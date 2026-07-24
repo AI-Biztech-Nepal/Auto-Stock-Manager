@@ -381,6 +381,12 @@ export default function Inventory() {
                         <div className="font-semibold text-slate-800">{v.selling_price ? formatNPR(v.selling_price) : "—"}</div>
                       </div>
                     )}
+                    {!isPartsOnly && (
+                      <div>
+                        <div className="text-slate-400">Min. Selling</div>
+                        <div className="font-semibold text-slate-800">{v.minimum_selling_price ? formatNPR(v.minimum_selling_price) : "—"}</div>
+                      </div>
+                    )}
                     {!hideFinancials && (
                       <div>
                         <div className="text-slate-400">Margin</div>

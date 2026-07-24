@@ -147,15 +147,16 @@ def stock_aging(purchase_date_str: str) -> dict:
     else:            return {"days": days, "category": "dead",   "label": "Dead Stock Alert"}
 
 # Front desk stock can record purchase price at intake and manage expenses,
-# but must never see the numbers that reveal profit on existing stock.
+# but must never see the numbers that reveal profit on existing stock. They do see
+# minimum_selling_price, though — they need the negotiation floor to work a sale.
 FRONT_DESK_HIDDEN_VEHICLE_FIELDS = {
     "purchase_price", "total_investment", "expected_profit", "profit_margin",
-    "low_margin", "accessories_cost", "minimum_selling_price",
+    "low_margin", "accessories_cost",
 }
 
 # Parts department doesn't handle pricing or sales at all, so on top of the front-desk-hidden
-# fields they also never see the selling price.
-PARTS_HIDDEN_VEHICLE_FIELDS = FRONT_DESK_HIDDEN_VEHICLE_FIELDS | {"selling_price"}
+# fields they also never see the selling price or minimum selling price.
+PARTS_HIDDEN_VEHICLE_FIELDS = FRONT_DESK_HIDDEN_VEHICLE_FIELDS | {"selling_price", "minimum_selling_price"}
 
 def _hide_financials_for_role(v: dict, role: str) -> dict:
     if role == "stock_supervisor":
