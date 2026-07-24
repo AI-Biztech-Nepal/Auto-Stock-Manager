@@ -949,7 +949,10 @@ async def update_vehicle(vid: str, vehicle: VehicleUpdate, cu: dict = Depends(re
             raise HTTPException(400, f"Registration number '{upd['registration_number']}' is already in stock")
     upd["updated_at"] = datetime.now(timezone.utc).isoformat()
     if upd.get("status") == "sold" and "sold_date" not in upd:
-        upd["sold_date"] = datetime.now(timezone.utc).date().isoformat()
+        # Preserve the original sale date if this vehicle was sold before — otherwise
+        # re-marking Sold (e.g. after a warranty repair stint) resets the sale date
+        # and the warranty clock to today.
+        upd["sold_date"] = existing.get("sold_date") or datetime.now(timezone.utc).date().isoformat()
 
     # Marking a vehicle Sold directly (Inventory/Edit/quick-status) bypasses the Sales form —
     # auto-create the matching sale record so it still shows up in the Sales tab.
@@ -1013,7 +1016,10 @@ async def update_vehicle_status(vid: str, body: VehicleStatusUpdate, cu: dict = 
 
     upd = {"status": body.status, "updated_at": datetime.now(timezone.utc).isoformat()}
     if body.status == "sold":
-        upd["sold_date"] = datetime.now(timezone.utc).date().isoformat()
+        # Preserve the original sale date if this vehicle was sold before (e.g. it was
+        # flipped to In Repair for a warranty return and is now being flipped back) —
+        # otherwise this would reset the sale date and the warranty clock to today.
+        upd["sold_date"] = existing.get("sold_date") or datetime.now(timezone.utc).date().isoformat()
 
     became_sold = body.status == "sold" and existing.get("status") != "sold"
     sale_price = existing.get("selling_price") or existing.get("purchase_price", 0)
