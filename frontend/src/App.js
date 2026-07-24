@@ -21,6 +21,7 @@ import Marketing from "./pages/Marketing";
 import EMI from "./pages/EMI";
 import SpareParts from "./pages/SpareParts";
 import Sales from "./pages/Sales";
+import SaleDetail from "./pages/SaleDetail";
 import SoldStock from "./pages/SoldStock";
 import ImportStock from "./pages/ImportStock";
 import Leads from "./pages/Leads";
@@ -74,6 +75,7 @@ function AppRoutes() {
         <Route path="emi" element={<RoleRoute path="/emi"><EMI /></RoleRoute>} />
         <Route path="spare-parts" element={<RoleRoute path="/spare-parts"><SpareParts /></RoleRoute>} />
         <Route path="sales" element={<RoleRoute path="/sales"><Sales /></RoleRoute>} />
+        <Route path="sales/:id" element={<RoleRoute path="/sales/detail"><SaleDetail /></RoleRoute>} />
         <Route path="sold-stock" element={<RoleRoute path="/sold-stock"><SoldStock /></RoleRoute>} />
         <Route path="ai" element={<RoleRoute path="/ai"><AIAssistant /></RoleRoute>} />
         <Route path="settings" element={<Settings />} />

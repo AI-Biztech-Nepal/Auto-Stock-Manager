@@ -1313,6 +1313,24 @@ async def get_sales_summary(cu: dict = Depends(require("sales", "view"))):
 async def get_sale(sid: str, cu: dict = Depends(require("sales", "view"))):
     s = await db.sales.find_one({"id": sid}, {"_id": 0})
     if not s: raise HTTPException(404, "Not found")
+    v = await db.vehicles.find_one({"id": s.get("vehicle_id")}, {"_id": 0})
+    if v:
+        s["vehicle_info"] = f"{v.get('brand','')} {v.get('model','')} {v.get('year','')}".strip()
+        s["vehicle_brand"] = v.get("brand"); s["vehicle_model"] = v.get("model")
+        s["vehicle_year"] = v.get("year"); s["registration_number"] = v.get("registration_number")
+        s["engine_cc"] = v.get("engine_cc"); s["fuel_type"] = v.get("fuel_type")
+    c = await db.customers.find_one({"id": s.get("customer_id")}, {"_id": 0}) if s.get("customer_id") else None
+    s["customer_name"] = c["name"] if c else "Walk-in Customer"
+    s["customer_contact"] = c.get("contact_number") if c else None
+    s["customer_address"] = c.get("address") if c else None
+    # Margin/profit reveal what the shop paid for the vehicle — restricted to Super Admin
+    # to keep that number away from front desk, same as the vehicle-level fields.
+    if cu.get("role", "admin") == "admin" and v:
+        investment = await _vehicle_investment(s["vehicle_id"], v)
+        total = s.get("total_amount", 0)
+        s["total_investment"] = investment
+        s["profit"] = total - investment
+        s["profit_margin"] = round(((total - investment) / total) * 100, 2) if total else None
     return s
 
 @api_router.put("/sales/{sid}")

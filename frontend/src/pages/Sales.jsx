@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
-import { Plus, Search, Trash2, Pencil, TrendingUp, DollarSign, Calendar, ShoppingBag, X, ChevronDown, ChevronUp, UserPlus, AlertTriangle } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { Plus, Search, Trash2, Eye, TrendingUp, DollarSign, Calendar, ShoppingBag, X, ChevronDown, ChevronUp, UserPlus, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
 import { formatNPR } from "../utils/helpers";
@@ -42,6 +43,7 @@ const EMPTY_FORM = {
 };
 
 export default function Sales() {
+  const navigate = useNavigate();
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
   const [sales, setSales] = useState([]);
@@ -60,7 +62,6 @@ export default function Sales() {
   const [showAddCust, setShowAddCust] = useState(false);
   const [newCust, setNewCust] = useState({ name: "", contact_number: "", address: "" });
   const [addingCust, setAddingCust] = useState(false);
-  const [editingId, setEditingId] = useState(null);
 
   // Extra expenses state
   const [expenseItems, setExpenseItems] = useState([]);          // [{name, amount}] - added one by one
@@ -80,7 +81,6 @@ export default function Sales() {
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
   const openModal = async () => {
-    setEditingId(null);
     setForm(EMPTY_FORM);
     setExpenseItems([]);
     setPresetToAdd("");
@@ -90,34 +90,6 @@ export default function Sales() {
     setShowModal(true);
     try {
       const [v, c] = await Promise.all([api.get("/vehicles?status=available"), api.get("/customers")]);
-      setVehicles(v.data); setCustomers(c.data);
-    } catch { toast.error("Failed to load vehicles/customers"); }
-  };
-
-  const openEditModal = async (sale) => {
-    setEditingId(sale.id);
-    setForm({
-      vehicle_id: sale.vehicle_id,
-      customer_id: sale.customer_id || "",
-      sale_price: sale.sale_price,
-      payment_method: sale.payment_method,
-      paid_cash: sale.paid_cash || "",
-      paid_bank: sale.paid_bank || "",
-      due_date: sale.due_date || "",
-      sale_date: sale.sale_date || "",
-      notes: sale.notes || "",
-    });
-
-    // Restore extra expenses list
-    setExpenseItems(sale.extra_expenses?.length > 0 ? sale.extra_expenses : []);
-    setPresetToAdd("");
-
-    setNewExpName(""); setNewExpAmt("");
-    setShowAddCust(false);
-    setNewCust({ name: "", contact_number: "", address: "" });
-    setShowModal(true);
-    try {
-      const [v, c] = await Promise.all([api.get("/vehicles"), api.get("/customers")]);
       setVehicles(v.data); setCustomers(c.data);
     } catch { toast.error("Failed to load vehicles/customers"); }
   };
@@ -179,19 +151,11 @@ export default function Sales() {
         sale_date: form.sale_date || undefined,
         notes: form.notes,
       };
-      
-      if (editingId) {
-        // Edit existing sale
-        await api.put(`/sales/${editingId}`, payload);
-        toast.success("Sale updated successfully!");
-      } else {
-        // Create new sale
-        await api.post("/sales", payload);
-        toast.success("Sale recorded successfully!");
-      }
-      
+
+      await api.post("/sales", payload);
+      toast.success("Sale recorded successfully!");
+
       setShowModal(false);
-      setEditingId(null);
       fetchAll();
     } catch (err) { toast.error(getErrMsg(err, "Failed to save sale")); }
     finally { setSaving(false); }
@@ -204,20 +168,6 @@ export default function Sales() {
       toast.success("Sale deleted, vehicle restored");
       fetchAll();
     } catch (err) { toast.error(getErrMsg(err, "Failed to delete")); }
-  };
-
-  const openPayModal = (sale) => { setPayModal(sale); setPayAmount(""); setPayMethod("Cash"); };
-
-  const submitPayment = async () => {
-    if (!payModal || !payAmount || Number(payAmount) <= 0) { toast.error("Enter a valid amount"); return; }
-    setPayingSaving(true);
-    try {
-      await api.post(`/sales/${payModal.id}/payments`, { amount: Number(payAmount), method: payMethod });
-      toast.success("Payment recorded!");
-      setPayModal(null);
-      fetchAll();
-    } catch (err) { toast.error(getErrMsg(err, "Failed to record payment")); }
-    finally { setPayingSaving(false); }
   };
 
   const filtered = sales.filter(s => {
@@ -316,8 +266,8 @@ export default function Sales() {
                   <tr
                     key={s.id}
                     data-testid="sale-row"
-                    onClick={() => isAdmin && openEditModal(s)}
-                    className={`transition-colors ${isAdmin ? "table-row-hover cursor-pointer" : "hover:bg-slate-50"}`}
+                    onClick={() => navigate(`/sales/${s.id}`)}
+                    className="table-row-hover cursor-pointer transition-colors"
                   >
                     <td className="px-4 py-3">
                       <div className="font-semibold text-slate-900 text-sm">{s.vehicle_info || "—"}</div>
@@ -343,18 +293,16 @@ export default function Sales() {
                     </td>
                     <td className="px-4 py-3 text-sm text-slate-500 whitespace-nowrap">{s.sale_date}</td>
                     <td className="px-4 py-3">
-                      {isAdmin ? (
-                        <div className="flex items-center gap-1">
-                          <button onClick={e => { e.stopPropagation(); openEditModal(s); }} className="p-1.5 hover:bg-blue-50 rounded-lg transition-colors" data-testid="edit-sale-btn">
-                            <Pencil size={14} className="text-blue-500" />
-                          </button>
+                      <div className="flex items-center gap-1">
+                        <button onClick={e => { e.stopPropagation(); navigate(`/sales/${s.id}`); }} className="p-1.5 hover:bg-slate-100 rounded-lg transition-colors" data-testid="view-sale-btn">
+                          <Eye size={14} className="text-slate-500" />
+                        </button>
+                        {isAdmin && (
                           <button onClick={e => { e.stopPropagation(); handleDelete(s.id); }} className="p-1.5 hover:bg-red-50 rounded-lg transition-colors" data-testid="delete-sale-btn">
                             <Trash2 size={14} className="text-red-400" />
                           </button>
-                        </div>
-                      ) : (
-                        <span className="text-xs text-slate-300">—</span>
-                      )}
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -369,7 +317,7 @@ export default function Sales() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between p-5 border-b border-slate-100">
-              <h2 className="text-lg font-bold text-slate-900">{editingId ? "Edit Sale" : "Record Sale"}</h2>
+              <h2 className="text-lg font-bold text-slate-900">Record Sale</h2>
               <button onClick={() => setShowModal(false)} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500">✕</button>
             </div>
             <form onSubmit={handleSave} className="p-5 space-y-4">
