@@ -6,6 +6,7 @@ import { formatNPR, getJobStyle } from "../utils/helpers";
 import { formatBSDate } from "../utils/nepali-date";
 import VehicleComboBox from "../components/VehicleComboBox";
 import BSDatePicker from "../components/BSDatePicker";
+import HoverADDate from "../components/HoverADDate";
 import { useAuth } from "../context/AuthContext";
 import { canEditJobs, canDeleteJobs } from "../utils/permissions";
 
@@ -293,7 +294,7 @@ export default function JobCards() {
                   <div>Mechanic: <span className="font-medium text-slate-700">{job.mechanic_name}</span></div>
                   <div>Est: <span className="font-medium text-slate-700">{formatNPR(job.estimated_cost)}</span></div>
                   {job.actual_cost != null && <div className={overBudget ? "text-red-600 font-medium" : ""}>Actual: <span className="font-medium">{formatNPR(job.actual_cost)}</span></div>}
-                  <div>Created: <span className="font-medium text-slate-700">{job.created_at?.slice(0, 10)}</span></div>
+                  <div>Created: <span className="font-medium text-slate-700"><HoverADDate date={job.created_at} /></span></div>
                 </div>
 
                 {/* Parts used in this job */}
