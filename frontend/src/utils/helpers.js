@@ -15,12 +15,12 @@ export const getAgingStyle = (category) => {
 
 export const getStatusStyle = (status) => {
   const map = {
-    unlisted:  { bg: "bg-slate-200",  text: "text-slate-700",  label: "Unlisted" },
-    scrap:     { bg: "bg-red-100",    text: "text-red-800",    label: "Scrap" },
-    in_repair: { bg: "bg-purple-100", text: "text-purple-800", label: "In Repair" },
-    available: { bg: "bg-blue-100",   text: "text-blue-800",   label: "Available" },
-    sold:      { bg: "bg-green-100",  text: "text-green-800",  label: "Sold" },
-    reserved:  { bg: "bg-yellow-100", text: "text-yellow-800", label: "Reserved" },
+    unlisted:  { bg: "bg-slate-200",  text: "text-slate-700",  label: "Unlisted",  cardBg: "bg-slate-50",  cardBorder: "border-slate-300",  accent: "border-l-slate-400" },
+    scrap:     { bg: "bg-red-100",    text: "text-red-800",    label: "Scrap",     cardBg: "bg-red-50",    cardBorder: "border-red-200",    accent: "border-l-red-500" },
+    in_repair: { bg: "bg-purple-100", text: "text-purple-800", label: "In Repair", cardBg: "bg-purple-50", cardBorder: "border-purple-200", accent: "border-l-purple-500" },
+    available: { bg: "bg-blue-100",   text: "text-blue-800",   label: "Available", cardBg: "bg-blue-50",   cardBorder: "border-blue-200",   accent: "border-l-blue-500" },
+    sold:      { bg: "bg-green-100",  text: "text-green-800",  label: "Sold",      cardBg: "bg-green-50",  cardBorder: "border-green-200",  accent: "border-l-green-500" },
+    reserved:  { bg: "bg-yellow-100", text: "text-yellow-800", label: "Reserved",  cardBg: "bg-yellow-50", cardBorder: "border-yellow-200", accent: "border-l-yellow-500" },
   };
   if (status === "hidden") return map.unlisted; // legacy alias, pre-rename data
   return map[status] || map.available;
