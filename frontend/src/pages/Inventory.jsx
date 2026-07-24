@@ -6,6 +6,8 @@ import api from "../utils/api";
 import { formatNPR, getAgingStyle, getStatusStyle, BRANDS, VEHICLE_STATUS_OPTIONS, formatOwnership } from "../utils/helpers";
 import { AddVehicleModal } from "./AddVehicleModal";
 import HoverADDate from "../components/HoverADDate";
+import BSDatePicker from "../components/BSDatePicker";
+import { formatBSDate } from "../utils/nepali-date";
 import { useAuth } from "../context/AuthContext";
 import { hasFullVehicleAccess } from "../utils/permissions";
 
@@ -48,6 +50,7 @@ export default function Inventory() {
   const [statusFilter, setStatusFilter] = useState(searchParams.get("aging") ? "available" : "all");
   const [brandFilter, setBrandFilter] = useState("all");
   const [agingFilter, setAgingFilter] = useState(searchParams.get("aging") || "all");
+  const [dateFilter, setDateFilter] = useState("");
   const [showModal, setShowModal] = useState(false);
   const [form, setForm] = useState(EMPTY);
   const [saving, setSaving] = useState(false);
@@ -101,6 +104,7 @@ export default function Inventory() {
     if (statusFilter !== "all") result = result.filter(v => v.status === statusFilter);
     if (agingFilter !== "all") result = result.filter(v => v.aging?.category === agingFilter);
     if (brandFilter !== "all") result = result.filter(v => v.brand === brandFilter);
+    if (dateFilter) result = result.filter(v => v.purchase_date?.slice(0, 10) === dateFilter);
     if (search) {
       const q = search.toLowerCase();
       result = result.filter(v =>
@@ -112,7 +116,7 @@ export default function Inventory() {
     result.sort(sortStock);
 
     setFiltered(result);
-  }, [vehicles, search, statusFilter, brandFilter, agingFilter]);
+  }, [vehicles, search, statusFilter, brandFilter, agingFilter, dateFilter]);
 
   const handleSave = async (e) => {
     e.preventDefault();
@@ -258,6 +262,19 @@ export default function Inventory() {
               <option key={a} value={a}>{a === "all" ? "All Stock Age" : `${getAgingStyle(a).label} (${AGING_RANGES[a]})`}</option>
             ))}
           </select>
+          <div className="w-44" data-testid="date-filter-input">
+            <BSDatePicker value={dateFilter} onChange={setDateFilter} />
+          </div>
+          {dateFilter && (
+            <button
+              onClick={() => setDateFilter("")}
+              data-testid="clear-date-filter"
+              className="flex items-center gap-1 h-9 px-2.5 text-sm text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
+              title="Clear date filter"
+            >
+              <X size={14} />
+            </button>
+          )}
         </div>
       </div>
 
@@ -293,12 +310,14 @@ export default function Inventory() {
           <p className="font-medium">
             {agingFilter !== "all"
               ? `No ${getAgingStyle(agingFilter).label.toLowerCase()} (${AGING_RANGES[agingFilter]}) vehicles found`
-              : "No vehicles found"}
+              : dateFilter
+                ? `No stock entered on ${formatBSDate(dateFilter)} BS`
+                : "No vehicles found"}
           </p>
           <p className="text-sm mt-1">
             {agingFilter !== "all"
               ? "No vehicles fall into this stock age range right now."
-              : search || statusFilter !== "all" || brandFilter !== "all"
+              : search || statusFilter !== "all" || brandFilter !== "all" || dateFilter
                 ? "Try adjusting your filters"
                 : "Add your first vehicle to get started"}
           </p>
