@@ -1057,6 +1057,9 @@ async def delete_vehicle(vid: str, cu: dict = Depends(admin_only)):
     if r.deleted_count == 0: raise HTTPException(404, "Vehicle not found")
     await db.expenses.delete_many({"vehicle_id": vid})
     await db.job_cards.delete_many({"vehicle_id": vid})
+    # Otherwise a sale record survives with no vehicle to resolve — it still counts in the
+    # Sales tab total but can never show up in Sold Stock, silently desyncing the two counts.
+    await db.sales.delete_many({"vehicle_id": vid})
     return {"message": "Deleted"}
 
 @api_router.delete("/vehicles")
@@ -1069,6 +1072,7 @@ async def delete_all_vehicles(confirm: str = "", cu: dict = Depends(get_current_
     result = await db.vehicles.delete_many({})
     if vehicle_ids:
         await db.expenses.delete_many({"vehicle_id": {"$in": vehicle_ids}})
+        await db.sales.delete_many({"vehicle_id": {"$in": vehicle_ids}})
         # Job cards are intentionally left untouched — service history survives inventory resets.
     await db.audit_logs.insert_one({"action": "vehicles_bulk_deleted",
         "user": cu["username"], "timestamp": datetime.now(timezone.utc).isoformat(),
