@@ -70,6 +70,10 @@ export default function Sales() {
   const [newExpAmt, setNewExpAmt] = useState("");
   const [showPresets, setShowPresets] = useState(true);
 
+  // Admin-only diagnostic: sales whose linked vehicle no longer has status "sold" —
+  // the usual cause of this tab's total drifting from the Sold Stock count.
+  const [mismatches, setMismatches] = useState([]);
+
   const fetchAll = useCallback(async () => {
     try {
       const [s, sm] = await Promise.all([api.get("/sales"), api.get("/sales/summary")]);
@@ -79,6 +83,11 @@ export default function Sales() {
   }, []);
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    api.get("/sales/reconcile").then(r => setMismatches(r.data.mismatches)).catch(() => {});
+  }, [isAdmin, sales]);
 
   const openModal = async () => {
     setForm(EMPTY_FORM);
@@ -231,6 +240,26 @@ export default function Sales() {
                 </div>
               );
             })}
+          </div>
+        </div>
+      )}
+
+      {isAdmin && mismatches.length > 0 && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4" data-testid="mismatch-alert-banner">
+          <div className="flex items-center gap-2 text-amber-700 font-semibold text-sm mb-2">
+            <AlertTriangle size={16} />
+            Out of Sync with Sold Stock ({mismatches.length})
+          </div>
+          <p className="text-xs text-amber-700 mb-2">
+            These sales' vehicles no longer have status "Sold" (edited or deleted directly from Inventory), so they count here but not in Sold Stock. Open each and either restore the vehicle's status to Sold, or delete the stray sale.
+          </p>
+          <div className="space-y-1.5">
+            {mismatches.map(m => (
+              <div key={m.sale_id} onClick={() => navigate(`/sales/${m.sale_id}`)} className="flex items-center justify-between text-sm px-3 py-2 rounded-lg bg-white hover:bg-amber-100 cursor-pointer transition-colors">
+                <div className="text-slate-700">{m.vehicle_info || "Vehicle deleted"} — {formatNPR(m.total_amount)} on {m.sale_date}</div>
+                <div className="font-semibold text-amber-700">{m.issue === "vehicle_deleted" ? "Vehicle deleted" : `Vehicle is now "${m.vehicle_status}"`}</div>
+              </div>
+            ))}
           </div>
         </div>
       )}

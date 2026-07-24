@@ -1331,6 +1331,31 @@ async def get_sales_summary(cu: dict = Depends(require("sales", "view"))):
     overdue_count = sum(1 for s in sales if s.get("due_amount", 0) > 0 and s.get("due_date") and s.get("due_date") < today_iso)
     return {"total_sales": len(sales), "total_revenue": total_revenue, "this_month_sales": len(monthly), "this_month_revenue": sum(s.get("total_amount", 0) for s in monthly), "avg_sale_price": round(avg, 2), "total_due": total_due, "due_count": due_count, "overdue_count": overdue_count}
 
+@api_router.get("/sales/reconcile")
+async def reconcile_sales(cu: dict = Depends(admin_only)):
+    """Diagnostic: finds sales whose linked vehicle no longer has status "sold" — the
+    usual cause of the Sales-tab total drifting from the Sold Stock count. Happens when
+    a sold vehicle's status gets changed (or the vehicle deleted) directly from Inventory
+    instead of through "Delete Sale", which is the only path that keeps both in sync."""
+    sales = await db.sales.find({}, {"_id": 0}).to_list(1000)
+    mismatches = []
+    for s in sales:
+        v = await db.vehicles.find_one({"id": s.get("vehicle_id")}, {"_id": 0})
+        if not v:
+            mismatches.append({
+                "sale_id": s["id"], "vehicle_id": s.get("vehicle_id"), "issue": "vehicle_deleted",
+                "vehicle_info": None, "vehicle_status": None,
+                "sale_date": s.get("sale_date"), "total_amount": s.get("total_amount"),
+            })
+        elif v.get("status") != "sold":
+            mismatches.append({
+                "sale_id": s["id"], "vehicle_id": s.get("vehicle_id"), "issue": "vehicle_status_mismatch",
+                "vehicle_info": f"{v.get('brand','')} {v.get('model','')} {v.get('year','')}".strip(),
+                "vehicle_status": v.get("status"),
+                "sale_date": s.get("sale_date"), "total_amount": s.get("total_amount"),
+            })
+    return {"count": len(mismatches), "mismatches": mismatches}
+
 @api_router.get("/sales/{sid}")
 async def get_sale(sid: str, cu: dict = Depends(require("sales", "view"))):
     s = await db.sales.find_one({"id": sid}, {"_id": 0})
