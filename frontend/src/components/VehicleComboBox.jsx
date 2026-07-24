@@ -58,6 +58,7 @@ export default function VehicleComboBox({ vehicles, value, onChange, placeholder
               <div className="flex items-center justify-between gap-2">
                 <span className="text-slate-800">{v.brand} {v.model} {v.year}</span>
                 {tagStatus && v.status === "in_repair" && <span className="shrink-0 text-purple-600 font-medium">In Repair</span>}
+                {tagStatus && v.status === "sold" && <span className="shrink-0 text-teal-600 font-medium">Sold · Under Warranty</span>}
               </div>
               <div className="flex items-center justify-between gap-2 text-slate-400">
                 {v.registration_number && <span className="font-mono">{v.registration_number}</span>}

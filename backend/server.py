@@ -182,6 +182,19 @@ async def enrich_vehicle(v: dict) -> dict:
         v["expected_profit"] = None; v["profit_margin"] = None; v["low_margin"] = False
     return v
 
+# Sold vehicles carry a 6-month warranty — a job card can still be opened against
+# one after sale, as long as it's within that window from sold_date.
+VEHICLE_WARRANTY_DAYS = 182  # ~6 months
+
+def _within_warranty(vehicle: dict) -> bool:
+    sold_date = vehicle.get("sold_date")
+    if not sold_date: return False
+    try:
+        d = datetime.strptime(str(sold_date)[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    except (ValueError, TypeError):
+        return False
+    return 0 <= (datetime.now(timezone.utc) - d).days <= VEHICLE_WARRANTY_DAYS
+
 # ── Helper: compute total investment for a vehicle ────────────────────
 async def _vehicle_investment(vehicle_id: str, vehicle: dict) -> float:
     """Returns purchase_price + accessories + all expenses for a vehicle."""
@@ -1122,7 +1135,12 @@ async def create_job(job: JobCardCreate, cu: dict = Depends(require("jobs", "cre
         if not job.vehicle_id: raise HTTPException(400, "vehicle_id is required")
         v = await db.vehicles.find_one({"id": job.vehicle_id}, {"_id": 0})
         if not v: raise HTTPException(404, "Vehicle not found")
-        if v.get("status") != "in_repair": raise HTTPException(400, "Job cards can only be created for vehicles in the Repair stage")
+        if v.get("status") == "sold":
+            if not _within_warranty(v):
+                raise HTTPException(400, "This vehicle's 6-month warranty period has expired")
+            jc["is_warranty"] = True
+        elif v.get("status") != "in_repair":
+            raise HTTPException(400, "Job cards can only be created for vehicles in the Repair stage, or sold vehicles still under warranty")
         jc["vehicle_brand"] = v.get("brand"); jc["vehicle_model"] = v.get("model")
         jc["vehicle_year"] = v.get("year"); jc["registration_number"] = v.get("registration_number")
     await db.job_cards.insert_one(jc)

@@ -11,6 +11,14 @@ import { useAuth } from "../context/AuthContext";
 import { canEditJobs, canDeleteJobs } from "../utils/permissions";
 
 const STATUSES = ["all", "pending", "in_progress", "completed"];
+// Sold vehicles carry a 6-month warranty — still pickable for a job card within that window.
+// Keep in sync with VEHICLE_WARRANTY_DAYS in backend/server.py.
+const WARRANTY_DAYS = 182;
+const isWithinWarranty = (soldDate) => {
+  if (!soldDate) return false;
+  const days = Math.floor((Date.now() - new Date(soldDate).getTime()) / 86400000);
+  return days >= 0 && days <= WARRANTY_DAYS;
+};
 const EMPTY_FORM = {
   vehicle_id: "", is_external: false,
   vehicle_brand: "", vehicle_model: "", vehicle_year: "", registration_number: "",
@@ -62,7 +70,13 @@ export default function JobCards() {
 
   useEffect(() => {
     fetchJobs();
-    api.get("/vehicles?status=in_repair").then(r => setVehicles(r.data)).catch(() => {});
+    Promise.all([
+      api.get("/vehicles?status=in_repair"),
+      api.get("/vehicles?status=sold"),
+    ]).then(([repair, sold]) => {
+      const underWarranty = sold.data.filter(v => isWithinWarranty(v.sold_date));
+      setVehicles([...repair.data, ...underWarranty]);
+    }).catch(() => {});
     api.get("/spare-parts").then(r => setSpareParts(r.data)).catch(() => {});
     api.get("/team").then(r => setMechanics(r.data.filter(m => m.role === "mechanic"))).catch(() => {});
   }, [fetchJobs]);
@@ -293,6 +307,9 @@ export default function JobCards() {
                       <span className="text-xs font-mono text-slate-400">{job.job_number}</span>
                       {!job.vehicle_id && (
                         <span className="px-1.5 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide bg-orange-100 text-orange-700">External</span>
+                      )}
+                      {job.is_warranty && (
+                        <span className="px-1.5 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide bg-teal-100 text-teal-700">Warranty</span>
                       )}
                     </div>
                     <div className="font-bold text-slate-900 text-sm mt-0.5" style={{ fontFamily: "Manrope" }}>
