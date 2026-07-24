@@ -104,7 +104,7 @@ export default function Inventory() {
     if (statusFilter !== "all") result = result.filter(v => v.status === statusFilter);
     if (agingFilter !== "all") result = result.filter(v => v.aging?.category === agingFilter);
     if (brandFilter !== "all") result = result.filter(v => v.brand === brandFilter);
-    if (dateFilter) result = result.filter(v => v.purchase_date?.slice(0, 10) === dateFilter);
+    if (dateFilter) result = result.filter(v => v.created_at?.slice(0, 10) === dateFilter);
     if (search) {
       const q = search.toLowerCase();
       const qNoSlash = q.replace(/\//g, "");
