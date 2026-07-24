@@ -107,9 +107,11 @@ export default function Inventory() {
     if (dateFilter) result = result.filter(v => v.purchase_date?.slice(0, 10) === dateFilter);
     if (search) {
       const q = search.toLowerCase();
+      const qNoSlash = q.replace(/\//g, "");
       result = result.filter(v =>
         v.brand?.toLowerCase().includes(q) || v.model?.toLowerCase().includes(q) ||
-        v.registration_number?.toLowerCase().includes(q) || v.purchase_source?.toLowerCase().includes(q)
+        v.registration_number?.toLowerCase().replace(/\//g, "").includes(qNoSlash) ||
+        v.purchase_source?.toLowerCase().includes(q)
       );
     }
 
