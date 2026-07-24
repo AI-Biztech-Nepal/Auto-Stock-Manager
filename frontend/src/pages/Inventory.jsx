@@ -324,7 +324,7 @@ export default function Inventory() {
                 key={v.id}
                 data-testid="vehicle-row"
                 onClick={() => navigate(`/inventory/${v.id}`)}
-                className={`bg-white rounded-xl border ${st.cardBorder} border-l-4 ${st.accent} shadow-sm p-5 hover:shadow-md transition-shadow cursor-pointer ${isDND ? "opacity-60 saturate-50" : ""}`}
+                className={`${st.cardBg} rounded-xl border ${st.cardBorder} shadow-sm p-5 hover:shadow-md transition-shadow cursor-pointer ${isDND ? "opacity-60 saturate-50" : ""}`}
               >
                 <div className="flex items-start justify-between gap-2 mb-3">
                   <div className="min-w-0">
