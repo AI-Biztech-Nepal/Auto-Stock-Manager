@@ -452,7 +452,13 @@ class ExpenseCreate(BaseModel):
     description: Optional[str] = None; date: Optional[str] = None
 
 class JobCardCreate(BaseModel):
-    vehicle_id: str; work_description: str
+    vehicle_id: Optional[str] = None; is_external: bool = False
+    # Only used when is_external is True — a walk-in repair vehicle we don't own,
+    # so there's no inventory record to pull these from.
+    vehicle_brand: Optional[str] = None; vehicle_model: Optional[str] = None
+    vehicle_year: Optional[int] = None; registration_number: Optional[str] = None
+    customer_name: Optional[str] = None; customer_contact: Optional[str] = None
+    work_description: str
     mechanic_id: Optional[str] = None; mechanic_name: str
     estimated_cost: float; notes: Optional[str] = None
     coupon_no: int; job_date: str
@@ -1108,11 +1114,17 @@ async def create_job(job: JobCardCreate, cu: dict = Depends(require("jobs", "cre
     jc["status"] = "pending"; jc["actual_cost"] = None
     jc["created_at"] = datetime.now(timezone.utc).isoformat()
     jc["completed_at"] = None; jc["created_by"] = cu["username"]
-    v = await db.vehicles.find_one({"id": job.vehicle_id}, {"_id": 0})
-    if not v: raise HTTPException(404, "Vehicle not found")
-    if v.get("status") != "in_repair": raise HTTPException(400, "Job cards can only be created for vehicles in the Repair stage")
-    jc["vehicle_brand"] = v.get("brand"); jc["vehicle_model"] = v.get("model")
-    jc["vehicle_year"] = v.get("year"); jc["registration_number"] = v.get("registration_number")
+    if job.is_external:
+        jc["vehicle_id"] = None
+        if not job.vehicle_brand or not job.vehicle_model or not job.registration_number:
+            raise HTTPException(400, "Brand, model and registration number are required for external vehicles")
+    else:
+        if not job.vehicle_id: raise HTTPException(400, "vehicle_id is required")
+        v = await db.vehicles.find_one({"id": job.vehicle_id}, {"_id": 0})
+        if not v: raise HTTPException(404, "Vehicle not found")
+        if v.get("status") != "in_repair": raise HTTPException(400, "Job cards can only be created for vehicles in the Repair stage")
+        jc["vehicle_brand"] = v.get("brand"); jc["vehicle_model"] = v.get("model")
+        jc["vehicle_year"] = v.get("year"); jc["registration_number"] = v.get("registration_number")
     await db.job_cards.insert_one(jc)
     jc.pop("_id", None)
     # Deduct parts from spare parts inventory and log transactions

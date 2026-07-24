@@ -11,7 +11,12 @@ import { useAuth } from "../context/AuthContext";
 import { canEditJobs, canDeleteJobs } from "../utils/permissions";
 
 const STATUSES = ["all", "pending", "in_progress", "completed"];
-const EMPTY_FORM = { vehicle_id: "", work_description: "", mechanic_id: "", mechanic_name: "", estimated_cost: "", notes: "", coupon_no: "", job_date: "" };
+const EMPTY_FORM = {
+  vehicle_id: "", is_external: false,
+  vehicle_brand: "", vehicle_model: "", vehicle_year: "", registration_number: "",
+  customer_name: "", customer_contact: "",
+  work_description: "", mechanic_id: "", mechanic_name: "", estimated_cost: "", notes: "", coupon_no: "", job_date: "",
+};
 
 const makeKey = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`);
 const EMPTY_EXTERNAL_PART = { name: "", quantity: "1", unit_cost: "" };
@@ -72,7 +77,9 @@ export default function JobCards() {
         j.job_number?.toLowerCase().includes(q) ||
         j.work_description?.toLowerCase().includes(q) ||
         j.vehicle_brand?.toLowerCase().includes(q) ||
-        j.vehicle_model?.toLowerCase().includes(q)
+        j.vehicle_model?.toLowerCase().includes(q) ||
+        j.registration_number?.toLowerCase().includes(q) ||
+        j.customer_name?.toLowerCase().includes(q)
       );
     }
     setFiltered(result);
@@ -176,11 +183,16 @@ export default function JobCards() {
       finally { setSaving(false); }
       return;
     }
-    if (!form.vehicle_id || !form.work_description || !form.mechanic_name || !form.estimated_cost || !form.coupon_no || !form.job_date) { toast.error("Fill all required fields"); return; }
+    const vehicleValid = form.is_external
+      ? form.vehicle_brand && form.vehicle_model && form.registration_number
+      : form.vehicle_id;
+    if (!vehicleValid || !form.work_description || !form.mechanic_name || !form.estimated_cost || !form.coupon_no || !form.job_date) { toast.error("Fill all required fields"); return; }
     setSaving(true);
     try {
       await api.post("/jobs", {
         ...form,
+        vehicle_id: form.is_external ? null : form.vehicle_id,
+        vehicle_year: form.vehicle_year ? Number(form.vehicle_year) : null,
         estimated_cost: Number(form.estimated_cost),
         coupon_no: Number(form.coupon_no),
         parts: jobParts.map(p => ({ part_id: p.part_id, part_name: p.part_name, quantity: Math.max(1, parseInt(p.quantity, 10) || 1), unit_cost: p.unit_cost, external: !!p.external })),
@@ -277,11 +289,17 @@ export default function JobCards() {
               <div key={job.id} data-testid="job-card" className={`flex flex-col bg-white rounded-xl border ${overBudget ? "border-red-200" : "border-slate-200"} shadow-sm p-5 hover:shadow-md transition-shadow`}>
                 <div className="flex items-start justify-between mb-3">
                   <div>
-                    <div className="text-xs font-mono text-slate-400">{job.job_number}</div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs font-mono text-slate-400">{job.job_number}</span>
+                      {!job.vehicle_id && (
+                        <span className="px-1.5 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide bg-orange-100 text-orange-700">External</span>
+                      )}
+                    </div>
                     <div className="font-bold text-slate-900 text-sm mt-0.5" style={{ fontFamily: "Manrope" }}>
                       {job.vehicle_brand} {job.vehicle_model} {job.vehicle_year}
                     </div>
                     {job.registration_number && <div className="text-xs text-slate-500 font-mono">{job.registration_number}</div>}
+                    {job.customer_name && <div className="text-xs text-slate-500">{job.customer_name}{job.customer_contact ? ` · ${job.customer_contact}` : ""}</div>}
                   </div>
                   <span className={`px-2 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wide ${js.bg} ${js.text}`}>{js.label}</span>
                 </div>
@@ -364,7 +382,63 @@ export default function JobCards() {
                 </div>
               ) : (
                 <>
-                  <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-medium text-slate-600 mb-1">Vehicle Source</label>
+                    <div className="grid grid-cols-2 gap-1.5 p-1 bg-slate-100 rounded-lg text-xs font-medium">
+                      <button
+                        type="button"
+                        onClick={() => setForm({ ...form, is_external: false })}
+                        data-testid="job-source-inventory-btn"
+                        className={`h-8 rounded-md transition-colors ${!form.is_external ? "bg-white text-blue-700 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}
+                      >
+                        From Inventory
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setForm({ ...form, is_external: true, vehicle_id: "" })}
+                        data-testid="job-source-external-btn"
+                        className={`h-8 rounded-md transition-colors ${form.is_external ? "bg-white text-orange-700 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}
+                      >
+                        External Vehicle
+                      </button>
+                    </div>
+                  </div>
+
+                  {form.is_external ? (
+                    <>
+                      <p className="text-[11px] text-slate-400 -mt-2">For a repair-only vehicle that isn't part of our stock.</p>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-xs font-medium text-slate-600 mb-1">Brand <span className="text-red-500">*</span></label>
+                          <input value={form.vehicle_brand} onChange={e => setForm({...form, vehicle_brand: e.target.value})} placeholder="e.g. Honda" className={inp} data-testid="job-ext-brand-input" />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-slate-600 mb-1">Model <span className="text-red-500">*</span></label>
+                          <input value={form.vehicle_model} onChange={e => setForm({...form, vehicle_model: e.target.value})} placeholder="e.g. Dio" className={inp} data-testid="job-ext-model-input" />
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-xs font-medium text-slate-600 mb-1">Year</label>
+                          <input type="text" inputMode="numeric" value={form.vehicle_year} onChange={e => setForm({...form, vehicle_year: e.target.value})} placeholder="e.g. 2021" className={inp} data-testid="job-ext-year-input" />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-slate-600 mb-1">Registration Number <span className="text-red-500">*</span></label>
+                          <input value={form.registration_number} onChange={e => setForm({...form, registration_number: e.target.value})} placeholder="e.g. BA 12 PA 3456" className={inp} data-testid="job-ext-reg-input" />
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-xs font-medium text-slate-600 mb-1">Customer Name</label>
+                          <input value={form.customer_name} onChange={e => setForm({...form, customer_name: e.target.value})} placeholder="Owner's name" className={inp} data-testid="job-ext-customer-name-input" />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-slate-600 mb-1">Customer Contact</label>
+                          <input value={form.customer_contact} onChange={e => setForm({...form, customer_contact: e.target.value})} placeholder="Phone number" className={inp} data-testid="job-ext-customer-contact-input" />
+                        </div>
+                      </div>
+                    </>
+                  ) : (
                     <div>
                       <label className="block text-xs font-medium text-slate-600 mb-1">Vehicle <span className="text-red-500">*</span></label>
                       <VehicleComboBox
@@ -376,14 +450,17 @@ export default function JobCards() {
                         tagStatus
                       />
                     </div>
+                  )}
+
+                  <div className="grid grid-cols-2 gap-4">
                     <div>
                       <label className="block text-xs font-medium text-slate-600 mb-1">Coupon No. <span className="text-red-500">*</span></label>
                       <input type="text" inputMode="numeric" value={form.coupon_no} onChange={e => setForm({...form, coupon_no: e.target.value})} placeholder="0" className={inp} data-testid="job-coupon-no-input" />
                     </div>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-slate-600 mb-1">Job Date (BS) <span className="text-red-500">*</span></label>
-                    <BSDatePicker value={form.job_date} onChange={val => setForm({...form, job_date: val})} required data-testid="job-date-input" />
+                    <div>
+                      <label className="block text-xs font-medium text-slate-600 mb-1">Job Date (BS) <span className="text-red-500">*</span></label>
+                      <BSDatePicker value={form.job_date} onChange={val => setForm({...form, job_date: val})} required data-testid="job-date-input" />
+                    </div>
                   </div>
                 </>
               )}
