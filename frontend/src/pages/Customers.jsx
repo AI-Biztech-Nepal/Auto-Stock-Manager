@@ -1,10 +1,12 @@
 import { useEffect, useState, useCallback } from "react";
-import { Plus, Search, Phone, MapPin, ShoppingBag, Star, Trash2, Edit, Eye } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { Plus, Search, Phone, MapPin, ShoppingBag, Star, Trash2, Edit, Eye, Undo2 } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
 import { formatNPR } from "../utils/helpers";
 
 export default function Customers() {
+  const navigate = useNavigate();
   const [customers, setCustomers] = useState([]);
   const [filtered, setFiltered] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -213,9 +215,15 @@ export default function Customers() {
               )}
 
               <div>
-                <h3 className="text-sm font-bold text-slate-900 mb-2" style={{ fontFamily: "Manrope" }}>
-                  Purchase History {viewCustomer.sales ? `(${viewCustomer.sales.length})` : ""}
-                </h3>
+                <div className="flex items-center gap-2 mb-2">
+                  <h3 className="text-sm font-bold text-slate-900" style={{ fontFamily: "Manrope" }}>Purchases</h3>
+                  {viewCustomer.sales && (
+                    <>
+                      <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-blue-100 text-blue-700" data-testid="customer-sales-tag">Sales: {viewCustomer.sales.filter(s => !s.returned).length}</span>
+                      <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-slate-100 text-slate-600" data-testid="customer-purchases-tag">Purchases: {viewCustomer.sales.length}</span>
+                    </>
+                  )}
+                </div>
                 {viewLoading ? (
                   <div className="flex items-center justify-center h-24"><div className="animate-spin w-6 h-6 border-4 border-blue-600 border-t-transparent rounded-full" /></div>
                 ) : !viewCustomer.sales || viewCustomer.sales.length === 0 ? (
@@ -223,9 +231,19 @@ export default function Customers() {
                 ) : (
                   <div className="space-y-2">
                     {viewCustomer.sales.map(s => (
-                      <div key={s.id} className="border border-slate-100 rounded-xl p-3" data-testid="customer-purchase-row">
+                      <div
+                        key={s.id}
+                        onClick={() => navigate(`/sales/${s.id}`)}
+                        className="border border-slate-100 rounded-xl p-3 cursor-pointer hover:bg-slate-50 transition-colors"
+                        data-testid="customer-purchase-row"
+                      >
                         <div className="flex items-center justify-between gap-2">
-                          <div className="font-semibold text-slate-900 text-sm">{s.vehicle_info}</div>
+                          <div className="flex items-center gap-1.5">
+                            <div className="font-semibold text-slate-900 text-sm">{s.vehicle_info}</div>
+                            {s.returned && (
+                              <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-700"><Undo2 size={10} /> Returned</span>
+                            )}
+                          </div>
                           <div className="text-xs text-slate-400 whitespace-nowrap">{s.sale_date}</div>
                         </div>
                         <div className="flex items-center justify-between gap-2 mt-1.5">
@@ -235,14 +253,21 @@ export default function Customers() {
                           </div>
                           <div className="text-sm font-bold text-green-700">{formatNPR(s.total_amount)}</div>
                         </div>
-                        <div className="flex items-center justify-between gap-2 mt-1.5">
-                          <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-700">{s.payment_method}</span>
-                          {s.due_amount > 0 ? (
-                            <span className="text-xs font-semibold text-red-600">Due: {formatNPR(s.due_amount)}</span>
-                          ) : (
-                            <span className="text-xs text-green-600">Fully Paid</span>
-                          )}
-                        </div>
+                        {s.returned ? (
+                          <div className="flex items-center justify-between gap-2 mt-1.5">
+                            <span className="text-xs text-slate-500">Refunded {s.refund_percentage}%</span>
+                            <span className="text-xs font-semibold text-amber-700">Retained: {formatNPR(s.retained_amount || 0)}</span>
+                          </div>
+                        ) : (
+                          <div className="flex items-center justify-between gap-2 mt-1.5">
+                            <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-700">{s.payment_method}</span>
+                            {s.due_amount > 0 ? (
+                              <span className="text-xs font-semibold text-red-600">Due: {formatNPR(s.due_amount)}</span>
+                            ) : (
+                              <span className="text-xs text-green-600">Fully Paid</span>
+                            )}
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
