@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, Pencil, Trash2, X, ChevronDown, ChevronUp, UserPlus, Lock } from "lucide-react";
+import { ArrowLeft, Pencil, Trash2, X, ChevronDown, ChevronUp, UserPlus, Lock, Undo2 } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
 import { formatNPR } from "../utils/helpers";
@@ -74,6 +74,10 @@ export default function SaleDetail() {
   const [showAddCust, setShowAddCust] = useState(false);
   const [newCust, setNewCust] = useState({ name: "", contact_number: "", address: "" });
   const [addingCust, setAddingCust] = useState(false);
+
+  const [showReturnModal, setShowReturnModal] = useState(false);
+  const [returnForm, setReturnForm] = useState({ refund_percentage: "", new_status: "available", notes: "" });
+  const [returning, setReturning] = useState(false);
 
   const fetchSale = useCallback(async () => {
     try {
@@ -179,6 +183,32 @@ export default function SaleDetail() {
     } catch (err) { toast.error(getErrMsg(err, "Failed to delete")); }
   };
 
+  const openReturnModal = () => {
+    setReturnForm({ refund_percentage: "", new_status: "available", notes: "" });
+    setShowReturnModal(true);
+  };
+
+  const submitReturn = async (e) => {
+    e.preventDefault();
+    const pct = Number(returnForm.refund_percentage);
+    if (returnForm.refund_percentage === "" || Number.isNaN(pct) || pct < 0 || pct > 100) {
+      toast.error("Enter a refund percentage between 0 and 100");
+      return;
+    }
+    setReturning(true);
+    try {
+      await api.post(`/vehicles/${sale.vehicle_id}/return`, {
+        refund_percentage: pct,
+        new_status: returnForm.new_status,
+        notes: returnForm.notes || null,
+      });
+      toast.success("Return recorded — vehicle back in stock");
+      setShowReturnModal(false);
+      fetchSale();
+    } catch (err) { toast.error(getErrMsg(err, "Failed to record return")); }
+    finally { setReturning(false); }
+  };
+
   if (loading) return <div className="flex items-center justify-center h-64"><div className="animate-spin w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full" /></div>;
   if (!sale) return null;
 
@@ -196,10 +226,13 @@ export default function SaleDetail() {
           </div>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          <span className={`px-2.5 py-1 rounded-full text-xs font-semibold uppercase tracking-wide ${ps.bg} ${ps.text}`} data-testid="payment-status-badge">{sale.payment_status}</span>
+          <span className={`px-2.5 py-1 rounded-full text-xs font-semibold uppercase tracking-wide ${ps.bg} ${ps.text}`} data-testid="payment-status-badge">{sale.returned ? "Returned" : sale.payment_status}</span>
           {isAdmin && !isEditing && (
             <>
               <button onClick={startEdit} data-testid="edit-sale-btn" className="flex items-center gap-1.5 px-3 py-2 border border-slate-200 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors"><Pencil size={14} /> Edit</button>
+              {!sale.returned && sale.vehicle_status === "sold" && (
+                <button onClick={openReturnModal} data-testid="record-return-btn" className="flex items-center gap-1.5 px-3 py-2 border border-amber-200 text-amber-700 rounded-lg text-sm font-medium hover:bg-amber-50 transition-colors"><Undo2 size={14} /> Record Return</button>
+              )}
               <button onClick={deleteSale} data-testid="delete-sale-btn" className="flex items-center gap-1.5 px-3 py-2 border border-red-200 text-red-600 rounded-lg text-sm font-medium hover:bg-red-50 transition-colors"><Trash2 size={14} /> Delete</button>
             </>
           )}
@@ -372,6 +405,17 @@ export default function SaleDetail() {
             </div>
           )}
 
+          {sale.returned && (
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-5">
+              <h3 className="text-sm font-bold text-amber-800 mb-1 flex items-center gap-1.5"><Undo2 size={15} /> Return Details</h3>
+              <Row label="Refund Percentage"><span className="text-sm font-medium text-slate-900 sm:text-right">{sale.refund_percentage}%</span></Row>
+              <Row label="Refunded to Customer"><span className="text-sm font-medium text-slate-900 sm:text-right">{formatNPR(sale.refund_amount || 0)}</span></Row>
+              <Row label="Retained (kept)"><span className="text-sm font-medium text-slate-900 sm:text-right">{formatNPR(sale.retained_amount || 0)}</span></Row>
+              <Row label="Vehicle Restocked As"><span className="text-sm font-medium text-slate-900 sm:text-right capitalize">{sale.returned_status}</span></Row>
+              {sale.return_notes && <Row label="Condition Notes"><span className="text-sm font-medium text-slate-900 sm:text-right">{sale.return_notes}</span></Row>}
+            </div>
+          )}
+
           {/* Details */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
@@ -413,6 +457,53 @@ export default function SaleDetail() {
             </div>
           )}
         </>
+      )}
+
+      {showReturnModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+            <div className="flex items-center justify-between p-5 border-b border-slate-100">
+              <h2 className="text-lg font-bold text-slate-900">Record Return</h2>
+              <button onClick={() => setShowReturnModal(false)} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500">✕</button>
+            </div>
+            <form onSubmit={submitReturn} className="p-5 space-y-4">
+              <p className="text-xs text-slate-500">Assess the vehicle's condition and set what percentage of the sale amount ({formatNPR(sale.total_amount)}) gets refunded to the customer. The rest is kept by the shop, and the sale is marked returned rather than deleted.</p>
+              <Field label="Refund Percentage" required>
+                <input
+                  type="number" min="0" max="100" step="0.01"
+                  value={returnForm.refund_percentage}
+                  onChange={e => setReturnForm({ ...returnForm, refund_percentage: e.target.value })}
+                  placeholder="e.g. 80"
+                  className={inp}
+                  data-testid="return-refund-percentage-input"
+                />
+              </Field>
+              {returnForm.refund_percentage !== "" && !Number.isNaN(Number(returnForm.refund_percentage)) && (
+                <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-slate-700 space-y-0.5">
+                  <div>Refund to customer: <span className="font-semibold">{formatNPR(sale.total_amount * Number(returnForm.refund_percentage) / 100)}</span></div>
+                  <div>Retained by shop: <span className="font-semibold">{formatNPR(sale.total_amount * (100 - Number(returnForm.refund_percentage)) / 100)}</span></div>
+                </div>
+              )}
+              <Field label="Vehicle Re-enters Stock As" required>
+                <select value={returnForm.new_status} onChange={e => setReturnForm({ ...returnForm, new_status: e.target.value })} className={sel} data-testid="return-new-status-select">
+                  <option value="available">Available</option>
+                  <option value="unlisted">Unlisted</option>
+                  <option value="reserved">Reserved</option>
+                  <option value="scrap">Scrap</option>
+                </select>
+              </Field>
+              <Field label="Condition Notes">
+                <input value={returnForm.notes} onChange={e => setReturnForm({ ...returnForm, notes: e.target.value })} placeholder="Assessment details..." className={inp} />
+              </Field>
+              <div className="flex gap-3">
+                <button type="button" onClick={() => setShowReturnModal(false)} className="flex-1 h-10 border border-slate-200 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50">Cancel</button>
+                <button type="submit" disabled={returning} data-testid="submit-return-btn" className="flex-1 h-10 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-sm font-semibold disabled:opacity-60">
+                  {returning ? "Recording..." : "Record Return"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
     </div>
   );

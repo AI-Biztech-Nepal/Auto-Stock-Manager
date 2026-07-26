@@ -201,6 +201,12 @@ async def _vehicle_investment(vehicle_id: str, vehicle: dict) -> float:
     exps = await db.expenses.find({"vehicle_id": vehicle_id}, {"_id": 0}).to_list(200)
     return vehicle.get("purchase_price", 0) + vehicle.get("accessories_cost", 0) + sum(e["amount"] for e in exps)
 
+# For a sale returned via POST /vehicles/{vid}/return, only the retained (unrefunded) portion
+# is real revenue — the rest went back to the customer. Every revenue/profit aggregate should
+# read a sale's amount through this instead of "total_amount" directly.
+def _sale_revenue(s: dict) -> float:
+    return s.get("retained_amount", 0) if s.get("returned") else s.get("total_amount", 0)
+
 # ── Helper: compute total amount owed to a vendor (payable) ──────────
 async def _vendor_payable(vendor_id: str) -> float:
     """Returns max(0, total_purchased - total_paid) for a vendor."""
@@ -459,6 +465,11 @@ class VehicleUpdate(BaseModel):
 
 class VehicleStatusUpdate(BaseModel):
     status: str
+
+class VehicleReturnRequest(BaseModel):
+    refund_percentage: float  # % of the sale's total_amount handed back to the customer, after condition assessment
+    new_status: str = "available"  # where the vehicle re-enters stock: available / unlisted / reserved / scrap
+    notes: Optional[str] = None
 
 class ExpenseCreate(BaseModel):
     vehicle_id: str; category: str; amount: float
@@ -964,7 +975,7 @@ async def update_vehicle(vid: str, vehicle: VehicleUpdate, cu: dict = Depends(re
     r = await db.vehicles.update_one({"id": vid}, {"$set": upd})
     if r.matched_count == 0: raise HTTPException(404, "Vehicle not found")
 
-    if became_sold and not await db.sales.find_one({"vehicle_id": vid}):
+    if became_sold and not await db.sales.find_one({"vehicle_id": vid, "returned": {"$ne": True}}):
         sale_date = upd.get("sold_date", existing.get("sold_date")) or datetime.now(timezone.utc).date().isoformat()
         await db.sales.insert_one({
             "id": str(uuid.uuid4()),
@@ -1029,7 +1040,7 @@ async def update_vehicle_status(vid: str, body: VehicleStatusUpdate, cu: dict = 
     r = await db.vehicles.update_one({"id": vid}, {"$set": upd})
     if r.matched_count == 0: raise HTTPException(404, "Vehicle not found")
 
-    if became_sold and not await db.sales.find_one({"vehicle_id": vid}):
+    if became_sold and not await db.sales.find_one({"vehicle_id": vid, "returned": {"$ne": True}}):
         await db.sales.insert_one({
             "id": str(uuid.uuid4()),
             "vehicle_id": vid,
@@ -1056,6 +1067,57 @@ async def update_vehicle_status(vid: str, body: VehicleStatusUpdate, cu: dict = 
         "details": f"Status changed from {existing.get('status')} to {body.status}"})
     v = await db.vehicles.find_one({"id": vid}, {"_id": 0})
     return _hide_financials_for_role(v, role)
+
+# Recondition-house return: unlike the plain status dropdown above (which the /sales/reconcile
+# ribbon is specifically meant to catch if someone bypasses proper channels), this is the one
+# sanctioned path for taking a sold vehicle back. The shop assesses the vehicle's condition and
+# refunds only a percentage of what the customer paid, keeping the rest — so the sale record is
+# tagged "returned" (not deleted) with that split preserved, and the vehicle re-enters stock at
+# whatever status the assessment calls for.
+@api_router.post("/vehicles/{vid}/return")
+async def return_vehicle(vid: str, body: VehicleReturnRequest, cu: dict = Depends(admin_only)):
+    if not (0 <= body.refund_percentage <= 100):
+        raise HTTPException(400, "Refund percentage must be between 0 and 100")
+    if body.new_status not in VEHICLE_STATUSES or body.new_status in ("sold", "in_repair"):
+        raise HTTPException(400, f"Invalid return status '{body.new_status}'")
+
+    existing = await db.vehicles.find_one({"id": vid}, {"_id": 0})
+    if not existing: raise HTTPException(404, "Vehicle not found")
+    if existing.get("status") != "sold":
+        raise HTTPException(400, f"Vehicle is not currently marked Sold (status: {existing.get('status')})")
+
+    sale = await db.sales.find_one({"vehicle_id": vid, "returned": {"$ne": True}}, sort=[("created_at", -1)])
+    if not sale:
+        raise HTTPException(404, "No active sale found for this vehicle")
+
+    total_amount = sale.get("total_amount", 0)
+    refund_amount = round(total_amount * body.refund_percentage / 100, 2)
+    retained_amount = round(total_amount - refund_amount, 2)
+
+    await db.sales.update_one({"id": sale["id"]}, {"$set": {
+        "returned": True,
+        "returned_at": datetime.now(timezone.utc).isoformat(),
+        "returned_status": body.new_status,
+        "refund_percentage": body.refund_percentage,
+        "refund_amount": refund_amount,
+        "retained_amount": retained_amount,
+        "return_notes": body.notes,
+        "due_amount": 0,
+    }})
+
+    await db.vehicles.update_one({"id": vid}, {"$set": {
+        "status": body.new_status,
+        "sold_date": None,
+        "customer_id": None,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }})
+
+    await db.audit_logs.insert_one({"action": "vehicle_returned", "vehicle_id": vid,
+        "user": cu["username"], "timestamp": datetime.now(timezone.utc).isoformat(),
+        "details": f"Sale {sale['id']} returned at {body.refund_percentage}% refund, vehicle set to {body.new_status}"})
+
+    v = await db.vehicles.find_one({"id": vid}, {"_id": 0})
+    return {"vehicle": v, "refund_amount": refund_amount, "retained_amount": retained_amount}
 
 @api_router.delete("/vehicles/{vid}")
 async def delete_vehicle(vid: str, cu: dict = Depends(admin_only)):
@@ -1225,8 +1287,9 @@ async def delete_job(jid: str, cu: dict = Depends(require("jobs", "delete"))):
 async def get_customers(cu: dict = Depends(require("customers", "view"))):
     customers = await db.customers.find({}, {"_id": 0}).sort("created_at", -1).to_list(1000)
     for c in customers:
-        cust_sales = await db.sales.find({"customer_id": c["id"]}, {"_id": 0, "due_amount": 1, "due_date": 1}).to_list(1000)
-        c["purchase_count"] = len(cust_sales); c["is_repeat_customer"] = len(cust_sales) > 1
+        cust_sales = await db.sales.find({"customer_id": c["id"]}, {"_id": 0, "due_amount": 1, "due_date": 1, "returned": 1}).to_list(1000)
+        active_cust_sales = [cs for cs in cust_sales if not cs.get("returned")]
+        c["purchase_count"] = len(active_cust_sales); c["is_repeat_customer"] = len(active_cust_sales) > 1
         c["total_due"] = round(sum(cs.get("due_amount", 0) for cs in cust_sales), 2)
         today_iso2 = datetime.now(timezone.utc).date().isoformat()
         c["has_overdue"] = any((cs.get("due_amount", 0) > 0 and cs.get("due_date") and cs.get("due_date") < today_iso2) for cs in cust_sales)
@@ -1250,8 +1313,9 @@ async def get_customer(cid: str, cu: dict = Depends(require("customers", "view")
         v = await db.vehicles.find_one({"id": s.get("vehicle_id")}, {"_id": 0, "brand": 1, "model": 1, "year": 1, "registration_number": 1})
         s["vehicle_info"] = f"{v['brand']} {v['model']} {v.get('year','')}" + (f" ({v['registration_number']})" if v.get("registration_number") else "") if v else "Vehicle removed"
     c["sales"] = sales
-    c["purchase_count"] = len(sales)
-    c["is_repeat_customer"] = len(sales) > 1
+    active_sales = [s for s in sales if not s.get("returned")]
+    c["purchase_count"] = len(active_sales)
+    c["is_repeat_customer"] = len(active_sales) > 1
     return c
 
 @api_router.put("/customers/{cid}")
@@ -1327,7 +1391,7 @@ async def create_sale(sale: SaleCreate, cu: dict = Depends(require("sales", "cre
 @api_router.get("/sales/summary")
 async def get_sales_summary(cu: dict = Depends(require("sales", "view"))):
     sales = await db.sales.find({}, {"_id": 0}).to_list(1000)
-    total_revenue = sum(s.get("total_amount", 0) for s in sales)
+    total_revenue = sum(_sale_revenue(s) for s in sales)
     this_month = datetime.now(timezone.utc).strftime("%Y-%m")
     monthly = [s for s in sales if s.get("sale_date", "").startswith(this_month)]
     avg = total_revenue / len(sales) if sales else 0
@@ -1335,17 +1399,30 @@ async def get_sales_summary(cu: dict = Depends(require("sales", "view"))):
     today_iso = datetime.now(timezone.utc).date().isoformat()
     due_count = sum(1 for s in sales if s.get("due_amount", 0) > 0)
     overdue_count = sum(1 for s in sales if s.get("due_amount", 0) > 0 and s.get("due_date") and s.get("due_date") < today_iso)
-    return {"total_sales": len(sales), "total_revenue": total_revenue, "this_month_sales": len(monthly), "this_month_revenue": sum(s.get("total_amount", 0) for s in monthly), "avg_sale_price": round(avg, 2), "total_due": total_due, "due_count": due_count, "overdue_count": overdue_count}
+    return {"total_sales": len(sales), "total_revenue": total_revenue, "this_month_sales": len(monthly), "this_month_revenue": sum(_sale_revenue(s) for s in monthly), "avg_sale_price": round(avg, 2), "total_due": total_due, "due_count": due_count, "overdue_count": overdue_count}
 
 @api_router.get("/sales/reconcile")
 async def reconcile_sales(cu: dict = Depends(admin_only)):
     """Diagnostic: finds sales whose linked vehicle no longer has status "sold" — the
     usual cause of the Sales-tab total drifting from the Sold Stock count. Happens when
     a sold vehicle's status gets changed (or the vehicle deleted) directly from Inventory
-    instead of through "Delete Sale", which is the only path that keeps both in sync."""
+    instead of through "Delete Sale", which is the only path that keeps both in sync.
+
+    Two legitimate exceptions are excluded from this check, both from PATCH /vehicles/{vid}/status:
+    - "in_repair": the warranty-repair cycle, where a sold vehicle is temporarily brought
+      back into the recondition pipeline and later flipped back to "sold" with its original
+      sold_date preserved. The sale stays active throughout.
+    - sales flagged "returned": a recondition-house return, where the vehicle is handed
+      back and re-enters stock (e.g. flipped to "available") instead of going through
+      "Delete Sale". The sale is intentionally kept (with its "returned" flag set) for
+      history/revenue instead of deleted, so it's excluded here entirely — its vehicle's
+      current status (and even later deletion) no longer implies a desync.
+    Only genuine mismatches (deleted vehicle, or any other unflagged status drift) surface here."""
     sales = await db.sales.find({}, {"_id": 0}).to_list(1000)
     mismatches = []
     for s in sales:
+        if s.get("returned"):
+            continue
         v = await db.vehicles.find_one({"id": s.get("vehicle_id")}, {"_id": 0})
         if not v:
             mismatches.append({
@@ -1353,7 +1430,7 @@ async def reconcile_sales(cu: dict = Depends(admin_only)):
                 "vehicle_info": None, "vehicle_status": None,
                 "sale_date": s.get("sale_date"), "total_amount": s.get("total_amount"),
             })
-        elif v.get("status") != "sold":
+        elif v.get("status") != "sold" and v.get("status") != "in_repair":
             mismatches.append({
                 "sale_id": s["id"], "vehicle_id": s.get("vehicle_id"), "issue": "vehicle_status_mismatch",
                 "vehicle_info": f"{v.get('brand','')} {v.get('model','')} {v.get('year','')}".strip(),
@@ -1372,6 +1449,7 @@ async def get_sale(sid: str, cu: dict = Depends(require("sales", "view"))):
         s["vehicle_brand"] = v.get("brand"); s["vehicle_model"] = v.get("model")
         s["vehicle_year"] = v.get("year"); s["registration_number"] = v.get("registration_number")
         s["engine_cc"] = v.get("engine_cc"); s["fuel_type"] = v.get("fuel_type")
+        s["vehicle_status"] = v.get("status")
     c = await db.customers.find_one({"id": s.get("customer_id")}, {"_id": 0}) if s.get("customer_id") else None
     s["customer_name"] = c["name"] if c else "Walk-in Customer"
     s["customer_contact"] = c.get("contact_number") if c else None
@@ -1675,8 +1753,10 @@ async def finance_summary(cu: dict = Depends(admin_only)):
     )
     # Revenue & COGS from Sales table (single source of truth)
     sales_records = await db.sales.find({}, {"_id": 0}).to_list(1000)
-    total_revenue = sum(s.get("total_amount", 0) for s in sales_records)
-    sold_vehicle_ids = [s["vehicle_id"] for s in sales_records]
+    total_revenue = sum(_sale_revenue(s) for s in sales_records)
+    # Dedupe: a vehicle sold, returned, then resold appears in two sales rows but its
+    # investment (purchase price + expenses) should only count once toward COGS.
+    sold_vehicle_ids = {s["vehicle_id"] for s in sales_records}
     total_cogs = 0
     for vid in sold_vehicle_ids:
         v = await db.vehicles.find_one({"id": vid}, {"_id": 0})
@@ -1725,6 +1805,12 @@ async def dashboard_stats(cu: dict = Depends(admin_only)):
     sold = len(sales_records)
     total_profit = 0
     for s in sales_records:
+        if s.get("returned"):
+            # The vehicle's investment cost stays attributed to inventory (it'll be
+            # subtracted again on its actual resale) — only the retained refund fee
+            # counts as profit here, so it isn't double-charged against COGS.
+            total_profit += s.get("retained_amount", 0)
+            continue
         v = await db.vehicles.find_one({"id": s["vehicle_id"]}, {"_id": 0})
         if v:
             inv = await _vehicle_investment(s["vehicle_id"], v)
@@ -1813,7 +1899,11 @@ async def accounting_summary(start_date: str, end_date: str, cu: dict = Depends(
     ).to_list(5000)
     total_sales, total_investment_sold, sold_count = 0, 0, len(sales_in_period)
     for s in sales_in_period:
-        total_sales += s.get("total_amount", 0)
+        total_sales += _sale_revenue(s)
+        if s.get("returned"):
+            # Retained refund fee has no cost basis subtracted — the vehicle's investment
+            # is still attributed to inventory until it's actually resold.
+            continue
         v = await db.vehicles.find_one({"id": s["vehicle_id"]}, {"_id": 0})
         if v:
             exps = await db.expenses.find({"vehicle_id": s["vehicle_id"]}, {"_id": 0}).to_list(200)
