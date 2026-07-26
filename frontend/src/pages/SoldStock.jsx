@@ -139,7 +139,7 @@ export default function SoldStock() {
                       return (
                         <div
                           key={v.id}
-                          onClick={() => navigate(`/inventory/${v.id}`)}
+                          onClick={() => navigate(`/sold-stock/${v.id}`)}
                           data-testid="sold-vehicle-row"
                           className="flex items-center justify-between gap-4 px-4 py-3 hover:bg-slate-50 cursor-pointer transition-colors"
                         >

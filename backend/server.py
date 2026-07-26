@@ -468,7 +468,7 @@ class VehicleStatusUpdate(BaseModel):
 
 class VehicleReturnRequest(BaseModel):
     refund_percentage: float  # % of the sale's total_amount handed back to the customer, after condition assessment
-    new_status: str = "available"  # where the vehicle re-enters stock: available / unlisted / reserved / scrap
+    new_status: str = "available"  # where the vehicle re-enters stock: available / unlisted / reserved / scrap / in_repair
     notes: Optional[str] = None
 
 class ExpenseCreate(BaseModel):
@@ -1090,7 +1090,7 @@ async def get_active_sale(vid: str, cu: dict = Depends(admin_only)):
 async def return_vehicle(vid: str, body: VehicleReturnRequest, cu: dict = Depends(admin_only)):
     if not (0 <= body.refund_percentage <= 100):
         raise HTTPException(400, "Refund percentage must be between 0 and 100")
-    if body.new_status not in VEHICLE_STATUSES or body.new_status in ("sold", "in_repair"):
+    if body.new_status not in VEHICLE_STATUSES or body.new_status == "sold":
         raise HTTPException(400, f"Invalid return status '{body.new_status}'")
 
     existing = await db.vehicles.find_one({"id": vid}, {"_id": 0})

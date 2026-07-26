@@ -489,6 +489,7 @@ export default function SaleDetail() {
                   <option value="available">Available</option>
                   <option value="unlisted">Unlisted</option>
                   <option value="reserved">Reserved</option>
+                  <option value="in_repair">In Repair</option>
                   <option value="scrap">Scrap</option>
                 </select>
               </Field>
