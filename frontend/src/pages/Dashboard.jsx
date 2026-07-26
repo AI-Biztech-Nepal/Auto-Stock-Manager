@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
-import { AlertTriangle, TrendingUp, Package, Users, Wrench, DollarSign, Clock, ShoppingCart, CalendarDays, TrendingDown, Banknote, UserPlus, ArrowDownCircle, ArrowUpCircle, PlusSquare, FileText } from "lucide-react";
+import { AlertTriangle, TrendingUp, Package, Users, Wrench, DollarSign, Clock, ShoppingCart, CalendarDays, TrendingDown, Banknote } from "lucide-react";
 import api from "../utils/api";
 import { formatNPR } from "../utils/helpers";
 import {
@@ -222,58 +222,6 @@ export default function Dashboard() {
         <KPICard title="Customers" value={stats.total_customers} icon={Users} color="bg-purple-500" testid="kpi-customers" onClick={() => navigate("/customers")} />
         <KPICard title="Pending Jobs" value={stats.pending_jobs} icon={Wrench} color="bg-orange-500" testid="kpi-pending-jobs" onClick={() => navigate("/jobs")} />
         <KPICard title="Total Vehicles" value={stats.total_vehicles} icon={Package} color="bg-slate-500" testid="kpi-total" subtitle="All time" onClick={() => navigate("/inventory")} />
-      </div>
-
-      {/* Quick Actions */}
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <h2 className="text-base font-bold text-slate-900" style={{ fontFamily: "Manrope, sans-serif" }}>Quick Actions</h2>
-            <p className="text-sm text-slate-500">Jump to common sales, purchase, payment and party actions.</p>
-          </div>
-        </div>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <button onClick={() => navigate("/customers")} className="group bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl p-4 text-left transition-colors">
-            <div className="flex items-center justify-center w-10 h-10 rounded-lg bg-blue-600 text-white mb-3"><UserPlus size={18} /></div>
-            <p className="font-semibold text-slate-900">Add Party</p>
-            <p className="text-xs text-slate-500 mt-1">Customer list</p>
-          </button>
-          <button onClick={() => navigate("/sales")} className="group bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl p-4 text-left transition-colors">
-            <div className="flex items-center justify-center w-10 h-10 rounded-lg bg-green-600 text-white mb-3"><ShoppingCart size={18} /></div>
-            <p className="font-semibold text-slate-900">Sales Invoice</p>
-            <p className="text-xs text-slate-500 mt-1">Create or view invoices</p>
-          </button>
-          <button onClick={() => navigate("/vendors")} className="group bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl p-4 text-left transition-colors">
-            <div className="flex items-center justify-center w-10 h-10 rounded-lg bg-emerald-600 text-white mb-3"><ArrowDownCircle size={18} /></div>
-            <p className="font-semibold text-slate-900">Payment In</p>
-            <p className="text-xs text-slate-500 mt-1">Vendor payments</p>
-          </button>
-          <button onClick={() => navigate("/vendors")} className="group bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl p-4 text-left transition-colors">
-            <div className="flex items-center justify-center w-10 h-10 rounded-lg bg-red-600 text-white mb-3"><ArrowUpCircle size={18} /></div>
-            <p className="font-semibold text-slate-900">Payment Out</p>
-            <p className="text-xs text-slate-500 mt-1">Vendor dues</p>
-          </button>
-          <button onClick={() => navigate("/inventory")} className="group bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl p-4 text-left transition-colors">
-            <div className="flex items-center justify-center w-10 h-10 rounded-lg bg-indigo-600 text-white mb-3"><PlusSquare size={18} /></div>
-            <p className="font-semibold text-slate-900">Purchase</p>
-            <p className="text-xs text-slate-500 mt-1">Add vehicle purchase</p>
-          </button>
-          <button onClick={() => navigate("/inventory")} className="group bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl p-4 text-left transition-colors">
-            <div className="flex items-center justify-center w-10 h-10 rounded-lg bg-teal-600 text-white mb-3"><PlusSquare size={18} /></div>
-            <p className="font-semibold text-slate-900">Add Item</p>
-            <p className="text-xs text-slate-500 mt-1">New inventory item</p>
-          </button>
-          <button onClick={() => navigate("/customers")} className="group bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl p-4 text-left transition-colors">
-            <div className="flex items-center justify-center w-10 h-10 rounded-lg bg-blue-500 text-white mb-3"><FileText size={18} /></div>
-            <p className="font-semibold text-slate-900">Add Note</p>
-            <p className="text-xs text-slate-500 mt-1">Customer notes</p>
-          </button>
-          <button onClick={() => navigate("/inventory")} className="group bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl p-4 text-left transition-colors">
-            <div className="flex items-center justify-center w-10 h-10 rounded-lg bg-orange-600 text-white mb-3"><FileText size={18} /></div>
-            <p className="font-semibold text-slate-900">Expense</p>
-            <p className="text-xs text-slate-500 mt-1">Record costs</p>
-          </button>
-        </div>
       </div>
 
       {/* Charts + Alerts */}
