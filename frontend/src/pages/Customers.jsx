@@ -122,7 +122,7 @@ export default function Customers() {
               </thead>
               <tbody className="divide-y divide-slate-50">
                 {filtered.map(c => (
-                  <tr key={c.id} data-testid="customer-row" className="table-row-hover">
+                  <tr key={c.id} onClick={() => openView(c)} data-testid="customer-row" className="table-row-hover cursor-pointer">
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-3">
                         <div className="w-9 h-9 rounded-full bg-blue-100 flex items-center justify-center text-blue-700 font-bold text-sm">{c.name[0]?.toUpperCase()}</div>
@@ -155,7 +155,7 @@ export default function Customers() {
                         <span className="text-xs text-green-600">Paid Up</span>
                       )}
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
                       <div className="flex items-center gap-1">
                         <button onClick={() => openView(c)} className="p-1.5 hover:bg-blue-50 rounded-lg transition-colors" data-testid="view-customer-btn"><Eye size={14} className="text-blue-500" /></button>
                         <button onClick={() => openEdit(c)} className="p-1.5 hover:bg-slate-100 rounded-lg transition-colors" data-testid="edit-customer-btn"><Edit size={14} className="text-slate-500" /></button>

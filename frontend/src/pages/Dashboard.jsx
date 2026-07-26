@@ -211,18 +211,17 @@ export default function Dashboard() {
 
       {/* KPI Row 1 */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <KPICard title="Available Vehicles" value={stats.available} icon={Package} color="bg-blue-500" testid="kpi-available" />
-        <KPICard title="Vehicles Sold" value={stats.sold} icon={ShoppingCart} color="bg-green-500" testid="kpi-sold" />
+        <KPICard title="Available Vehicles" value={stats.available} icon={Package} color="bg-blue-500" testid="kpi-available" onClick={() => navigate("/inventory")} />
+        <KPICard title="Vehicles Sold" value={stats.sold} icon={ShoppingCart} color="bg-green-500" testid="kpi-sold" onClick={() => navigate("/sold-stock")} />
         <KPICard title="Locked Capital" value={formatNPR(stats.locked_capital)} icon={DollarSign} color="bg-indigo-500" testid="kpi-capital" subtitle="In available stock" onClick={() => navigate("/inventory")} />
-        <KPICard title="Realized Profit" value={formatNPR(stats.total_realized_profit)} icon={TrendingUp} color="bg-emerald-500" testid="kpi-profit" subtitle="From sold vehicles" />
+        <KPICard title="Realized Profit" value={formatNPR(stats.total_realized_profit)} icon={TrendingUp} color="bg-emerald-500" testid="kpi-profit" subtitle="From sold vehicles" onClick={() => navigate("/finance")} />
       </div>
 
       {/* KPI Row 2 */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <KPICard title="Reserved" value={stats.reserved} icon={Clock} color="bg-yellow-500" testid="kpi-reserved" />
-        <KPICard title="Customers" value={stats.total_customers} icon={Users} color="bg-purple-500" testid="kpi-customers" />
-        <KPICard title="Pending Jobs" value={stats.pending_jobs} icon={Wrench} color="bg-orange-500" testid="kpi-pending-jobs" />
-        <KPICard title="Total Vehicles" value={stats.total_vehicles} icon={Package} color="bg-slate-500" testid="kpi-total" subtitle="All time" />
+      <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-3 gap-4">
+        <KPICard title="Customers" value={stats.total_customers} icon={Users} color="bg-purple-500" testid="kpi-customers" onClick={() => navigate("/customers")} />
+        <KPICard title="Pending Jobs" value={stats.pending_jobs} icon={Wrench} color="bg-orange-500" testid="kpi-pending-jobs" onClick={() => navigate("/jobs")} />
+        <KPICard title="Total Vehicles" value={stats.total_vehicles} icon={Package} color="bg-slate-500" testid="kpi-total" subtitle="All time" onClick={() => navigate("/inventory")} />
       </div>
 
       {/* Quick Actions */}
