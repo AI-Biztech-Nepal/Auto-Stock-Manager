@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, PieChart, Pie, Legend } from "recharts";
-import { DollarSign, TrendingUp, Package, AlertTriangle, CreditCard, Users, ShoppingCart, Wallet, UserPlus, ArrowDownCircle, ArrowUpCircle, PlusSquare, FileText } from "lucide-react";
+import { DollarSign, AlertTriangle, CreditCard, Users, ShoppingCart, Wallet, UserPlus, ArrowDownCircle, ArrowUpCircle, PlusSquare, FileText } from "lucide-react";
 import api from "../utils/api";
 import { formatNPR } from "../utils/helpers";
 
@@ -78,16 +78,10 @@ export default function Finance() {
       {tab === "overview" && summary && (
         <div className="space-y-5">
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            <KCard title="Total Revenue" value={formatNPR(summary.total_revenue)} icon={TrendingUp} color="bg-blue-500" />
             <KCard title="Gross Profit" value={formatNPR(summary.gross_profit)} sub={`${summary.profit_margin_pct}% margin`} icon={DollarSign} color="bg-emerald-500" />
-            <KCard title="Inventory Value" value={formatNPR(summary.inventory_value)} sub={`${summary.vehicles_in_stock} vehicles`} icon={Package} color="bg-indigo-500" />
             <KCard title="Vendor Payables" value={formatNPR(summary.vendor_payables)} icon={CreditCard} color="bg-red-500" />
-          </div>
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
             <KCard title="Partner Capital" value={formatNPR(summary.total_partner_capital)} icon={Wallet} color="bg-purple-500" />
             <KCard title="EMI Receivables" value={formatNPR(summary.emi_receivables)} icon={Users} color="bg-teal-500" />
-            <KCard title="Vehicles Sold" value={summary.vehicles_sold} icon={ShoppingCart} color="bg-green-500" />
-            <KCard title="Cost of Goods" value={formatNPR(summary.total_cogs)} icon={AlertTriangle} color="bg-orange-500" />
           </div>
 
           {/* Alerts */}

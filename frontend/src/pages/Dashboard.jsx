@@ -209,10 +209,17 @@ export default function Dashboard() {
       {/* Accounting Summary (BS-based) */}
       <AccountingSummary />
 
-      {/* KPI Row 1 */}
+      {/* Financial Overview (moved from Finance tab) */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <KPICard title="Available Vehicles" value={stats.available} icon={Package} color="bg-blue-500" testid="kpi-available" onClick={() => navigate("/inventory")} />
+        <KPICard title="Total Revenue" value={formatNPR(stats.total_revenue)} icon={TrendingUp} color="bg-blue-500" testid="kpi-total-revenue" onClick={() => navigate("/finance")} />
+        <KPICard title="Inventory Value" value={formatNPR(stats.inventory_value)} icon={Package} color="bg-indigo-500" testid="kpi-inventory-value" subtitle={`${stats.available} vehicles`} onClick={() => navigate("/inventory")} />
         <KPICard title="Vehicles Sold" value={stats.sold} icon={ShoppingCart} color="bg-green-500" testid="kpi-sold" onClick={() => navigate("/sold-stock")} />
+        <KPICard title="Cost of Goods" value={formatNPR(stats.total_cogs)} icon={AlertTriangle} color="bg-orange-500" testid="kpi-cogs" onClick={() => navigate("/finance")} />
+      </div>
+
+      {/* KPI Row 1 */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        <KPICard title="Available Vehicles" value={stats.available} icon={Package} color="bg-blue-500" testid="kpi-available" onClick={() => navigate("/inventory")} />
         <KPICard title="Locked Capital" value={formatNPR(stats.locked_capital)} icon={DollarSign} color="bg-indigo-500" testid="kpi-capital" subtitle="In available stock" onClick={() => navigate("/inventory")} />
         <KPICard title="Realized Profit" value={formatNPR(stats.total_realized_profit)} icon={TrendingUp} color="bg-emerald-500" testid="kpi-profit" subtitle="From sold vehicles" onClick={() => navigate("/finance")} />
       </div>

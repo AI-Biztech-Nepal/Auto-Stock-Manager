@@ -1836,6 +1836,16 @@ async def dashboard_stats(cu: dict = Depends(admin_only)):
             inv = await _vehicle_investment(s["vehicle_id"], v)
             total_profit += s.get("total_amount", 0) - inv
 
+    total_revenue = sum(_sale_revenue(s) for s in sales_records)
+    # Dedupe: a vehicle sold, returned, then resold appears in two sales rows but its
+    # investment (purchase price + expenses) should only count once toward COGS.
+    sold_vehicle_ids = {s["vehicle_id"] for s in sales_records}
+    total_cogs = 0
+    for vid in sold_vehicle_ids:
+        v = await db.vehicles.find_one({"id": vid}, {"_id": 0})
+        if v:
+            total_cogs += await _vehicle_investment(vid, v)
+
     vendors = await db.vendors.find({}, {"_id": 0}).to_list(100)
     total_vendor_due = sum([await _vendor_payable(v["id"]) for v in vendors])
 
@@ -1850,6 +1860,8 @@ async def dashboard_stats(cu: dict = Depends(admin_only)):
         "total_customers": await db.customers.count_documents({}),
         "total_vendor_due": total_vendor_due,
         "total_vendors": await db.vendors.count_documents({}),
+        "total_revenue": total_revenue, "inventory_value": locked_capital,
+        "total_cogs": total_cogs,
     }
 
 @api_router.get("/reports/inventory")
