@@ -4,6 +4,7 @@
 import { Plus } from "lucide-react";
 import BSDatePicker from "../components/BSDatePicker";
 import VendorAutocomplete from "../components/VendorAutocomplete";
+import CustomerVendorPicker from "../components/CustomerVendorPicker";
 import { BRANDS, SOURCES, CONDITIONS, FUEL_TYPES, VEHICLE_STATUS_OPTIONS, OWNERSHIP_OPTIONS } from "../utils/helpers";
 
 // text-base (16px) on mobile stops iOS Safari auto-zooming the page on focus; h-10 gives a comfortable touch target
@@ -158,6 +159,13 @@ export function AddVehicleModal({ form, setForm, onClose, onSubmit, saving, phot
                 onChange={e => setForm({ ...form, color: e.target.value })}
                 placeholder="e.g. Red, Black"
                 className={inp}
+              />
+            </Field>
+            <Field label="Link Customer / Vendor">
+              <CustomerVendorPicker
+                value={{ type: form.linked_contact_type || "vendor", id: form.linked_contact_id || null, name: form.linked_contact_name || "" }}
+                onChange={next => setForm({ ...form, linked_contact_type: next.type, linked_contact_id: next.id, linked_contact_name: next.name })}
+                vendorType="vehicles"
               />
             </Field>
           </div>

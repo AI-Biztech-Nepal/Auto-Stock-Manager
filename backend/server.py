@@ -90,7 +90,7 @@ ROLE_PERMISSIONS = {
         "customers": {"view", "create", "edit", "delete"},
         "sales": {"view", "create"},
         "team": {"view", "create", "edit", "delete"},
-        "vendor_lookup": {"view"},  # read-only autocomplete when picking a vehicle's purchase source
+        "vendor_lookup": {"view", "create"},  # vendor picker + inline "add new vendor" when picking a vehicle's purchase source
     },
     "parts_supervisor": {  # Parts department
         "spare_parts": {"view", "create", "edit", "delete"},
@@ -433,6 +433,12 @@ class VehicleCreate(BaseModel):
     purchase_source: str
     vendor_id: Optional[str] = None
     purchase_from: Optional[str] = None
+    # Optional link to an existing/newly-created Customer or Vendor record, independent of
+    # vendor_id/purchase_from above — lets stock entry reference a customer (e.g. a trade-in
+    # / exchange source) as well as a vendor, picked via the Customer/Vendor combobox on the form.
+    linked_contact_type: Optional[str] = None  # "customer" | "vendor"
+    linked_contact_id: Optional[str] = None
+    linked_contact_name: Optional[str] = None
     selling_price: Optional[float] = None
     minimum_selling_price: Optional[float] = None
     notes: Optional[str] = None
@@ -455,6 +461,8 @@ class VehicleUpdate(BaseModel):
     purchase_price: Optional[float] = None; accessories_cost: Optional[float] = None
     purchase_date: Optional[str] = None; purchase_source: Optional[str] = None
     vendor_id: Optional[str] = None; purchase_from: Optional[str] = None
+    linked_contact_type: Optional[str] = None; linked_contact_id: Optional[str] = None
+    linked_contact_name: Optional[str] = None
     selling_price: Optional[float] = None; minimum_selling_price: Optional[float] = None
     notes: Optional[str] = None; status: Optional[str] = None
     sold_date: Optional[str] = None; customer_id: Optional[str] = None
