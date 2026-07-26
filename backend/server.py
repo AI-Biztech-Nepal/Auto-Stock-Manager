@@ -1068,12 +1068,24 @@ async def update_vehicle_status(vid: str, body: VehicleStatusUpdate, cu: dict = 
     v = await db.vehicles.find_one({"id": vid}, {"_id": 0})
     return _hide_financials_for_role(v, role)
 
+# Lets Vehicle Detail / Sold Stock show the refund-preview numbers before opening the return
+# modal, without the caller having to know which sale record is currently active for this
+# vehicle — there's no time limit on this (unlike the warranty window), a vehicle sold years
+# ago can still be returned, so this just looks for whichever sale hasn't been returned yet.
+@api_router.get("/vehicles/{vid}/active-sale")
+async def get_active_sale(vid: str, cu: dict = Depends(admin_only)):
+    sale = await db.sales.find_one({"vehicle_id": vid, "returned": {"$ne": True}}, {"_id": 0}, sort=[("created_at", -1)])
+    if not sale:
+        raise HTTPException(404, "No active sale found for this vehicle")
+    return sale
+
 # Recondition-house return: unlike the plain status dropdown above (which the /sales/reconcile
 # ribbon is specifically meant to catch if someone bypasses proper channels), this is the one
 # sanctioned path for taking a sold vehicle back. The shop assesses the vehicle's condition and
 # refunds only a percentage of what the customer paid, keeping the rest — so the sale record is
 # tagged "returned" (not deleted) with that split preserved, and the vehicle re-enters stock at
-# whatever status the assessment calls for.
+# whatever status the assessment calls for. There is no time limit — a vehicle can come back
+# for return long after its warranty window has closed.
 @api_router.post("/vehicles/{vid}/return")
 async def return_vehicle(vid: str, body: VehicleReturnRequest, cu: dict = Depends(admin_only)):
     if not (0 <= body.refund_percentage <= 100):

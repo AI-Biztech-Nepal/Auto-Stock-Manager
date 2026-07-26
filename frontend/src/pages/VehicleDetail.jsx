@@ -1,10 +1,10 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, Plus, Trash2, Edit, CheckCircle, AlertCircle, Clock, QrCode } from "lucide-react";
+import { ArrowLeft, Plus, Trash2, Edit, CheckCircle, AlertCircle, Clock, QrCode, Undo2 } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
 import { formatNPR, getAgingStyle, getStatusStyle, getDocStyle, EXPENSE_CATEGORIES, VEHICLE_STATUS_OPTIONS, CONDITIONS, SOURCES, BRANDS, FUEL_TYPES, OWNERSHIP_OPTIONS, formatOwnership } from "../utils/helpers";
-import { ExpenseModal, QRLabelModal, inp, sel } from "./VehicleModals";
+import { ExpenseModal, QRLabelModal, ReturnModal, inp, sel } from "./VehicleModals";
 import HoverADDate from "../components/HoverADDate";
 import BSDatePicker from "../components/BSDatePicker";
 import VendorAutocomplete from "../components/VendorAutocomplete";
@@ -30,6 +30,7 @@ export default function VehicleDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { user } = useAuth();
+  const isAdmin = user?.role === "admin";
   const isFrontDesk = user?.role === "stock_supervisor";
   const isPartsOnly = user?.role === "parts_supervisor";
   const hideFinancials = isFrontDesk || isPartsOnly;
@@ -42,6 +43,11 @@ export default function VehicleDetail() {
   const [expForm, setExpForm] = useState({ category: "servicing", amount: "", description: "", date: "" });
   const [editForm, setEditForm] = useState({});
   const [saving, setSaving] = useState(false);
+
+  const [showReturnModal, setShowReturnModal] = useState(false);
+  const [returnForm, setReturnForm] = useState({ refund_percentage: "", new_status: "available", notes: "" });
+  const [returning, setReturning] = useState(false);
+  const [activeSale, setActiveSale] = useState(null);
 
   const fetchVehicle = useCallback(async () => {
     try {
@@ -79,6 +85,36 @@ export default function VehicleDetail() {
       toast.success(`Status updated to ${status}`);
       fetchVehicle();
     } catch (err) { toast.error(err.response?.data?.detail || "Failed"); }
+  };
+
+  const openReturnModal = async () => {
+    try {
+      const r = await api.get(`/vehicles/${id}/active-sale`);
+      setActiveSale(r.data);
+      setReturnForm({ refund_percentage: "", new_status: "available", notes: "" });
+      setShowReturnModal(true);
+    } catch (err) { toast.error(err.response?.data?.detail || "No active sale found for this vehicle"); }
+  };
+
+  const submitReturn = async (e) => {
+    e.preventDefault();
+    const pct = Number(returnForm.refund_percentage);
+    if (returnForm.refund_percentage === "" || Number.isNaN(pct) || pct < 0 || pct > 100) {
+      toast.error("Enter a refund percentage between 0 and 100");
+      return;
+    }
+    setReturning(true);
+    try {
+      await api.post(`/vehicles/${id}/return`, {
+        refund_percentage: pct,
+        new_status: returnForm.new_status,
+        notes: returnForm.notes || null,
+      });
+      toast.success("Return recorded — vehicle back in stock");
+      setShowReturnModal(false);
+      fetchVehicle();
+    } catch (err) { toast.error(err.response?.data?.detail || "Failed to record return"); }
+    finally { setReturning(false); }
   };
 
   const saveEdit = async (e) => {
@@ -237,6 +273,9 @@ export default function VehicleDetail() {
           ) : (
             <button onClick={() => { setIsEditing(true); setActiveTab("overview"); }} className="flex items-center gap-1.5 px-3 py-2 border border-slate-200 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors" data-testid="edit-vehicle-btn"><Edit size={14} /> Edit</button>
           ))}
+          {isAdmin && vehicle.status === "sold" && !isEditing && (
+            <button onClick={openReturnModal} className="flex items-center gap-1.5 px-3 py-2 border border-amber-200 text-amber-700 rounded-lg text-sm font-medium hover:bg-amber-50 transition-colors" data-testid="record-return-btn"><Undo2 size={14} /> Record Return</button>
+          )}
           <button onClick={loadQR} className="flex items-center gap-1.5 px-3 py-2 border border-slate-200 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors" data-testid="qr-btn"><QrCode size={14} /> QR Label</button>
         </div>
       </div>
@@ -573,6 +612,17 @@ export default function VehicleDetail() {
         <QRLabelModal
           onClose={() => setShowQR(false)}
           qrData={qrData}
+        />
+      )}
+
+      {showReturnModal && (
+        <ReturnModal
+          onClose={() => setShowReturnModal(false)}
+          onSubmit={submitReturn}
+          form={returnForm}
+          setForm={setReturnForm}
+          saving={returning}
+          activeSale={activeSale}
         />
       )}
     </div>

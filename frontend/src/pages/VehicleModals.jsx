@@ -49,6 +49,66 @@ export function ExpenseModal({ onClose, onSubmit, form, setForm, saving }) {
   );
 }
 
+// ── Return Modal ───────────────────────────────────────────────────────
+// activeSale is the vehicle's currently active (non-returned) sale, fetched via
+// GET /vehicles/{vid}/active-sale — used only to preview the refund/retained split
+// before submitting; the actual split is computed server-side from that same sale.
+export function ReturnModal({ onClose, onSubmit, form, setForm, saving, activeSale }) {
+  const pct = Number(form.refund_percentage);
+  const hasValidPct = form.refund_percentage !== "" && !Number.isNaN(pct);
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+        <div className="flex items-center justify-between p-5 border-b border-slate-100">
+          <h2 className="text-lg font-bold text-slate-900">Record Return</h2>
+          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500">✕</button>
+        </div>
+        <form onSubmit={onSubmit} className="p-5 space-y-4">
+          <p className="text-xs text-slate-500">
+            Assess the vehicle's condition and set what percentage of the sale amount{activeSale ? ` (${formatNPR(activeSale.total_amount)})` : ""} gets refunded to the customer. The rest is kept by the shop, and the sale is marked returned rather than deleted. There's no time limit — this works no matter how long ago it was sold.
+          </p>
+          <div>
+            <label className="block text-xs font-medium text-slate-600 mb-1">Refund Percentage <span className="text-red-500">*</span></label>
+            <input
+              type="number" min="0" max="100" step="0.01"
+              value={form.refund_percentage}
+              onChange={e => setForm({ ...form, refund_percentage: e.target.value })}
+              placeholder="e.g. 80"
+              className={inp}
+              data-testid="return-refund-percentage-input"
+            />
+          </div>
+          {hasValidPct && activeSale && (
+            <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-slate-700 space-y-0.5">
+              <div>Refund to customer: <span className="font-semibold">{formatNPR(activeSale.total_amount * pct / 100)}</span></div>
+              <div>Retained by shop: <span className="font-semibold">{formatNPR(activeSale.total_amount * (100 - pct) / 100)}</span></div>
+            </div>
+          )}
+          <div>
+            <label className="block text-xs font-medium text-slate-600 mb-1">Vehicle Re-enters Stock As <span className="text-red-500">*</span></label>
+            <select value={form.new_status} onChange={e => setForm({ ...form, new_status: e.target.value })} className={sel} data-testid="return-new-status-select">
+              <option value="available">Available</option>
+              <option value="unlisted">Unlisted</option>
+              <option value="reserved">Reserved</option>
+              <option value="scrap">Scrap</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-600 mb-1">Condition Notes</label>
+            <input value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} placeholder="Assessment details..." className={inp} />
+          </div>
+          <div className="flex gap-3">
+            <button type="button" onClick={onClose} className="flex-1 h-10 border border-slate-200 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50">Cancel</button>
+            <button type="submit" disabled={saving} data-testid="submit-return-btn" className="flex-1 h-10 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-sm font-semibold disabled:opacity-60">
+              {saving ? "Recording..." : "Record Return"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 // ── QR Label Modal ─────────────────────────────────────────────────────
 export function QRLabelModal({ onClose, qrData }) {
   if (!qrData) return null;
