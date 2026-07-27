@@ -6,19 +6,7 @@ import BSDatePicker from "../components/BSDatePicker";
 import VendorAutocomplete from "../components/VendorAutocomplete";
 import CustomerVendorPicker from "../components/CustomerVendorPicker";
 import { BRANDS, SOURCES, CONDITIONS, FUEL_TYPES, VEHICLE_STATUS_OPTIONS, OWNERSHIP_OPTIONS } from "../utils/helpers";
-
-// text-base (16px) on mobile stops iOS Safari auto-zooming the page on focus; h-10 gives a comfortable touch target
-const inp = "w-full h-10 sm:h-9 px-3 text-base sm:text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500";
-const sel = "w-full h-10 sm:h-9 px-3 text-base sm:text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white";
-
-const Field = ({ label, required, children, full }) => (
-  <div className={full ? "col-span-1 sm:col-span-2" : ""}>
-    <label className="block text-xs font-medium text-slate-600 mb-1">
-      {label}{required && <span className="text-red-500 ml-0.5">*</span>}
-    </label>
-    {children}
-  </div>
-);
+import { Field, inp, sel } from "./VehicleModals";
 
 export function AddVehicleModal({ form, setForm, onClose, onSubmit, saving, photos, setPhotos }) {
   const addPhotos = (files) => {
