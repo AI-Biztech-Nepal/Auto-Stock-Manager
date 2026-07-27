@@ -95,15 +95,10 @@ export default function Inventory() {
   const [statusThumb, setStatusThumb] = useState({ left: 0, width: 0 });
 
   useLayoutEffect(() => {
-    const measure = () => {
-      const btn = statusBtnRefs.current[statusFilter];
-      if (!btn) return;
-      const next = { left: btn.offsetLeft, width: btn.offsetWidth };
-      setStatusThumb(prev => (prev.left === next.left && prev.width === next.width) ? prev : next);
-    };
-    measure();
-    window.addEventListener("resize", measure);
-    return () => window.removeEventListener("resize", measure);
+    const btn = statusBtnRefs.current[statusFilter];
+    if (!btn) return;
+    const next = { left: btn.offsetLeft, width: btn.offsetWidth };
+    setStatusThumb(prev => (prev.left === next.left && prev.width === next.width) ? prev : next);
   }, [statusFilter, statusCounts[statusFilter]]);
 
   const hideUnpriced = async () => {
