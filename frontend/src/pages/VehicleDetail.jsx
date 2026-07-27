@@ -146,6 +146,7 @@ export default function VehicleDetail() {
   const [showQR, setShowQR] = useState(false);
   const [qrData, setQrData] = useState(null);
   const [photos, setPhotos] = useState([]);
+  const [selectedPhotoIds, setSelectedPhotoIds] = useState(() => new Set());
   const [legalDocs, setLegalDocs] = useState([]);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [uploadingDoc, setUploadingDoc] = useState(false);
@@ -170,10 +171,25 @@ export default function VehicleDetail() {
     finally { setUploadingPhoto(false); }
   };
 
-  const deletePhoto = async (photoId) => {
-    if (!window.confirm("Delete this photo?")) return;
-    try { await api.delete(`/vehicles/${id}/photos/${photoId}`); loadPhotos(); toast.success("Photo deleted"); }
-    catch { toast.error("Failed to delete"); }
+  const togglePhotoSelected = (photoId) => {
+    setSelectedPhotoIds(prev => {
+      const next = new Set(prev);
+      if (next.has(photoId)) next.delete(photoId); else next.add(photoId);
+      return next;
+    });
+  };
+
+  const deleteSelectedPhotos = async () => {
+    if (selectedPhotoIds.size === 0) return;
+    if (!window.confirm(`Delete ${selectedPhotoIds.size} selected photo(s)?`)) return;
+    try {
+      const results = await Promise.allSettled([...selectedPhotoIds].map(pid => api.delete(`/vehicles/${id}/photos/${pid}`)));
+      const failed = results.filter(r => r.status === "rejected").length;
+      if (failed > 0) toast.error(`Deleted ${results.length - failed}, ${failed} failed`);
+      else toast.success(`Deleted ${results.length} photo(s)`);
+      setSelectedPhotoIds(new Set());
+      loadPhotos();
+    } catch { toast.error("Failed to delete selected photos"); }
   };
 
   const uploadDoc = async (file, docType) => {
@@ -509,12 +525,23 @@ export default function VehicleDetail() {
           <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5" data-testid="photos-section">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-sm font-bold text-slate-900" style={{ fontFamily: "Manrope" }}>Vehicle Photos</h2>
-              {canManageStock && (
-                <label className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer transition-colors ${uploadingPhoto ? "bg-slate-200 text-slate-500" : "bg-blue-600 hover:bg-blue-700 text-white"}`} data-testid="upload-photo-btn">
-                  {uploadingPhoto ? "Uploading..." : "+ Add Photo"}
-                  <input type="file" accept="image/*" className="hidden" disabled={uploadingPhoto} onChange={e => { if (e.target.files[0]) uploadPhoto(e.target.files[0]); e.target.value = ""; }} />
-                </label>
-              )}
+              <div className="flex items-center gap-2">
+                {canManageStock && selectedPhotoIds.size > 0 && (
+                  <button
+                    onClick={deleteSelectedPhotos}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer transition-colors bg-red-600 hover:bg-red-700 text-white"
+                    data-testid="delete-selected-photos-btn"
+                  >
+                    <Trash2 size={12} /> Delete Selected ({selectedPhotoIds.size})
+                  </button>
+                )}
+                {canManageStock && (
+                  <label className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer transition-colors ${uploadingPhoto ? "bg-slate-200 text-slate-500" : "bg-blue-600 hover:bg-blue-700 text-white"}`} data-testid="upload-photo-btn">
+                    {uploadingPhoto ? "Uploading..." : "+ Add Photo"}
+                    <input type="file" accept="image/*" className="hidden" disabled={uploadingPhoto} onChange={e => { if (e.target.files[0]) uploadPhoto(e.target.files[0]); e.target.value = ""; }} />
+                  </label>
+                )}
+              </div>
             </div>
             {photos.length === 0 ? (
               <div className="border-2 border-dashed border-slate-200 rounded-xl h-32 flex flex-col items-center justify-center text-slate-400">
@@ -524,11 +551,18 @@ export default function VehicleDetail() {
             ) : (
               <div className="grid grid-cols-3 sm:grid-cols-5 gap-3">
                 {photos.map(photo => (
-                  <div key={photo.id} className="relative group rounded-xl overflow-hidden aspect-square bg-slate-100" data-testid="vehicle-photo">
-                    <img src={photo.url} alt="Vehicle" className="w-full h-full object-cover" />
+                  <div key={photo.id} className="relative rounded-xl overflow-hidden aspect-square bg-slate-100" data-testid="vehicle-photo">
+                    <a href={photo.url} target="_blank" rel="noreferrer" className="block w-full h-full">
+                      <img src={photo.url} alt="Vehicle" className="w-full h-full object-cover" />
+                    </a>
                     {canManageStock && (
-                      <button onClick={() => deletePhoto(photo.id)} className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white text-xs font-semibold" data-testid="delete-photo-btn">
-                        Delete
+                      <button
+                        onClick={() => togglePhotoSelected(photo.id)}
+                        className={`absolute top-1.5 left-1.5 w-5 h-5 rounded-md border-2 flex items-center justify-center transition-colors ${selectedPhotoIds.has(photo.id) ? "bg-red-600 border-red-600" : "bg-white/80 border-white"}`}
+                        title="Select for deletion"
+                        data-testid="select-photo-checkbox"
+                      >
+                        {selectedPhotoIds.has(photo.id) && <div className="w-2 h-2 bg-white rounded-sm" />}
                       </button>
                     )}
                   </div>

@@ -1,7 +1,8 @@
 /**
  * AddVehicleModal.jsx — extracted Add Vehicle form modal for Inventory page
  */
-import { Plus } from "lucide-react";
+import { useState } from "react";
+import { Plus, Trash2 } from "lucide-react";
 import BSDatePicker from "../components/BSDatePicker";
 import VendorAutocomplete from "../components/VendorAutocomplete";
 import CustomerVendorPicker from "../components/CustomerVendorPicker";
@@ -9,18 +10,27 @@ import { BRANDS, SOURCES, CONDITIONS, FUEL_TYPES, VEHICLE_STATUS_OPTIONS, OWNERS
 import { Field, inp, sel } from "./VehicleModals";
 
 export function AddVehicleModal({ form, setForm, onClose, onSubmit, saving, photos, setPhotos }) {
+  const [selected, setSelected] = useState(() => new Set());
+
   const addPhotos = (files) => {
     const staged = Array.from(files).map(file => ({ file, previewUrl: URL.createObjectURL(file) }));
     setPhotos(prev => [...prev, ...staged]);
   };
 
-  const removePhoto = (idx) => {
-    setPhotos(prev => {
-      const next = [...prev];
-      const [removed] = next.splice(idx, 1);
-      if (removed) URL.revokeObjectURL(removed.previewUrl);
+  const toggleSelected = (idx) => {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(idx)) next.delete(idx); else next.add(idx);
       return next;
     });
+  };
+
+  const removeSelected = () => {
+    setPhotos(prev => {
+      prev.forEach((p, idx) => { if (selected.has(idx)) URL.revokeObjectURL(p.previewUrl); });
+      return prev.filter((_, idx) => !selected.has(idx));
+    });
+    setSelected(new Set());
   };
 
   return (
@@ -172,13 +182,24 @@ export function AddVehicleModal({ form, setForm, onClose, onSubmit, saving, phot
           <div className="border-t border-slate-100 pt-4">
             <div className="flex items-center justify-between mb-3">
               <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Vehicle Photos</p>
-              <label className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer transition-colors bg-blue-600 hover:bg-blue-700 text-white">
-                <Plus size={12} /> Add Photo
-                <input
-                  type="file" accept="image/*" multiple className="hidden"
-                  onChange={e => { if (e.target.files.length) addPhotos(e.target.files); e.target.value = ""; }}
-                />
-              </label>
+              <div className="flex items-center gap-2">
+                {selected.size > 0 && (
+                  <button
+                    type="button"
+                    onClick={removeSelected}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer transition-colors bg-red-600 hover:bg-red-700 text-white"
+                  >
+                    <Trash2 size={12} /> Remove Selected ({selected.size})
+                  </button>
+                )}
+                <label className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer transition-colors bg-blue-600 hover:bg-blue-700 text-white">
+                  <Plus size={12} /> Add Photo
+                  <input
+                    type="file" accept="image/*" multiple className="hidden"
+                    onChange={e => { if (e.target.files.length) addPhotos(e.target.files); e.target.value = ""; }}
+                  />
+                </label>
+              </div>
             </div>
             {photos.length === 0 ? (
               <div className="border-2 border-dashed border-slate-200 rounded-xl h-24 flex flex-col items-center justify-center text-slate-400">
@@ -188,10 +209,17 @@ export function AddVehicleModal({ form, setForm, onClose, onSubmit, saving, phot
             ) : (
               <div className="grid grid-cols-3 sm:grid-cols-5 gap-3">
                 {photos.map((p, idx) => (
-                  <div key={idx} className="relative group rounded-xl overflow-hidden aspect-square bg-slate-100">
-                    <img src={p.previewUrl} alt="Vehicle" className="w-full h-full object-cover" />
-                    <button type="button" onClick={() => removePhoto(idx)} className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white text-xs font-semibold">
-                      Remove
+                  <div key={idx} className="relative rounded-xl overflow-hidden aspect-square bg-slate-100">
+                    <a href={p.previewUrl} target="_blank" rel="noreferrer" className="block w-full h-full">
+                      <img src={p.previewUrl} alt="Vehicle" className="w-full h-full object-cover" />
+                    </a>
+                    <button
+                      type="button"
+                      onClick={() => toggleSelected(idx)}
+                      className={`absolute top-1.5 left-1.5 w-5 h-5 rounded-md border-2 flex items-center justify-center transition-colors ${selected.has(idx) ? "bg-red-600 border-red-600" : "bg-white/80 border-white"}`}
+                      title="Select for removal"
+                    >
+                      {selected.has(idx) && <div className="w-2 h-2 bg-white rounded-sm" />}
                     </button>
                   </div>
                 ))}
