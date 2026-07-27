@@ -33,9 +33,10 @@ const Row = ({ label, children }) => (
   </div>
 );
 
-export default function VehicleDetail() {
-  const { id } = useParams();
-  const navigate = useNavigate();
+// Rendered either as a routed page (/inventory/:id, via the default-exported VehicleDetail
+// wrapper below) or embedded directly by Inventory.jsx with local state — the latter keeps
+// the Inventory page mounted underneath instead of unmounting/refetching it on open/close.
+export function VehicleDetailModal({ id, onClose }) {
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
   const isFrontDesk = user?.role === "stock_supervisor";
@@ -56,16 +57,14 @@ export default function VehicleDetail() {
   const [returning, setReturning] = useState(false);
   const [activeSale, setActiveSale] = useState(null);
 
-  const close = () => navigate("/inventory");
-
   const fetchVehicle = useCallback(async () => {
     try {
       const r = await api.get(`/vehicles/${id}`);
       setVehicle(r.data);
       setEditForm(r.data);
-    } catch { toast.error("Vehicle not found"); navigate("/inventory"); }
+    } catch { toast.error("Vehicle not found"); onClose(); }
     finally { setLoading(false); }
-  }, [id, navigate]);
+  }, [id, onClose]);
 
   useEffect(() => {
     fetchVehicle();
@@ -257,7 +256,7 @@ export default function VehicleDetail() {
             <h2 className="text-lg font-bold text-slate-900 truncate" style={{ fontFamily: "Manrope, sans-serif" }}>{vehicle.brand} {vehicle.model}</h2>
             <p className="text-xs text-slate-500">{vehicle.year} · {vehicle.engine_cc}cc · {vehicle.fuel_type}{vehicle.registration_number ? ` · ${vehicle.registration_number}` : ""}</p>
           </div>
-          <button onClick={close} className="w-9 h-9 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500 shrink-0">✕</button>
+          <button onClick={onClose} className="w-9 h-9 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500 shrink-0">✕</button>
         </div>
 
         <div className="p-4 sm:p-5 space-y-4">
@@ -654,4 +653,12 @@ export default function VehicleDetail() {
       )}
     </div>
   );
+}
+
+// Thin route wrapper for direct deep links (e.g. from Reports, Sold Stock) — closing here
+// still navigates back to /inventory since there's no local Inventory state to fall back to.
+export default function VehicleDetail() {
+  const { id } = useParams();
+  const navigate = useNavigate();
+  return <VehicleDetailModal id={id} onClose={() => navigate("/inventory")} />;
 }

@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import api from "../utils/api";
 import { formatNPR, getAgingStyle, getStatusStyle, BRANDS, VEHICLE_STATUS_OPTIONS, formatOwnership } from "../utils/helpers";
 import { AddVehicleModal } from "./AddVehicleModal";
+import { VehicleDetailModal } from "./VehicleDetail";
 import HoverADDate from "../components/HoverADDate";
 import BSDatePicker from "../components/BSDatePicker";
 import { formatBSDate } from "../utils/nepali-date";
@@ -58,6 +59,9 @@ export default function Inventory() {
   const [saving, setSaving] = useState(false);
   const [photos, setPhotos] = useState([]);
   const [hidingUnpriced, setHidingUnpriced] = useState(false);
+  // Opening a vehicle renders VehicleDetailModal inline instead of navigating to /inventory/:id,
+  // so the Inventory page underneath stays mounted (no refetch, no lost scroll/filter state).
+  const [selectedVehicleId, setSelectedVehicleId] = useState(null);
 
   const unpricedVisible = vehicles.filter(v => !v.selling_price && !["sold", "unlisted", "hidden", "scrap", "in_repair"].includes(v.status));
   const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
@@ -359,7 +363,7 @@ export default function Inventory() {
               return (
                 <div
                   key={v.id}
-                  onClick={() => navigate(`/inventory/${v.id}`)}
+                  onClick={() => setSelectedVehicleId(v.id)}
                   data-testid="recently-added-card"
                   className="shrink-0 w-56 bg-white rounded-lg border border-amber-100 shadow-sm p-3 hover:shadow-md transition-shadow cursor-pointer"
                 >
@@ -428,7 +432,7 @@ export default function Inventory() {
               <div
                 key={v.id}
                 data-testid="vehicle-row"
-                onClick={() => navigate(`/inventory/${v.id}`)}
+                onClick={() => setSelectedVehicleId(v.id)}
                 className={`${st.cardBg} rounded-xl border ${st.cardBorder} shadow-sm p-5 hover:shadow-md transition-shadow cursor-pointer ${isDND ? "opacity-60 saturate-50" : ""}`}
               >
                 <div className="flex items-start justify-between gap-2 mb-3">
@@ -492,7 +496,7 @@ export default function Inventory() {
 
                 <div className="flex items-center justify-end gap-1 pt-1 border-t border-slate-50">
                   <button
-                    onClick={e => { e.stopPropagation(); navigate(`/inventory/${v.id}`); }}
+                    onClick={e => { e.stopPropagation(); setSelectedVehicleId(v.id); }}
                     className="p-1.5 hover:bg-slate-100 rounded-lg transition-colors"
                     data-testid="view-vehicle-btn"
                   >
@@ -537,6 +541,15 @@ export default function Inventory() {
           saving={saving}
           photos={photos}
           setPhotos={setPhotos}
+        />
+      )}
+
+      {/* Vehicle View/Edit Modal — rendered inline (not via route navigation) so this page
+          stays mounted underneath: no refetch, no lost scroll position or filters while open. */}
+      {selectedVehicleId && (
+        <VehicleDetailModal
+          id={selectedVehicleId}
+          onClose={() => { setSelectedVehicleId(null); fetchVehicles(); }}
         />
       )}
     </div>
