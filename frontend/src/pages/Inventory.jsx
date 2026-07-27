@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { Plus, Search, Eye, Trash2, Filter, X, UploadCloud, EyeOff, Package, Wallet, DollarSign, Lock, Moon, Archive } from "lucide-react";
+import { Plus, Search, Eye, Trash2, Filter, X, UploadCloud, EyeOff, Package, Wallet, DollarSign, Lock, Moon, Archive, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
 import { formatNPR, getAgingStyle, getStatusStyle, BRANDS, VEHICLE_STATUS_OPTIONS, formatOwnership } from "../utils/helpers";
@@ -59,6 +59,10 @@ export default function Inventory() {
   const [hidingUnpriced, setHidingUnpriced] = useState(false);
 
   const unpricedVisible = vehicles.filter(v => !v.selling_price && !["sold", "unlisted", "hidden", "scrap", "in_repair"].includes(v.status));
+  const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
+  const recentlyAdded = vehicles
+    .filter(v => v.created_at && new Date(v.created_at).getTime() >= oneDayAgo)
+    .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
   const totalInvestment = filtered.reduce((sum, v) => sum + (v.total_investment || 0), 0);
   const totalSellingPrice = filtered.reduce((sum, v) => sum + (v.selling_price || 0), 0);
   const lockedCapital = filtered.filter(v => v.status === "available").reduce((sum, v) => sum + (v.total_investment || 0), 0);
@@ -300,6 +304,41 @@ export default function Inventory() {
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Recently Added Highlight */}
+      {!loading && recentlyAdded.length > 0 && (
+        <div className="bg-amber-50 rounded-xl border border-amber-200 shadow-sm p-4" data-testid="recently-added-section">
+          <div className="flex items-center gap-2 mb-3">
+            <Sparkles size={16} className="text-amber-600" />
+            <h2 className="text-sm font-bold text-amber-900">Recently Added</h2>
+            <span className="text-xs font-medium text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">
+              {recentlyAdded.length} in the last 24 hours
+            </span>
+          </div>
+          <div className="flex gap-3 overflow-x-auto pb-1">
+            {recentlyAdded.map(v => {
+              const st = getStatusStyle(v.status);
+              return (
+                <div
+                  key={v.id}
+                  onClick={() => navigate(`/inventory/${v.id}`)}
+                  data-testid="recently-added-card"
+                  className="shrink-0 w-56 bg-white rounded-lg border border-amber-100 shadow-sm p-3 hover:shadow-md transition-shadow cursor-pointer"
+                >
+                  <div className="flex items-start justify-between gap-2 mb-1">
+                    <div className="font-bold text-slate-900 text-sm truncate" style={{ fontFamily: "Manrope" }}>{v.brand} {v.model}</div>
+                    <span className={`shrink-0 px-1.5 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide ${st.bg} ${st.text}`}>
+                      {st.label}
+                    </span>
+                  </div>
+                  {v.registration_number && <div className="text-xs font-mono text-slate-500 mb-1">{v.registration_number}</div>}
+                  <div className="text-xs text-slate-500">Added: <HoverADDate date={v.created_at?.slice(0, 10)} /></div>
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
 
