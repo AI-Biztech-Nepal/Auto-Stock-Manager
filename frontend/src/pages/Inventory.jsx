@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef, useLayoutEffect } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Plus, Search, Eye, Trash2, Filter, X, UploadCloud, EyeOff, Package, Wallet, DollarSign, Lock, Moon, Archive, Sparkles, Store, User, Wrench, Clock, CheckCircle2 } from "lucide-react";
 import { toast } from "sonner";
@@ -88,6 +88,21 @@ export default function Inventory() {
     acc[s] = result.length;
     return acc;
   }, {});
+
+  // Sliding highlight for the status toggle: measures the active button's position/width
+  // within its track so the highlight can animate to it instead of just swapping colors.
+  const statusBtnRefs = useRef({});
+  const [statusThumb, setStatusThumb] = useState({ left: 0, width: 0 });
+
+  useLayoutEffect(() => {
+    const measure = () => {
+      const btn = statusBtnRefs.current[statusFilter];
+      if (btn) setStatusThumb({ left: btn.offsetLeft, width: btn.offsetWidth });
+    };
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, [statusFilter, statusCounts]);
 
   const hideUnpriced = async () => {
     if (unpricedVisible.length === 0) return;
@@ -244,30 +259,6 @@ export default function Inventory() {
         </div>
       )}
 
-      {/* Status Toggle */}
-      <div className="flex items-center gap-2 overflow-x-auto pb-1" data-testid="status-toggle-group">
-        {STATUSES.map(s => {
-          const active = statusFilter === s;
-          const Icon = STATUS_ICONS[s] || Filter;
-          return (
-            <button
-              key={s}
-              onClick={() => setStatusFilter(s)}
-              data-testid={`status-toggle-${s}`}
-              className={`flex items-center gap-1.5 shrink-0 px-3.5 py-2 rounded-full text-sm font-medium border transition-colors whitespace-nowrap ${
-                active ? "bg-blue-600 border-blue-600 text-white" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
-              }`}
-            >
-              <Icon size={14} />
-              {s === "all" ? "All Status" : getStatusStyle(s).label}
-              <span className={`text-xs px-1.5 py-0.5 rounded-full ${active ? "bg-white/20 text-white" : "bg-slate-100 text-slate-500"}`}>
-                {statusCounts[s]}
-              </span>
-            </button>
-          );
-        })}
-      </div>
-
       {/* Filters */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 flex flex-wrap gap-3 items-center">
         <div className="relative flex-1 min-w-48">
@@ -282,6 +273,33 @@ export default function Inventory() {
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <Filter size={14} className="text-slate-400" />
+          <div className="relative flex items-center gap-1 bg-slate-100 rounded-full p-1 overflow-x-auto max-w-full" data-testid="status-toggle-group">
+            <div
+              className="absolute top-1 bottom-1 bg-blue-600 rounded-full transition-all duration-300 ease-out"
+              style={{ left: statusThumb.left, width: statusThumb.width }}
+            />
+            {STATUSES.map(s => {
+              const active = statusFilter === s;
+              const Icon = STATUS_ICONS[s] || Filter;
+              return (
+                <button
+                  key={s}
+                  ref={el => { statusBtnRefs.current[s] = el; }}
+                  onClick={() => setStatusFilter(s)}
+                  data-testid={`status-toggle-${s}`}
+                  className={`relative z-10 flex items-center gap-1.5 shrink-0 px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition-colors duration-300 ${
+                    active ? "text-white" : "text-slate-600 hover:text-slate-900"
+                  }`}
+                >
+                  <Icon size={13} />
+                  {s === "all" ? "All Status" : getStatusStyle(s).label}
+                  <span className={`px-1.5 py-0.5 rounded-full text-[10px] transition-colors duration-300 ${active ? "bg-white/20 text-white" : "bg-slate-200 text-slate-500"}`}>
+                    {statusCounts[s]}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
           <select
             value={brandFilter}
             onChange={e => setBrandFilter(e.target.value)}
