@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
-import { ArrowLeft, Undo2, ExternalLink, Lock } from "lucide-react";
+import { ArrowLeft, Undo2, ExternalLink, Lock, Store, User } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
 import { formatNPR, formatOwnership } from "../utils/helpers";
@@ -143,7 +143,14 @@ export default function SoldStockDetail() {
           <Row label="Condition"><span className="text-sm font-medium text-slate-900 sm:text-right">{vehicle.condition || "—"}</span></Row>
           <Row label="Ownership"><span className="text-sm font-medium text-slate-900 sm:text-right">{formatOwnership(vehicle.ownership_number)}</span></Row>
           <Row label="Purchase Source"><span className="text-sm font-medium text-slate-900 sm:text-right">{vehicle.purchase_source || "—"}</span></Row>
-          <Row label="Purchased From"><span className="text-sm font-medium text-slate-900 sm:text-right">{vehicle.purchase_from || "—"}</span></Row>
+          <Row label="Name of Source">
+            {vehicle.linked_contact_name ? (
+              <span className="text-sm font-medium text-slate-900 sm:text-right flex items-center gap-1.5 sm:justify-end">
+                {vehicle.linked_contact_type === "customer" ? <User size={13} className="text-slate-400 shrink-0" /> : <Store size={13} className="text-slate-400 shrink-0" />}
+                {vehicle.linked_contact_name}
+              </span>
+            ) : <span className="text-sm font-medium text-slate-900 sm:text-right">—</span>}
+          </Row>
         </div>
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
           <h3 className="text-sm font-bold text-slate-900 mb-1">Sale</h3>

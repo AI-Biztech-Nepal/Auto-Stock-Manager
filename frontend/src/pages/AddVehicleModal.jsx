@@ -4,7 +4,6 @@
 import { useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import BSDatePicker from "../components/BSDatePicker";
-import VendorAutocomplete from "../components/VendorAutocomplete";
 import CustomerVendorPicker from "../components/CustomerVendorPicker";
 import { BRANDS, SOURCES, CONDITIONS, FUEL_TYPES, VEHICLE_STATUS_OPTIONS, OWNERSHIP_OPTIONS } from "../utils/helpers";
 import { Field, inp, sel } from "./VehicleModals";
@@ -129,11 +128,10 @@ export function AddVehicleModal({ form, setForm, onClose, onSubmit, saving, phot
                 {SOURCES.map(s => <option key={s}>{s}</option>)}
               </select>
             </Field>
-            <Field label="Purchased From (Name)">
-              <VendorAutocomplete
-                value={form.purchase_from}
-                onChange={(name, vendorId) => setForm({ ...form, purchase_from: name, vendor_id: vendorId || form.vendor_id })}
-                placeholder="Type vendor name to search..."
+            <Field label="Name of Source (Customer/Vendor)">
+              <CustomerVendorPicker
+                value={{ type: form.linked_contact_type || "vendor", id: form.linked_contact_id || null, name: form.linked_contact_name || "" }}
+                onChange={next => setForm({ ...form, linked_contact_type: next.type, linked_contact_id: next.id, linked_contact_name: next.name })}
                 vendorType="vehicles"
               />
             </Field>
@@ -157,13 +155,6 @@ export function AddVehicleModal({ form, setForm, onClose, onSubmit, saving, phot
                 onChange={e => setForm({ ...form, color: e.target.value })}
                 placeholder="e.g. Red, Black"
                 className={inp}
-              />
-            </Field>
-            <Field label="Link Customer / Vendor">
-              <CustomerVendorPicker
-                value={{ type: form.linked_contact_type || "vendor", id: form.linked_contact_id || null, name: form.linked_contact_name || "" }}
-                onChange={next => setForm({ ...form, linked_contact_type: next.type, linked_contact_id: next.id, linked_contact_name: next.name })}
-                vendorType="vehicles"
               />
             </Field>
           </div>

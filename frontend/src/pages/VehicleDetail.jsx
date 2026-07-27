@@ -7,7 +7,6 @@ import { formatNPR, getAgingStyle, getStatusStyle, getDocStyle, EXPENSE_CATEGORI
 import { ExpenseModal, QRLabelModal, ReturnModal, Field, inp, sel } from "./VehicleModals";
 import HoverADDate from "../components/HoverADDate";
 import BSDatePicker from "../components/BSDatePicker";
-import VendorAutocomplete from "../components/VendorAutocomplete";
 import CustomerVendorPicker from "../components/CustomerVendorPicker";
 import { useAuth } from "../context/AuthContext";
 import { hasFullVehicleAccess, PARTS_ALLOWED_VEHICLE_STATUSES } from "../utils/permissions";
@@ -398,11 +397,10 @@ export default function VehicleDetail() {
                         {SOURCES.map(s => <option key={s}>{s}</option>)}
                       </select>
                     </Field>
-                    <Field label="Purchased From (Name)">
-                      <VendorAutocomplete
-                        value={editForm.purchase_from || ""}
-                        onChange={(name, vendorId) => setEditForm({ ...editForm, purchase_from: name, vendor_id: vendorId || editForm.vendor_id })}
-                        placeholder="Type vendor name to search..."
+                    <Field label="Name of Source (Customer/Vendor)">
+                      <CustomerVendorPicker
+                        value={{ type: editForm.linked_contact_type || "vendor", id: editForm.linked_contact_id || null, name: editForm.linked_contact_name || "" }}
+                        onChange={next => setEditForm({ ...editForm, linked_contact_type: next.type, linked_contact_id: next.id, linked_contact_name: next.name })}
                         vendorType="vehicles"
                       />
                     </Field>
@@ -416,13 +414,6 @@ export default function VehicleDetail() {
                     </Field>
                     <Field label="Color">
                       <input value={editForm.color || ""} onChange={e => setEditForm({ ...editForm, color: e.target.value })} placeholder="e.g. Red, Black" className={inp} />
-                    </Field>
-                    <Field label="Name of Source (Customer/Vendor)">
-                      <CustomerVendorPicker
-                        value={{ type: editForm.linked_contact_type || "vendor", id: editForm.linked_contact_id || null, name: editForm.linked_contact_name || "" }}
-                        onChange={next => setEditForm({ ...editForm, linked_contact_type: next.type, linked_contact_id: next.id, linked_contact_name: next.name })}
-                        vendorType="vehicles"
-                      />
                     </Field>
                   </div>
 
@@ -458,7 +449,6 @@ export default function VehicleDetail() {
                   <Row label="Color"><span className="text-sm font-medium text-slate-900 sm:text-right">{vehicle.color || "Not specified"}</span></Row>
                   <Row label="Condition"><span className="text-sm font-medium text-slate-900 sm:text-right">{vehicle.condition}</span></Row>
                   <Row label="Purchase Source"><span className="text-sm font-medium text-slate-900 sm:text-right">{vehicle.purchase_source}</span></Row>
-                  <Row label="Purchased From"><span className="text-sm font-medium text-slate-900 sm:text-right">{vehicle.purchase_from || "—"}</span></Row>
                   <Row label="Name of Source">
                     {vehicle.linked_contact_name ? (
                       <span className="text-sm font-medium text-slate-900 sm:text-right flex items-center gap-1.5 sm:justify-end">
