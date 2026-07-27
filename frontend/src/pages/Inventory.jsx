@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { Plus, Search, Eye, Trash2, Filter, X, UploadCloud, EyeOff, Package, Wallet, DollarSign, Lock, Moon, Archive, Sparkles } from "lucide-react";
+import { Plus, Search, Eye, Trash2, Filter, X, UploadCloud, EyeOff, Package, Wallet, DollarSign, Lock, Moon, Archive, Sparkles, Store, User } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
 import { formatNPR, getAgingStyle, getStatusStyle, BRANDS, VEHICLE_STATUS_OPTIONS, formatOwnership } from "../utils/helpers";
@@ -334,6 +334,14 @@ export default function Inventory() {
                     </span>
                   </div>
                   {v.registration_number && <div className="text-xs font-mono text-slate-500 mb-1">{v.registration_number}</div>}
+                  {(v.linked_contact_name || v.purchase_from) && (
+                    <div className="text-xs text-slate-500 mb-1 flex items-center gap-1 truncate">
+                      {v.linked_contact_name
+                        ? (v.linked_contact_type === "customer" ? <User size={11} className="text-slate-400 shrink-0" /> : <Store size={11} className="text-slate-400 shrink-0" />)
+                        : <Store size={11} className="text-slate-400 shrink-0" />}
+                      <span className="truncate">{v.linked_contact_name || v.purchase_from}</span>
+                    </div>
+                  )}
                   <div className="text-xs text-slate-500">Added: <HoverADDate date={v.created_at?.slice(0, 10)} /></div>
                 </div>
               );
@@ -405,7 +413,15 @@ export default function Inventory() {
                     {v.aging?.days}d · {ag.label}
                   </span>
                 </div>
-                <div className="text-xs text-slate-500 mb-3">Purchased: <span className="font-medium text-slate-700"><HoverADDate date={v.purchase_date} /></span></div>
+                <div className="text-xs text-slate-500 mb-1">Purchased: <span className="font-medium text-slate-700"><HoverADDate date={v.purchase_date} /></span></div>
+                {(v.linked_contact_name || v.purchase_from) && (
+                  <div className="text-xs text-slate-500 mb-3 flex items-center gap-1 truncate">
+                    {v.linked_contact_name
+                      ? (v.linked_contact_type === "customer" ? <User size={11} className="text-slate-400 shrink-0" /> : <Store size={11} className="text-slate-400 shrink-0" />)
+                      : <Store size={11} className="text-slate-400 shrink-0" />}
+                    <span className="truncate">Vendor/Customer: <span className="font-medium text-slate-700">{v.linked_contact_name || v.purchase_from}</span></span>
+                  </div>
+                )}
 
                 {showFinRow && (
                   <div className="flex gap-4 bg-slate-50 rounded-lg px-3 py-2 border border-slate-100 mb-3 text-xs">

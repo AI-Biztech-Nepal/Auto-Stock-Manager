@@ -375,7 +375,7 @@ export default function VehicleDetail() {
                 )}
               </div>
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1.5 sm:gap-3 py-2 border-b border-slate-50">
-                <span className="text-sm text-slate-500 shrink-0">Linked Customer/Vendor</span>
+                <span className="text-sm text-slate-500 shrink-0">Name of Source</span>
                 {isEditing ? (
                   <div className="w-full sm:w-48">
                     <CustomerVendorPicker
