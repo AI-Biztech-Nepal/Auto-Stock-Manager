@@ -97,12 +97,14 @@ export default function Inventory() {
   useLayoutEffect(() => {
     const measure = () => {
       const btn = statusBtnRefs.current[statusFilter];
-      if (btn) setStatusThumb({ left: btn.offsetLeft, width: btn.offsetWidth });
+      if (!btn) return;
+      const next = { left: btn.offsetLeft, width: btn.offsetWidth };
+      setStatusThumb(prev => (prev.left === next.left && prev.width === next.width) ? prev : next);
     };
     measure();
     window.addEventListener("resize", measure);
     return () => window.removeEventListener("resize", measure);
-  }, [statusFilter, statusCounts]);
+  }, [statusFilter, statusCounts[statusFilter]]);
 
   const hideUnpriced = async () => {
     if (unpricedVisible.length === 0) return;
