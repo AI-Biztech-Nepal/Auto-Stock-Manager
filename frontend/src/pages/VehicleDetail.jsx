@@ -146,6 +146,7 @@ export default function VehicleDetail() {
   const [qrData, setQrData] = useState(null);
   const [photos, setPhotos] = useState([]);
   const [selectedPhotoIds, setSelectedPhotoIds] = useState(() => new Set());
+  const [previewPhoto, setPreviewPhoto] = useState(null);
   const [legalDocs, setLegalDocs] = useState([]);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [uploadingDoc, setUploadingDoc] = useState(false);
@@ -542,9 +543,9 @@ export default function VehicleDetail() {
               <div className="grid grid-cols-3 sm:grid-cols-5 gap-3">
                 {photos.map(photo => (
                   <div key={photo.id} className="relative rounded-xl overflow-hidden aspect-square bg-slate-100" data-testid="vehicle-photo">
-                    <a href={photo.url} target="_blank" rel="noreferrer" className="block w-full h-full">
+                    <button type="button" onClick={() => setPreviewPhoto(photo.url)} className="block w-full h-full">
                       <img src={photo.url} alt="Vehicle" className="w-full h-full object-cover" />
-                    </a>
+                    </button>
                     {canManageStock && (
                       <button
                         onClick={() => togglePhotoSelected(photo.id)}
@@ -643,6 +644,13 @@ export default function VehicleDetail() {
           saving={returning}
           activeSale={activeSale}
         />
+      )}
+
+      {previewPhoto && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-4" onClick={() => setPreviewPhoto(null)}>
+          <button onClick={() => setPreviewPhoto(null)} className="absolute top-4 right-4 w-9 h-9 flex items-center justify-center rounded-lg bg-white/10 hover:bg-white/20 text-white">✕</button>
+          <img src={previewPhoto} alt="Vehicle full size" className="max-w-full max-h-full object-contain rounded-lg" onClick={e => e.stopPropagation()} />
+        </div>
       )}
     </div>
   );

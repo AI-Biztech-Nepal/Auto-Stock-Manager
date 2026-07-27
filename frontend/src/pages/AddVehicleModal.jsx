@@ -10,6 +10,7 @@ import { Field, inp, sel } from "./VehicleModals";
 
 export function AddVehicleModal({ form, setForm, onClose, onSubmit, saving, photos, setPhotos }) {
   const [selected, setSelected] = useState(() => new Set());
+  const [previewPhoto, setPreviewPhoto] = useState(null);
 
   const addPhotos = (files) => {
     const staged = Array.from(files).map(file => ({ file, previewUrl: URL.createObjectURL(file) }));
@@ -201,9 +202,9 @@ export function AddVehicleModal({ form, setForm, onClose, onSubmit, saving, phot
               <div className="grid grid-cols-3 sm:grid-cols-5 gap-3">
                 {photos.map((p, idx) => (
                   <div key={idx} className="relative rounded-xl overflow-hidden aspect-square bg-slate-100">
-                    <a href={p.previewUrl} target="_blank" rel="noreferrer" className="block w-full h-full">
+                    <button type="button" onClick={() => setPreviewPhoto(p.previewUrl)} className="block w-full h-full">
                       <img src={p.previewUrl} alt="Vehicle" className="w-full h-full object-cover" />
-                    </a>
+                    </button>
                     <button
                       type="button"
                       onClick={() => toggleSelected(idx)}
@@ -248,6 +249,13 @@ export function AddVehicleModal({ form, setForm, onClose, onSubmit, saving, phot
           </div>
         </form>
       </div>
+
+      {previewPhoto && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-4" onClick={() => setPreviewPhoto(null)}>
+          <button onClick={() => setPreviewPhoto(null)} className="absolute top-4 right-4 w-9 h-9 flex items-center justify-center rounded-lg bg-white/10 hover:bg-white/20 text-white">✕</button>
+          <img src={previewPhoto} alt="Vehicle full size" className="max-w-full max-h-full object-contain rounded-lg" onClick={e => e.stopPropagation()} />
+        </div>
+      )}
     </div>
   );
 }
