@@ -31,7 +31,7 @@ const EMPTY = {
   brand: "", model: "", year: new Date().getFullYear(), engine_cc: 125, fuel_type: "Petrol", vehicle_type: "bike",
   ownership_number: 1, purchase_price: "", purchase_date: "", purchase_source: "", purchase_from: "",
   vendor_id: null, linked_contact_type: "vendor", linked_contact_id: null, linked_contact_name: "",
-  condition: "Good", color: "", registration_number: "", selling_price: "", notes: "", status: "unlisted",
+  condition: "Good", color: "", registration_number: "", selling_price: "", notes: "", status: "available",
   bluebook_status: "pending", insurance_status: "pending", tax_clearance_status: "pending", transfer_status: "pending"
 };
 

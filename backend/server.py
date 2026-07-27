@@ -442,7 +442,7 @@ class VehicleCreate(BaseModel):
     selling_price: Optional[float] = None
     minimum_selling_price: Optional[float] = None
     notes: Optional[str] = None
-    status: str = "unlisted"
+    status: str = "available"
     bluebook_status: str = "pending"
     insurance_status: str = "pending"
     tax_clearance_status: str = "pending"
