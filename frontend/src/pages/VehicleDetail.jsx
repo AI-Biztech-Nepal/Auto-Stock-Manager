@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, Plus, Trash2, Edit, CheckCircle, AlertCircle, Clock, QrCode, Undo2 } from "lucide-react";
+import { ArrowLeft, Plus, Trash2, Edit, CheckCircle, AlertCircle, Clock, QrCode, Undo2, Store, User } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
 import { formatNPR, getAgingStyle, getStatusStyle, getDocStyle, EXPENSE_CATEGORIES, VEHICLE_STATUS_OPTIONS, CONDITIONS, SOURCES, BRANDS, FUEL_TYPES, OWNERSHIP_OPTIONS, formatOwnership } from "../utils/helpers";
@@ -8,6 +8,7 @@ import { ExpenseModal, QRLabelModal, ReturnModal, inp, sel } from "./VehicleModa
 import HoverADDate from "../components/HoverADDate";
 import BSDatePicker from "../components/BSDatePicker";
 import VendorAutocomplete from "../components/VendorAutocomplete";
+import CustomerVendorPicker from "../components/CustomerVendorPicker";
 import { useAuth } from "../context/AuthContext";
 import { hasFullVehicleAccess, PARTS_ALLOWED_VEHICLE_STATUSES } from "../utils/permissions";
 
@@ -371,6 +372,25 @@ export default function VehicleDetail() {
                   </div>
                 ) : (
                   <span className="text-sm font-medium text-slate-900 sm:text-right">{vehicle.purchase_from || "—"}</span>
+                )}
+              </div>
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1.5 sm:gap-3 py-2 border-b border-slate-50">
+                <span className="text-sm text-slate-500 shrink-0">Linked Customer/Vendor</span>
+                {isEditing ? (
+                  <div className="w-full sm:w-48">
+                    <CustomerVendorPicker
+                      value={{ type: editForm.linked_contact_type || "vendor", id: editForm.linked_contact_id || null, name: editForm.linked_contact_name || "" }}
+                      onChange={next => setEditForm({ ...editForm, linked_contact_type: next.type, linked_contact_id: next.id, linked_contact_name: next.name })}
+                      vendorType="vehicles"
+                    />
+                  </div>
+                ) : vehicle.linked_contact_name ? (
+                  <span className="text-sm font-medium text-slate-900 sm:text-right flex items-center gap-1.5 sm:justify-end">
+                    {vehicle.linked_contact_type === "customer" ? <User size={13} className="text-slate-400 shrink-0" /> : <Store size={13} className="text-slate-400 shrink-0" />}
+                    {vehicle.linked_contact_name}
+                  </span>
+                ) : (
+                  <span className="text-sm font-medium text-slate-900 sm:text-right">—</span>
                 )}
               </div>
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1.5 sm:gap-3 py-2 border-b border-slate-50">
