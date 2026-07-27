@@ -344,7 +344,7 @@ export default function Inventory() {
       )}
 
       {/* Recently Added Highlight */}
-      {!loading && recentlyAdded.length > 0 && (
+      {!loading && statusFilter === "all" && recentlyAdded.length > 0 && (
         <div className="bg-amber-50 rounded-xl border border-amber-200 shadow-sm p-4" data-testid="recently-added-section">
           <div className="flex items-center gap-2 mb-3">
             <Sparkles size={16} className="text-amber-600" />
