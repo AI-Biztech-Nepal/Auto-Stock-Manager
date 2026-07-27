@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { Plus, Search, Eye, Trash2, Filter, X, UploadCloud, EyeOff, Package, Wallet, DollarSign, Lock, Moon, Archive, Sparkles, Store, User } from "lucide-react";
+import { Plus, Search, Eye, Trash2, Filter, X, UploadCloud, EyeOff, Package, Wallet, DollarSign, Lock, Moon, Archive, Sparkles, Store, User, Wrench, Clock, CheckCircle2 } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
 import { formatNPR, getAgingStyle, getStatusStyle, BRANDS, VEHICLE_STATUS_OPTIONS, formatOwnership } from "../utils/helpers";
@@ -14,6 +14,7 @@ import { hasFullVehicleAccess } from "../utils/permissions";
 // Sold vehicles get their own archive (Sold Stock page) rather than sitting in the active
 // pipeline grid, so "sold" is left out of this page's status filter entirely.
 const STATUSES = ["all", ...VEHICLE_STATUS_OPTIONS.filter(o => o.value !== "sold").map(o => o.value)];
+const STATUS_ICONS = { all: Filter, unlisted: EyeOff, in_repair: Wrench, available: CheckCircle2, reserved: Clock, scrap: Moon };
 const AGING_CATEGORIES = ["all", "fresh", "normal", "slow", "dead"];
 const AGING_RANGES = { fresh: "0–30 days", normal: "31–45 days", slow: "46–60 days", dead: "60+ days" };
 
@@ -66,6 +67,27 @@ export default function Inventory() {
   const totalInvestment = filtered.reduce((sum, v) => sum + (v.total_investment || 0), 0);
   const totalSellingPrice = filtered.reduce((sum, v) => sum + (v.selling_price || 0), 0);
   const lockedCapital = filtered.filter(v => v.status === "available").reduce((sum, v) => sum + (v.total_investment || 0), 0);
+
+  // Counts per status toggle, applying every other active filter so switching tabs shows
+  // what would actually appear rather than a total unaffected by search/brand/aging/date.
+  const statusCounts = STATUSES.reduce((acc, s) => {
+    let result = vehicles.filter(v => v.status !== "sold");
+    if (s !== "all") result = result.filter(v => v.status === s);
+    if (agingFilter !== "all") result = result.filter(v => v.aging?.category === agingFilter);
+    if (brandFilter !== "all") result = result.filter(v => v.brand === brandFilter);
+    if (dateFilter) result = result.filter(v => v.created_at?.slice(0, 10) === dateFilter);
+    if (search) {
+      const q = search.toLowerCase();
+      const qNoSlash = q.replace(/\//g, "");
+      result = result.filter(v =>
+        v.brand?.toLowerCase().includes(q) || v.model?.toLowerCase().includes(q) ||
+        v.registration_number?.toLowerCase().replace(/\//g, "").includes(qNoSlash) ||
+        v.purchase_source?.toLowerCase().includes(q)
+      );
+    }
+    acc[s] = result.length;
+    return acc;
+  }, {});
 
   const hideUnpriced = async () => {
     if (unpricedVisible.length === 0) return;
@@ -222,6 +244,30 @@ export default function Inventory() {
         </div>
       )}
 
+      {/* Status Toggle */}
+      <div className="flex items-center gap-2 overflow-x-auto pb-1" data-testid="status-toggle-group">
+        {STATUSES.map(s => {
+          const active = statusFilter === s;
+          const Icon = STATUS_ICONS[s] || Filter;
+          return (
+            <button
+              key={s}
+              onClick={() => setStatusFilter(s)}
+              data-testid={`status-toggle-${s}`}
+              className={`flex items-center gap-1.5 shrink-0 px-3.5 py-2 rounded-full text-sm font-medium border transition-colors whitespace-nowrap ${
+                active ? "bg-blue-600 border-blue-600 text-white" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
+              }`}
+            >
+              <Icon size={14} />
+              {s === "all" ? "All Status" : getStatusStyle(s).label}
+              <span className={`text-xs px-1.5 py-0.5 rounded-full ${active ? "bg-white/20 text-white" : "bg-slate-100 text-slate-500"}`}>
+                {statusCounts[s]}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
       {/* Filters */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 flex flex-wrap gap-3 items-center">
         <div className="relative flex-1 min-w-48">
@@ -236,16 +282,6 @@ export default function Inventory() {
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <Filter size={14} className="text-slate-400" />
-          <select
-            value={statusFilter}
-            onChange={e => setStatusFilter(e.target.value)}
-            data-testid="status-filter-select"
-            className="h-9 px-3 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-          >
-            {STATUSES.map(s => (
-              <option key={s} value={s}>{s === "all" ? "All Status" : getStatusStyle(s).label}</option>
-            ))}
-          </select>
           <select
             value={brandFilter}
             onChange={e => setBrandFilter(e.target.value)}
