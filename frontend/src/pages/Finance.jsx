@@ -121,28 +121,6 @@ export default function Finance() {
             <KCard title="EMI Receivables" value={formatNPR(summary.emi_receivables)} icon={Users} color="bg-teal-500" />
           </div>
 
-          {/* Alerts */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {summary.vendor_payables > 0 && (
-              <div className="bg-red-50 border border-red-200 rounded-xl p-4">
-                <div className="flex items-center gap-2 mb-1"><AlertTriangle size={15} className="text-red-600" /><span className="font-semibold text-red-800 text-sm">Vendor Due Alert</span></div>
-                <p className="text-sm text-red-700">You owe <strong>{formatNPR(summary.vendor_payables)}</strong> to vendors. Clear dues to maintain supplier relationships.</p>
-              </div>
-            )}
-            {summary.profit_margin_pct < 8 && summary.total_revenue > 0 && (
-              <div className="bg-orange-50 border border-orange-200 rounded-xl p-4">
-                <div className="flex items-center gap-2 mb-1"><AlertTriangle size={15} className="text-orange-600" /><span className="font-semibold text-orange-800 text-sm">Low Margin Alert</span></div>
-                <p className="text-sm text-orange-700">Overall profit margin is <strong>{summary.profit_margin_pct}%</strong>. Target is at least 8-10%.</p>
-              </div>
-            )}
-            {summary.inventory_value > summary.total_revenue && (
-              <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4">
-                <div className="flex items-center gap-2 mb-1"><AlertTriangle size={15} className="text-yellow-600" /><span className="font-semibold text-yellow-800 text-sm">High Capital Lock</span></div>
-                <p className="text-sm text-yellow-700">More capital locked in inventory than revenue generated. Focus on clearing stock.</p>
-              </div>
-            )}
-          </div>
-
           {/* Quick Actions */}
           <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
             <div className="flex items-center justify-between mb-4">
