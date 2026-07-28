@@ -164,8 +164,9 @@ export function VehicleDetailModal({ id, onClose }) {
     const fd = new FormData(); fd.append("file", file);
     setUploadingPhoto(true);
     try {
-      await api.post(`/vehicles/${id}/photos`, fd, { headers: { "Content-Type": "multipart/form-data" } });
-      toast.success("Photo uploaded!"); loadPhotos();
+      const r = await api.post(`/vehicles/${id}/photos`, fd, { headers: { "Content-Type": "multipart/form-data" } });
+      setPhotos(prev => [...prev, r.data]);
+      toast.success("Photo uploaded!");
     } catch (e) { toast.error(e.response?.data?.detail || "Upload failed"); }
     finally { setUploadingPhoto(false); }
   };
@@ -184,7 +185,7 @@ export function VehicleDetailModal({ id, onClose }) {
     try {
       await api.delete(`/vehicles/${id}/photos/${photoId}`);
       toast.success("Photo deleted");
-      loadPhotos();
+      setPhotos(prev => prev.filter(p => p.id !== photoId));
     } catch { toast.error("Failed to delete photo"); }
   };
 
