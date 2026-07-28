@@ -1,11 +1,12 @@
 import { useEffect, useState, useMemo } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, PieChart, Pie, Legend } from "recharts";
-import { DollarSign, AlertTriangle, CreditCard, Users, ShoppingCart, Wallet, UserPlus, ArrowDownCircle, ArrowUpCircle, PlusSquare, FileText, BookOpen } from "lucide-react";
+import { DollarSign, AlertTriangle, CreditCard, Users, ShoppingCart, Wallet, UserPlus, ArrowDownCircle, ArrowUpCircle, PlusSquare, FileText, BookOpen, Printer } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
 import { formatNPR } from "../utils/helpers";
 import LedgerTable from "../components/LedgerTable";
+import BillPrintModal from "../components/BillPrintModal";
 
 const KCard = ({ title, value, sub, color, icon: Icon }) => (
   <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 hover:shadow-md transition-shadow">
@@ -35,6 +36,7 @@ export default function Finance() {
   const [selectedVendorId, setSelectedVendorId] = useState(searchParams.get("vendor") || "");
   const [ledgerData, setLedgerData] = useState(null);
   const [ledgerLoading, setLedgerLoading] = useState(false);
+  const [printBill, setPrintBill] = useState(null);
 
   useEffect(() => {
     Promise.all([
@@ -382,7 +384,17 @@ export default function Finance() {
                         </li>
                       ))}
                     </ul>,
-                    formatNPR(b.total),
+                    <div className="flex items-center justify-end gap-2">
+                      <button
+                        onClick={() => setPrintBill(b)}
+                        className="p-1 rounded hover:bg-blue-50 text-blue-600"
+                        title="Print bill"
+                        data-testid="print-bill-row-btn"
+                      >
+                        <Printer size={13} />
+                      </button>
+                      {formatNPR(b.total)}
+                    </div>,
                   ])}
                   totalLabel="Total Parts Purchased"
                   totalValue={formatNPR(ledgerData.parts_bills.reduce((s, b) => s + (b.total || 0), 0))}
@@ -407,6 +419,10 @@ export default function Finance() {
             </div>
           )}
         </div>
+      )}
+
+      {printBill && (
+        <BillPrintModal bill={printBill} vendor={selectedVendor} onClose={() => setPrintBill(null)} />
       )}
     </div>
   );

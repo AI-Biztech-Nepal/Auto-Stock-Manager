@@ -18,11 +18,11 @@ export default function LedgerTable({ title, countLabel, headers, rows, totalLab
                 ))}
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100 bg-white">
+            <tbody className="divide-y-4 divide-slate-100 bg-white">
               {rows.map((cells, ri) => (
-                <tr key={ri}>
+                <tr key={ri} className={ri % 2 === 1 ? "bg-slate-50/50" : undefined}>
                   {cells.map((cell, ci) => (
-                    <td key={ci} className={`px-3 py-2 align-top text-slate-700 ${ci === cells.length - 1 ? "text-right font-semibold whitespace-nowrap" : ""}`}>{cell}</td>
+                    <td key={ci} className={`px-3 py-3 align-top text-slate-700 ${ci === cells.length - 1 ? "text-right font-semibold whitespace-nowrap" : ""}`}>{cell}</td>
                   ))}
                 </tr>
               ))}

@@ -63,6 +63,14 @@ h1, h2, h3, h4, h5, h6 {
   }
 }
 
+/* Print-scoped content: only .print-area is shown when printing */
+@media print {
+  body * { visibility: hidden; }
+  .print-area, .print-area * { visibility: visible; }
+  .print-area { position: absolute; top: 0; left: 0; width: 100%; }
+  .no-print { display: none !important; }
+}
+
 /* Animate fade in */
 @keyframes fadeInUp {
   from { opacity: 0; transform: translateY(12px); }
