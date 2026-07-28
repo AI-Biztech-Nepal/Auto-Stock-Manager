@@ -144,7 +144,6 @@ export function VehicleDetailModal({ id, onClose }) {
   const [showQR, setShowQR] = useState(false);
   const [qrData, setQrData] = useState(null);
   const [photos, setPhotos] = useState([]);
-  const [selectedPhotoIds, setSelectedPhotoIds] = useState(() => new Set());
   const [previewPhoto, setPreviewPhoto] = useState(null);
   const [legalDocs, setLegalDocs] = useState([]);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
@@ -170,25 +169,13 @@ export function VehicleDetailModal({ id, onClose }) {
     finally { setUploadingPhoto(false); }
   };
 
-  const togglePhotoSelected = (photoId) => {
-    setSelectedPhotoIds(prev => {
-      const next = new Set(prev);
-      if (next.has(photoId)) next.delete(photoId); else next.add(photoId);
-      return next;
-    });
-  };
-
-  const deleteSelectedPhotos = async () => {
-    if (selectedPhotoIds.size === 0) return;
-    if (!window.confirm(`Delete ${selectedPhotoIds.size} selected photo(s)?`)) return;
+  const deletePhoto = async (photoId) => {
+    if (!window.confirm("Delete this photo?")) return;
     try {
-      const results = await Promise.allSettled([...selectedPhotoIds].map(pid => api.delete(`/vehicles/${id}/photos/${pid}`)));
-      const failed = results.filter(r => r.status === "rejected").length;
-      if (failed > 0) toast.error(`Deleted ${results.length - failed}, ${failed} failed`);
-      else toast.success(`Deleted ${results.length} photo(s)`);
-      setSelectedPhotoIds(new Set());
+      await api.delete(`/vehicles/${id}/photos/${photoId}`);
+      toast.success("Photo deleted");
       loadPhotos();
-    } catch { toast.error("Failed to delete selected photos"); }
+    } catch { toast.error("Failed to delete photo"); }
   };
 
   const uploadDoc = async (file, docType) => {
@@ -516,15 +503,6 @@ export function VehicleDetailModal({ id, onClose }) {
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-sm font-bold text-slate-900" style={{ fontFamily: "Manrope" }}>Vehicle Photos</h2>
               <div className="flex items-center gap-2">
-                {canManageStock && selectedPhotoIds.size > 0 && (
-                  <button
-                    onClick={deleteSelectedPhotos}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer transition-colors bg-red-600 hover:bg-red-700 text-white"
-                    data-testid="delete-selected-photos-btn"
-                  >
-                    <Trash2 size={12} /> Delete Selected ({selectedPhotoIds.size})
-                  </button>
-                )}
                 {canManageStock && (
                   <label className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer transition-colors ${uploadingPhoto ? "bg-slate-200 text-slate-500" : "bg-blue-600 hover:bg-blue-700 text-white"}`} data-testid="upload-photo-btn">
                     {uploadingPhoto ? "Uploading..." : "+ Add Photo"}
@@ -547,12 +525,13 @@ export function VehicleDetailModal({ id, onClose }) {
                     </button>
                     {canManageStock && (
                       <button
-                        onClick={() => togglePhotoSelected(photo.id)}
-                        className={`absolute top-1.5 left-1.5 w-5 h-5 rounded-md border-2 flex items-center justify-center transition-colors ${selectedPhotoIds.has(photo.id) ? "bg-red-600 border-red-600" : "bg-white/80 border-white"}`}
-                        title="Select for deletion"
-                        data-testid="select-photo-checkbox"
+                        type="button"
+                        onClick={() => deletePhoto(photo.id)}
+                        className="absolute top-1.5 right-1.5 w-6 h-6 rounded-md bg-black/50 hover:bg-red-600 text-white flex items-center justify-center transition-colors"
+                        title="Delete photo"
+                        data-testid="delete-photo-btn"
                       >
-                        {selectedPhotoIds.has(photo.id) && <div className="w-2 h-2 bg-white rounded-sm" />}
+                        <Trash2 size={12} />
                       </button>
                     )}
                   </div>
