@@ -39,7 +39,7 @@ export default function Vendors() {
         return next;
       }, { replace: true });
     }
-  }, [searchParams]);
+  }, [searchParams, setSearchParams]);
 
   const handleSave = async (e) => {
     e.preventDefault();
