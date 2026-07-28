@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { Plus, Phone, MapPin, AlertTriangle, Edit, Trash2, CreditCard, Search, BookOpen } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
@@ -7,6 +7,7 @@ import { formatNPR, formatDateDual } from "../utils/helpers";
 
 export default function Vendors() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [vendors, setVendors] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
@@ -28,6 +29,17 @@ export default function Vendors() {
   const openAdd = () => { setEditItem(null); setForm({ name: "", phone: "", address: "", notes: "", vendor_type: "both" }); setShowModal(true); };
   const openEdit = (v) => { setEditItem(v); setForm({ name: v.name, phone: v.phone, address: v.address || "", notes: v.notes || "", vendor_type: v.vendor_type || "both" }); setShowModal(true); };
   const openPayment = (v) => { setSelectedVendor(v); setPayForm({ vendor_id: v.id, amount: "", payment_date: "", notes: "" }); setShowPayModal(true); };
+
+  useEffect(() => {
+    if (searchParams.get("action") === "add") {
+      openAdd();
+      setSearchParams(prev => {
+        const next = new URLSearchParams(prev);
+        next.delete("action");
+        return next;
+      }, { replace: true });
+    }
+  }, [searchParams]);
 
   const handleSave = async (e) => {
     e.preventDefault();

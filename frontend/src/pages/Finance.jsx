@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, PieChart, Pie, Legend } from "recharts";
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend } from "recharts";
 import { DollarSign, AlertTriangle, CreditCard, Users, ShoppingCart, Wallet, UserPlus, ArrowDownCircle, ArrowUpCircle, PlusSquare, FileText, BookOpen, Printer } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
@@ -94,14 +94,6 @@ export default function Finance() {
   const totalCapital = useMemo(() => partners.reduce((s, p) => s + p.capital_contribution, 0), [partners]);
   const totalProfit = useMemo(() => financial?.total_profit || 0, [financial]);
 
-  const pieData = useMemo(() => {
-    if (!summary) return [];
-    return [
-      { name: "Revenue", value: summary.total_revenue, fill: "#2563EB" },
-      { name: "Cost of Goods", value: summary.total_cogs, fill: "#94A3B8" },
-    ].filter(d => d.value > 0);
-  }, [summary]);
-
   if (loading) return <div className="flex items-center justify-center h-64"><div className="animate-spin w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full" /></div>;
 
   return (
@@ -151,22 +143,6 @@ export default function Finance() {
             )}
           </div>
 
-          {pieData.length > 0 && (
-            <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
-              <h2 className="text-base font-bold text-slate-900 mb-4">Revenue vs Cost Breakdown</h2>
-              <ResponsiveContainer width="100%" height={220}>
-                <PieChart>
-                  <Pie data={pieData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={90}
-                    label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`} labelLine={false} fontSize={12}>
-                    {pieData.map((e) => <Cell key={e.name} fill={e.fill} />)}
-                  </Pie>
-                  <Legend wrapperStyle={{ fontSize: 12 }} />
-                  <Tooltip formatter={(v) => formatNPR(v)} contentStyle={{ fontSize: 12, borderRadius: 8 }} />
-                </PieChart>
-              </ResponsiveContainer>
-            </div>
-          )}
-
           {/* Quick Actions */}
           <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
             <div className="flex items-center justify-between mb-4">
@@ -176,17 +152,17 @@ export default function Finance() {
               </div>
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <button onClick={() => navigate("/customers")} className="group bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl p-4 text-left transition-colors">
+              <button onClick={() => navigate("/vendors?action=add")} className="group bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl p-4 text-left transition-colors">
                 <div className="flex items-center justify-center w-10 h-10 rounded-lg bg-blue-600 text-white mb-3"><UserPlus size={18} /></div>
-                <p className="font-semibold text-slate-900">Add Party</p>
-                <p className="text-xs text-slate-500 mt-1">Customer list</p>
+                <p className="font-semibold text-slate-900">Add Vendor</p>
+                <p className="text-xs text-slate-500 mt-1">Vendor list</p>
               </button>
               <button onClick={() => navigate("/sales")} className="group bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl p-4 text-left transition-colors">
                 <div className="flex items-center justify-center w-10 h-10 rounded-lg bg-green-600 text-white mb-3"><ShoppingCart size={18} /></div>
                 <p className="font-semibold text-slate-900">Sales Invoice</p>
                 <p className="text-xs text-slate-500 mt-1">Create or view invoices</p>
               </button>
-              <button onClick={() => navigate("/vendors")} className="group bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl p-4 text-left transition-colors">
+              <button onClick={() => navigate("/sales")} className="group bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl p-4 text-left transition-colors">
                 <div className="flex items-center justify-center w-10 h-10 rounded-lg bg-emerald-600 text-white mb-3"><ArrowDownCircle size={18} /></div>
                 <p className="font-semibold text-slate-900">Payment In</p>
                 <p className="text-xs text-slate-500 mt-1">Vendor payments</p>
