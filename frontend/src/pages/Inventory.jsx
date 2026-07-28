@@ -111,6 +111,14 @@ export default function Inventory() {
     setPhotos([]);
   };
 
+  const closeAddModal = () => {
+    const dirty = photos.length > 0 || JSON.stringify(form) !== JSON.stringify(EMPTY);
+    if (dirty && !window.confirm("You have unsaved changes. Close without saving?")) return;
+    setShowModal(false);
+    setForm(EMPTY);
+    clearStagedPhotos();
+  };
+
   const fetchVehicles = useCallback(async () => {
     try {
       const r = await api.get("/vehicles");
@@ -536,7 +544,7 @@ export default function Inventory() {
         <AddVehicleModal
           form={form}
           setForm={setForm}
-          onClose={() => { setShowModal(false); setForm(EMPTY); clearStagedPhotos(); }}
+          onClose={closeAddModal}
           onSubmit={handleSave}
           saving={saving}
           photos={photos}

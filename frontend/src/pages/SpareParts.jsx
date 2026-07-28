@@ -130,6 +130,7 @@ export default function SpareParts() {
   const [showModal, setShowModal] = useState(false);
   const [editId, setEditId] = useState(null);
   const [form, setForm] = useState(EMPTY);
+  const [initialForm, setInitialForm] = useState(EMPTY);
   const [saving, setSaving] = useState(false);
 
   // Use/Sell modal
@@ -172,10 +173,16 @@ export default function SpareParts() {
     return true;
   });
 
-  const openAdd = () => { setForm(EMPTY); setEditId(null); setShowAddVendor(false); setNewVendor({ name: "", phone: "", address: "" }); setShowModal(true); };
+  const openAdd = () => { setForm(EMPTY); setInitialForm(EMPTY); setEditId(null); setShowAddVendor(false); setNewVendor({ name: "", phone: "", address: "" }); setShowModal(true); };
   const openEdit = (p) => {
-    setForm({ ...p, unit_cost: p.unit_cost || "", selling_price: p.selling_price || "", vendor_id: p.vendor_id || "" });
+    const next = { ...p, unit_cost: p.unit_cost || "", selling_price: p.selling_price || "", vendor_id: p.vendor_id || "" };
+    setForm(next); setInitialForm(next);
     setEditId(p.id); setShowAddVendor(false); setNewVendor({ name: "", phone: "", address: "" }); setShowModal(true);
+  };
+
+  const closePartModal = () => {
+    if (JSON.stringify(form) !== JSON.stringify(initialForm) && !window.confirm("You have unsaved changes. Close without saving?")) return;
+    setShowModal(false); setForm(EMPTY); setShowAddVendor(false);
   };
 
   const handleSave = async (e) => {
@@ -412,7 +419,7 @@ export default function SpareParts() {
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between p-5 border-b border-slate-100">
               <h2 className="text-lg font-bold text-slate-900">{editId ? "Edit Part" : "Add Spare Part"}</h2>
-              <button onClick={() => { setShowModal(false); setForm(EMPTY); setShowAddVendor(false); }} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500">✕</button>
+              <button onClick={closePartModal} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500">✕</button>
             </div>
             <form onSubmit={handleSave} className="p-5 space-y-4">
               <div className="grid grid-cols-2 gap-4">
@@ -481,7 +488,7 @@ export default function SpareParts() {
                 <textarea value={form.notes} onChange={e => setForm({...form, notes: e.target.value})} rows={2} placeholder="Any notes..." className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" />
               </Field>
               <div className="flex gap-3 pt-1">
-                <button type="button" onClick={() => { setShowModal(false); setForm(EMPTY); setShowAddVendor(false); }} className="flex-1 h-10 border border-slate-200 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50">Cancel</button>
+                <button type="button" onClick={closePartModal} className="flex-1 h-10 border border-slate-200 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50">Cancel</button>
                 <button type="submit" disabled={saving} data-testid="save-part-btn" className="flex-1 h-10 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-semibold disabled:opacity-60 active:scale-95 transition-all">{saving ? "Saving..." : editId ? "Update" : "Add Part"}</button>
               </div>
             </form>
