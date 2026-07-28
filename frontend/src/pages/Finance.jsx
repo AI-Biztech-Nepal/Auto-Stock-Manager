@@ -369,36 +369,63 @@ export default function Finance() {
               )}
 
               {ledgerData.parts_bills?.length > 0 && (
-                <LedgerTable
-                  title="Spare Parts Bills"
-                  countLabel={`${ledgerData.parts_bills.length} bill${ledgerData.parts_bills.length !== 1 ? "s" : ""}`}
-                  headers={["Bill No.", "Date", "Items", "Total"]}
-                  rows={ledgerData.parts_bills.map(b => [
-                    b.bill_no,
-                    b.entry_date || "—",
-                    <ul className="space-y-0.5">
-                      {b.items?.map((it, j) => (
-                        <li key={j} className="flex justify-between gap-3 text-slate-600">
-                          <span>{it.name}{it.part_number ? ` (${it.part_number})` : ""} × {it.quantity}</span>
-                          <span className="text-slate-500 whitespace-nowrap">{formatNPR(it.quantity * it.unit_cost)}</span>
-                        </li>
-                      ))}
-                    </ul>,
-                    <div className="flex items-center justify-end gap-2">
-                      <button
-                        onClick={() => setPrintBill(b)}
-                        className="p-1 rounded hover:bg-blue-50 text-blue-600"
-                        title="Print bill"
-                        data-testid="print-bill-row-btn"
-                      >
-                        <Printer size={13} />
-                      </button>
-                      {formatNPR(b.total)}
-                    </div>,
-                  ])}
-                  totalLabel="Total Parts Purchased"
-                  totalValue={formatNPR(ledgerData.parts_bills.reduce((s, b) => s + (b.total || 0), 0))}
-                />
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Spare Parts Bills</p>
+                    <span className="text-[11px] text-slate-400">{ledgerData.parts_bills.length} bill{ledgerData.parts_bills.length !== 1 ? "s" : ""}</span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    {ledgerData.parts_bills.map((b, i) => {
+                      const itemCount = b.items?.length || 0;
+                      const preview = (b.items || []).slice(0, 3).map(it => it.name).join(", ");
+                      return (
+                        <div
+                          key={b.bill_no || i}
+                          onClick={() => setPrintBill(b)}
+                          className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 hover:shadow-md transition-shadow cursor-pointer"
+                          data-testid="parts-bill-card"
+                        >
+                          <div className="flex items-start justify-between gap-2 mb-2">
+                            <div className="min-w-0">
+                              <div className="font-bold text-slate-900 text-sm truncate" style={{ fontFamily: "Manrope" }}>{b.bill_no}</div>
+                              <div className="text-xs text-slate-500 mt-0.5">{b.entry_date || "—"}</div>
+                            </div>
+                            <span className="shrink-0 px-2 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wide bg-blue-50 text-blue-700">
+                              {itemCount} item{itemCount !== 1 ? "s" : ""}
+                            </span>
+                          </div>
+
+                          {preview && (
+                            <p className="text-xs text-slate-500 mb-3 line-clamp-2">
+                              {preview}{itemCount > 3 ? ` +${itemCount - 3} more` : ""}
+                            </p>
+                          )}
+
+                          <div className="flex items-center justify-between pt-2 border-t border-slate-50">
+                            <span className="text-xs text-slate-400">Total</span>
+                            <div className="flex items-center gap-2">
+                              <span className="font-bold text-slate-900">{formatNPR(b.total)}</span>
+                              <button
+                                onClick={e => { e.stopPropagation(); setPrintBill(b); }}
+                                className="p-1.5 rounded-lg hover:bg-blue-50 text-blue-600"
+                                title="Print bill"
+                                data-testid="print-bill-card-btn"
+                              >
+                                <Printer size={13} />
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  <div className="flex items-center justify-between bg-slate-50 rounded-lg px-4 py-2.5 text-sm mt-3">
+                    <span className="font-semibold text-slate-600">Total Parts Purchased</span>
+                    <span className="font-bold text-slate-900">{formatNPR(ledgerData.parts_bills.reduce((s, b) => s + (b.total || 0), 0))}</span>
+                  </div>
+                </div>
               )}
 
               <LedgerTable
