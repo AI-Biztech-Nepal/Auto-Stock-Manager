@@ -147,6 +147,7 @@ export function VehicleDetailModal({ id, onClose }) {
   const [previewPhoto, setPreviewPhoto] = useState(null);
   const [legalDocs, setLegalDocs] = useState([]);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const [isDraggingPhoto, setIsDraggingPhoto] = useState(false);
   const [uploadingDoc, setUploadingDoc] = useState(false);
 
   const loadPhotos = useCallback(async () => {
@@ -167,6 +168,15 @@ export function VehicleDetailModal({ id, onClose }) {
       toast.success("Photo uploaded!"); loadPhotos();
     } catch (e) { toast.error(e.response?.data?.detail || "Upload failed"); }
     finally { setUploadingPhoto(false); }
+  };
+
+  const onPhotoDragOver = (e) => { e.preventDefault(); setIsDraggingPhoto(true); };
+  const onPhotoDragLeave = () => setIsDraggingPhoto(false);
+  const onPhotoDrop = (e) => {
+    e.preventDefault();
+    setIsDraggingPhoto(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file) uploadPhoto(file);
   };
 
   const deletePhoto = async (photoId) => {
@@ -502,20 +512,25 @@ export function VehicleDetailModal({ id, onClose }) {
           <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5" data-testid="photos-section">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-sm font-bold text-slate-900" style={{ fontFamily: "Manrope" }}>Vehicle Photos</h2>
-              <div className="flex items-center gap-2">
-                {canManageStock && (
-                  <label className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer transition-colors ${uploadingPhoto ? "bg-slate-200 text-slate-500" : "bg-blue-600 hover:bg-blue-700 text-white"}`} data-testid="upload-photo-btn">
-                    {uploadingPhoto ? "Uploading..." : "+ Add Photo"}
-                    <input type="file" accept="image/*" className="hidden" disabled={uploadingPhoto} onChange={e => { if (e.target.files[0]) uploadPhoto(e.target.files[0]); e.target.value = ""; }} />
-                  </label>
-                )}
-              </div>
             </div>
             {photos.length === 0 ? (
-              <div className="border-2 border-dashed border-slate-200 rounded-xl h-32 flex flex-col items-center justify-center text-slate-400">
-                <p className="text-sm font-medium">No photos yet</p>
-                {canManageStock && <p className="text-xs mt-0.5">Click &quot;+ Add Photo&quot; to upload</p>}
-              </div>
+              canManageStock ? (
+                <label
+                  onDragOver={onPhotoDragOver}
+                  onDragLeave={onPhotoDragLeave}
+                  onDrop={onPhotoDrop}
+                  data-testid="upload-photo-btn"
+                  className={`border-2 border-dashed rounded-xl h-32 flex flex-col items-center justify-center cursor-pointer transition-colors ${isDraggingPhoto ? "border-blue-400 bg-blue-50 text-blue-500" : "border-slate-200 text-slate-400 hover:border-blue-300 hover:text-blue-400"}`}
+                >
+                  <p className="text-sm font-medium">{uploadingPhoto ? "Uploading..." : "No photos yet"}</p>
+                  {!uploadingPhoto && <p className="text-xs mt-0.5">Click or drop a photo to upload</p>}
+                  <input type="file" accept="image/*" className="hidden" disabled={uploadingPhoto} onChange={e => { if (e.target.files[0]) uploadPhoto(e.target.files[0]); e.target.value = ""; }} />
+                </label>
+              ) : (
+                <div className="border-2 border-dashed border-slate-200 rounded-xl h-32 flex flex-col items-center justify-center text-slate-400">
+                  <p className="text-sm font-medium">No photos yet</p>
+                </div>
+              )
             ) : (
               <div className="grid grid-cols-3 sm:grid-cols-5 gap-3">
                 {photos.map(photo => (
@@ -537,10 +552,15 @@ export function VehicleDetailModal({ id, onClose }) {
                   </div>
                 ))}
                 {canManageStock && (
-                <label className="border-2 border-dashed border-slate-200 rounded-xl aspect-square flex flex-col items-center justify-center text-slate-400 cursor-pointer hover:border-blue-400 hover:text-blue-500 transition-colors">
+                <label
+                  onDragOver={onPhotoDragOver}
+                  onDragLeave={onPhotoDragLeave}
+                  onDrop={onPhotoDrop}
+                  className={`border-2 border-dashed rounded-xl aspect-square flex flex-col items-center justify-center cursor-pointer transition-colors ${isDraggingPhoto ? "border-blue-400 bg-blue-50 text-blue-500" : "border-slate-200 text-slate-400 hover:border-blue-400 hover:text-blue-500"}`}
+                >
                   <Plus size={20} />
-                  <span className="text-xs mt-1">Add</span>
-                  <input type="file" accept="image/*" className="hidden" onChange={e => { if (e.target.files[0]) uploadPhoto(e.target.files[0]); e.target.value = ""; }} />
+                  <span className="text-xs mt-1">{uploadingPhoto ? "Uploading..." : "Add"}</span>
+                  <input type="file" accept="image/*" className="hidden" disabled={uploadingPhoto} onChange={e => { if (e.target.files[0]) uploadPhoto(e.target.files[0]); e.target.value = ""; }} />
                 </label>
                 )}
               </div>
