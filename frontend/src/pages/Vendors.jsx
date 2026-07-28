@@ -1,16 +1,16 @@
 import { useEffect, useState, useCallback } from "react";
-import { Plus, Phone, MapPin, AlertTriangle, Edit, Trash2, CreditCard, ChevronDown, ChevronUp, Search } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { Plus, Phone, MapPin, AlertTriangle, Edit, Trash2, CreditCard, Search, BookOpen } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
 import { formatNPR, formatDateDual } from "../utils/helpers";
 
 export default function Vendors() {
+  const navigate = useNavigate();
   const [vendors, setVendors] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [showPayModal, setShowPayModal] = useState(false);
-  const [showLedger, setShowLedger] = useState(null);
-  const [ledgerData, setLedgerData] = useState(null);
   const [editItem, setEditItem] = useState(null);
   const [form, setForm] = useState({ name: "", phone: "", address: "", notes: "", vendor_type: "both" });
   const [payForm, setPayForm] = useState({ vendor_id: "", amount: "", payment_date: "", notes: "" });
@@ -28,14 +28,6 @@ export default function Vendors() {
   const openAdd = () => { setEditItem(null); setForm({ name: "", phone: "", address: "", notes: "", vendor_type: "both" }); setShowModal(true); };
   const openEdit = (v) => { setEditItem(v); setForm({ name: v.name, phone: v.phone, address: v.address || "", notes: v.notes || "", vendor_type: v.vendor_type || "both" }); setShowModal(true); };
   const openPayment = (v) => { setSelectedVendor(v); setPayForm({ vendor_id: v.id, amount: "", payment_date: "", notes: "" }); setShowPayModal(true); };
-
-  const fetchLedger = async (vendorId) => {
-    if (showLedger === vendorId) { setShowLedger(null); return; }
-    try {
-      const r = await api.get(`/vendors/${vendorId}/payments`);
-      setLedgerData(r.data); setShowLedger(vendorId);
-    } catch { toast.error("Failed to load ledger"); }
-  };
 
   const handleSave = async (e) => {
     e.preventDefault();
@@ -55,7 +47,6 @@ export default function Vendors() {
     try {
       await api.post("/vendor-payments", { ...payForm, amount: Number(payForm.amount) });
       toast.success("Payment recorded!"); setShowPayModal(false); fetchVendors();
-      if (showLedger === payForm.vendor_id) fetchLedger(payForm.vendor_id);
     } catch { toast.error("Failed"); } finally { setSaving(false); }
   };
 
@@ -181,74 +172,11 @@ export default function Vendors() {
                   </div>
                 </div>
 
-                {/* Ledger Toggle */}
-                <button onClick={() => fetchLedger(v.id)} className="mt-3 flex items-center gap-1.5 text-xs text-blue-600 hover:text-blue-700 font-medium transition-colors" data-testid="view-ledger-btn">
-                  {showLedger === v.id ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
-                  {showLedger === v.id ? "Hide" : "View"} Payment Ledger
+                {/* Ledger link */}
+                <button onClick={() => navigate(`/finance?tab=ledger&vendor=${v.id}`)} className="mt-3 flex items-center gap-1.5 text-xs text-blue-600 hover:text-blue-700 font-medium transition-colors" data-testid="view-ledger-btn">
+                  <BookOpen size={13} />
+                  View Payment Ledger
                 </button>
-
-                {/* Ledger */}
-                {showLedger === v.id && ledgerData && (
-                  <div className="mt-3 border-t border-slate-100 pt-4 space-y-5">
-                    {ledgerData.vehicles?.length > 0 && (
-                      <LedgerTable
-                        title="Vehicles Purchased"
-                        countLabel={`${ledgerData.vehicles.length} vehicle${ledgerData.vehicles.length !== 1 ? "s" : ""}`}
-                        headers={["Vehicle", "Reg. No.", "Purchase Date", "Price"]}
-                        rows={ledgerData.vehicles
-                          .slice()
-                          .sort((a, b) => (b.purchase_date || "").localeCompare(a.purchase_date || ""))
-                          .map(vh => [
-                            `${vh.brand} ${vh.model} ${vh.year || ""}`.trim(),
-                            vh.registration_number || "—",
-                            vh.purchase_date || "—",
-                            formatNPR(vh.purchase_price),
-                          ])}
-                        totalLabel="Total Purchased"
-                        totalValue={formatNPR(ledgerData.vehicles.reduce((s, vh) => s + (vh.purchase_price || 0), 0))}
-                      />
-                    )}
-
-                    {ledgerData.parts_bills?.length > 0 && (
-                      <LedgerTable
-                        title="Spare Parts Bills"
-                        countLabel={`${ledgerData.parts_bills.length} bill${ledgerData.parts_bills.length !== 1 ? "s" : ""}`}
-                        headers={["Bill No.", "Date", "Items", "Total"]}
-                        rows={ledgerData.parts_bills.map(b => [
-                          b.bill_no,
-                          b.entry_date || "—",
-                          <ul className="space-y-0.5">
-                            {b.items?.map((it, j) => (
-                              <li key={j} className="flex justify-between gap-3 text-slate-600">
-                                <span>{it.name}{it.part_number ? ` (${it.part_number})` : ""} × {it.quantity}</span>
-                                <span className="text-slate-500 whitespace-nowrap">{formatNPR(it.quantity * it.unit_cost)}</span>
-                              </li>
-                            ))}
-                          </ul>,
-                          formatNPR(b.total),
-                        ])}
-                        totalLabel="Total Parts Purchased"
-                        totalValue={formatNPR(ledgerData.parts_bills.reduce((s, b) => s + (b.total || 0), 0))}
-                      />
-                    )}
-
-                    <LedgerTable
-                      title="Payment History"
-                      countLabel={`${ledgerData.payments?.length || 0} payment${(ledgerData.payments?.length || 0) !== 1 ? "s" : ""}`}
-                      headers={["Date", "Notes", "Amount"]}
-                      rows={(ledgerData.payments || []).map(p => [p.payment_date, p.notes || "—", formatNPR(p.amount)])}
-                      totalLabel="Total Paid"
-                      totalValue={formatNPR(ledgerData.total_paid || 0)}
-                      empty="No payments recorded yet"
-                      accent="green"
-                    />
-
-                    <div className="flex items-center justify-between bg-slate-50 rounded-lg px-4 py-2.5 text-sm">
-                      <span className="font-semibold text-slate-600">Remaining Due</span>
-                      <span className={`font-bold ${ledgerData.remaining_due > 0 ? "text-red-600" : "text-green-600"}`}>{formatNPR(ledgerData.remaining_due || 0)}</span>
-                    </div>
-                  </div>
-                )}
               </div>
             </div>
           ))}
@@ -325,50 +253,6 @@ export default function Vendors() {
               </div>
             </form>
           </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function LedgerTable({ title, countLabel, headers, rows, totalLabel, totalValue, empty, accent = "slate" }) {
-  const headBg = accent === "green" ? "bg-green-50/60" : "bg-slate-50";
-  return (
-    <div>
-      <div className="flex items-center justify-between mb-2">
-        <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">{title}</p>
-        <span className="text-[11px] text-slate-400">{countLabel}</span>
-      </div>
-      {rows.length === 0 ? (
-        <p className="text-xs text-slate-400 text-center py-3 border border-dashed border-slate-200 rounded-lg">{empty || "No records"}</p>
-      ) : (
-        <div className="border border-slate-200 rounded-lg overflow-hidden">
-          <table className="w-full text-xs">
-            <thead>
-              <tr className={headBg}>
-                {headers.map((h, i) => (
-                  <th key={i} className={`text-left font-semibold uppercase tracking-wider text-slate-500 px-3 py-2 ${i === headers.length - 1 ? "text-right" : ""}`}>{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100 bg-white">
-              {rows.map((cells, ri) => (
-                <tr key={ri}>
-                  {cells.map((cell, ci) => (
-                    <td key={ci} className={`px-3 py-2 align-top text-slate-700 ${ci === cells.length - 1 ? "text-right font-semibold whitespace-nowrap" : ""}`}>{cell}</td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-            {totalValue != null && (
-              <tfoot>
-                <tr className={headBg}>
-                  <td colSpan={headers.length - 1} className="px-3 py-2 text-right font-semibold text-slate-600">{totalLabel}</td>
-                  <td className="px-3 py-2 text-right font-bold text-slate-900 whitespace-nowrap">{totalValue}</td>
-                </tr>
-              </tfoot>
-            )}
-          </table>
         </div>
       )}
     </div>

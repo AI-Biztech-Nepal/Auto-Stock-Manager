@@ -1,9 +1,11 @@
 import { useEffect, useState, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, PieChart, Pie, Legend } from "recharts";
-import { DollarSign, AlertTriangle, CreditCard, Users, ShoppingCart, Wallet, UserPlus, ArrowDownCircle, ArrowUpCircle, PlusSquare, FileText } from "lucide-react";
+import { DollarSign, AlertTriangle, CreditCard, Users, ShoppingCart, Wallet, UserPlus, ArrowDownCircle, ArrowUpCircle, PlusSquare, FileText, BookOpen } from "lucide-react";
+import { toast } from "sonner";
 import api from "../utils/api";
 import { formatNPR } from "../utils/helpers";
+import LedgerTable from "../components/LedgerTable";
 
 const KCard = ({ title, value, sub, color, icon: Icon }) => (
   <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 hover:shadow-md transition-shadow">
@@ -22,11 +24,17 @@ const KCard = ({ title, value, sub, color, icon: Icon }) => (
 
 export default function Finance() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [summary, setSummary] = useState(null);
   const [financial, setFinancial] = useState(null);
   const [partners, setPartners] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState("overview");
+  const [tab, setTab] = useState(searchParams.get("tab") || "overview");
+
+  const [vendors, setVendors] = useState([]);
+  const [selectedVendorId, setSelectedVendorId] = useState(searchParams.get("vendor") || "");
+  const [ledgerData, setLedgerData] = useState(null);
+  const [ledgerLoading, setLedgerLoading] = useState(false);
 
   useEffect(() => {
     Promise.all([
@@ -37,6 +45,41 @@ export default function Finance() {
       setSummary(s.data); setFinancial(f.data); setPartners(p.data);
     }).catch(console.error).finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => {
+    if (tab === "ledger" && vendors.length === 0) {
+      api.get("/vendors").then(r => setVendors(r.data)).catch(() => toast.error("Failed to load vendors"));
+    }
+  }, [tab, vendors.length]);
+
+  useEffect(() => {
+    if (!selectedVendorId) { setLedgerData(null); return; }
+    setLedgerLoading(true);
+    api.get(`/vendors/${selectedVendorId}/payments`)
+      .then(r => setLedgerData(r.data))
+      .catch(() => toast.error("Failed to load ledger"))
+      .finally(() => setLedgerLoading(false));
+  }, [selectedVendorId]);
+
+  const switchTab = (t) => {
+    setTab(t);
+    setSearchParams(prev => {
+      const next = new URLSearchParams(prev);
+      next.set("tab", t);
+      return next;
+    }, { replace: true });
+  };
+
+  const selectVendor = (id) => {
+    setSelectedVendorId(id);
+    setSearchParams(prev => {
+      const next = new URLSearchParams(prev);
+      if (id) next.set("vendor", id); else next.delete("vendor");
+      return next;
+    }, { replace: true });
+  };
+
+  const selectedVendor = useMemo(() => vendors.find(v => String(v.id) === String(selectedVendorId)), [vendors, selectedVendorId]);
 
   const monthlyData = useMemo(() => {
     if (!financial) return [];
@@ -67,10 +110,10 @@ export default function Finance() {
       </div>
 
       <div className="flex border-b border-slate-200 gap-1">
-        {["overview", "monthly", "partners"].map(t => (
-          <button key={t} onClick={() => setTab(t)} data-testid={`finance-tab-${t}`}
+        {["overview", "monthly", "partners", "ledger"].map(t => (
+          <button key={t} onClick={() => switchTab(t)} data-testid={`finance-tab-${t}`}
             className={`px-4 py-2.5 text-sm font-medium capitalize transition-colors ${tab === t ? "border-b-2 border-blue-600 text-blue-600" : "text-slate-500 hover:text-slate-700"}`}>
-            {t.charAt(0).toUpperCase() + t.slice(1)}
+            {t === "ledger" ? "Vendor Ledger" : t.charAt(0).toUpperCase() + t.slice(1)}
           </button>
         ))}
       </div>
@@ -266,6 +309,103 @@ export default function Finance() {
               );
             })}
           </div>
+        </div>
+      )}
+
+      {tab === "ledger" && (
+        <div className="space-y-5">
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
+            <label className="block text-xs font-medium text-slate-600 mb-1.5">Select Vendor</label>
+            <select
+              value={selectedVendorId}
+              onChange={e => selectVendor(e.target.value)}
+              className="w-full sm:w-96 h-10 px-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              data-testid="ledger-vendor-select"
+            >
+              <option value="">Choose a vendor...</option>
+              {vendors.map(v => (
+                <option key={v.id} value={v.id}>{v.name}{v.remaining_due > 0 ? ` (Due: ${formatNPR(v.remaining_due)})` : ""}</option>
+              ))}
+            </select>
+          </div>
+
+          {!selectedVendorId ? (
+            <div className="bg-white rounded-xl border border-slate-200 p-12 text-center text-slate-500">
+              <BookOpen size={28} className="mx-auto mb-2 text-slate-300" />
+              <p className="font-medium">Select a vendor to view their payment ledger</p>
+            </div>
+          ) : ledgerLoading ? (
+            <div className="flex items-center justify-center h-32"><div className="animate-spin w-6 h-6 border-4 border-blue-600 border-t-transparent rounded-full" /></div>
+          ) : ledgerData && (
+            <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 space-y-5">
+              <div className="flex items-center justify-between">
+                <h2 className="text-base font-bold text-slate-900">{selectedVendor?.name}</h2>
+                {selectedVendor?.remaining_due > 0 && (
+                  <span className="flex items-center gap-1 text-xs font-semibold text-red-600 bg-red-50 px-2 py-1 rounded-lg">
+                    <AlertTriangle size={11} />Due: {formatNPR(selectedVendor.remaining_due)}
+                  </span>
+                )}
+              </div>
+
+              {ledgerData.vehicles?.length > 0 && (
+                <LedgerTable
+                  title="Vehicles Purchased"
+                  countLabel={`${ledgerData.vehicles.length} vehicle${ledgerData.vehicles.length !== 1 ? "s" : ""}`}
+                  headers={["Vehicle", "Reg. No.", "Purchase Date", "Price"]}
+                  rows={ledgerData.vehicles
+                    .slice()
+                    .sort((a, b) => (b.purchase_date || "").localeCompare(a.purchase_date || ""))
+                    .map(vh => [
+                      `${vh.brand} ${vh.model} ${vh.year || ""}`.trim(),
+                      vh.registration_number || "—",
+                      vh.purchase_date || "—",
+                      formatNPR(vh.purchase_price),
+                    ])}
+                  totalLabel="Total Purchased"
+                  totalValue={formatNPR(ledgerData.vehicles.reduce((s, vh) => s + (vh.purchase_price || 0), 0))}
+                />
+              )}
+
+              {ledgerData.parts_bills?.length > 0 && (
+                <LedgerTable
+                  title="Spare Parts Bills"
+                  countLabel={`${ledgerData.parts_bills.length} bill${ledgerData.parts_bills.length !== 1 ? "s" : ""}`}
+                  headers={["Bill No.", "Date", "Items", "Total"]}
+                  rows={ledgerData.parts_bills.map(b => [
+                    b.bill_no,
+                    b.entry_date || "—",
+                    <ul className="space-y-0.5">
+                      {b.items?.map((it, j) => (
+                        <li key={j} className="flex justify-between gap-3 text-slate-600">
+                          <span>{it.name}{it.part_number ? ` (${it.part_number})` : ""} × {it.quantity}</span>
+                          <span className="text-slate-500 whitespace-nowrap">{formatNPR(it.quantity * it.unit_cost)}</span>
+                        </li>
+                      ))}
+                    </ul>,
+                    formatNPR(b.total),
+                  ])}
+                  totalLabel="Total Parts Purchased"
+                  totalValue={formatNPR(ledgerData.parts_bills.reduce((s, b) => s + (b.total || 0), 0))}
+                />
+              )}
+
+              <LedgerTable
+                title="Payment History"
+                countLabel={`${ledgerData.payments?.length || 0} payment${(ledgerData.payments?.length || 0) !== 1 ? "s" : ""}`}
+                headers={["Date", "Notes", "Amount"]}
+                rows={(ledgerData.payments || []).map(p => [p.payment_date, p.notes || "—", formatNPR(p.amount)])}
+                totalLabel="Total Paid"
+                totalValue={formatNPR(ledgerData.total_paid || 0)}
+                empty="No payments recorded yet"
+                accent="green"
+              />
+
+              <div className="flex items-center justify-between bg-slate-50 rounded-lg px-4 py-2.5 text-sm">
+                <span className="font-semibold text-slate-600">Remaining Due</span>
+                <span className={`font-bold ${ledgerData.remaining_due > 0 ? "text-red-600" : "text-green-600"}`}>{formatNPR(ledgerData.remaining_due || 0)}</span>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
