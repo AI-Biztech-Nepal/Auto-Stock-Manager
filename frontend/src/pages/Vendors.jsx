@@ -189,58 +189,64 @@ export default function Vendors() {
 
                 {/* Ledger */}
                 {showLedger === v.id && ledgerData && (
-                  <div className="mt-3 border-t border-slate-100 pt-3">
+                  <div className="mt-3 border-t border-slate-100 pt-4 space-y-5">
                     {ledgerData.vehicles?.length > 0 && (
-                      <div className="mb-3">
-                        <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Vehicles Purchased</p>
-                        <div className="space-y-1.5">
-                          {ledgerData.vehicles.map(vh => (
-                            <div key={vh.id} className="flex justify-between text-xs bg-slate-50 rounded-lg px-3 py-2">
-                              <span className="font-medium text-slate-700">{vh.brand} {vh.model} {vh.year}</span>
-                              <span className="text-slate-600">{formatNPR(vh.purchase_price)}</span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
+                      <LedgerTable
+                        title="Vehicles Purchased"
+                        countLabel={`${ledgerData.vehicles.length} vehicle${ledgerData.vehicles.length !== 1 ? "s" : ""}`}
+                        headers={["Vehicle", "Reg. No.", "Purchase Date", "Price"]}
+                        rows={ledgerData.vehicles
+                          .slice()
+                          .sort((a, b) => (b.purchase_date || "").localeCompare(a.purchase_date || ""))
+                          .map(vh => [
+                            `${vh.brand} ${vh.model} ${vh.year || ""}`.trim(),
+                            vh.registration_number || "—",
+                            vh.purchase_date || "—",
+                            formatNPR(vh.purchase_price),
+                          ])}
+                        totalLabel="Total Purchased"
+                        totalValue={formatNPR(ledgerData.vehicles.reduce((s, vh) => s + (vh.purchase_price || 0), 0))}
+                      />
                     )}
+
                     {ledgerData.parts_bills?.length > 0 && (
-<div className="mb-3">
-<p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Spare Parts Bills</p>
-<div className="space-y-2">
-{ledgerData.parts_bills.map((b, i) => (
-<div key={i} className="bg-purple-50 rounded-lg px-3 py-2">
-<div className="flex justify-between text-xs font-semibold text-purple-800">
-<span>Bill: {b.bill_no} · {b.entry_date}</span>
-<span>{formatNPR(b.total)}</span>
-</div>
-<div className="mt-1 space-y-0.5">
-{b.items?.map((it, j) => (
-<div key={j} className="flex justify-between text-[11px] text-slate-600">
-<span>{it.name} {it.part_number ? "(" + it.part_number + ")" : ""} x {it.quantity}</span>
-<span>{formatNPR(it.quantity * it.unit_cost)}</span>
-</div>
-))}
-</div>
-</div>
-))}
-</div>
-</div>
-)}
-{ledgerData.payments?.length > 0 ? (
-                      <div>
-                        <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Payment History</p>
-                        <div className="space-y-1.5">
-                          {ledgerData.payments.map(p => (
-                            <div key={p.id} className="flex justify-between text-xs bg-green-50 rounded-lg px-3 py-2">
-                              <span className="text-green-700">{p.payment_date} · {p.notes || "Payment"}</span>
-                              <span className="font-semibold text-green-800">{formatNPR(p.amount)}</span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    ) : (
-                      <p className="text-xs text-slate-400 text-center py-2">No payments recorded yet</p>
+                      <LedgerTable
+                        title="Spare Parts Bills"
+                        countLabel={`${ledgerData.parts_bills.length} bill${ledgerData.parts_bills.length !== 1 ? "s" : ""}`}
+                        headers={["Bill No.", "Date", "Items", "Total"]}
+                        rows={ledgerData.parts_bills.map(b => [
+                          b.bill_no,
+                          b.entry_date || "—",
+                          <ul className="space-y-0.5">
+                            {b.items?.map((it, j) => (
+                              <li key={j} className="flex justify-between gap-3 text-slate-600">
+                                <span>{it.name}{it.part_number ? ` (${it.part_number})` : ""} × {it.quantity}</span>
+                                <span className="text-slate-500 whitespace-nowrap">{formatNPR(it.quantity * it.unit_cost)}</span>
+                              </li>
+                            ))}
+                          </ul>,
+                          formatNPR(b.total),
+                        ])}
+                        totalLabel="Total Parts Purchased"
+                        totalValue={formatNPR(ledgerData.parts_bills.reduce((s, b) => s + (b.total || 0), 0))}
+                      />
                     )}
+
+                    <LedgerTable
+                      title="Payment History"
+                      countLabel={`${ledgerData.payments?.length || 0} payment${(ledgerData.payments?.length || 0) !== 1 ? "s" : ""}`}
+                      headers={["Date", "Notes", "Amount"]}
+                      rows={(ledgerData.payments || []).map(p => [p.payment_date, p.notes || "—", formatNPR(p.amount)])}
+                      totalLabel="Total Paid"
+                      totalValue={formatNPR(ledgerData.total_paid || 0)}
+                      empty="No payments recorded yet"
+                      accent="green"
+                    />
+
+                    <div className="flex items-center justify-between bg-slate-50 rounded-lg px-4 py-2.5 text-sm">
+                      <span className="font-semibold text-slate-600">Remaining Due</span>
+                      <span className={`font-bold ${ledgerData.remaining_due > 0 ? "text-red-600" : "text-green-600"}`}>{formatNPR(ledgerData.remaining_due || 0)}</span>
+                    </div>
                   </div>
                 )}
               </div>
@@ -319,6 +325,50 @@ export default function Vendors() {
               </div>
             </form>
           </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function LedgerTable({ title, countLabel, headers, rows, totalLabel, totalValue, empty, accent = "slate" }) {
+  const headBg = accent === "green" ? "bg-green-50/60" : "bg-slate-50";
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">{title}</p>
+        <span className="text-[11px] text-slate-400">{countLabel}</span>
+      </div>
+      {rows.length === 0 ? (
+        <p className="text-xs text-slate-400 text-center py-3 border border-dashed border-slate-200 rounded-lg">{empty || "No records"}</p>
+      ) : (
+        <div className="border border-slate-200 rounded-lg overflow-hidden">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className={headBg}>
+                {headers.map((h, i) => (
+                  <th key={i} className={`text-left font-semibold uppercase tracking-wider text-slate-500 px-3 py-2 ${i === headers.length - 1 ? "text-right" : ""}`}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 bg-white">
+              {rows.map((cells, ri) => (
+                <tr key={ri}>
+                  {cells.map((cell, ci) => (
+                    <td key={ci} className={`px-3 py-2 align-top text-slate-700 ${ci === cells.length - 1 ? "text-right font-semibold whitespace-nowrap" : ""}`}>{cell}</td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+            {totalValue != null && (
+              <tfoot>
+                <tr className={headBg}>
+                  <td colSpan={headers.length - 1} className="px-3 py-2 text-right font-semibold text-slate-600">{totalLabel}</td>
+                  <td className="px-3 py-2 text-right font-bold text-slate-900 whitespace-nowrap">{totalValue}</td>
+                </tr>
+              </tfoot>
+            )}
+          </table>
         </div>
       )}
     </div>

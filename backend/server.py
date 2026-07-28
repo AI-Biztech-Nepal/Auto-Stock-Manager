@@ -15,6 +15,7 @@ import pillow_heif
 pillow_heif.register_heif_opener()  # lets Image.open() decode HEIC/HEIF from iPhone cameras
 from google import genai
 from google.genai import types as genai_types
+import httpx
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -50,6 +51,24 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto", bcrypt__rounds
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# ── Storefront revalidation ─────────────────────────────────────────────
+# The Next.js storefront (hamroauto.com.np) caches its public pages for 60s (ISR) and
+# otherwise has no way to know inventory changed. This pings its on-demand revalidation
+# route right after a change so listings/photos update within seconds instead of up to
+# a minute later. Both env vars are optional — with either unset this silently no-ops,
+# so it's safe to deploy before the storefront side is configured.
+STOREFRONT_REVALIDATE_URL = os.environ.get("STOREFRONT_REVALIDATE_URL")
+STOREFRONT_REVALIDATE_SECRET = os.environ.get("STOREFRONT_REVALIDATE_SECRET")
+
+async def _notify_storefront():
+    if not STOREFRONT_REVALIDATE_URL:
+        return
+    try:
+        async with httpx.AsyncClient(timeout=5) as http:
+            await http.post(STOREFRONT_REVALIDATE_URL, params={"secret": STOREFRONT_REVALIDATE_SECRET})
+    except Exception:
+        logger.warning("Storefront revalidation ping failed", exc_info=True)
 
 @app.get("/api/health")
 async def health(): return {"status": "ok", "service": "Hamro G&G Auto OS"}
@@ -702,6 +721,7 @@ async def create_vehicle(vehicle: VehicleCreate, cu: dict = Depends(require("veh
         "details": f"Added {v['brand']} {v['model']} {v['year']}"})
     await db.vehicles.insert_one(v)
     v.pop("_id", None)
+    asyncio.create_task(_notify_storefront())
     return v
 
 # ── Bulk Import (xlsx/csv) ─────────────────────────────────────────────
@@ -1009,6 +1029,7 @@ async def update_vehicle(vid: str, vehicle: VehicleUpdate, cu: dict = Depends(re
     await db.audit_logs.insert_one({"action": "vehicle_updated", "vehicle_id": vid,
         "user": cu["username"], "timestamp": datetime.now(timezone.utc).isoformat(),
         "details": f"Updated fields: {list(upd.keys())}"})
+    asyncio.create_task(_notify_storefront())
     return await db.vehicles.find_one({"id": vid}, {"_id": 0})
 
 VEHICLE_STATUSES = {"available", "reserved", "sold", "unlisted", "scrap", "in_repair"}
@@ -1073,6 +1094,7 @@ async def update_vehicle_status(vid: str, body: VehicleStatusUpdate, cu: dict = 
     await db.audit_logs.insert_one({"action": "vehicle_status_updated", "vehicle_id": vid,
         "user": cu["username"], "timestamp": datetime.now(timezone.utc).isoformat(),
         "details": f"Status changed from {existing.get('status')} to {body.status}"})
+    asyncio.create_task(_notify_storefront())
     v = await db.vehicles.find_one({"id": vid}, {"_id": 0})
     return _hide_financials_for_role(v, role)
 
@@ -1148,6 +1170,7 @@ async def delete_vehicle(vid: str, cu: dict = Depends(admin_only)):
     # Otherwise a sale record survives with no vehicle to resolve — it still counts in the
     # Sales tab total but can never show up in Sold Stock, silently desyncing the two counts.
     await db.sales.delete_many({"vehicle_id": vid})
+    asyncio.create_task(_notify_storefront())
     return {"message": "Deleted"}
 
 @api_router.delete("/vehicles")
@@ -1165,6 +1188,7 @@ async def delete_all_vehicles(confirm: str = "", cu: dict = Depends(get_current_
     await db.audit_logs.insert_one({"action": "vehicles_bulk_deleted",
         "user": cu["username"], "timestamp": datetime.now(timezone.utc).isoformat(),
         "details": f"Cleared all inventory: {result.deleted_count} vehicles deleted (job cards preserved)"})
+    asyncio.create_task(_notify_storefront())
     return {"message": f"Deleted {result.deleted_count} vehicles"}
 
 @api_router.get("/vehicles/{vid}/qr-data")
@@ -1985,6 +2009,7 @@ async def get_settings(cu: dict = Depends(admin_only)):
 async def update_settings(settings: SettingsUpdate, cu: dict = Depends(admin_only)):
     updates = {k: v for k, v in settings.model_dump().items() if v is not None}
     await db.settings.update_one({"id": "general"}, {"$set": updates}, upsert=True)
+    asyncio.create_task(_notify_storefront())
     return await db.settings.find_one({"id": "general"}, {"_id": 0})
 
 # ── STARTUP ───────────────────────────────────────────────────────────
@@ -2126,12 +2151,14 @@ async def upload_vehicle_photo(vid: str, file: UploadFile = File(...), cu: dict 
         "uploaded_at": datetime.now(timezone.utc).isoformat(), "size": len(content),
     }
     await db.vehicle_photos.insert_one(photo)
+    asyncio.create_task(_notify_storefront())
     return _photo_out(photo)
 
 @api_router.delete("/vehicles/{vid}/photos/{photo_id}")
 async def delete_vehicle_photo(vid: str, photo_id: str, cu: dict = Depends(require("vehicle_media", "delete"))):
     r = await db.vehicle_photos.delete_one({"id": photo_id, "vehicle_id": vid})
     if r.deleted_count == 0: raise HTTPException(404, "Photo not found")
+    asyncio.create_task(_notify_storefront())
     return {"message": "Photo deleted"}
 
 # ══════════════════════════════════════════════════════════════════════
