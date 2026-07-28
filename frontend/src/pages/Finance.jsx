@@ -375,50 +375,47 @@ export default function Finance() {
                     <span className="text-[11px] text-slate-400">{ledgerData.parts_bills.length} bill{ledgerData.parts_bills.length !== 1 ? "s" : ""}</span>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    {ledgerData.parts_bills.map((b, i) => {
-                      const itemCount = b.items?.length || 0;
-                      const preview = (b.items || []).slice(0, 3).map(it => it.name).join(", ");
-                      return (
+                  <div className="space-y-4">
+                    {ledgerData.parts_bills
+                      .slice()
+                      .sort((a, b) => (b.entry_date || "").localeCompare(a.entry_date || ""))
+                      .map((b, i) => (
                         <div
                           key={b.bill_no || i}
-                          onClick={() => setPrintBill(b)}
-                          className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 hover:shadow-md transition-shadow cursor-pointer"
-                          data-testid="parts-bill-card"
+                          className="bg-white rounded-lg border border-slate-200 shadow-sm overflow-hidden"
+                          data-testid="parts-bill-tile"
                         >
-                          <div className="flex items-start justify-between gap-2 mb-2">
-                            <div className="min-w-0">
-                              <div className="font-bold text-slate-900 text-sm truncate" style={{ fontFamily: "Manrope" }}>{b.bill_no}</div>
-                              <div className="text-xs text-slate-500 mt-0.5">{b.entry_date || "—"}</div>
+                          <div className="flex items-center justify-between gap-3 px-4 py-2.5 bg-slate-50 border-b border-slate-100">
+                            <div className="flex items-baseline gap-2 min-w-0">
+                              <span className="font-bold text-slate-900 text-sm truncate">{b.bill_no}</span>
+                              <span className="text-xs text-slate-400">·</span>
+                              <span className="text-xs font-semibold text-slate-600 whitespace-nowrap">{b.entry_date || "—"}</span>
                             </div>
-                            <span className="shrink-0 px-2 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wide bg-blue-50 text-blue-700">
-                              {itemCount} item{itemCount !== 1 ? "s" : ""}
-                            </span>
+                            <button
+                              onClick={() => setPrintBill(b)}
+                              className="shrink-0 p-1 rounded hover:bg-blue-100 text-blue-600"
+                              title="Print bill"
+                              data-testid="print-bill-tile-btn"
+                            >
+                              <Printer size={13} />
+                            </button>
                           </div>
 
-                          {preview && (
-                            <p className="text-xs text-slate-500 mb-3 line-clamp-2">
-                              {preview}{itemCount > 3 ? ` +${itemCount - 3} more` : ""}
-                            </p>
-                          )}
+                          <ul className="divide-y divide-slate-50">
+                            {b.items?.map((it, j) => (
+                              <li key={j} className="flex justify-between gap-3 px-4 py-2 text-xs">
+                                <span className="text-slate-600">{it.name}{it.part_number ? ` (${it.part_number})` : ""} × {it.quantity}</span>
+                                <span className="text-slate-500 whitespace-nowrap">{formatNPR(it.quantity * it.unit_cost)}</span>
+                              </li>
+                            ))}
+                          </ul>
 
-                          <div className="flex items-center justify-between pt-2 border-t border-slate-50">
-                            <span className="text-xs text-slate-400">Total</span>
-                            <div className="flex items-center gap-2">
-                              <span className="font-bold text-slate-900">{formatNPR(b.total)}</span>
-                              <button
-                                onClick={e => { e.stopPropagation(); setPrintBill(b); }}
-                                className="p-1.5 rounded-lg hover:bg-blue-50 text-blue-600"
-                                title="Print bill"
-                                data-testid="print-bill-card-btn"
-                              >
-                                <Printer size={13} />
-                              </button>
-                            </div>
+                          <div className="flex items-center justify-between px-4 py-2 bg-slate-50 border-t border-slate-100">
+                            <span className="text-xs font-semibold text-slate-500">Bill Total</span>
+                            <span className="text-sm font-bold text-slate-900">{formatNPR(b.total)}</span>
                           </div>
                         </div>
-                      );
-                    })}
+                      ))}
                   </div>
 
                   <div className="flex items-center justify-between bg-slate-50 rounded-lg px-4 py-2.5 text-sm mt-3">
