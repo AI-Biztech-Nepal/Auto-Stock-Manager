@@ -63,7 +63,7 @@ const PERIODS = [
 ];
 
 function AccountingSummary() {
-  const [activePeriod, setActivePeriod] = useState("monthly");
+  const [activePeriod, setActivePeriod] = useState("daily");
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
 
