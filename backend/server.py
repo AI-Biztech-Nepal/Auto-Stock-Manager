@@ -22,6 +22,7 @@ load_dotenv(ROOT_DIR / '.env')
 
 import certifi
 from pymongo.server_api import ServerApi
+from pymongo import ReturnDocument
 
 # Force Python SSL to use certifi CA bundle (fixes Atlas TLS on Docker/Render)
 os.environ["SSL_CERT_FILE"] = certifi.where()
@@ -2045,6 +2046,8 @@ async def startup():
             {"id": str(uuid.uuid4()), "name": "Partner B", "capital_contribution": 500000, "stake_percentage": 33.33, "contact": "", "created_at": now},
             {"id": str(uuid.uuid4()), "name": "You (Owner)", "capital_contribution": 500000, "stake_percentage": 33.34, "contact": "", "created_at": now},
         ])
+    await db.kit_components.create_index([("kit_part_id", 1), ("component_part_id", 1)], unique=True)
+    await db.kit_components.create_index("component_part_id")
     if not await db.settings.find_one({"id": "general"}):
         await db.settings.insert_one({
             "id": "general",
@@ -2227,6 +2230,7 @@ class SparePartCreate(BaseModel):
     min_stock_alert: int = 2
     location: Optional[str] = None
     notes: Optional[str] = None
+    is_kit: bool = False
 
 class SparePartUpdate(BaseModel):
     name: Optional[str] = None
@@ -2243,6 +2247,17 @@ class SparePartUpdate(BaseModel):
     min_stock_alert: Optional[int] = None
     location: Optional[str] = None
     notes: Optional[str] = None
+    is_kit: Optional[bool] = None
+
+class KitComponentIn(BaseModel):
+    component_part_id: str
+    qty_per_kit: int
+
+class KitComponentsUpdate(BaseModel):
+    components: List[KitComponentIn]
+
+class BreakKitRequest(BaseModel):
+    quantity: int = 1
 
 @api_router.get("/spare-parts")
 async def get_spare_parts(category: Optional[str] = None, low_stock: Optional[bool] = None, cu: dict = Depends(require("spare_parts", "view"))):
@@ -2285,6 +2300,7 @@ async def update_spare_part(pid: str, part: SparePartUpdate, cu: dict = Depends(
 async def delete_spare_part(pid: str, cu: dict = Depends(require("spare_parts", "delete"))):
     r = await db.spare_parts.delete_one({"id": pid})
     if r.deleted_count == 0: raise HTTPException(404, "Not found")
+    await db.kit_components.delete_many({"$or": [{"kit_part_id": pid}, {"component_part_id": pid}]})
     return {"message": "Deleted"}
 
 @api_router.post("/spare-parts/{pid}/adjust-stock")
@@ -2301,10 +2317,16 @@ async def stock_out_part(pid: str, req: PartStockOut, cu: dict = Depends(require
     p = await db.spare_parts.find_one({"id": pid}, {"_id": 0})
     if not p: raise HTTPException(404, "Not found")
     if req.quantity <= 0: raise HTTPException(400, "Quantity must be positive")
-    current_qty = p.get("quantity", 0)
-    if req.quantity > current_qty: raise HTTPException(400, f"Insufficient stock. Available: {current_qty}")
-    new_qty = current_qty - req.quantity
-    await db.spare_parts.update_one({"id": pid}, {"$set": {"quantity": new_qty}})
+    # Atomic conditional decrement (see break_kit for why) instead of the old
+    # find-then-set, so two simultaneous stock-outs can't both pass the check.
+    updated = await db.spare_parts.find_one_and_update(
+        {"id": pid, "quantity": {"$gte": req.quantity}},
+        {"$inc": {"quantity": -req.quantity}},
+        return_document=ReturnDocument.AFTER,
+    )
+    if not updated:
+        raise HTTPException(400, f"Insufficient stock. Available: {p.get('quantity', 0)}")
+    new_qty = updated["quantity"]
     txn = {
         "id": str(uuid.uuid4()), "part_id": pid, "part_name": p.get("name"),
         "type": "out", "quantity": req.quantity, "reason": req.reason,
@@ -2328,6 +2350,112 @@ async def spare_parts_summary(cu: dict = Depends(require("spare_parts", "view"))
 async def get_part_transactions(pid: str, cu: dict = Depends(require("spare_parts", "view"))):
     txns = await db.part_transactions.find({"part_id": pid}, {"_id": 0}).sort("created_at", -1).to_list(100)
     return txns
+
+# ══════════════════════════════════════════════════════════════════════
+# ── KITS / BILL OF MATERIALS ──────────────────────────────────────────
+# A spare_parts doc with is_kit=True keeps its own `quantity` (sealed kits on
+# hand). kit_components maps that kit to the component parts it breaks down
+# into, each of which also keeps its own independent `quantity` (loose stock).
+# ══════════════════════════════════════════════════════════════════════
+
+@api_router.get("/spare-parts/{pid}/kit-components")
+async def get_kit_components(pid: str, cu: dict = Depends(require("spare_parts", "view"))):
+    rows = await db.kit_components.find({"kit_part_id": pid}, {"_id": 0}).to_list(200)
+    if not rows: return []
+    comp_ids = [r["component_part_id"] for r in rows]
+    comps = await db.spare_parts.find({"id": {"$in": comp_ids}}, {"_id": 0}).to_list(200)
+    comp_map = {c["id"]: c for c in comps}
+    out = []
+    for r in rows:
+        c = comp_map.get(r["component_part_id"], {})
+        out.append({**r, "component_name": c.get("name"), "component_quantity": c.get("quantity", 0)})
+    return out
+
+@api_router.post("/spare-parts/{pid}/kit-components")
+async def set_kit_components(pid: str, body: KitComponentsUpdate, cu: dict = Depends(require("spare_parts", "edit"))):
+    kit = await db.spare_parts.find_one({"id": pid}, {"_id": 0})
+    if not kit: raise HTTPException(404, "Kit part not found")
+    comp_ids = [c.component_part_id for c in body.components]
+    if pid in comp_ids: raise HTTPException(400, "A kit cannot contain itself")
+    if len(comp_ids) != len(set(comp_ids)): raise HTTPException(400, "Duplicate component in kit")
+    if comp_ids:
+        comps = await db.spare_parts.find({"id": {"$in": comp_ids}}, {"_id": 0}).to_list(200)
+        comp_map = {c["id"]: c for c in comps}
+        for c_id in comp_ids:
+            c = comp_map.get(c_id)
+            if not c: raise HTTPException(400, f"Component part {c_id} not found")
+            if c.get("is_kit"): raise HTTPException(400, f"{c.get('name')} is itself a kit — nested kits aren't supported")
+    await db.kit_components.delete_many({"kit_part_id": pid})
+    if body.components:
+        now = datetime.now(timezone.utc).isoformat()
+        docs = [{"id": str(uuid.uuid4()), "kit_part_id": pid, "component_part_id": c.component_part_id,
+                 "qty_per_kit": c.qty_per_kit, "created_by": cu.get("username"), "created_at": now}
+                for c in body.components]
+        await db.kit_components.insert_many(docs)
+    await db.spare_parts.update_one({"id": pid}, {"$set": {"is_kit": bool(body.components)}})
+    return await get_kit_components(pid, cu)
+
+@api_router.get("/spare-parts/{pid}/containing-kits")
+async def get_containing_kits(pid: str, cu: dict = Depends(require("spare_parts", "view"))):
+    """Reverse lookup: which kits (if any) this part is a component of, with each
+    kit's current sealed-stock — used to offer 'break a kit' when loose stock runs out."""
+    rows = await db.kit_components.find({"component_part_id": pid}, {"_id": 0}).to_list(200)
+    if not rows: return []
+    kit_ids = list({r["kit_part_id"] for r in rows})
+    kits = await db.spare_parts.find({"id": {"$in": kit_ids}}, {"_id": 0}).to_list(200)
+    kit_map = {k["id"]: k for k in kits}
+    out = []
+    for r in rows:
+        k = kit_map.get(r["kit_part_id"])
+        if not k: continue
+        out.append({"kit_part_id": k["id"], "kit_name": k.get("name"), "kit_quantity": k.get("quantity", 0), "qty_per_kit": r["qty_per_kit"]})
+    return out
+
+@api_router.post("/spare-parts/{pid}/break-kit")
+async def break_kit(pid: str, req: BreakKitRequest, cu: dict = Depends(require("spare_parts", "edit"))):
+    if req.quantity <= 0: raise HTTPException(400, "Quantity must be positive")
+    kit = await db.spare_parts.find_one({"id": pid}, {"_id": 0})
+    if not kit: raise HTTPException(404, "Not found")
+    components = await db.kit_components.find({"kit_part_id": pid}, {"_id": 0}).to_list(200)
+    if not components: raise HTTPException(400, "This part has no kit components defined")
+
+    # Atomic conditional decrement — the $gte guard blocks the update entirely (rather
+    # than clamping to 0) if concurrent breaks/sales already dropped kit stock below
+    # what this request needs, closing the race window a plain find-then-update has.
+    updated_kit = await db.spare_parts.find_one_and_update(
+        {"id": pid, "quantity": {"$gte": req.quantity}},
+        {"$inc": {"quantity": -req.quantity}},
+        return_document=ReturnDocument.AFTER,
+    )
+    if not updated_kit:
+        raise HTTPException(400, f"Insufficient kit stock. Available: {kit.get('quantity', 0)}")
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    txns = [{
+        "id": str(uuid.uuid4()), "part_id": pid, "part_name": kit.get("name"),
+        "type": "out", "quantity": req.quantity, "reason": "Kit Broken",
+        "date": now_iso[:10], "job_id": None,
+        "notes": f"Broken into {len(components)} component part(s)",
+        "created_by": cu.get("username"), "created_at": now_iso,
+    }]
+    for comp in components:
+        add_qty = comp["qty_per_kit"] * req.quantity
+        comp_doc = await db.spare_parts.find_one_and_update(
+            {"id": comp["component_part_id"]},
+            {"$inc": {"quantity": add_qty}},
+            return_document=ReturnDocument.AFTER,
+        )
+        if not comp_doc: continue
+        txns.append({
+            "id": str(uuid.uuid4()), "part_id": comp["component_part_id"], "part_name": comp_doc.get("name"),
+            "type": "in", "quantity": add_qty, "reason": "From Broken Kit",
+            "date": now_iso[:10], "job_id": None,
+            "notes": f"From breaking {req.quantity}x {kit.get('name')}",
+            "created_by": cu.get("username"), "created_at": now_iso,
+        })
+    await db.part_transactions.insert_many(txns)
+    for t in txns: t.pop("_id", None)
+    return {"kit_quantity": updated_kit["quantity"], "components_updated": len(components), "transactions": txns}
 
 # ══════════════════════════════════════════════════════════════════════
 # ── WEBSITE SYNC (hamroauto.com.np) ───────────────────────────────────
