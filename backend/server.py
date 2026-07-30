@@ -1291,8 +1291,19 @@ async def update_job(jid: str, job: JobCardUpdate, cu: dict = Depends(require("j
     upd["updated_at"] = datetime.now(timezone.utc).isoformat()
 
     if "parts" in upd:
-        old_qtys = {p["part_id"]: int(p.get("quantity", 0)) for p in existing.get("parts", []) if p.get("part_id")}
-        new_qtys = {p["part_id"]: int(p.get("quantity", 0)) for p in upd["parts"] if p.get("part_id")}
+        old_parts = existing.get("parts", []) or []
+        new_parts = upd["parts"] or []
+        old_sig = {(p.get("part_id"), p.get("part_name"), int(p.get("quantity", 0))) for p in old_parts}
+        new_sig = {(p.get("part_id"), p.get("part_name"), int(p.get("quantity", 0))) for p in new_parts}
+        # A completed job that gets its parts list changed (e.g. another item added)
+        # wasn't actually finished — reopen it, unless the caller already set a status
+        # explicitly in this same request. Keeps every other field untouched.
+        if old_sig != new_sig and existing.get("status") == "completed" and "status" not in upd:
+            upd["status"] = "in_progress"
+            upd["completed_at"] = None
+
+        old_qtys = {p["part_id"]: int(p.get("quantity", 0)) for p in old_parts if p.get("part_id")}
+        new_qtys = {p["part_id"]: int(p.get("quantity", 0)) for p in new_parts if p.get("part_id")}
         diffs = {}
         part_info = {}
         for part_id in set(old_qtys) | set(new_qtys):
