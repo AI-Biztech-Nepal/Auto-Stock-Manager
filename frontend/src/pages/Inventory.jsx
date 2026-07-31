@@ -31,7 +31,7 @@ const sortStock = (a, b) => {
 
 const EMPTY = {
   brand: "", model: "", year: new Date().getFullYear(), engine_cc: 125, fuel_type: "Petrol", vehicle_type: "bike",
-  ownership_number: 1, purchase_price: "", purchase_date: "", purchase_source: "", purchase_from: "",
+  ownership_number: "", purchase_price: "", purchase_date: "", purchase_source: "", purchase_from: "",
   vendor_id: null, linked_contact_type: "vendor", linked_contact_id: null, linked_contact_name: "",
   condition: "Good", color: "", registration_number: "", selling_price: "", notes: "", status: "available",
   bluebook_status: "pending", insurance_status: "pending", tax_clearance_status: "pending", transfer_status: "pending"
@@ -161,7 +161,7 @@ export default function Inventory() {
 
   const handleSave = async (e) => {
     e.preventDefault();
-    if (!form.brand || !form.model || !form.purchase_price || !form.purchase_date || !form.purchase_source || !form.registration_number) {
+    if (!form.brand || !form.model || !form.purchase_price || !form.purchase_date || !form.purchase_source || !form.registration_number || !form.ownership_number) {
       toast.error("Please fill all required fields"); return;
     }
     setSaving(true);
