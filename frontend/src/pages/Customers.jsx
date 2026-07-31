@@ -19,6 +19,7 @@ export default function Customers() {
   // View customer detail
   const [viewCustomer, setViewCustomer] = useState(null);
   const [viewLoading, setViewLoading] = useState(false);
+  const [purchaseFilter, setPurchaseFilter] = useState("all"); // "all" | "sales"
 
   const fetchCustomers = useCallback(async () => {
     try { const r = await api.get("/customers"); setCustomers(r.data); }
@@ -39,6 +40,7 @@ export default function Customers() {
   const openView = async (c) => {
     setViewCustomer(c);
     setViewLoading(true);
+    setPurchaseFilter("all");
     try {
       const r = await api.get(`/customers/${c.id}`);
       setViewCustomer(r.data);
@@ -201,7 +203,7 @@ export default function Customers() {
 
       {viewCustomer && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[85vh] overflow-y-auto" data-testid="customer-view-modal">
+          <div className="bg-white sm:rounded-2xl shadow-2xl w-full h-full sm:h-auto sm:max-w-2xl sm:max-h-[90vh] overflow-y-auto" data-testid="customer-view-modal">
             <div className="flex items-center justify-between p-5 border-b border-slate-100">
               <div>
                 <h2 className="text-lg font-bold text-slate-900">{viewCustomer.name}</h2>
@@ -219,8 +221,22 @@ export default function Customers() {
                   <h3 className="text-sm font-bold text-slate-900" style={{ fontFamily: "Manrope" }}>Purchases</h3>
                   {viewCustomer.sales && (
                     <>
-                      <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-blue-100 text-blue-700" data-testid="customer-sales-tag">Sales: {viewCustomer.sales.filter(s => !s.returned).length}</span>
-                      <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-slate-100 text-slate-600" data-testid="customer-purchases-tag">Purchases: {viewCustomer.sales.length}</span>
+                      <button
+                        type="button"
+                        onClick={() => setPurchaseFilter("sales")}
+                        className={`px-2 py-0.5 rounded-full text-xs font-semibold transition-colors ${purchaseFilter === "sales" ? "bg-blue-600 text-white" : "bg-blue-100 text-blue-700 hover:bg-blue-200"}`}
+                        data-testid="customer-sales-tag"
+                      >
+                        Sales: {viewCustomer.sales.filter(s => !s.returned).length}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setPurchaseFilter("all")}
+                        className={`px-2 py-0.5 rounded-full text-xs font-semibold transition-colors ${purchaseFilter === "all" ? "bg-slate-700 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}
+                        data-testid="customer-purchases-tag"
+                      >
+                        Purchases: {viewCustomer.sales.length}
+                      </button>
                     </>
                   )}
                 </div>
@@ -228,7 +244,11 @@ export default function Customers() {
                   <div className="flex items-center justify-center h-24"><div className="animate-spin w-6 h-6 border-4 border-blue-600 border-t-transparent rounded-full" /></div>
                 ) : !viewCustomer.sales || viewCustomer.sales.length === 0 ? (
                   <div className="text-center py-8 text-slate-400 text-sm border border-dashed border-slate-200 rounded-xl">No purchases yet</div>
-                ) : (
+                ) : (() => {
+                  const displayedSales = purchaseFilter === "sales" ? viewCustomer.sales.filter(s => !s.returned) : viewCustomer.sales;
+                  return displayedSales.length === 0 ? (
+                    <div className="text-center py-8 text-slate-400 text-sm border border-dashed border-slate-200 rounded-xl">No active sales — this customer's purchases were returned</div>
+                  ) : (
                   <div className="border border-slate-200 rounded-lg overflow-hidden">
                     <div className="overflow-x-auto">
                       <table className="w-full text-xs">
@@ -240,7 +260,7 @@ export default function Customers() {
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100 bg-white">
-                          {viewCustomer.sales.map(s => (
+                          {displayedSales.map(s => (
                             <tr
                               key={s.id}
                               onClick={() => navigate(`/sales/${s.id}`)}
@@ -277,7 +297,8 @@ export default function Customers() {
                       </table>
                     </div>
                   </div>
-                )}
+                  );
+                })()}
               </div>
             </div>
           </div>
