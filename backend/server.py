@@ -446,7 +446,7 @@ class VehicleCreate(BaseModel):
     year: int; engine_cc: int
     fuel_type: str = "Petrol"
     vehicle_type: str = "bike"  # "bike" | "scooter" — drives hamroauto.com.np's type filter
-    ownership_number: int  # no default — number of hands can't be assumed without the bluebook
+    ownership_number: Optional[int] = None  # may not be known yet at initial stock entry (bluebook not on hand) — filled in later via edit
     chassis_number: Optional[str] = None
     engine_number: Optional[str] = None
     kilometer_run: Optional[int] = None

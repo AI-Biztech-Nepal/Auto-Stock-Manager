@@ -184,7 +184,7 @@ export default function Inventory() {
 
   const handleSave = async (e) => {
     e.preventDefault();
-    if (!form.brand || !form.model || !form.purchase_price || !form.purchase_date || !form.purchase_source || !form.registration_number || !form.ownership_number) {
+    if (!form.brand || !form.model || !form.purchase_price || !form.purchase_date || !form.purchase_source || !form.registration_number) {
       toast.error("Please fill all required fields"); return;
     }
     setSaving(true);
@@ -195,7 +195,7 @@ export default function Inventory() {
         selling_price: form.selling_price ? Number(form.selling_price) : null,
         year: Number(form.year),
         engine_cc: Number(form.engine_cc),
-        ownership_number: Number(form.ownership_number)
+        ownership_number: form.ownership_number ? Number(form.ownership_number) : null
       });
       if (photos.length > 0) {
         const results = await Promise.allSettled(photos.map(p => {

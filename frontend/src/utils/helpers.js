@@ -46,6 +46,7 @@ const ordinal = (n) => `${n}${["st", "nd", "rd"][n - 1] || "th"}`;
 export const TRANSCRIPT_BASE = 90;
 
 export const formatOwnership = (n) => {
+  if (n === null || n === undefined || n === "") return "—";
   if (n > TRANSCRIPT_BASE) return `${ordinal(n - TRANSCRIPT_BASE)} Transcript`;
   return `${ordinal(n)} Owner`;
 };

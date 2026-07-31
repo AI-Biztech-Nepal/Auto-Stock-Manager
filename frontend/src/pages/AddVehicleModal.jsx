@@ -86,9 +86,9 @@ export function AddVehicleModal({ form, setForm, onClose, onSubmit, saving, phot
                 <option value="scooter">Scooter</option>
               </select>
             </Field>
-            <Field label="Ownership Number" required>
+            <Field label="Ownership Number">
               <select data-testid="ownership-select" value={form.ownership_number} onChange={e => setForm({ ...form, ownership_number: e.target.value })} className={sel}>
-                <option value="">Select Number of Hand</option>
+                <option value="">Select Number of Hand (optional)</option>
                 {OWNERSHIP_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
               </select>
             </Field>
