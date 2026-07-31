@@ -169,9 +169,24 @@ export default function JobCards() {
 
   const nextCouponNo = () => Math.max(0, ...jobs.map(j => Number(j.coupon_no) || 0)) + 1;
 
-  const openModal = () => { setEditingJob(null); setForm({ ...EMPTY_FORM, coupon_no: String(nextCouponNo()) }); setJobParts([]); setPartSearch(""); setExternalPart({ ...EMPTY_EXTERNAL_PART }); setShowModal(true); };
+  // Spare parts (including each Set's stock_type/set_components) are only fetched once on page
+  // load — if a Set was created or edited in another tab after that, this page's copy goes stale
+  // and the "is this a set?" check below silently falls back to treating it as a plain part. Pull
+  // a fresh copy every time the Add/Edit Job modal opens so that check is always accurate.
+  const refreshSpareParts = async () => {
+    try {
+      const r = await api.get("/spare-parts");
+      setSpareParts(r.data);
+      return r.data;
+    } catch { return spareParts; }
+  };
 
-  const openEditModal = (job) => {
+  const openModal = () => {
+    setEditingJob(null); setForm({ ...EMPTY_FORM, coupon_no: String(nextCouponNo()) }); setJobParts([]); setPartSearch(""); setExternalPart({ ...EMPTY_EXTERNAL_PART }); setShowModal(true);
+    refreshSpareParts();
+  };
+
+  const openEditModal = async (job) => {
     setEditingJob(job);
     setForm({
       vehicle_id: job.vehicle_id || "",
@@ -183,9 +198,10 @@ export default function JobCards() {
       coupon_no: job.coupon_no != null ? String(job.coupon_no) : "",
       job_date: job.job_date || "",
     });
+    const freshParts = await refreshSpareParts();
     setJobParts((job.parts || []).map(p => {
       const isExternal = !!p.external || !p.part_id;
-      const stock = !isExternal ? spareParts.find(sp => sp.id === p.part_id) : null;
+      const stock = !isExternal ? freshParts.find(sp => sp.id === p.part_id) : null;
       const component = stock && p.component_name ? (stock.set_components || []).find(c => c.name === p.component_name) : null;
       // Add back what this job already has reserved so re-editing isn't capped below its own current usage.
       const currentStock = p.component_name ? (component?.stock || 0) : (stock?.quantity || 0);
