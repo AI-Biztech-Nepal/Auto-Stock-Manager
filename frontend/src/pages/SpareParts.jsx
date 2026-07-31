@@ -123,7 +123,7 @@ const STOCK_TYPES = [
 ];
 const EMPTY_USE = { quantity: 1, reason: "Sale", notes: "" }; const EMPTY_BULK_ROW = { part_number: "", name: "", qty: "1", unit: "PCS", rate: "", discount: "", selling_price: "", min_stock_alert: "2" };
 const EMPTY_KIT_ROW = { component_part_id: "", qty_per_kit: 1 };
-const EMPTY_SET_ROW = { name: "", stock: 1 };
+const EMPTY_SET_ROW = { name: "", stock: 1, rate: "" };
 const netRate = (r) => { const rate = Number(r.rate) || 0; const discount = Number(r.discount) || 0; return discount ? rate - (rate * discount / 100) : rate; };
 
 export default function SpareParts() {
@@ -202,7 +202,7 @@ export default function SpareParts() {
     const next = { ...p, unit_cost: p.unit_cost || "", selling_price: p.selling_price || "", vendor_id: p.vendor_id || "", stock_type };
     setForm(next); setInitialForm(next);
     setEditId(p.id); setShowAddVendor(false); setNewVendor({ name: "", phone: "", address: "" }); setKitRows([]);
-    setSetRows(stock_type === "set" ? (p.set_components || []).map(c => ({ name: c.name, stock: c.stock })) : []);
+    setSetRows(stock_type === "set" ? (p.set_components || []).map(c => ({ name: c.name, stock: c.stock, rate: c.rate || "" })) : []);
     setShowModal(true);
     if (p.is_kit) {
       try {
@@ -232,6 +232,11 @@ export default function SpareParts() {
     const validSetRows = setRows.filter(r => r.name.trim() && Number(r.stock) >= 0);
     if (form.stock_type === "kit" && validKitRows.length === 0) { toast.error("Add at least one component for this kit"); return; }
     if (form.stock_type === "set" && validSetRows.length === 0) { toast.error("Add at least one component for this set"); return; }
+    const setRateTotal = validSetRows.reduce((s, r) => s + (Number(r.rate) || 0), 0);
+    if (form.stock_type === "set" && setRateTotal > (Number(form.unit_cost) || 0)) {
+      toast.error(`Component rates add up to ${formatNPR(setRateTotal)}, which is more than the set's own rate (${formatNPR(Number(form.unit_cost) || 0)})`);
+      return;
+    }
     setSaving(true);
     try {
       const payload = {
@@ -243,7 +248,7 @@ export default function SpareParts() {
         vendor_id: form.vendor_id || null,
         supplier: null, // clear legacy text field on save
         is_kit: form.stock_type === "kit",
-        set_components: form.stock_type === "set" ? validSetRows.map(r => ({ name: r.name.trim(), stock: Number(r.stock) || 0 })) : [],
+        set_components: form.stock_type === "set" ? validSetRows.map(r => ({ name: r.name.trim(), stock: Number(r.stock) || 0, rate: Number(r.rate) || 0 })) : [],
       };
       let partId = editId;
       if (editId) { await api.put(`/spare-parts/${editId}`, payload); toast.success("Updated!"); }
@@ -729,12 +734,31 @@ export default function SpareParts() {
                           className="w-20 h-9 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                           data-testid={`set-row-stock-${idx}`}
                         />
+                        <input
+                          type="text" inputMode="numeric"
+                          value={row.rate}
+                          onChange={e => updateSetRow(idx, "rate", e.target.value)}
+                          placeholder="Rate"
+                          className="w-20 h-9 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          data-testid={`set-row-rate-${idx}`}
+                        />
                         <button type="button" onClick={() => removeSetRow(idx)} className="p-1.5 hover:bg-red-50 rounded-lg shrink-0"><Trash2 size={13} className="text-red-400" /></button>
                       </div>
                     ))}
                     <button type="button" onClick={addSetRow} className="flex items-center gap-1.5 text-xs text-blue-600 hover:bg-blue-50 px-2.5 py-1.5 rounded-lg font-medium" data-testid="add-set-row-btn">
                       <Plus size={12} /> Add Component
                     </button>
+                    {setRows.length > 0 && (() => {
+                      const setRatesTotal = setRows.reduce((s, r) => s + (Number(r.rate) || 0), 0);
+                      const setUnitCost = Number(form.unit_cost) || 0;
+                      const overBudget = setRatesTotal > setUnitCost;
+                      return (
+                        <div className={`flex items-center justify-between text-xs font-medium px-1 pt-1 ${overBudget ? "text-red-600" : "text-slate-500"}`} data-testid="set-rate-total">
+                          <span>Components total: {formatNPR(setRatesTotal)}</span>
+                          <span>{overBudget ? "exceeds" : "of"} set's own rate: {formatNPR(setUnitCost)}</span>
+                        </div>
+                      );
+                    })()}
                   </div>
                 </div>
               )}

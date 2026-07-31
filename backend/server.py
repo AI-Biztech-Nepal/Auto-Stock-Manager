@@ -2287,6 +2287,7 @@ async def delete_legal_document(vid: str, doc_id: str, cu: dict = Depends(requir
 class SetComponentIn(BaseModel):
     name: str
     stock: int = 0  # independently tracked, decremented when this specific item (not the whole set) is used/sold
+    rate: float = 0  # this item's own price; sum across all components must not exceed the set's own unit_cost
 
 class SparePartCreate(BaseModel):
     name: str
@@ -2359,9 +2360,16 @@ async def get_spare_parts(category: Optional[str] = None, low_stock: Optional[bo
         p["vendor_name"] = vendor_map.get(p.get("vendor_id", ""))
     return parts
 
+def _check_set_component_rates(unit_cost: float, set_components: list):
+    if not set_components: return
+    total = round(sum(c.get("rate", 0) for c in set_components), 2)
+    if total > unit_cost:
+        raise HTTPException(400, f"Component rates add up to NPR {total}, which is more than the set's own rate (NPR {unit_cost})")
+
 @api_router.post("/spare-parts")
 async def create_spare_part(part: SparePartCreate, cu: dict = Depends(require("spare_parts", "create"))):
     doc = {"id": str(uuid.uuid4()), **part.dict(), "created_at": datetime.now(timezone.utc).isoformat()}
+    _check_set_component_rates(doc.get("unit_cost", 0), doc.get("set_components", []))
     if not doc.get("entry_date"): doc["entry_date"] = datetime.now(timezone.utc).date().isoformat()
     await db.spare_parts.insert_one(doc)
     doc.pop("_id", None)
@@ -2371,6 +2379,13 @@ async def create_spare_part(part: SparePartCreate, cu: dict = Depends(require("s
 async def update_spare_part(pid: str, part: SparePartUpdate, cu: dict = Depends(require("spare_parts", "edit"))):
     upd = {k: v for k, v in part.dict().items() if v is not None}
     if not upd: raise HTTPException(400, "No fields to update")
+    if "set_components" in upd or "unit_cost" in upd:
+        existing = await db.spare_parts.find_one({"id": pid}, {"_id": 0, "unit_cost": 1, "set_components": 1})
+        if not existing: raise HTTPException(404, "Not found")
+        _check_set_component_rates(
+            upd.get("unit_cost", existing.get("unit_cost", 0)),
+            upd.get("set_components", existing.get("set_components", [])),
+        )
     upd["updated_at"] = datetime.now(timezone.utc).isoformat()
     r = await db.spare_parts.update_one({"id": pid}, {"$set": upd})
     if r.matched_count == 0: raise HTTPException(404, "Not found")
