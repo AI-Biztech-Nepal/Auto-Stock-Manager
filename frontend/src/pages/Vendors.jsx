@@ -107,18 +107,20 @@ export default function Vendors() {
         </div>
       </div>
 
-      {/* Search */}
+      {/* Search — sticky so it stays reachable while scrolling a long list */}
       {!loading && vendors.length > 0 && (
-        <div className="relative">
-          <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-          <input
-            type="text"
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            placeholder="Search vendors by name, phone, or address..."
-            className="w-full h-10 pl-9 pr-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
-            data-testid="vendor-search-input"
-          />
+        <div className="sticky top-0 z-20 bg-slate-50 py-2 -my-2">
+          <div className="relative">
+            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input
+              type="text"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Search vendors by name, phone, or address..."
+              className="w-full h-10 pl-9 pr-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+              data-testid="vendor-search-input"
+            />
+          </div>
         </div>
       )}
 

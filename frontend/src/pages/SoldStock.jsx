@@ -91,7 +91,8 @@ export default function SoldStock() {
         </button>
       </div>
 
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
+      {/* Search — sticky so it stays reachable while scrolling a long list */}
+      <div className="sticky top-0 z-20 bg-white rounded-xl border border-slate-200 shadow-sm p-4">
         <div className="relative max-w-sm">
           <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
           <input
