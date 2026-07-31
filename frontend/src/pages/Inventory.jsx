@@ -67,17 +67,24 @@ export default function Inventory() {
   // vehicle logged twice by mistake, or a typo that collided with another plate. Left unnoticed
   // this silently inflates the on-screen vehicle count above what's physically in stock (or the
   // reverse: a real vehicle never got its own record because it was saved under a duplicate).
+  // Compared with spaces/dashes/slashes/case stripped out, so "BA 2 PA 1234" and "BA-2-PA-1234"
+  // are still caught as the same plate even though they don't match as exact strings.
   const duplicateRegGroups = useMemo(() => {
     const byReg = {};
     for (const v of vehicles) {
-      const reg = v.registration_number?.trim().toUpperCase();
-      if (!reg) continue;
-      (byReg[reg] ??= []).push(v);
+      const norm = v.registration_number?.trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+      if (!norm) continue;
+      (byReg[norm] ??= []).push(v);
     }
-    return Object.entries(byReg)
-      .filter(([, list]) => list.length > 1)
-      .map(([reg, list]) => ({ reg, vehicles: list }));
+    return Object.values(byReg).filter(list => list.length > 1);
   }, [vehicles]);
+
+  // Vehicles with no registration number at all can't be checked for duplicates above, but
+  // still occupy a slot in the stock count — worth a quick look when a count won't reconcile.
+  const noRegVehicles = useMemo(
+    () => vehicles.filter(v => v.status !== "sold" && !v.registration_number?.trim()),
+    [vehicles]
+  );
 
   const unpricedVisible = vehicles.filter(v => !v.selling_price && !["sold", "unlisted", "hidden", "scrap", "in_repair"].includes(v.status));
   const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
@@ -265,23 +272,52 @@ export default function Inventory() {
               {duplicateRegGroups.length} registration number{duplicateRegGroups.length !== 1 ? "s" : ""} used on more than one vehicle
             </p>
             <p className="text-xs text-red-600 mt-0.5">
-              Same vehicle logged twice, or a typo reusing another plate — this is a likely cause of physical stock not matching what's recorded. Review each pair below.
+              Same vehicle logged twice, or a typo reusing another plate — a likely cause of the stock count not matching what's on hand. Matched even when spacing/dashes/case differ, so a plate typed two different ways still shows up here. Review each pair below.
             </p>
             <div className="mt-2.5 space-y-2">
-              {duplicateRegGroups.map(({ reg, vehicles: vs }) => (
-                <div key={reg} className="flex items-center gap-2 flex-wrap">
-                  <span className="text-xs font-mono font-semibold text-red-800 bg-red-100 px-1.5 py-0.5 rounded">{reg}</span>
+              {duplicateRegGroups.map(vs => (
+                <div key={vs.map(v => v.id).join("-")} className="flex items-center gap-2 flex-wrap">
                   {vs.map(v => (
                     <button
                       key={v.id}
                       onClick={() => setSelectedVehicleId(v.id)}
                       data-testid="duplicate-reg-vehicle"
-                      className="flex items-center gap-1 px-2 py-1 rounded-lg bg-white border border-red-200 text-xs font-medium text-red-700 hover:bg-red-100 transition-colors"
+                      className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-white border border-red-200 text-xs font-medium text-red-700 hover:bg-red-100 transition-colors"
                     >
+                      <span className="font-mono font-semibold">{v.registration_number}</span>
+                      <span className="text-red-400">·</span>
                       {v.brand} {v.model} · {getStatusStyle(v.status).label}
                     </button>
                   ))}
                 </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Missing Registration Number Alert — these can't be checked for duplicates above,
+          but each still occupies a slot in the active stock count. */}
+      {canManageStock && noRegVehicles.length > 0 && (
+        <div className="flex items-start gap-3 px-4 py-3 rounded-xl border border-amber-200 bg-amber-50" data-testid="no-reg-banner">
+          <AlertTriangle size={18} className="text-amber-600 mt-0.5 shrink-0" />
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-amber-800">
+              {noRegVehicles.length} vehicle{noRegVehicles.length !== 1 ? "s" : ""} in active stock with no registration number
+            </p>
+            <p className="text-xs text-amber-700 mt-0.5">
+              Can't be checked against the duplicate list above — worth a manual check if your stock count won't reconcile with paper records.
+            </p>
+            <div className="mt-2.5 flex flex-wrap gap-2">
+              {noRegVehicles.map(v => (
+                <button
+                  key={v.id}
+                  onClick={() => setSelectedVehicleId(v.id)}
+                  data-testid="no-reg-vehicle"
+                  className="flex items-center gap-1 px-2 py-1 rounded-lg bg-white border border-amber-200 text-xs font-medium text-amber-800 hover:bg-amber-100 transition-colors"
+                >
+                  {v.brand} {v.model} · {getStatusStyle(v.status).label}
+                </button>
               ))}
             </div>
           </div>
