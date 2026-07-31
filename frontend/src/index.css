@@ -50,6 +50,27 @@ h1, h2, h3, h4, h5, h6 {
 .sidebar-nav::-webkit-scrollbar-track { background: transparent; }
 .sidebar-nav::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 2px; }
 
+/* Always-visible sliders for every scrollable area (tables, modals, panels) so
+   horizontal/vertical overflow is obvious instead of relying on OS auto-hide bars. */
+.overflow-x-auto, .overflow-y-auto, .overflow-auto {
+  scrollbar-width: thin;
+  scrollbar-color: #CBD5E1 transparent;
+}
+.overflow-x-auto::-webkit-scrollbar, .overflow-y-auto::-webkit-scrollbar, .overflow-auto::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.overflow-x-auto::-webkit-scrollbar-track, .overflow-y-auto::-webkit-scrollbar-track, .overflow-auto::-webkit-scrollbar-track {
+  background: transparent;
+}
+.overflow-x-auto::-webkit-scrollbar-thumb, .overflow-y-auto::-webkit-scrollbar-thumb, .overflow-auto::-webkit-scrollbar-thumb {
+  background: #CBD5E1;
+  border-radius: 4px;
+}
+.overflow-x-auto::-webkit-scrollbar-thumb:hover, .overflow-y-auto::-webkit-scrollbar-thumb:hover, .overflow-auto::-webkit-scrollbar-thumb:hover {
+  background: #94A3B8;
+}
+
 /* Table hover */
 .table-row-hover:hover { background: #F8FAFC; }
 
