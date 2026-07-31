@@ -1242,6 +1242,27 @@ async def get_jobs(status: Optional[str] = None, vehicle_id: Optional[str] = Non
     if vehicle_id: q["vehicle_id"] = vehicle_id
     return await db.job_cards.find(q, {"_id": 0}).sort("created_at", -1).to_list(1000)
 
+async def _job_part_current_stock(part_id: str, component_name: Optional[str]):
+    """Looks up the current usable stock for a job-card part row — either a plain part's own
+    `quantity`, or (when component_name is set) one named item inside a Set's checklist, which
+    is tracked independently of the set's own whole-set quantity. Returns (current, label) or
+    (None, None) if the part/component no longer exists."""
+    if component_name:
+        pp = await db.spare_parts.find_one({"id": part_id}, {"_id": 0, "name": 1, "set_components": 1})
+        if not pp: return None, None
+        comp = next((c for c in pp.get("set_components", []) if c.get("name") == component_name), None)
+        if not comp: return None, None
+        return comp.get("stock", 0), f"{pp.get('name')} — {component_name}"
+    pp = await db.spare_parts.find_one({"id": part_id}, {"_id": 0, "name": 1, "quantity": 1})
+    if not pp: return None, None
+    return pp.get("quantity", 0), pp.get("name")
+
+async def _job_part_set_stock(part_id: str, component_name: Optional[str], new_value: int):
+    if component_name:
+        await db.spare_parts.update_one({"id": part_id, "set_components.name": component_name}, {"$set": {"set_components.$.stock": new_value}})
+    else:
+        await db.spare_parts.update_one({"id": part_id}, {"$set": {"quantity": new_value}})
+
 @api_router.post("/jobs")
 async def create_job(job: JobCardCreate, cu: dict = Depends(require("jobs", "create"))):
     count = await db.job_cards.count_documents({})
@@ -1269,17 +1290,17 @@ async def create_job(job: JobCardCreate, cu: dict = Depends(require("jobs", "cre
         jc["vehicle_year"] = v.get("year"); jc["registration_number"] = v.get("registration_number")
     await db.job_cards.insert_one(jc)
     jc.pop("_id", None)
-    # Deduct parts from spare parts inventory and log transactions
+    # Deduct parts (or, for a Set, one specific component within it) from spare parts inventory and log transactions
     for part in jc.get("parts", []):
         part_id = part.get("part_id")
+        component_name = part.get("component_name")
         qty = int(part.get("quantity", 0))
         if part_id and qty > 0:
-            pp = await db.spare_parts.find_one({"id": part_id}, {"_id": 0, "quantity": 1, "name": 1})
-            if pp:
-                new_qty = max(0, pp.get("quantity", 0) - qty)
-                await db.spare_parts.update_one({"id": part_id}, {"$set": {"quantity": new_qty}})
+            current, part_label = await _job_part_current_stock(part_id, component_name)
+            if current is not None:
+                await _job_part_set_stock(part_id, component_name, max(0, current - qty))
                 txn = {
-                    "id": str(uuid.uuid4()), "part_id": part_id, "part_name": pp.get("name"),
+                    "id": str(uuid.uuid4()), "part_id": part_id, "part_name": part_label,
                     "type": "out", "quantity": qty, "reason": "Used in Job Card",
                     "date": datetime.now(timezone.utc).isoformat()[:10],
                     "job_id": jc["id"], "notes": f"Job {jc['job_number']}",
@@ -1309,24 +1330,37 @@ async def update_job(jid: str, job: JobCardUpdate, cu: dict = Depends(require("j
             upd["status"] = "in_progress"
             upd["completed_at"] = None
 
-        old_qtys = {p["part_id"]: int(p.get("quantity", 0)) for p in old_parts if p.get("part_id")}
-        new_qtys = {p["part_id"]: int(p.get("quantity", 0)) for p in new_parts if p.get("part_id")}
+        # Keyed by (part_id, component_name) — a plain part's key has component_name=None, a
+        # specific item used out of a Set is keyed separately per item so two different items
+        # from the same set (or a component alongside the same set's other components) each
+        # diff independently instead of colliding on a shared part_id.
+        old_qtys, new_qtys = {}, {}
+        for p in old_parts:
+            if p.get("part_id"):
+                key = (p["part_id"], p.get("component_name"))
+                old_qtys[key] = old_qtys.get(key, 0) + int(p.get("quantity", 0))
+        for p in new_parts:
+            if p.get("part_id"):
+                key = (p["part_id"], p.get("component_name"))
+                new_qtys[key] = new_qtys.get(key, 0) + int(p.get("quantity", 0))
         diffs = {}
-        part_info = {}
-        for part_id in set(old_qtys) | set(new_qtys):
-            diff = new_qtys.get(part_id, 0) - old_qtys.get(part_id, 0)
+        stock_info = {}
+        for key in set(old_qtys) | set(new_qtys):
+            diff = new_qtys.get(key, 0) - old_qtys.get(key, 0)
             if diff == 0: continue
-            pp = await db.spare_parts.find_one({"id": part_id}, {"_id": 0, "quantity": 1, "name": 1})
-            if not pp: continue
-            if diff > 0 and pp.get("quantity", 0) < diff:
-                raise HTTPException(400, f"Not enough stock for {pp.get('name')}: only {pp.get('quantity', 0)} left")
-            diffs[part_id] = diff
-            part_info[part_id] = pp
-        for part_id, diff in diffs.items():
-            pp = part_info[part_id]
-            await db.spare_parts.update_one({"id": part_id}, {"$set": {"quantity": max(0, pp.get("quantity", 0) - diff)}})
+            part_id, component_name = key
+            current, part_label = await _job_part_current_stock(part_id, component_name)
+            if current is None: continue
+            if diff > 0 and current < diff:
+                raise HTTPException(400, f"Not enough stock for {part_label}: only {current} left")
+            diffs[key] = diff
+            stock_info[key] = (current, part_label)
+        for key, diff in diffs.items():
+            part_id, component_name = key
+            current, part_label = stock_info[key]
+            await _job_part_set_stock(part_id, component_name, max(0, current - diff))
             txn = {
-                "id": str(uuid.uuid4()), "part_id": part_id, "part_name": pp.get("name"),
+                "id": str(uuid.uuid4()), "part_id": part_id, "part_name": part_label,
                 "type": "out" if diff > 0 else "in", "quantity": abs(diff),
                 "reason": "Used in Job Card" if diff > 0 else "Removed from Job Card",
                 "date": datetime.now(timezone.utc).date().isoformat(),
@@ -2252,7 +2286,7 @@ async def delete_legal_document(vid: str, doc_id: str, cu: dict = Depends(requir
 # ══════════════════════════════════════════════════════════════════════
 class SetComponentIn(BaseModel):
     name: str
-    qty: int = 1
+    stock: int = 0  # independently tracked, decremented when this specific item (not the whole set) is used/sold
 
 class SparePartCreate(BaseModel):
     name: str
@@ -2271,9 +2305,10 @@ class SparePartCreate(BaseModel):
     notes: Optional[str] = None
     is_kit: bool = False
     stock_type: str = "singular"  # "singular" | "set" | "kit" — purely descriptive label; is_kit still drives all BOM/breakdown logic below and is only true for "kit"
-    # "Set" components are a free-text checklist (e.g. individual stickers in a sticker set) —
-    # unlike kit components they aren't links to other spare_parts rows with their own tracked
-    # stock, so they're stored inline here rather than through the kit_components collection/API.
+    # "Set" components are a lightweight named stock count (e.g. individual stickers in a sticker
+    # set) — unlike kit components they aren't links to other spare_parts rows, so they're stored
+    # inline here rather than through the kit_components collection/API. This still lets a single
+    # item be used/sold out of the set without touching the set's own (whole-set) `quantity`.
     set_components: List[SetComponentIn] = []
 
 class SparePartUpdate(BaseModel):
@@ -2383,6 +2418,43 @@ async def stock_out_part(pid: str, req: PartStockOut, cu: dict = Depends(require
     await db.part_transactions.insert_one(txn)
     txn.pop("_id", None)
     return {"quantity": new_qty, "transaction": txn}
+
+class SetComponentStockOut(BaseModel):
+    component_name: str
+    quantity: int
+    reason: str
+    date: Optional[str] = None
+    job_id: Optional[str] = None
+    notes: Optional[str] = None
+
+@api_router.post("/spare-parts/{pid}/set-components/stock-out")
+async def stock_out_set_component(pid: str, req: SetComponentStockOut, cu: dict = Depends(require("spare_parts", "edit"))):
+    """Deducts from a single named item inside a Set's component checklist, independently of
+    the set's own (whole-set) `quantity` — lets one sticker/item be used without touching the
+    count of complete sets on hand."""
+    p = await db.spare_parts.find_one({"id": pid}, {"_id": 0})
+    if not p: raise HTTPException(404, "Not found")
+    if req.quantity <= 0: raise HTTPException(400, "Quantity must be positive")
+    comp = next((c for c in p.get("set_components", []) if c.get("name") == req.component_name), None)
+    if not comp: raise HTTPException(404, f"Component '{req.component_name}' not found in this set")
+    updated = await db.spare_parts.find_one_and_update(
+        {"id": pid, "set_components.name": req.component_name, "set_components.stock": {"$gte": req.quantity}},
+        {"$inc": {"set_components.$.stock": -req.quantity}},
+        return_document=ReturnDocument.AFTER,
+    )
+    if not updated:
+        raise HTTPException(400, f"Insufficient stock. Available: {comp.get('stock', 0)}")
+    updated_comp = next(c for c in updated["set_components"] if c["name"] == req.component_name)
+    txn = {
+        "id": str(uuid.uuid4()), "part_id": pid, "part_name": f"{p.get('name')} — {req.component_name}",
+        "type": "out", "quantity": req.quantity, "reason": req.reason,
+        "date": req.date or datetime.now(timezone.utc).date().isoformat(),
+        "job_id": req.job_id, "notes": req.notes,
+        "created_by": cu.get("username"), "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.part_transactions.insert_one(txn)
+    txn.pop("_id", None)
+    return {"component": updated_comp, "transaction": txn}
 
 @api_router.get("/spare-parts/summary")
 async def spare_parts_summary(cu: dict = Depends(require("spare_parts", "view"))):

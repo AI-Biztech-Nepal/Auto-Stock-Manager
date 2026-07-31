@@ -123,7 +123,7 @@ const STOCK_TYPES = [
 ];
 const EMPTY_USE = { quantity: 1, reason: "Sale", notes: "" }; const EMPTY_BULK_ROW = { part_number: "", name: "", qty: "1", unit: "PCS", rate: "", discount: "", selling_price: "", min_stock_alert: "2" };
 const EMPTY_KIT_ROW = { component_part_id: "", qty_per_kit: 1 };
-const EMPTY_SET_ROW = { name: "", qty: 1 };
+const EMPTY_SET_ROW = { name: "", stock: 1 };
 const netRate = (r) => { const rate = Number(r.rate) || 0; const discount = Number(r.discount) || 0; return discount ? rate - (rate * discount / 100) : rate; };
 
 export default function SpareParts() {
@@ -202,7 +202,7 @@ export default function SpareParts() {
     const next = { ...p, unit_cost: p.unit_cost || "", selling_price: p.selling_price || "", vendor_id: p.vendor_id || "", stock_type };
     setForm(next); setInitialForm(next);
     setEditId(p.id); setShowAddVendor(false); setNewVendor({ name: "", phone: "", address: "" }); setKitRows([]);
-    setSetRows(stock_type === "set" ? (p.set_components || []).map(c => ({ name: c.name, qty: c.qty })) : []);
+    setSetRows(stock_type === "set" ? (p.set_components || []).map(c => ({ name: c.name, stock: c.stock })) : []);
     setShowModal(true);
     if (p.is_kit) {
       try {
@@ -229,7 +229,7 @@ export default function SpareParts() {
     e.preventDefault();
     if (!form.name) { toast.error("Name is required"); return; }
     const validKitRows = kitRows.filter(r => r.component_part_id && Number(r.qty_per_kit) > 0);
-    const validSetRows = setRows.filter(r => r.name.trim() && Number(r.qty) > 0);
+    const validSetRows = setRows.filter(r => r.name.trim() && Number(r.stock) >= 0);
     if (form.stock_type === "kit" && validKitRows.length === 0) { toast.error("Add at least one component for this kit"); return; }
     if (form.stock_type === "set" && validSetRows.length === 0) { toast.error("Add at least one component for this set"); return; }
     setSaving(true);
@@ -243,7 +243,7 @@ export default function SpareParts() {
         vendor_id: form.vendor_id || null,
         supplier: null, // clear legacy text field on save
         is_kit: form.stock_type === "kit",
-        set_components: form.stock_type === "set" ? validSetRows.map(r => ({ name: r.name.trim(), qty: Number(r.qty) })) : [],
+        set_components: form.stock_type === "set" ? validSetRows.map(r => ({ name: r.name.trim(), stock: Number(r.stock) || 0 })) : [],
       };
       let partId = editId;
       if (editId) { await api.put(`/spare-parts/${editId}`, payload); toast.success("Updated!"); }
@@ -328,6 +328,21 @@ export default function SpareParts() {
       setUseSaving(true);
       try {
         await doStockOut(comp.component_part_id, comp.component_name, qty, useForm.reason, useForm.notes);
+        setShowUseModal(false);
+      } catch (err) { toast.error(err.response?.data?.detail || "Error"); }
+      finally { setUseSaving(false); }
+      return;
+    }
+
+    if (usePart.stock_type === "set" && issueMode === "individual") {
+      const comp = (usePart.set_components || []).find(c => c.name === issueComponentId);
+      if (!comp) { toast.error("Pick which item to issue"); return; }
+      if (qty > comp.stock) { toast.error(`Only ${comp.stock} of ${comp.name} in stock`); return; }
+      setUseSaving(true);
+      try {
+        await api.post(`/spare-parts/${usePart.id}/set-components/stock-out`, { component_name: comp.name, quantity: qty, reason: useForm.reason, notes: useForm.notes });
+        toast.success(`${qty} unit(s) of ${comp.name} marked as "${useForm.reason}"`);
+        fetchAll();
         setShowUseModal(false);
       } catch (err) { toast.error(err.response?.data?.detail || "Error"); }
       finally { setUseSaving(false); }
@@ -695,7 +710,7 @@ export default function SpareParts() {
                     <Boxes size={14} className="text-indigo-500" /> Set Components
                   </p>
                   <div className="mt-3 space-y-2">
-                    <p className="text-xs text-slate-500">The individual items this set is made up of (e.g. the separate stickers in a sticker set). Just a checklist — these aren't tracked as their own inventory items, only the set's own stock (above) is.</p>
+                    <p className="text-xs text-slate-500">The individual items this set is made up of (e.g. the separate stickers in a sticker set), each with its own stock count. Using one item in a Job Card or Use/Sell deducts only that item — not the whole set.</p>
                     {setRows.map((row, idx) => (
                       <div key={idx} className="flex items-center gap-2">
                         <input
@@ -708,10 +723,11 @@ export default function SpareParts() {
                         />
                         <input
                           type="text" inputMode="numeric"
-                          value={row.qty}
-                          onChange={e => updateSetRow(idx, "qty", e.target.value)}
-                          placeholder="Qty/set"
+                          value={row.stock}
+                          onChange={e => updateSetRow(idx, "stock", e.target.value)}
+                          placeholder="Stock"
                           className="w-20 h-9 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          data-testid={`set-row-stock-${idx}`}
                         />
                         <button type="button" onClick={() => removeSetRow(idx)} className="p-1.5 hover:bg-red-50 rounded-lg shrink-0"><Trash2 size={13} className="text-red-400" /></button>
                       </div>
@@ -774,10 +790,10 @@ export default function SpareParts() {
               <button onClick={() => setShowUseModal(false)} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500">✕</button>
             </div>
 
-            {usePart.is_kit && (
+            {(usePart.is_kit || usePart.stock_type === "set") && (
               <div className="flex gap-2 px-5 pt-4">
                 <button type="button" onClick={() => setIssueMode("whole")} data-testid="issue-mode-whole" className={`flex-1 h-9 rounded-lg text-xs font-semibold border transition-colors ${issueMode === "whole" ? "bg-indigo-600 border-indigo-600 text-white" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>Issue Whole {usePart.stock_type === "set" ? "Set" : "Kit"}</button>
-                <button type="button" onClick={() => setIssueMode("individual")} data-testid="issue-mode-individual" className={`flex-1 h-9 rounded-lg text-xs font-semibold border transition-colors ${issueMode === "individual" ? "bg-indigo-600 border-indigo-600 text-white" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>Issue Individual Part(s)</button>
+                <button type="button" onClick={() => setIssueMode("individual")} data-testid="issue-mode-individual" className={`flex-1 h-9 rounded-lg text-xs font-semibold border transition-colors ${issueMode === "individual" ? "bg-indigo-600 border-indigo-600 text-white" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>Issue Individual {usePart.stock_type === "set" ? "Item" : "Part(s)"}</button>
               </div>
             )}
 
@@ -788,6 +804,17 @@ export default function SpareParts() {
                     <option value="">Select component...</option>
                     {useKitComponents.map(c => (
                       <option key={c.component_part_id} value={c.component_part_id}>{c.component_name} ({c.component_quantity} loose in stock)</option>
+                    ))}
+                  </select>
+                </Field>
+              )}
+
+              {usePart.stock_type === "set" && issueMode === "individual" && (
+                <Field label="Item" required>
+                  <select value={issueComponentId} onChange={e => setIssueComponentId(e.target.value)} className={sel} data-testid="issue-set-component-select">
+                    <option value="">Select item...</option>
+                    {(usePart.set_components || []).map(c => (
+                      <option key={c.name} value={c.name} disabled={c.stock <= 0}>{c.name} ({c.stock} in stock)</option>
                     ))}
                   </select>
                 </Field>

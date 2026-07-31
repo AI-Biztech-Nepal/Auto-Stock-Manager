@@ -108,13 +108,37 @@ export default function JobCards() {
   const filteredSpareParts = spareParts.filter(p =>
     partSearch.length > 0 &&
     p.name.toLowerCase().includes(partSearch.toLowerCase()) &&
-    !jobParts.find(jp => jp.part_id === p.id)
+    // Sets stay searchable even after one of their components has been added, since a job
+    // can use more than one item out of the same set. Plain parts still drop out once added.
+    (p.stock_type === "set" || !jobParts.find(jp => jp.part_id === p.id))
   );
 
   const addPartToJob = (part) => {
     if (part.quantity <= 0) { toast.error(`${part.name} is out of stock`); return; }
     setJobParts(prev => [...prev, { _key: makeKey(), part_id: part.id, part_name: part.name, quantity: 1, unit_cost: part.unit_cost || 0, available_qty: part.quantity, original_qty: 0, external: false }]);
     setPartSearch("");
+  };
+
+  // Sets have no usable stock of their own — picking one from search opens this instead,
+  // so the mechanic picks exactly which item inside the set (and how many) to use.
+  const openSetPicker = (part) => {
+    setPendingSet(part);
+    setPendingComponent("");
+    setPendingComponentQty("1");
+    setPartSearch("");
+  };
+
+  const confirmAddSetComponent = () => {
+    const comp = (pendingSet.set_components || []).find(c => c.name === pendingComponent);
+    if (!comp) { toast.error("Pick which item to use"); return; }
+    const qty = Math.max(1, parseInt(pendingComponentQty, 10) || 1);
+    if (qty > comp.stock) { toast.error(`Only ${comp.stock} of ${comp.name} in stock`); return; }
+    setJobParts(prev => [...prev, {
+      _key: makeKey(), part_id: pendingSet.id, component_name: comp.name,
+      part_name: `${pendingSet.name} — ${comp.name}`, quantity: qty,
+      unit_cost: pendingSet.unit_cost || 0, available_qty: comp.stock, original_qty: 0, external: false,
+    }]);
+    setPendingSet(null); setPendingComponent(""); setPendingComponentQty("1");
   };
 
   const addExternalPartToJob = () => {
@@ -162,14 +186,18 @@ export default function JobCards() {
     setJobParts((job.parts || []).map(p => {
       const isExternal = !!p.external || !p.part_id;
       const stock = !isExternal ? spareParts.find(sp => sp.id === p.part_id) : null;
+      const component = stock && p.component_name ? (stock.set_components || []).find(c => c.name === p.component_name) : null;
+      // Add back what this job already has reserved so re-editing isn't capped below its own current usage.
+      const currentStock = p.component_name ? (component?.stock || 0) : (stock?.quantity || 0);
       return {
         _key: makeKey(),
         part_id: p.part_id || null,
+        component_name: p.component_name || undefined,
         part_name: p.part_name,
         quantity: p.quantity,
         unit_cost: p.unit_cost,
         original_qty: p.quantity,
-        available_qty: (stock?.quantity || 0) + p.quantity,
+        available_qty: currentStock + p.quantity,
         external: isExternal,
       };
     }));
@@ -191,7 +219,7 @@ export default function JobCards() {
           mechanic_name: form.mechanic_name,
           estimated_cost: Number(form.estimated_cost),
           notes: form.notes,
-          parts: jobParts.map(p => ({ part_id: p.part_id, part_name: p.part_name, quantity: Math.max(1, parseInt(p.quantity, 10) || 1), unit_cost: p.unit_cost, external: !!p.external })),
+          parts: jobParts.map(p => ({ part_id: p.part_id, component_name: p.component_name || null, part_name: p.part_name, quantity: Math.max(1, parseInt(p.quantity, 10) || 1), unit_cost: p.unit_cost, external: !!p.external })),
         });
         toast.success("Job card updated!");
         closeModal();
@@ -213,7 +241,7 @@ export default function JobCards() {
         vehicle_year: form.vehicle_year ? Number(form.vehicle_year) : null,
         estimated_cost: Number(form.estimated_cost),
         coupon_no: Number(form.coupon_no),
-        parts: jobParts.map(p => ({ part_id: p.part_id, part_name: p.part_name, quantity: Math.max(1, parseInt(p.quantity, 10) || 1), unit_cost: p.unit_cost, external: !!p.external })),
+        parts: jobParts.map(p => ({ part_id: p.part_id, component_name: p.component_name || null, part_name: p.part_name, quantity: Math.max(1, parseInt(p.quantity, 10) || 1), unit_cost: p.unit_cost, external: !!p.external })),
       });
       toast.success("Job card created!");
       closeModal();
@@ -528,13 +556,17 @@ export default function JobCards() {
                   {filteredSpareParts.length > 0 && (
                     <div className="absolute left-0 right-0 top-10 z-10 bg-white border border-slate-200 rounded-lg shadow-lg max-h-40 overflow-y-auto" data-testid="parts-dropdown">
                       {filteredSpareParts.map(p => (
-                        <button type="button" key={p.id} onClick={() => addPartToJob(p)} className="w-full text-left px-3 py-2 text-xs hover:bg-blue-50 flex justify-between items-center border-b border-slate-50 last:border-0">
+                        <button type="button" key={p.id} onClick={() => p.stock_type === "set" ? openSetPicker(p) : addPartToJob(p)} className="w-full text-left px-3 py-2 text-xs hover:bg-blue-50 flex justify-between items-center border-b border-slate-50 last:border-0">
                           <div>
                             <span className="font-medium text-slate-800">{p.name}</span>
                             {p.brand_compatibility && <span className="text-slate-400 ml-1.5">({p.brand_compatibility})</span>}
                           </div>
                           <div className="text-right shrink-0 ml-2">
-                            <div className={`font-semibold ${p.quantity <= (p.min_stock_alert || 2) ? "text-red-600" : "text-green-600"}`}>{p.quantity} left</div>
+                            {p.stock_type === "set" ? (
+                              <div className="font-semibold text-indigo-600">pick item ›</div>
+                            ) : (
+                              <div className={`font-semibold ${p.quantity <= (p.min_stock_alert || 2) ? "text-red-600" : "text-green-600"}`}>{p.quantity} left</div>
+                            )}
                             <div className="text-slate-400">{formatNPR(p.unit_cost)}</div>
                           </div>
                         </button>
@@ -542,6 +574,39 @@ export default function JobCards() {
                     </div>
                   )}
                 </div>
+
+                {pendingSet && (
+                  <div className="mt-2 p-3 bg-indigo-50 border border-indigo-200 rounded-lg space-y-2" data-testid="set-component-picker">
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs font-semibold text-indigo-700">{pendingSet.name} — pick which item to use</p>
+                      <button type="button" onClick={() => setPendingSet(null)} className="text-indigo-400 hover:text-indigo-600 shrink-0"><X size={13} /></button>
+                    </div>
+                    {(pendingSet.set_components || []).length === 0 ? (
+                      <p className="text-xs text-indigo-600">This set has no components defined yet — edit it in Spare Parts to add some.</p>
+                    ) : (
+                      <>
+                        <select value={pendingComponent} onChange={e => setPendingComponent(e.target.value)} className={sel} data-testid="set-component-select">
+                          <option value="">Select component...</option>
+                          {pendingSet.set_components.map(c => (
+                            <option key={c.name} value={c.name} disabled={c.stock <= 0}>{c.name} ({c.stock} left)</option>
+                          ))}
+                        </select>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-slate-500 shrink-0">Qty:</span>
+                          <input
+                            type="text" inputMode="numeric"
+                            value={pendingComponentQty}
+                            onChange={e => setPendingComponentQty(e.target.value)}
+                            className="w-16 h-8 px-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
+                          />
+                          <button type="button" onClick={confirmAddSetComponent} disabled={!pendingComponent} data-testid="confirm-set-component-btn" className="flex-1 h-8 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-semibold disabled:opacity-50 transition-colors">
+                            Add to Job
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
 
                 {jobParts.length > 0 && (
                   <div className="mt-2 bg-slate-50 rounded-lg p-2 space-y-1.5" data-testid="job-parts-list">
