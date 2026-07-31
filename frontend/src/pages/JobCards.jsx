@@ -136,7 +136,7 @@ export default function JobCards() {
     setJobParts(prev => [...prev, {
       _key: makeKey(), part_id: pendingSet.id, component_name: comp.name,
       part_name: `${pendingSet.name} — ${comp.name}`, quantity: qty,
-      unit_cost: pendingSet.unit_cost || 0, available_qty: comp.stock, original_qty: 0, external: false,
+      unit_cost: comp.rate || 0, available_qty: comp.stock, original_qty: 0, external: false,
     }]);
     setPendingSet(null); setPendingComponent(""); setPendingComponentQty("1");
   };
