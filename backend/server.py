@@ -1480,7 +1480,13 @@ async def reconcile_sales(cu: dict = Depends(admin_only)):
       "Delete Sale". The sale is intentionally kept (with its "returned" flag set) for
       history/revenue instead of deleted, so it's excluded here entirely — its vehicle's
       current status (and even later deletion) no longer implies a desync.
-    Only genuine mismatches (deleted vehicle, or any other unflagged status drift) surface here."""
+    Only genuine mismatches (deleted vehicle, or any other unflagged status drift) surface here.
+
+    This only catches sales drifting away from their vehicle. The opposite drift — a vehicle
+    sitting at status "sold" (so it counts in Sold Stock) with no active sale record backing it
+    (so it doesn't count in Sales) — happens when a vehicle's status is set to "sold" by a path
+    that skips the auto-create-sale logic (e.g. bulk import, or a direct DB edit), and is checked
+    separately below."""
     sales = await db.sales.find({}, {"_id": 0}).to_list(1000)
     mismatches = []
     for s in sales:
@@ -1499,6 +1505,17 @@ async def reconcile_sales(cu: dict = Depends(admin_only)):
                 "vehicle_info": f"{v.get('brand','')} {v.get('model','')} {v.get('year','')}".strip(),
                 "vehicle_status": v.get("status"),
                 "sale_date": s.get("sale_date"), "total_amount": s.get("total_amount"),
+            })
+
+    sold_vehicles = await db.vehicles.find({"status": "sold"}, {"_id": 0}).to_list(1000)
+    for v in sold_vehicles:
+        active_sale = await db.sales.find_one({"vehicle_id": v["id"], "returned": {"$ne": True}}, {"_id": 0, "id": 1})
+        if not active_sale:
+            mismatches.append({
+                "sale_id": None, "vehicle_id": v["id"], "issue": "orphan_sold_vehicle",
+                "vehicle_info": f"{v.get('brand','')} {v.get('model','')} {v.get('year','')}".strip(),
+                "vehicle_status": v.get("status"),
+                "sale_date": v.get("sold_date"), "total_amount": v.get("selling_price"),
             })
     return {"count": len(mismatches), "mismatches": mismatches}
 

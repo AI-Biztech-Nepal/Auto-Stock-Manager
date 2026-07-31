@@ -251,13 +251,21 @@ export default function Sales() {
             Out of Sync with Sold Stock ({mismatches.length})
           </div>
           <p className="text-xs text-amber-700 mb-2">
-            These sales' vehicles no longer have status "Sold" (edited or deleted directly from Inventory), so they count here but not in Sold Stock. Open each and either restore the vehicle's status to Sold, or delete the stray sale.
+            Either a sale's vehicle no longer has status "Sold" (edited or deleted directly from Inventory), or a vehicle is marked "Sold" with no sale record behind it — either way it counts on one tab but not the other. Open each and reconcile: restore the vehicle's status, delete the stray sale, or record the missing sale.
           </p>
           <div className="space-y-1.5">
             {mismatches.map(m => (
-              <div key={m.sale_id} onClick={() => navigate(`/sales/${m.sale_id}`)} className="flex items-center justify-between text-sm px-3 py-2 rounded-lg bg-white hover:bg-amber-100 cursor-pointer transition-colors">
-                <div className="text-slate-700">{m.vehicle_info || "Vehicle deleted"} — {formatNPR(m.total_amount)} on {m.sale_date}</div>
-                <div className="font-semibold text-amber-700">{m.issue === "vehicle_deleted" ? "Vehicle deleted" : `Vehicle is now "${m.vehicle_status}"`}</div>
+              <div key={m.sale_id || m.vehicle_id} onClick={() => navigate(m.sale_id ? `/sales/${m.sale_id}` : `/inventory/${m.vehicle_id}`)} className="flex items-center justify-between text-sm px-3 py-2 rounded-lg bg-white hover:bg-amber-100 cursor-pointer transition-colors">
+                <div className="text-slate-700">
+                  {m.issue === "orphan_sold_vehicle"
+                    ? `${m.vehicle_info || "Vehicle"} — marked Sold on ${m.sale_date}, no sale record`
+                    : `${m.vehicle_info || "Vehicle deleted"} — ${formatNPR(m.total_amount)} on ${m.sale_date}`}
+                </div>
+                <div className="font-semibold text-amber-700">
+                  {m.issue === "vehicle_deleted" ? "Vehicle deleted"
+                    : m.issue === "orphan_sold_vehicle" ? "Missing sale record"
+                    : `Vehicle is now "${m.vehicle_status}"`}
+                </div>
               </div>
             ))}
           </div>
