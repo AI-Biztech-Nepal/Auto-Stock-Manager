@@ -59,6 +59,10 @@ export default function JobCards() {
   const [jobParts, setJobParts] = useState([]);
   const [partSearch, setPartSearch] = useState("");
   const [externalPart, setExternalPart] = useState({ ...EMPTY_EXTERNAL_PART });
+  // Picking a single component out of a Set (Sets have no usable stock of their own to add whole)
+  const [pendingSet, setPendingSet] = useState(null);
+  const [pendingComponent, setPendingComponent] = useState("");
+  const [pendingComponentQty, setPendingComponentQty] = useState("1");
 
   const fetchJobs = useCallback(async () => {
     try {
