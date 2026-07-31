@@ -227,10 +227,17 @@ async def _vehicle_investment(vehicle_id: str, vehicle: dict) -> float:
 def _sale_revenue(s: dict) -> float:
     return s.get("retained_amount", 0) if s.get("returned") else s.get("total_amount", 0)
 
+# A vehicle can be tied to a vendor two ways: the legacy vendor_id field, or the
+# newer linked_contact_type/id (set via the Customer/Vendor picker on the stock form).
+# Vendor aggregates (list page, ledger, payables) must count both, or a vehicle linked
+# only through the picker silently vanishes from that vendor's numbers.
+def _vendor_vehicle_filter(vendor_id: str) -> dict:
+    return {"$or": [{"vendor_id": vendor_id}, {"linked_contact_type": "vendor", "linked_contact_id": vendor_id}]}
+
 # ── Helper: compute total amount owed to a vendor (payable) ──────────
 async def _vendor_payable(vendor_id: str) -> float:
     """Returns max(0, total_purchased - total_paid) for a vendor."""
-    veh = await db.vehicles.find({"vendor_id": vendor_id}, {"_id": 0}).to_list(200)
+    veh = await db.vehicles.find(_vendor_vehicle_filter(vendor_id), {"_id": 0}).to_list(200)
     owed = sum(v.get("purchase_price", 0) for v in veh)
     pmts = await db.vendor_payments.find({"vendor_id": vendor_id}, {"_id": 0}).to_list(200)
     paid = sum(p["amount"] for p in pmts)
@@ -1662,7 +1669,7 @@ async def delete_partner(pid: str, cu: dict = Depends(admin_only)):
 async def get_vendors(cu: dict = Depends(require("vendors", "view"))):
     vendors = await db.vendors.find({}, {"_id": 0}).to_list(200)
     for v in vendors:
-        vehicles = await db.vehicles.find({"vendor_id": v["id"]}, {"_id": 0}).to_list(200)
+        vehicles = await db.vehicles.find(_vendor_vehicle_filter(v["id"]), {"_id": 0}).to_list(200)
         parts = await db.spare_parts.find({"vendor_id": v["id"]}, {"_id": 0}).to_list(1000)
         vehicle_owed = sum(vh.get("purchase_price", 0) for vh in vehicles)
         parts_owed = sum(p.get("quantity", 0) * p.get("unit_cost", 0) for p in parts)
@@ -1711,7 +1718,7 @@ async def search_vendors(q: str = "", vendor_type: Optional[str] = None, cu: dic
 @api_router.get("/vendors/{vid}/payments")
 async def get_vendor_payments(vid: str, cu: dict = Depends(require("vendors", "view"))):
     payments = await db.vendor_payments.find({"vendor_id": vid}, {"_id": 0}).sort("payment_date", -1).to_list(500)
-    vehicles = await db.vehicles.find({"vendor_id": vid}, {"_id": 0}).to_list(200)
+    vehicles = await db.vehicles.find(_vendor_vehicle_filter(vid), {"_id": 0}).to_list(200)
     parts = await db.spare_parts.find({"vendor_id": vid}, {"_id": 0}).to_list(1000)
     vehicle_owed = sum(v.get("purchase_price", 0) for v in vehicles)
     parts_owed = sum(p.get("quantity", 0) * p.get("unit_cost", 0) for p in parts)
