@@ -2266,6 +2266,7 @@ class SparePartCreate(BaseModel):
     location: Optional[str] = None
     notes: Optional[str] = None
     is_kit: bool = False
+    stock_type: str = "singular"  # "singular" | "set" | "kit" — purely descriptive; is_kit (derived from whether it has components) still drives all BOM/breakdown logic below
 
 class SparePartUpdate(BaseModel):
     name: Optional[str] = None
@@ -2283,6 +2284,7 @@ class SparePartUpdate(BaseModel):
     location: Optional[str] = None
     notes: Optional[str] = None
     is_kit: Optional[bool] = None
+    stock_type: Optional[str] = None
 
 class KitComponentIn(BaseModel):
     component_part_id: str
