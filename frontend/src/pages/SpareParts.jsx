@@ -123,6 +123,7 @@ const STOCK_TYPES = [
 ];
 const EMPTY_USE = { quantity: 1, reason: "Sale", notes: "" }; const EMPTY_BULK_ROW = { part_number: "", name: "", qty: "1", unit: "PCS", rate: "", discount: "", selling_price: "", min_stock_alert: "2" };
 const EMPTY_KIT_ROW = { component_part_id: "", qty_per_kit: 1 };
+const EMPTY_SET_ROW = { name: "", qty: 1 };
 const netRate = (r) => { const rate = Number(r.rate) || 0; const discount = Number(r.discount) || 0; return discount ? rate - (rate * discount / 100) : rate; };
 
 export default function SpareParts() {
@@ -139,8 +140,10 @@ export default function SpareParts() {
   const [initialForm, setInitialForm] = useState(EMPTY);
   const [saving, setSaving] = useState(false);
 
-  // Kit components (bill of materials) editor, shown inside Add/Edit modal when is_kit
+  // Kit components (bill of materials) editor, shown inside Add/Edit modal when stock_type is "kit"
   const [kitRows, setKitRows] = useState([]);
+  // Set components: a free-text checklist (not linked to other inventory parts), shown when stock_type is "set"
+  const [setRows, setSetRows] = useState([]);
 
   // Break Kit modal
   const [showBreakModal, setShowBreakModal] = useState(false);
@@ -193,11 +196,14 @@ export default function SpareParts() {
     return true;
   });
 
-  const openAdd = () => { setForm(EMPTY); setInitialForm(EMPTY); setEditId(null); setKitRows([]); setShowAddVendor(false); setNewVendor({ name: "", phone: "", address: "" }); setShowModal(true); };
+  const openAdd = () => { setForm(EMPTY); setInitialForm(EMPTY); setEditId(null); setKitRows([]); setSetRows([]); setShowAddVendor(false); setNewVendor({ name: "", phone: "", address: "" }); setShowModal(true); };
   const openEdit = async (p) => {
-    const next = { ...p, unit_cost: p.unit_cost || "", selling_price: p.selling_price || "", vendor_id: p.vendor_id || "", stock_type: p.stock_type || (p.is_kit ? "kit" : "singular") };
+    const stock_type = p.stock_type || (p.is_kit ? "kit" : "singular");
+    const next = { ...p, unit_cost: p.unit_cost || "", selling_price: p.selling_price || "", vendor_id: p.vendor_id || "", stock_type };
     setForm(next); setInitialForm(next);
-    setEditId(p.id); setShowAddVendor(false); setNewVendor({ name: "", phone: "", address: "" }); setKitRows([]); setShowModal(true);
+    setEditId(p.id); setShowAddVendor(false); setNewVendor({ name: "", phone: "", address: "" }); setKitRows([]);
+    setSetRows(stock_type === "set" ? (p.set_components || []).map(c => ({ name: c.name, qty: c.qty })) : []);
+    setShowModal(true);
     if (p.is_kit) {
       try {
         const r = await api.get(`/spare-parts/${p.id}/kit-components`);
@@ -210,6 +216,10 @@ export default function SpareParts() {
   const removeKitRow = (idx) => setKitRows(prev => prev.filter((_, i) => i !== idx));
   const updateKitRow = (idx, field, value) => setKitRows(prev => prev.map((r, i) => i === idx ? { ...r, [field]: value } : r));
 
+  const addSetRow = () => setSetRows(prev => [...prev, { ...EMPTY_SET_ROW }]);
+  const removeSetRow = (idx) => setSetRows(prev => prev.filter((_, i) => i !== idx));
+  const updateSetRow = (idx, field, value) => setSetRows(prev => prev.map((r, i) => i === idx ? { ...r, [field]: value } : r));
+
   const closePartModal = () => {
     if (JSON.stringify(form) !== JSON.stringify(initialForm) && !window.confirm("You have unsaved changes. Close without saving?")) return;
     setShowModal(false); setForm(EMPTY); setShowAddVendor(false);
@@ -219,7 +229,9 @@ export default function SpareParts() {
     e.preventDefault();
     if (!form.name) { toast.error("Name is required"); return; }
     const validKitRows = kitRows.filter(r => r.component_part_id && Number(r.qty_per_kit) > 0);
-    if (form.is_kit && validKitRows.length === 0) { toast.error(form.stock_type === "set" ? "Add at least one component for this set" : "Add at least one component for this kit"); return; }
+    const validSetRows = setRows.filter(r => r.name.trim() && Number(r.qty) > 0);
+    if (form.stock_type === "kit" && validKitRows.length === 0) { toast.error("Add at least one component for this kit"); return; }
+    if (form.stock_type === "set" && validSetRows.length === 0) { toast.error("Add at least one component for this set"); return; }
     setSaving(true);
     try {
       const payload = {
@@ -230,14 +242,19 @@ export default function SpareParts() {
         min_stock_alert: Number(form.min_stock_alert) || 2,
         vendor_id: form.vendor_id || null,
         supplier: null, // clear legacy text field on save
+        is_kit: form.stock_type === "kit",
+        set_components: form.stock_type === "set" ? validSetRows.map(r => ({ name: r.name.trim(), qty: Number(r.qty) })) : [],
       };
       let partId = editId;
       if (editId) { await api.put(`/spare-parts/${editId}`, payload); toast.success("Updated!"); }
       else { const r = await api.post("/spare-parts", payload); partId = r.data.id; toast.success("Part added!"); }
-      if (form.is_kit) {
+      if (form.stock_type === "kit") {
         await api.post(`/spare-parts/${partId}/kit-components`, {
           components: validKitRows.map(r => ({ component_part_id: r.component_part_id, qty_per_kit: Number(r.qty_per_kit) })),
         });
+      } else if (editId && initialForm.stock_type === "kit") {
+        // Type changed away from "kit" during edit — clear leftover linked components so is_kit resets too.
+        await api.post(`/spare-parts/${partId}/kit-components`, { components: [] });
       }
       setShowModal(false); fetchAll();
     } catch (err) { toast.error(err.response?.data?.detail || "Error"); }
@@ -470,7 +487,7 @@ export default function SpareParts() {
                       <td className="px-4 py-3">
                         <div className="font-semibold text-slate-900 text-sm flex items-center gap-2">
                           {p.name}
-                          {p.is_kit && <span className="text-xs bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded-full font-bold flex items-center gap-1" title={`This part is a ${p.stock_type === "set" ? "set" : "kit"} with its own components`}><Boxes size={11} /> {p.stock_type === "set" ? "Set" : "Kit"}</span>}
+                          {(p.is_kit || p.stock_type === "set") && <span className="text-xs bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded-full font-bold flex items-center gap-1" title={p.stock_type === "set" ? "This part is a set — see its component checklist" : "This part is a kit with its own components"}><Boxes size={11} /> {p.stock_type === "set" ? "Set" : "Kit"}</span>}
                           {p.low_stock && <span className="text-xs bg-red-100 text-red-700 px-1.5 py-0.5 rounded-full font-bold">Low</span>}
                         </div>
                         {p.brand_compatibility && <div className="text-xs text-slate-400 mt-0.5">{p.brand_compatibility}</div>}
@@ -622,7 +639,7 @@ export default function SpareParts() {
                     value={form.stock_type}
                     onChange={e => {
                       const stock_type = e.target.value;
-                      setForm({ ...form, stock_type, is_kit: stock_type !== "singular" });
+                      setForm({ ...form, stock_type, is_kit: stock_type === "kit" });
                     }}
                     className={sel}
                     data-testid="stock-type-select"
@@ -632,19 +649,14 @@ export default function SpareParts() {
                 </Field>
               </div>
 
-              {/* Set / Kit Bill of Materials editor */}
-              {form.stock_type !== "singular" && (
+              {/* Kit Bill of Materials editor — components link to real inventory parts, each with its own tracked stock */}
+              {form.stock_type === "kit" && (
                 <div className="border border-slate-200 rounded-xl p-3 bg-slate-50/60">
                   <p className="flex items-center gap-2 text-sm font-medium text-slate-700">
-                    <Boxes size={14} className="text-indigo-500" />
-                    {form.stock_type === "set" ? "Set Components" : "Kit Components"}
+                    <Boxes size={14} className="text-indigo-500" /> Kit Components
                   </p>
                   <div className="mt-3 space-y-2">
-                    <p className="text-xs text-slate-500">
-                      {form.stock_type === "set"
-                        ? "The individual items this set is made up of (e.g. the separate stickers in a sticker set). The set keeps its own stock; each component below keeps its own stock too."
-                        : "What this kit breaks down into when opened. The kit keeps its own stock (sealed kits); each component below keeps its own stock too."}
-                    </p>
+                    <p className="text-xs text-slate-500">What this kit breaks down into when opened. The kit keeps its own stock (sealed kits); each component below keeps its own stock too.</p>
                     {kitRows.map((row, idx) => (
                       <div key={idx} className="flex items-center gap-2">
                         <select
@@ -669,6 +681,42 @@ export default function SpareParts() {
                       </div>
                     ))}
                     <button type="button" onClick={addKitRow} className="flex items-center gap-1.5 text-xs text-blue-600 hover:bg-blue-50 px-2.5 py-1.5 rounded-lg font-medium" data-testid="add-kit-row-btn">
+                      <Plus size={12} /> Add Component
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Set component checklist — plain text items (e.g. individual stickers), not linked to
+                  other inventory parts and not separately stock-tracked; just what's included in the set */}
+              {form.stock_type === "set" && (
+                <div className="border border-slate-200 rounded-xl p-3 bg-slate-50/60">
+                  <p className="flex items-center gap-2 text-sm font-medium text-slate-700">
+                    <Boxes size={14} className="text-indigo-500" /> Set Components
+                  </p>
+                  <div className="mt-3 space-y-2">
+                    <p className="text-xs text-slate-500">The individual items this set is made up of (e.g. the separate stickers in a sticker set). Just a checklist — these aren't tracked as their own inventory items, only the set's own stock (above) is.</p>
+                    {setRows.map((row, idx) => (
+                      <div key={idx} className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          value={row.name}
+                          onChange={e => updateSetRow(idx, "name", e.target.value)}
+                          placeholder="e.g. Tank Sticker"
+                          className={`${inp} flex-1`}
+                          data-testid={`set-row-name-${idx}`}
+                        />
+                        <input
+                          type="text" inputMode="numeric"
+                          value={row.qty}
+                          onChange={e => updateSetRow(idx, "qty", e.target.value)}
+                          placeholder="Qty/set"
+                          className="w-20 h-9 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        />
+                        <button type="button" onClick={() => removeSetRow(idx)} className="p-1.5 hover:bg-red-50 rounded-lg shrink-0"><Trash2 size={13} className="text-red-400" /></button>
+                      </div>
+                    ))}
+                    <button type="button" onClick={addSetRow} className="flex items-center gap-1.5 text-xs text-blue-600 hover:bg-blue-50 px-2.5 py-1.5 rounded-lg font-medium" data-testid="add-set-row-btn">
                       <Plus size={12} /> Add Component
                     </button>
                   </div>

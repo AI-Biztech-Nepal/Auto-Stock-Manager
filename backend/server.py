@@ -2250,6 +2250,10 @@ async def delete_legal_document(vid: str, doc_id: str, cu: dict = Depends(requir
 # ══════════════════════════════════════════════════════════════════════
 # ── SPARE PARTS ───────────────────────────────────────────────────────
 # ══════════════════════════════════════════════════════════════════════
+class SetComponentIn(BaseModel):
+    name: str
+    qty: int = 1
+
 class SparePartCreate(BaseModel):
     name: str
     category: str = "General"
@@ -2266,7 +2270,11 @@ class SparePartCreate(BaseModel):
     location: Optional[str] = None
     notes: Optional[str] = None
     is_kit: bool = False
-    stock_type: str = "singular"  # "singular" | "set" | "kit" — purely descriptive; is_kit (derived from whether it has components) still drives all BOM/breakdown logic below
+    stock_type: str = "singular"  # "singular" | "set" | "kit" — purely descriptive label; is_kit still drives all BOM/breakdown logic below and is only true for "kit"
+    # "Set" components are a free-text checklist (e.g. individual stickers in a sticker set) —
+    # unlike kit components they aren't links to other spare_parts rows with their own tracked
+    # stock, so they're stored inline here rather than through the kit_components collection/API.
+    set_components: List[SetComponentIn] = []
 
 class SparePartUpdate(BaseModel):
     name: Optional[str] = None
@@ -2285,6 +2293,7 @@ class SparePartUpdate(BaseModel):
     notes: Optional[str] = None
     is_kit: Optional[bool] = None
     stock_type: Optional[str] = None
+    set_components: Optional[List[SetComponentIn]] = None
 
 class KitComponentIn(BaseModel):
     component_part_id: str
