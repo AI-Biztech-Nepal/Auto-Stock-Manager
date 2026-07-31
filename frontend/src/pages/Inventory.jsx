@@ -1,6 +1,6 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { Plus, Search, Eye, Trash2, Filter, X, UploadCloud, EyeOff, Package, Wallet, DollarSign, Lock, Moon, Archive, Sparkles, Store, User, Wrench, Clock, CheckCircle2 } from "lucide-react";
+import { Plus, Search, Eye, Trash2, Filter, X, UploadCloud, EyeOff, Package, Wallet, DollarSign, Lock, Moon, Archive, Sparkles, Store, User, Wrench, Clock, CheckCircle2, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
 import { formatNPR, getAgingStyle, getStatusStyle, BRANDS, VEHICLE_STATUS_OPTIONS, formatOwnership } from "../utils/helpers";
@@ -62,6 +62,22 @@ export default function Inventory() {
   // Opening a vehicle renders VehicleDetailModal inline instead of navigating to /inventory/:id,
   // so the Inventory page underneath stays mounted (no refetch, no lost scroll/filter state).
   const [selectedVehicleId, setSelectedVehicleId] = useState(null);
+
+  // Flags registration numbers reused across more than one vehicle record — usually the same
+  // vehicle logged twice by mistake, or a typo that collided with another plate. Left unnoticed
+  // this silently inflates the on-screen vehicle count above what's physically in stock (or the
+  // reverse: a real vehicle never got its own record because it was saved under a duplicate).
+  const duplicateRegGroups = useMemo(() => {
+    const byReg = {};
+    for (const v of vehicles) {
+      const reg = v.registration_number?.trim().toUpperCase();
+      if (!reg) continue;
+      (byReg[reg] ??= []).push(v);
+    }
+    return Object.entries(byReg)
+      .filter(([, list]) => list.length > 1)
+      .map(([reg, list]) => ({ reg, vehicles: list }));
+  }, [vehicles]);
 
   const unpricedVisible = vehicles.filter(v => !v.selling_price && !["sold", "unlisted", "hidden", "scrap", "in_repair"].includes(v.status));
   const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
@@ -239,6 +255,38 @@ export default function Inventory() {
           )}
         </div>
       </div>
+
+      {/* Duplicate Registration Number Alert */}
+      {canManageStock && duplicateRegGroups.length > 0 && (
+        <div className="flex items-start gap-3 px-4 py-3 rounded-xl border border-red-200 bg-red-50" data-testid="duplicate-reg-banner">
+          <AlertTriangle size={18} className="text-red-600 mt-0.5 shrink-0" />
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-red-700">
+              {duplicateRegGroups.length} registration number{duplicateRegGroups.length !== 1 ? "s" : ""} used on more than one vehicle
+            </p>
+            <p className="text-xs text-red-600 mt-0.5">
+              Same vehicle logged twice, or a typo reusing another plate — this is a likely cause of physical stock not matching what's recorded. Review each pair below.
+            </p>
+            <div className="mt-2.5 space-y-2">
+              {duplicateRegGroups.map(({ reg, vehicles: vs }) => (
+                <div key={reg} className="flex items-center gap-2 flex-wrap">
+                  <span className="text-xs font-mono font-semibold text-red-800 bg-red-100 px-1.5 py-0.5 rounded">{reg}</span>
+                  {vs.map(v => (
+                    <button
+                      key={v.id}
+                      onClick={() => setSelectedVehicleId(v.id)}
+                      data-testid="duplicate-reg-vehicle"
+                      className="flex items-center gap-1 px-2 py-1 rounded-lg bg-white border border-red-200 text-xs font-medium text-red-700 hover:bg-red-100 transition-colors"
+                    >
+                      {v.brand} {v.model} · {getStatusStyle(v.status).label}
+                    </button>
+                  ))}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Active Aging Filter Banner */}
       {agingFilter !== "all" && (
