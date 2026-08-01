@@ -234,7 +234,7 @@ export default function Sales() {
             {sales.filter(s => s.due_amount > 0).map(s => {
               const isOverdue = s.due_date && s.due_date < new Date().toISOString().slice(0, 10);
               return (
-                <div key={s.id} className={`flex items-center justify-between text-sm px-3 py-2 rounded-lg ${isOverdue ? "bg-red-100" : "bg-white"}`}>
+                <div key={s.id} onClick={() => navigate(`/sold-stock/${s.vehicle_id}`)} className={`flex items-center justify-between text-sm px-3 py-2 rounded-lg cursor-pointer transition-colors ${isOverdue ? "bg-red-100 hover:bg-red-200" : "bg-white hover:bg-red-50"}`}>
                   <div className="text-slate-700">{s.customer_name} — {s.vehicle_info}</div>
                   <div className={`font-semibold ${isOverdue ? "text-red-700" : "text-orange-600"}`}>{formatNPR(s.due_amount)}{s.due_date ? ` due ${s.due_date}` : ""}{isOverdue ? " (OVERDUE)" : ""}</div>
                 </div>
