@@ -466,7 +466,10 @@ async def ai_chatbot(req: AIChatRequest, cu: dict = Depends(admin_only)):
         genai_types.Content(role="model" if m["role"] == "assistant" else "user", parts=[genai_types.Part.from_text(text=m["text"])])
         for m in messages
     ]
-    reply = await _ai_text(system, contents)
+    # Higher cap than the other AI endpoints — with full business-data access, replies can
+    # legitimately need to enumerate dozens of vehicles/customers/parts, and the default
+    # 1024 was cutting long list answers off mid-sentence.
+    reply = await _ai_text(system, contents, max_tokens=4096)
     messages.append({"role": "assistant", "text": reply})
 
     await db.ai_chat_sessions.update_one(
