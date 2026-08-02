@@ -331,18 +331,53 @@ async def ai_chatbot(req: AIChatRequest, cu: dict = Depends(admin_only)):
     history = session["messages"] if session else []  # stored as [{"role": "user"|"assistant", "text": "..."}]
 
     settings = await db.settings.find_one({"id": "general"}, {"_id": 0}) or {}
-    avail = await db.vehicles.find({"status": "available"}, {"_id": 0}).sort("created_at", -1).to_list(40)
+
+    # This endpoint is admin-only and used internally by staff, not just as a customer-facing
+    # sales bot — so it needs enough operational data to answer questions like "how many
+    # vehicles have no photo" directly, instead of declining for lack of "backend access".
+    vehicles = await db.vehicles.find({"status": {"$ne": "sold"}}, {"_id": 0}).to_list(1000)
+    vehicle_ids = [v["id"] for v in vehicles]
+    photo_vehicle_ids = set(await db.vehicle_photos.distinct("vehicle_id", {"vehicle_id": {"$in": vehicle_ids}}))
+    avail = [v for v in vehicles if v.get("status") == "available"]
+    no_photo = [v for v in vehicles if v["id"] not in photo_vehicle_ids]
+    no_price = [v for v in vehicles if not v.get("selling_price") and v.get("status") != "scrap"]
+
     stock_lines = "\n".join(
         f"- {v.get('brand')} {v.get('model')} {v.get('year')} · {v.get('kilometer_run') or '?'}km · "
         f"{'Rs. ' + str(v['selling_price']) if v.get('selling_price') else 'price on request'}"
-        for v in avail
-    ) or "No vehicles currently in stock."
+        for v in avail[:40]
+    ) or "No vehicles currently available for sale."
+    no_photo_lines = "\n".join(
+        f"- {v.get('brand')} {v.get('model')} {v.get('year')} ({v.get('registration_number') or 'no reg#'})"
+        for v in no_photo[:30]
+    )
+
+    sales = await db.sales.find({}, {"_id": 0, "due_amount": 1}).to_list(3000)
+    total_due = round(sum(s.get("due_amount", 0) for s in sales), 2)
+    due_count = sum(1 for s in sales if s.get("due_amount", 0) > 0)
+
+    parts = await db.spare_parts.find({}, {"_id": 0, "quantity": 1, "min_stock_alert": 1}).to_list(3000)
+    low_stock_parts = sum(1 for p in parts if p.get("quantity", 0) <= p.get("min_stock_alert", 2))
+
+    ops_summary = (
+        "Operational snapshot (answer staff questions directly from these figures, don't say you lack access):\n"
+        f"- Active inventory (not sold): {len(vehicles)} vehicles total, {len(avail)} listed available for sale.\n"
+        f"- Vehicles with NO photos uploaded: {len(no_photo)}" + (f"\n{no_photo_lines}" if no_photo_lines else "") + "\n"
+        f"- Vehicles missing a selling price: {len(no_price)}\n"
+        f"- Sales with an outstanding due payment: {due_count}, totaling Rs. {total_due}\n"
+        f"- Spare parts at or below their low-stock threshold: {low_stock_parts}\n"
+    )
 
     system = (
-        f"You are the sales assistant chatbot for {settings.get('business_name', 'Hamro G n G Auto')}, "
-        "a used motorbike/scooter dealership in Nepal. Prices are in NPR. Be warm, concise, and helpful. "
-        "Only discuss vehicles, prices, financing, and dealership services — politely decline unrelated requests.\n"
-        f"Current available stock:\n{stock_lines}\n\n{MARKDOWN_NOTE}"
+        f"You are the AI assistant for {settings.get('business_name', 'Hamro G n G Auto')}, "
+        "a used motorbike/scooter dealership in Nepal. You're used both internally by dealership staff "
+        "and to answer prospective-customer questions. Prices are in NPR. Be warm, concise, and helpful.\n"
+        "Staff will ask operational questions about the business (missing photos, missing prices, due "
+        "payments, low-stock parts, etc.) — answer those directly from the data given below. Customers "
+        "will ask about vehicles, prices, and financing — use the available-stock list for those. "
+        "Politely decline only requests that are entirely unrelated to this dealership (e.g. general "
+        "trivia, coding help, other businesses).\n\n"
+        f"Available stock for sale:\n{stock_lines}\n\n{ops_summary}\n{MARKDOWN_NOTE}"
     )
     messages = history + [{"role": "user", "text": req.message}]
     # Gemini's role name for assistant turns is "model", not "assistant".

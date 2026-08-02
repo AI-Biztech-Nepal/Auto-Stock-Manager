@@ -7,7 +7,7 @@ import { getCurrentBSDate, BS_MONTHS } from "../utils/nepali-date";
 
 // ── Defined outside component ─────────────────────────────────────────
 const TABS = [
-  { id: "chatbot",   label: "Sales Chatbot",      icon: MessageCircle },
+  { id: "chatbot",   label: "AI Chat",             icon: MessageCircle },
   { id: "pricing",   label: "AI Pricing Engine",  icon: TrendingUp },
   { id: "festival",  label: "Festival Intel",      icon: CalendarDays },
   { id: "suggest",   label: "Business Advisor",   icon: Sparkles },
@@ -236,7 +236,7 @@ function AdvisorTab() {
 // ── Sales Chatbot Tab ─────────────────────────────────────────────────
 function ChatbotTab() {
   const [messages, setMessages] = useState([
-    { id: "init", role: "assistant", text: "Hi! I'm your AI sales assistant. Ask me about available vehicles, prices, or anything related to our stock!" }
+    { id: "init", role: "assistant", text: "Hi! I'm your AI assistant. Ask me about available vehicles and prices for customers, or operational questions like \"how many vehicles have no photo uploaded\" or \"what's our total due payments\"." }
   ]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -277,8 +277,8 @@ function ChatbotTab() {
       <div className="flex items-center gap-3 px-4 py-3 border-b border-slate-100 bg-gradient-to-r from-blue-600 to-blue-700">
         <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center"><MessageCircle size={16} className="text-white" /></div>
         <div>
-          <div className="font-semibold text-white text-sm">G&G Sales Assistant</div>
-          <div className="text-xs text-blue-100">AI-powered · Knows your current stock</div>
+          <div className="font-semibold text-white text-sm">G&G Assistant</div>
+          <div className="text-xs text-blue-100">AI-powered · Knows your stock, sales, and dues</div>
         </div>
         <button onClick={() => {
           setMessages([{ id: "init", role: "assistant", text: "Hi! I'm your AI sales assistant. Ask me about available vehicles, prices, or anything related to our stock!" }]);
@@ -313,7 +313,7 @@ function ChatbotTab() {
             value={input}
             onChange={e => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Ask about available bikes, prices..."
+            placeholder="Ask about stock, prices, dues, low-stock parts..."
             rows={1}
             data-testid="chatbot-input"
             className="flex-1 px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
