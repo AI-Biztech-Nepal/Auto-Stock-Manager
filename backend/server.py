@@ -324,6 +324,121 @@ async def _ai_text(system: str, contents, max_tokens: int = 1024) -> str:
     )
     return resp.text or ""
 
+# Builds a comprehensive, read-only snapshot of live business data for the AI assistant's
+# context — recomputed fresh on every chat message so it can answer virtually any factual
+# question (inventory, sales/dues, customers, vendors, parts, EMI) without a separate
+# tool-calling round trip. Every collection is bulk-fetched once and aggregated in Python
+# (no N+1 per-record queries), so this stays fast even as the business grows.
+async def _build_ai_business_snapshot() -> str:
+    all_vehicles = await db.vehicles.find({}, {"_id": 0}).to_list(3000)
+    active_vehicles = [v for v in all_vehicles if v.get("status") != "sold"]
+    sold_vehicles = [v for v in all_vehicles if v.get("status") == "sold"]
+    active_ids = [v["id"] for v in active_vehicles]
+    photo_ids = set(await db.vehicle_photos.distinct("vehicle_id", {"vehicle_id": {"$in": active_ids}}))
+
+    by_status: dict = {}
+    for v in active_vehicles:
+        by_status[v.get("status", "?")] = by_status.get(v.get("status", "?"), 0) + 1
+    avail = [v for v in active_vehicles if v.get("status") == "available"]
+    no_photo = [v for v in active_vehicles if v["id"] not in photo_ids]
+    no_price = [v for v in active_vehicles if not v.get("selling_price") and v.get("status") != "scrap"]
+
+    def _vline(v):
+        bits = [
+            f"{v.get('brand')} {v.get('model')} {v.get('year')}", v.get("status", "?"),
+            f"{v.get('kilometer_run') or '?'}km",
+            f"Rs. {v['selling_price']}" if v.get("selling_price") else "no price set",
+        ]
+        if v.get("registration_number"): bits.append(f"reg {v['registration_number']}")
+        if v["id"] not in photo_ids: bits.append("NO PHOTO")
+        return "- " + " · ".join(bits)
+    vehicle_lines = "\n".join(_vline(v) for v in active_vehicles[:250]) or "(none)"
+
+    all_sales = await db.sales.find({}, {"_id": 0}).sort("sale_date", -1).to_list(3000)
+    total_revenue = round(sum(_sale_revenue(s) for s in all_sales), 2)
+    due_sales = [s for s in all_sales if s.get("due_amount", 0) > 0]
+    total_due = round(sum(s.get("due_amount", 0) for s in all_sales), 2)
+    today_iso = datetime.now(timezone.utc).date().isoformat()
+    overdue_sales = [s for s in due_sales if s.get("due_date") and s.get("due_date") < today_iso]
+    overdue_ids = {s["id"] for s in overdue_sales}
+    due_lines = "\n".join(
+        f"- {s.get('customer_name') or 'Walk-in'} · {s.get('vehicle_info')} · owes Rs. {s.get('due_amount')}"
+        + (f" (OVERDUE, was due {s['due_date']})" if s["id"] in overdue_ids else (f" (due {s['due_date']})" if s.get("due_date") else ""))
+        for s in due_sales[:100]
+    ) or "(none)"
+
+    customers = await db.customers.find({}, {"_id": 0}).to_list(3000)
+    due_by_customer: dict = {}
+    for s in all_sales:
+        if s.get("customer_id") and s.get("due_amount", 0) > 0:
+            due_by_customer[s["customer_id"]] = due_by_customer.get(s["customer_id"], 0) + s["due_amount"]
+    customers_with_due = [
+        f"- {c.get('name')} ({c.get('contact_number') or 'no phone'}) owes Rs. {round(due_by_customer[c['id']], 2)}"
+        for c in customers if c.get("id") in due_by_customer
+    ]
+    customers_due_lines = "\n".join(customers_with_due[:100])
+    if len(customers_with_due) > 100: customers_due_lines += f"\n(+{len(customers_with_due) - 100} more not listed)"
+
+    vendors = await db.vendors.find({}, {"_id": 0}).to_list(500)
+    all_parts = await db.spare_parts.find({}, {"_id": 0}).to_list(3000)
+    all_vendor_payments = await db.vendor_payments.find({}, {"_id": 0}).to_list(3000)
+    owed_by_vendor: dict = {}
+    for v in all_vehicles:  # payable doesn't disappear once a vehicle sells
+        vid = v.get("vendor_id") or (v.get("linked_contact_id") if v.get("linked_contact_type") == "vendor" else None)
+        if vid: owed_by_vendor[vid] = owed_by_vendor.get(vid, 0) + v.get("purchase_price", 0)
+    for p in all_parts:
+        if p.get("vendor_id"):
+            owed_by_vendor[p["vendor_id"]] = owed_by_vendor.get(p["vendor_id"], 0) + p.get("quantity", 0) * p.get("unit_cost", 0)
+    paid_by_vendor: dict = {}
+    for p in all_vendor_payments:
+        paid_by_vendor[p["vendor_id"]] = paid_by_vendor.get(p["vendor_id"], 0) + p["amount"]
+    vendors_with_due = []
+    for v in vendors:
+        due = max(0.0, owed_by_vendor.get(v["id"], 0) - paid_by_vendor.get(v["id"], 0))
+        if due > 0: vendors_with_due.append(f"- {v.get('name')} ({v.get('phone') or 'no phone'}) — we owe Rs. {round(due, 2)}")
+    vendor_due_lines = "\n".join(vendors_with_due[:100]) or "(none)"
+    if len(vendors_with_due) > 100: vendor_due_lines += f"\n(+{len(vendors_with_due) - 100} more not listed)"
+
+    low_stock = [p for p in all_parts if p.get("quantity", 0) <= p.get("min_stock_alert", 2)]
+    low_stock_lines = "\n".join(
+        f"- {p.get('name')} ({p.get('category') or '?'}): {p.get('quantity', 0)} left, alert at {p.get('min_stock_alert', 2)}"
+        for p in low_stock[:80]
+    ) or "(none)"
+
+    emi_records = await db.emi_records.find({}, {"_id": 0}).to_list(1000)
+    emi_payments = await db.emi_payments.find({}, {"_id": 0}).to_list(5000)
+    paid_by_emi: dict = {}
+    for p in emi_payments:
+        paid_by_emi[p["emi_id"]] = paid_by_emi.get(p["emi_id"], 0) + p["amount"]
+    for e in emi_records:
+        e["remaining_balance"] = max(0, e.get("loan_amount", 0) - paid_by_emi.get(e["id"], 0))
+    active_emis = [e for e in emi_records if e["remaining_balance"] > 0]
+    emi_receivable = round(sum(e["remaining_balance"] for e in active_emis), 2)
+
+    return f"""=== LIVE BUSINESS DATA (fetched fresh for this message — answer directly from this, never say you lack backend access) ===
+
+INVENTORY — {len(active_vehicles)} active vehicles ({', '.join(f'{k}: {n}' for k, n in by_status.items()) or 'none'}), {len(sold_vehicles)} sold historically.
+{len(avail)} currently listed available for sale. {len(no_photo)} have NO photo uploaded. {len(no_price)} have no selling price set.
+Vehicle list:
+{vehicle_lines}
+
+SALES — {len(all_sales)} total sales, Rs. {total_revenue} total revenue.
+{len(due_sales)} sale(s) have an outstanding due, Rs. {total_due} total due, {len(overdue_sales)} of those are overdue.
+Sales with dues:
+{due_lines}
+
+CUSTOMERS — {len(customers)} total. {len(customers_with_due)} currently owe money:
+{customers_due_lines or '(none)'}
+
+VENDORS — {len(vendors)} total. We currently owe {len(vendors_with_due)} of them money:
+{vendor_due_lines}
+
+SPARE PARTS — {len(all_parts)} parts tracked. {len(low_stock)} at or below their low-stock threshold:
+{low_stock_lines}
+
+EMI / FINANCING — {len(emi_records)} plans total, {len(active_emis)} still active, Rs. {emi_receivable} still receivable.
+=== END LIVE DATA ==="""
+
 @api_router.post("/ai/chatbot")
 async def ai_chatbot(req: AIChatRequest, cu: dict = Depends(admin_only)):
     session_id = req.session_id or str(uuid.uuid4())
@@ -331,53 +446,19 @@ async def ai_chatbot(req: AIChatRequest, cu: dict = Depends(admin_only)):
     history = session["messages"] if session else []  # stored as [{"role": "user"|"assistant", "text": "..."}]
 
     settings = await db.settings.find_one({"id": "general"}, {"_id": 0}) or {}
-
-    # This endpoint is admin-only and used internally by staff, not just as a customer-facing
-    # sales bot — so it needs enough operational data to answer questions like "how many
-    # vehicles have no photo" directly, instead of declining for lack of "backend access".
-    vehicles = await db.vehicles.find({"status": {"$ne": "sold"}}, {"_id": 0}).to_list(1000)
-    vehicle_ids = [v["id"] for v in vehicles]
-    photo_vehicle_ids = set(await db.vehicle_photos.distinct("vehicle_id", {"vehicle_id": {"$in": vehicle_ids}}))
-    avail = [v for v in vehicles if v.get("status") == "available"]
-    no_photo = [v for v in vehicles if v["id"] not in photo_vehicle_ids]
-    no_price = [v for v in vehicles if not v.get("selling_price") and v.get("status") != "scrap"]
-
-    stock_lines = "\n".join(
-        f"- {v.get('brand')} {v.get('model')} {v.get('year')} · {v.get('kilometer_run') or '?'}km · "
-        f"{'Rs. ' + str(v['selling_price']) if v.get('selling_price') else 'price on request'}"
-        for v in avail[:40]
-    ) or "No vehicles currently available for sale."
-    no_photo_lines = "\n".join(
-        f"- {v.get('brand')} {v.get('model')} {v.get('year')} ({v.get('registration_number') or 'no reg#'})"
-        for v in no_photo[:30]
-    )
-
-    sales = await db.sales.find({}, {"_id": 0, "due_amount": 1}).to_list(3000)
-    total_due = round(sum(s.get("due_amount", 0) for s in sales), 2)
-    due_count = sum(1 for s in sales if s.get("due_amount", 0) > 0)
-
-    parts = await db.spare_parts.find({}, {"_id": 0, "quantity": 1, "min_stock_alert": 1}).to_list(3000)
-    low_stock_parts = sum(1 for p in parts if p.get("quantity", 0) <= p.get("min_stock_alert", 2))
-
-    ops_summary = (
-        "Operational snapshot (answer staff questions directly from these figures, don't say you lack access):\n"
-        f"- Active inventory (not sold): {len(vehicles)} vehicles total, {len(avail)} listed available for sale.\n"
-        f"- Vehicles with NO photos uploaded: {len(no_photo)}" + (f"\n{no_photo_lines}" if no_photo_lines else "") + "\n"
-        f"- Vehicles missing a selling price: {len(no_price)}\n"
-        f"- Sales with an outstanding due payment: {due_count}, totaling Rs. {total_due}\n"
-        f"- Spare parts at or below their low-stock threshold: {low_stock_parts}\n"
-    )
+    business_snapshot = await _build_ai_business_snapshot()
 
     system = (
         f"You are the AI assistant for {settings.get('business_name', 'Hamro G n G Auto')}, "
         "a used motorbike/scooter dealership in Nepal. You're used both internally by dealership staff "
-        "and to answer prospective-customer questions. Prices are in NPR. Be warm, concise, and helpful.\n"
-        "Staff will ask operational questions about the business (missing photos, missing prices, due "
-        "payments, low-stock parts, etc.) — answer those directly from the data given below. Customers "
-        "will ask about vehicles, prices, and financing — use the available-stock list for those. "
-        "Politely decline only requests that are entirely unrelated to this dealership (e.g. general "
-        "trivia, coding help, other businesses).\n\n"
-        f"Available stock for sale:\n{stock_lines}\n\n{ops_summary}\n{MARKDOWN_NOTE}"
+        "(who can ask about anything in the live data below — inventory, photos, prices, sales, dues, "
+        "customers, vendors, parts stock, EMI) and to answer prospective-customer questions about "
+        "available vehicles, prices, and financing. Prices are in NPR. Be warm, concise, and helpful, "
+        "and answer directly from the data given — never claim you lack backend access, it's provided "
+        "below. If something genuinely isn't in the data, say so honestly rather than guessing. "
+        "Politely decline only requests entirely unrelated to this dealership (e.g. general trivia, "
+        "coding help, other businesses).\n\n"
+        f"{business_snapshot}\n\n{MARKDOWN_NOTE}"
     )
     messages = history + [{"role": "user", "text": req.message}]
     # Gemini's role name for assistant turns is "model", not "assistant".
