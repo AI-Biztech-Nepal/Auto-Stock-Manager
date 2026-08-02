@@ -58,7 +58,7 @@ export default function Partners() {
           <h1 className="text-2xl font-bold text-slate-900">Partner Dashboard</h1>
           <p className="text-sm text-slate-500">Financial visibility & profit sharing</p>
         </div>
-        <button onClick={openAdd} data-testid="add-partner-button" className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-2.5 rounded-lg transition-all active:scale-95 shadow-sm">
+        <button onClick={openAdd} data-testid="add-partner-button" className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-3 rounded-lg transition-all active:scale-95 shadow-sm">
           <Plus size={16} /> Add Partner
         </button>
       </div>
@@ -112,8 +112,8 @@ export default function Partners() {
                     </div>
                   </div>
                   <div className="flex items-center gap-1">
-                    <button onClick={() => openEdit(p)} className="p-1.5 hover:bg-slate-100 rounded-lg transition-colors"><Edit size={14} className="text-slate-400" /></button>
-                    <button onClick={() => handleDelete(p.id)} className="p-1.5 hover:bg-red-50 rounded-lg transition-colors"><Trash2 size={14} className="text-red-400" /></button>
+                    <button onClick={() => openEdit(p)} className="w-11 h-11 flex items-center justify-center hover:bg-slate-100 rounded-lg transition-colors"><Edit size={14} className="text-slate-400" /></button>
+                    <button onClick={() => handleDelete(p.id)} className="w-11 h-11 flex items-center justify-center hover:bg-red-50 rounded-lg transition-colors"><Trash2 size={14} className="text-red-400" /></button>
                   </div>
                 </div>
 

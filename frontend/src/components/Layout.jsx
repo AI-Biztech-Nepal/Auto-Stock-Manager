@@ -61,7 +61,7 @@ export default function Layout() {
             end={path === "/"}
             onClick={() => mobile && setSidebarOpen(false)}
             className={({ isActive }) =>
-              `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-150 ${
+              `flex items-center gap-3 px-3 py-3 rounded-lg text-sm font-medium transition-all duration-150 ${
                 isActive
                   ? "bg-blue-600 text-white"
                   : "text-slate-400 hover:text-white hover:bg-slate-800"

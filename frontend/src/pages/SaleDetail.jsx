@@ -219,7 +219,7 @@ export default function SaleDetail() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
         <div className="flex items-center gap-3">
-          <button onClick={() => navigate("/sales")} className="p-2 hover:bg-slate-100 rounded-lg transition-colors text-slate-500"><ArrowLeft size={18} /></button>
+          <button onClick={() => navigate("/sales")} className="w-11 h-11 flex items-center justify-center hover:bg-slate-100 rounded-lg transition-colors text-slate-500"><ArrowLeft size={18} /></button>
           <div>
             <h1 className="text-2xl font-bold text-slate-900">{sale.vehicle_info || `${sale.vehicle_brand || ""} ${sale.vehicle_model || ""}`}</h1>
             <p className="text-sm text-slate-500">{sale.registration_number || "No registration on file"}</p>
@@ -229,11 +229,11 @@ export default function SaleDetail() {
           <span className={`px-2.5 py-1 rounded-full text-xs font-semibold uppercase tracking-wide ${ps.bg} ${ps.text}`} data-testid="payment-status-badge">{sale.returned ? "Returned" : sale.payment_status}</span>
           {isAdmin && !isEditing && (
             <>
-              <button onClick={startEdit} data-testid="edit-sale-btn" className="flex items-center gap-1.5 px-3 py-2 border border-slate-200 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors"><Pencil size={14} /> Edit</button>
+              <button onClick={startEdit} data-testid="edit-sale-btn" className="flex items-center gap-1.5 px-3 py-3 border border-slate-200 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors"><Pencil size={14} /> Edit</button>
               {!sale.returned && sale.vehicle_status === "sold" && (
-                <button onClick={openReturnModal} data-testid="record-return-btn" className="flex items-center gap-1.5 px-3 py-2 border border-amber-200 text-amber-700 rounded-lg text-sm font-medium hover:bg-amber-50 transition-colors"><Undo2 size={14} /> Record Return</button>
+                <button onClick={openReturnModal} data-testid="record-return-btn" className="flex items-center gap-1.5 px-3 py-3 border border-amber-200 text-amber-700 rounded-lg text-sm font-medium hover:bg-amber-50 transition-colors"><Undo2 size={14} /> Record Return</button>
               )}
-              <button onClick={deleteSale} data-testid="delete-sale-btn" className="flex items-center gap-1.5 px-3 py-2 border border-red-200 text-red-600 rounded-lg text-sm font-medium hover:bg-red-50 transition-colors"><Trash2 size={14} /> Delete</button>
+              <button onClick={deleteSale} data-testid="delete-sale-btn" className="flex items-center gap-1.5 px-3 py-3 border border-red-200 text-red-600 rounded-lg text-sm font-medium hover:bg-red-50 transition-colors"><Trash2 size={14} /> Delete</button>
             </>
           )}
         </div>
@@ -361,8 +361,8 @@ export default function SaleDetail() {
           </div>
 
           <div className="flex gap-3">
-            <button type="button" onClick={cancelEdit} className="flex-1 h-10 border border-slate-200 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50">Cancel</button>
-            <button type="submit" disabled={saving} data-testid="save-sale-edit-btn" className="flex-1 h-10 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-semibold disabled:opacity-60">{saving ? "Saving..." : "Save Changes"}</button>
+            <button type="button" onClick={cancelEdit} className="flex-1 h-11 border border-slate-200 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50">Cancel</button>
+            <button type="submit" disabled={saving} data-testid="save-sale-edit-btn" className="flex-1 h-11 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-semibold disabled:opacity-60">{saving ? "Saving..." : "Save Changes"}</button>
           </div>
         </form>
       ) : (
@@ -497,8 +497,8 @@ export default function SaleDetail() {
                 <input value={returnForm.notes} onChange={e => setReturnForm({ ...returnForm, notes: e.target.value })} placeholder="Assessment details..." className={inp} />
               </Field>
               <div className="flex gap-3">
-                <button type="button" onClick={() => setShowReturnModal(false)} className="flex-1 h-10 border border-slate-200 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50">Cancel</button>
-                <button type="submit" disabled={returning} data-testid="submit-return-btn" className="flex-1 h-10 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-sm font-semibold disabled:opacity-60">
+                <button type="button" onClick={() => setShowReturnModal(false)} className="flex-1 h-11 border border-slate-200 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50">Cancel</button>
+                <button type="submit" disabled={returning} data-testid="submit-return-btn" className="flex-1 h-11 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-sm font-semibold disabled:opacity-60">
                   {returning ? "Recording..." : "Record Return"}
                 </button>
               </div>

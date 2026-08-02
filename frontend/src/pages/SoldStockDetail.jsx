@@ -86,7 +86,7 @@ export default function SoldStockDetail() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
         <div className="flex items-center gap-3">
-          <button onClick={() => navigate("/sold-stock")} className="p-2 hover:bg-slate-100 rounded-lg transition-colors text-slate-500"><ArrowLeft size={18} /></button>
+          <button onClick={() => navigate("/sold-stock")} className="w-11 h-11 flex items-center justify-center hover:bg-slate-100 rounded-lg transition-colors text-slate-500"><ArrowLeft size={18} /></button>
           <div>
             <h1 className="text-2xl font-bold text-slate-900">{vehicle.brand} {vehicle.model}</h1>
             <p className="text-sm text-slate-500">{vehicle.year} · {vehicle.engine_cc}cc · {vehicle.fuel_type}{vehicle.registration_number ? ` · ${vehicle.registration_number}` : ""}</p>

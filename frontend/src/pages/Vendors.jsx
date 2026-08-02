@@ -86,7 +86,7 @@ export default function Vendors() {
           <h1 className="text-2xl font-bold text-slate-900">Vendor Management</h1>
           <p className="text-sm text-slate-500">{vendors.length} vendors · Total Due: <span className="font-semibold text-red-600">{formatNPR(totalDue)}</span></p>
         </div>
-        <button onClick={openAdd} data-testid="add-vendor-btn" className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-2.5 rounded-lg transition-all active:scale-95 shadow-sm">
+        <button onClick={openAdd} data-testid="add-vendor-btn" className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-3 rounded-lg transition-all active:scale-95 shadow-sm">
           <Plus size={16} /> Add Vendor
         </button>
       </div>
@@ -162,8 +162,8 @@ export default function Vendors() {
                     <button onClick={() => openPayment(v)} className="px-3 py-1.5 bg-green-100 text-green-700 text-xs font-semibold rounded-lg hover:bg-green-200 transition-colors" data-testid="record-payment-btn">
                       <CreditCard size={12} className="inline mr-1" />Pay
                     </button>
-                    <button onClick={() => openEdit(v)} className="p-1.5 hover:bg-slate-100 rounded-lg"><Edit size={14} className="text-slate-400" /></button>
-                    <button onClick={() => handleDelete(v.id)} className="p-1.5 hover:bg-red-50 rounded-lg"><Trash2 size={14} className="text-red-400" /></button>
+                    <button onClick={() => openEdit(v)} className="w-11 h-11 flex items-center justify-center hover:bg-slate-100 rounded-lg"><Edit size={14} className="text-slate-400" /></button>
+                    <button onClick={() => handleDelete(v.id)} className="w-11 h-11 flex items-center justify-center hover:bg-red-50 rounded-lg"><Trash2 size={14} className="text-red-400" /></button>
                   </div>
                 </div>
 

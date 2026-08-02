@@ -441,7 +441,7 @@ export default function SpareParts() {
           <h1 className="text-2xl font-bold text-slate-900">Spare Parts</h1>
           <p className="text-sm text-slate-500">{parts.length} parts in inventory</p>
         </div>
-        <button onClick={openBulkAdd} data-testid="bulk-add-part-btn" className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-2.5 rounded-lg transition-all active:scale-95 shadow-sm">
+        <button onClick={openBulkAdd} data-testid="bulk-add-part-btn" className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-3 rounded-lg transition-all active:scale-95 shadow-sm">
           <Layers size={16} /> Bulk Add (Bill)
         </button>
       </div>
@@ -510,9 +510,9 @@ export default function SpareParts() {
                           {p.brand_compatibility && <div className="text-xs text-slate-400 mt-0.5">{p.brand_compatibility}</div>}
                         </div>
                         <div className="flex items-center gap-1.5 shrink-0">
-                          <button onClick={() => adjustStock(p.id, -1)} className="w-7 h-7 rounded-md bg-slate-100 hover:bg-red-100 flex items-center justify-center transition-colors"><Minus size={12} /></button>
+                          <button onClick={() => adjustStock(p.id, -1)} className="w-11 h-11 rounded-md bg-slate-100 hover:bg-red-100 flex items-center justify-center transition-colors"><Minus size={12} /></button>
                           <span className={`text-sm font-bold w-6 text-center ${p.low_stock ? "text-red-600" : "text-slate-900"}`}>{p.quantity}</span>
-                          <button onClick={() => adjustStock(p.id, 1)} className="w-7 h-7 rounded-md bg-slate-100 hover:bg-green-100 flex items-center justify-center transition-colors"><Plus size={12} /></button>
+                          <button onClick={() => adjustStock(p.id, 1)} className="w-11 h-11 rounded-md bg-slate-100 hover:bg-green-100 flex items-center justify-center transition-colors"><Plus size={12} /></button>
                         </div>
                       </div>
 
@@ -526,19 +526,19 @@ export default function SpareParts() {
                       )}
 
                       <div className="flex items-center gap-1 mt-2.5 -ml-1.5">
-                        <button onClick={() => openUsePart(p)} title="Use / Sell Part" data-testid="use-part-btn-mobile" className="p-2 hover:bg-orange-50 rounded-lg transition-colors">
+                        <button onClick={() => openUsePart(p)} title="Use / Sell Part" data-testid="use-part-btn-mobile" className="w-11 h-11 flex items-center justify-center hover:bg-orange-50 rounded-lg transition-colors">
                           <ShoppingCart size={15} className="text-orange-500" />
                         </button>
                         {p.is_kit && (
-                          <button onClick={() => openBreakKit(p)} title={p.stock_type === "set" ? "Break Set into Components" : "Break Kit into Components"} data-testid="break-kit-btn-mobile" className="p-2 hover:bg-indigo-50 rounded-lg transition-colors">
+                          <button onClick={() => openBreakKit(p)} title={p.stock_type === "set" ? "Break Set into Components" : "Break Kit into Components"} data-testid="break-kit-btn-mobile" className="w-11 h-11 flex items-center justify-center hover:bg-indigo-50 rounded-lg transition-colors">
                             <PackageOpen size={15} className="text-indigo-500" />
                           </button>
                         )}
                         <button onClick={() => toggleTxn(p.id)} title="View History" data-testid="txn-history-btn-mobile" className={`p-2 rounded-lg transition-colors ${expandedPart === p.id ? "bg-blue-100" : "hover:bg-slate-100"}`}>
                           {expandedPart === p.id ? <ChevronUp size={15} className="text-blue-600" /> : <History size={15} className="text-slate-500" />}
                         </button>
-                        <button onClick={() => openEdit(p)} className="p-2 hover:bg-slate-100 rounded-lg transition-colors" data-testid="edit-part-btn-mobile"><Edit size={15} className="text-slate-500" /></button>
-                        <button onClick={() => handleDelete(p.id)} className="p-2 hover:bg-red-50 rounded-lg transition-colors" data-testid="delete-part-btn-mobile"><Trash2 size={15} className="text-red-400" /></button>
+                        <button onClick={() => openEdit(p)} className="w-11 h-11 flex items-center justify-center hover:bg-slate-100 rounded-lg transition-colors" data-testid="edit-part-btn-mobile"><Edit size={15} className="text-slate-500" /></button>
+                        <button onClick={() => handleDelete(p.id)} className="w-11 h-11 flex items-center justify-center hover:bg-red-50 rounded-lg transition-colors" data-testid="delete-part-btn-mobile"><Trash2 size={15} className="text-red-400" /></button>
                       </div>
                     </div>
 
@@ -783,7 +783,7 @@ export default function SpareParts() {
                           placeholder="Qty/kit"
                           className="w-20 h-9 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                         />
-                        <button type="button" onClick={() => removeKitRow(idx)} className="p-1.5 hover:bg-red-50 rounded-lg shrink-0"><Trash2 size={13} className="text-red-400" /></button>
+                        <button type="button" onClick={() => removeKitRow(idx)} className="w-11 h-11 flex items-center justify-center hover:bg-red-50 rounded-lg shrink-0"><Trash2 size={13} className="text-red-400" /></button>
                       </div>
                     ))}
                     <button type="button" onClick={addKitRow} className="flex items-center gap-1.5 text-xs text-blue-600 hover:bg-blue-50 px-2.5 py-1.5 rounded-lg font-medium" data-testid="add-kit-row-btn">
@@ -828,7 +828,7 @@ export default function SpareParts() {
                           className="w-20 h-9 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                           data-testid={`set-row-rate-${idx}`}
                         />
-                        <button type="button" onClick={() => removeSetRow(idx)} className="p-1.5 hover:bg-red-50 rounded-lg shrink-0"><Trash2 size={13} className="text-red-400" /></button>
+                        <button type="button" onClick={() => removeSetRow(idx)} className="w-11 h-11 flex items-center justify-center hover:bg-red-50 rounded-lg shrink-0"><Trash2 size={13} className="text-red-400" /></button>
                       </div>
                     ))}
                     <button type="button" onClick={addSetRow} className="flex items-center gap-1.5 text-xs text-blue-600 hover:bg-blue-50 px-2.5 py-1.5 rounded-lg font-medium" data-testid="add-set-row-btn">

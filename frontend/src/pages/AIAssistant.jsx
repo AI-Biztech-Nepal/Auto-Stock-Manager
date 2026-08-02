@@ -110,7 +110,7 @@ function PricingTab() {
           </div>
         </div>
         <button type="submit" disabled={loading} data-testid="ai-price-btn"
-          className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-5 py-2.5 rounded-lg transition-all active:scale-95 disabled:opacity-60">
+          className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-5 py-3 rounded-lg transition-all active:scale-95 disabled:opacity-60">
           {loading ? <><Loader2 size={15} className="animate-spin" />Analyzing market...</> : <><Sparkles size={15} />Get Price Suggestion</>}
         </button>
       </form>
@@ -162,7 +162,7 @@ function FestivalTab() {
       </div>
 
       <button onClick={fetch} disabled={loading} data-testid="festival-intel-btn"
-        className="flex items-center gap-2 bg-amber-600 hover:bg-amber-700 text-white text-sm font-semibold px-5 py-2.5 rounded-lg transition-all active:scale-95 disabled:opacity-60">
+        className="flex items-center gap-2 bg-amber-600 hover:bg-amber-700 text-white text-sm font-semibold px-5 py-3 rounded-lg transition-all active:scale-95 disabled:opacity-60">
         {loading ? <><Loader2 size={15} className="animate-spin" />Analyzing festivals...</> : <><CalendarDays size={15} />Get Festival Intelligence</>}
       </button>
 
@@ -218,7 +218,7 @@ function AdvisorTab() {
           <input value={note} onChange={e => setNote(e.target.value)} placeholder="e.g. Dashain is coming, focus on 125cc..." className={inp} />
         </div>
         <button onClick={fetch} disabled={loading} data-testid="get-suggestions-btn"
-          className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-5 py-2.5 rounded-lg transition-all active:scale-95 disabled:opacity-60">
+          className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-5 py-3 rounded-lg transition-all active:scale-95 disabled:opacity-60">
           {loading ? <><Loader2 size={15} className="animate-spin" />Thinking...</> : <><Sparkles size={15} />Get Recommendations</>}
         </button>
       </div>
@@ -285,7 +285,7 @@ function ChatbotTab() {
           sessionId.current = `chat-${Date.now()}`;
           msgCounter.current = 1;
         }}
-          className="ml-auto p-1.5 hover:bg-white/20 rounded-lg transition-colors" title="New chat">
+          className="ml-auto w-11 h-11 flex items-center justify-center hover:bg-white/20 rounded-lg transition-colors" title="New chat">
           <RefreshCw size={14} className="text-white" />
         </button>
       </div>

@@ -281,19 +281,19 @@ export function VehicleDetailModal({ id, onClose }) {
             <div className="flex-1" />
             {canManageStock && (isEditing ? (
               <>
-                <button type="button" onClick={cancelEdit} className="flex items-center gap-1.5 px-3 py-2 border border-slate-200 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors">Cancel</button>
-                <button type="button" onClick={saveEdit} disabled={saving} className="flex items-center gap-1.5 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-semibold disabled:opacity-60 transition-colors" data-testid="save-vehicle-btn">
+                <button type="button" onClick={cancelEdit} className="flex items-center gap-1.5 px-3 py-3 border border-slate-200 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors">Cancel</button>
+                <button type="button" onClick={saveEdit} disabled={saving} className="flex items-center gap-1.5 px-3 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-semibold disabled:opacity-60 transition-colors" data-testid="save-vehicle-btn">
                   {saving ? "Saving..." : "Save Changes"}
                 </button>
               </>
             ) : (
-              <button onClick={() => { setIsEditing(true); setActiveTab("overview"); }} className="flex items-center gap-1.5 px-3 py-2 border border-slate-200 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors" data-testid="edit-vehicle-btn"><Edit size={14} /> Edit</button>
+              <button onClick={() => { setIsEditing(true); setActiveTab("overview"); }} className="flex items-center gap-1.5 px-3 py-3 border border-slate-200 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors" data-testid="edit-vehicle-btn"><Edit size={14} /> Edit</button>
             ))}
             {isAdmin && vehicle.status === "sold" && !isEditing && (
-              <button onClick={openReturnModal} className="flex items-center gap-1.5 px-3 py-2 border border-amber-200 text-amber-700 rounded-lg text-sm font-medium hover:bg-amber-50 transition-colors" data-testid="record-return-btn"><Undo2 size={14} /> Record Return</button>
+              <button onClick={openReturnModal} className="flex items-center gap-1.5 px-3 py-3 border border-amber-200 text-amber-700 rounded-lg text-sm font-medium hover:bg-amber-50 transition-colors" data-testid="record-return-btn"><Undo2 size={14} /> Record Return</button>
             )}
             {!isEditing && (
-              <button onClick={loadQR} className="flex items-center gap-1.5 px-3 py-2 border border-slate-200 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors" data-testid="qr-btn"><QrCode size={14} /> QR Label</button>
+              <button onClick={loadQR} className="flex items-center gap-1.5 px-3 py-3 border border-slate-200 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors" data-testid="qr-btn"><QrCode size={14} /> QR Label</button>
             )}
           </div>
 

@@ -151,7 +151,7 @@ export function QRLabelModal({ onClose, qrData }) {
           </div>
           <button
             onClick={() => window.print()}
-            className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-xl transition-colors"
+            className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-xl transition-colors"
             data-testid="print-qr-btn"
           >
             Print Label

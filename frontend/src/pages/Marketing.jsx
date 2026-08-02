@@ -186,7 +186,7 @@ export default function Marketing() {
           onClick={generate}
           disabled={loading || !selectedVehicle || selectedPlatforms.length === 0}
           data-testid="generate-marketing-btn"
-          className="flex items-center gap-2 bg-pink-600 hover:bg-pink-700 text-white text-sm font-semibold px-6 py-2.5 rounded-lg transition-all active:scale-95 disabled:opacity-60"
+          className="flex items-center gap-2 bg-pink-600 hover:bg-pink-700 text-white text-sm font-semibold px-6 py-3 rounded-lg transition-all active:scale-95 disabled:opacity-60"
         >
           {loading ? <><Loader2 size={16} className="animate-spin" />Generating...</> : <><Megaphone size={16} />Generate Content</>}
         </button>

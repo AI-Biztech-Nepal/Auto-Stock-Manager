@@ -197,7 +197,7 @@ export default function Sales() {
           <h1 className="text-2xl font-bold text-slate-900">Sales</h1>
           <p className="text-sm text-slate-500">{sales.length} sales recorded</p>
         </div>
-        <button onClick={openModal} data-testid="new-sale-btn" className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-2.5 rounded-lg transition-all active:scale-95 shadow-sm">
+        <button onClick={openModal} data-testid="new-sale-btn" className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-3 rounded-lg transition-all active:scale-95 shadow-sm">
           <Plus size={16} /> Record Sale
         </button>
       </div>
@@ -305,7 +305,7 @@ export default function Sales() {
                       <div className="text-xs text-slate-500 mt-0.5 truncate">{s.customer_name}{s.customer_contact ? ` · ${s.customer_contact}` : ""}</div>
                     </div>
                     {isAdmin && (
-                      <button onClick={e => { e.stopPropagation(); handleDelete(s.id); }} className="p-1.5 -mr-1.5 -mt-1.5 shrink-0 hover:bg-red-50 rounded-lg transition-colors" data-testid="delete-sale-btn-mobile">
+                      <button onClick={e => { e.stopPropagation(); handleDelete(s.id); }} className="w-11 h-11 -mr-2.5 -mt-2.5 shrink-0 flex items-center justify-center hover:bg-red-50 rounded-lg transition-colors" data-testid="delete-sale-btn-mobile">
                         <Trash2 size={14} className="text-red-400" />
                       </button>
                     )}

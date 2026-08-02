@@ -114,11 +114,11 @@ export default function Leads() {
                       rel="noopener noreferrer"
                       title="Contact on WhatsApp"
                       data-testid="lead-whatsapp-btn"
-                      className="p-1.5 hover:bg-green-50 rounded-lg"
+                      className="w-11 h-11 flex items-center justify-center hover:bg-green-50 rounded-lg"
                     >
                       <MessageCircle size={14} className="text-green-500" />
                     </a>
-                    <button onClick={() => handleDelete(l.id)} className="p-1.5 hover:bg-red-50 rounded-lg"><Trash2 size={14} className="text-red-400" /></button>
+                    <button onClick={() => handleDelete(l.id)} className="w-11 h-11 flex items-center justify-center hover:bg-red-50 rounded-lg"><Trash2 size={14} className="text-red-400" /></button>
                   </div>
                 </div>
 

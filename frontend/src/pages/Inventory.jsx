@@ -259,7 +259,7 @@ export default function Inventory() {
             <button
               onClick={() => navigate("/sold-stock")}
               data-testid="sold-stock-link"
-              className="flex items-center gap-2 border border-slate-200 text-slate-700 text-sm font-medium px-4 py-2.5 rounded-lg hover:bg-slate-50 transition-all active:scale-95"
+              className="flex items-center gap-2 border border-slate-200 text-slate-700 text-sm font-medium px-4 py-3 rounded-lg hover:bg-slate-50 transition-all active:scale-95"
             >
               <Archive size={16} /> Sold Stock
             </button>
@@ -269,7 +269,7 @@ export default function Inventory() {
               onClick={hideUnpriced}
               disabled={hidingUnpriced}
               data-testid="hide-unpriced-button"
-              className="flex items-center gap-2 border border-slate-200 text-slate-700 text-sm font-medium px-4 py-2.5 rounded-lg hover:bg-slate-50 transition-all active:scale-95 disabled:opacity-60"
+              className="flex items-center gap-2 border border-slate-200 text-slate-700 text-sm font-medium px-4 py-3 rounded-lg hover:bg-slate-50 transition-all active:scale-95 disabled:opacity-60"
             >
               <EyeOff size={16} /> {hidingUnpriced ? "Moving..." : `Move ${unpricedVisible.length} With No Price To Unlisted`}
             </button>
@@ -278,7 +278,7 @@ export default function Inventory() {
             <button
               onClick={() => { setForm(EMPTY); setShowModal(true); }}
               data-testid="add-vehicle-button"
-              className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-2.5 rounded-lg transition-all active:scale-95 shadow-sm"
+              className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-3 rounded-lg transition-all active:scale-95 shadow-sm"
             >
               <Plus size={16} /> Add Vehicle
             </button>
@@ -373,7 +373,7 @@ export default function Inventory() {
               key={s}
               onClick={() => setStatusFilter(s)}
               data-testid={`status-toggle-${s}`}
-              className={`flex items-center gap-1.5 shrink-0 px-3.5 py-2.5 rounded-full text-sm font-medium border transition-colors whitespace-nowrap ${
+              className={`flex items-center gap-1.5 shrink-0 px-3.5 py-3 rounded-full text-sm font-medium border transition-colors whitespace-nowrap ${
                 active ? "bg-blue-600 border-blue-600 text-white" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
               }`}
             >
@@ -389,7 +389,7 @@ export default function Inventory() {
           onClick={() => setNoPhotoFilter(p => !p)}
           data-testid="no-photo-filter-toggle"
           title="Show only vehicles with no photo uploaded"
-          className={`flex items-center gap-1.5 shrink-0 px-3.5 py-2.5 rounded-full text-sm font-medium border transition-colors whitespace-nowrap ${
+          className={`flex items-center gap-1.5 shrink-0 px-3.5 py-3 rounded-full text-sm font-medium border transition-colors whitespace-nowrap ${
             noPhotoFilter ? "bg-blue-600 border-blue-600 text-white" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
           }`}
         >
@@ -626,7 +626,7 @@ export default function Inventory() {
                 <div className="flex items-center justify-end gap-1 pt-1 border-t border-slate-50">
                   <button
                     onClick={e => { e.stopPropagation(); setSelectedVehicleId(v.id); }}
-                    className="p-1.5 hover:bg-slate-100 rounded-lg transition-colors"
+                    className="w-11 h-11 flex items-center justify-center hover:bg-slate-100 rounded-lg transition-colors"
                     data-testid="view-vehicle-btn"
                   >
                     <Eye size={15} className="text-slate-500" />
@@ -634,7 +634,7 @@ export default function Inventory() {
                   {isAdmin && (
                     <button
                       onClick={e => handleDelete(v.id, e)}
-                      className="p-1.5 hover:bg-red-50 rounded-lg transition-colors"
+                      className="w-11 h-11 flex items-center justify-center hover:bg-red-50 rounded-lg transition-colors"
                       data-testid="delete-vehicle-btn"
                     >
                       <Trash2 size={15} className="text-red-400" />
@@ -653,7 +653,7 @@ export default function Inventory() {
           <button
             onClick={() => navigate("/import-stock")}
             data-testid="import-stock-btn"
-            className="flex items-center gap-2 px-4 py-2.5 border border-slate-200 text-slate-700 text-sm font-medium rounded-lg hover:bg-slate-50 transition-colors"
+            className="flex items-center gap-2 px-4 py-3 border border-slate-200 text-slate-700 text-sm font-medium rounded-lg hover:bg-slate-50 transition-colors"
           >
             <UploadCloud size={16} /> Import Stock
           </button>

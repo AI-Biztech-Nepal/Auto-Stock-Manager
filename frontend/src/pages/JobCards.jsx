@@ -301,7 +301,7 @@ export default function JobCards() {
           <p className="text-sm text-slate-500">{filtered.length} records</p>
         </div>
         {canEdit && (
-          <button onClick={openModal} data-testid="create-job-button" className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-2.5 rounded-lg transition-all active:scale-95 shadow-sm">
+          <button onClick={openModal} data-testid="create-job-button" className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-3 rounded-lg transition-all active:scale-95 shadow-sm">
             <Plus size={16} /> New Job Card
           </button>
         )}

@@ -130,7 +130,7 @@ export default function BSDatePicker({ value, onChange, required, className = ""
         data-testid="bs-calendar-popover"
       >
           <div className="flex items-center justify-between mb-2 gap-2">
-            <button type="button" onClick={() => changeMonth(-1)} className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500" data-testid="bs-prev-month">
+            <button type="button" onClick={() => changeMonth(-1)} className="w-11 h-11 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500" data-testid="bs-prev-month">
               <ChevronLeft size={16} />
             </button>
             <div className="flex items-center gap-1.5">
@@ -144,7 +144,7 @@ export default function BSDatePicker({ value, onChange, required, className = ""
                 {years.map(y => <option key={y} value={y}>{y}</option>)}
               </select>
             </div>
-            <button type="button" onClick={() => changeMonth(1)} className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500" data-testid="bs-next-month">
+            <button type="button" onClick={() => changeMonth(1)} className="w-11 h-11 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500" data-testid="bs-next-month">
               <ChevronRight size={16} />
             </button>
           </div>

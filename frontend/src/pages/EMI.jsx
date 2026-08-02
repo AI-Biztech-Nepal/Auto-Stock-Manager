@@ -70,7 +70,7 @@ export default function EMI() {
           <h1 className="text-2xl font-bold text-slate-900">EMI & Financing</h1>
           <p className="text-sm text-slate-500">{activeEMIs.length} active plans · Receivable: <span className="font-semibold text-blue-600">{formatNPR(totalReceivable)}</span></p>
         </div>
-        <button onClick={() => setShowModal(true)} data-testid="create-emi-btn" className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-2.5 rounded-lg transition-all active:scale-95 shadow-sm">
+        <button onClick={() => setShowModal(true)} data-testid="create-emi-btn" className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-3 rounded-lg transition-all active:scale-95 shadow-sm">
           <Plus size={16} /> New EMI Plan
         </button>
       </div>
