@@ -1,12 +1,13 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { Search, ChevronDown, ChevronRight, Archive } from "lucide-react";
+import { Search, ChevronDown, ChevronRight, Archive, X } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
 import { formatNPR, formatOwnership } from "../utils/helpers";
 import HoverADDate from "../components/HoverADDate";
+import BSDatePicker from "../components/BSDatePicker";
 import { useAuth } from "../context/AuthContext";
-import { adToBsDate, BS_MONTHS } from "../utils/nepali-date";
+import { adToBsDate, BS_MONTHS, formatBSDate } from "../utils/nepali-date";
 
 const monthLabelAD = (ym) => {
   if (!ym || ym === "unknown") return "Unknown Date";
@@ -45,6 +46,7 @@ export default function SoldStock() {
   const [search, setSearch] = useState("");
   const [collapsed, setCollapsed] = useState(() => new Set());
   const [dateMode, setDateMode] = useState("bs"); // "bs" | "ad" — which calendar groups the list into months
+  const [dateFilter, setDateFilter] = useState(""); // AD "YYYY-MM-DD" — exact sold_date to filter to
 
   const fetchSold = useCallback(async () => {
     try {
@@ -57,13 +59,17 @@ export default function SoldStock() {
   useEffect(() => { fetchSold(); }, [fetchSold]);
 
   const filtered = useMemo(() => {
-    if (!search) return vehicles;
-    const q = search.toLowerCase();
-    return vehicles.filter(v =>
-      v.brand?.toLowerCase().includes(q) || v.model?.toLowerCase().includes(q) ||
-      v.registration_number?.toLowerCase().includes(q) || v.purchase_source?.toLowerCase().includes(q)
-    );
-  }, [vehicles, search]);
+    let result = vehicles;
+    if (search) {
+      const q = search.toLowerCase();
+      result = result.filter(v =>
+        v.brand?.toLowerCase().includes(q) || v.model?.toLowerCase().includes(q) ||
+        v.registration_number?.toLowerCase().includes(q) || v.purchase_source?.toLowerCase().includes(q)
+      );
+    }
+    if (dateFilter) result = result.filter(v => v.sold_date?.slice(0, 10) === dateFilter);
+    return result;
+  }, [vehicles, search, dateFilter]);
 
   const groups = useMemo(() => {
     const byMonth = {};
@@ -114,6 +120,19 @@ export default function SoldStock() {
               </button>
             ))}
           </div>
+          <div className="w-44" data-testid="sold-stock-date-filter-input">
+            <BSDatePicker value={dateFilter} onChange={setDateFilter} />
+          </div>
+          {dateFilter && (
+            <button
+              onClick={() => setDateFilter("")}
+              data-testid="clear-sold-stock-date-filter"
+              className="flex items-center gap-1 h-9 px-2.5 text-sm text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
+              title="Clear date filter"
+            >
+              <X size={14} />
+            </button>
+          )}
           <button
             onClick={() => navigate("/inventory")}
             className="text-sm text-blue-600 hover:underline"
@@ -143,7 +162,13 @@ export default function SoldStock() {
       ) : groups.length === 0 ? (
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm flex flex-col items-center justify-center h-48 text-slate-500">
           <p className="font-medium">No sold vehicles found</p>
-          <p className="text-sm mt-1">{search ? "Try adjusting your search" : "Vehicles marked sold will appear here, grouped by month."}</p>
+          <p className="text-sm mt-1">
+            {dateFilter
+              ? `No vehicles sold on ${formatBSDate(dateFilter)} BS`
+              : search
+              ? "Try adjusting your search"
+              : "Vehicles marked sold will appear here, grouped by month."}
+          </p>
         </div>
       ) : (
         <div className="space-y-4">
