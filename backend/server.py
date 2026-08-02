@@ -691,6 +691,9 @@ async def get_vehicles(status: Optional[str] = None, brand: Optional[str] = None
     exps_by_vehicle: dict = {}
     for e in all_exps:
         exps_by_vehicle.setdefault(e["vehicle_id"], []).append(e)
+    # Batch-load which vehicles have at least one photo, so the frontend can filter
+    # for missing photos without an N+1 fetch of /vehicles/{id}/photos per row.
+    photo_vehicle_ids = set(await db.vehicle_photos.distinct("vehicle_id", {"vehicle_id": {"$in": vehicle_ids}}))
     # Enrich each vehicle using pre-loaded expenses
     def enrich_with_expenses(v: dict, exps: list) -> dict:
         v["aging"] = stock_aging(v.get("purchase_date", ""))
@@ -704,6 +707,7 @@ async def get_vehicles(status: Optional[str] = None, brand: Optional[str] = None
             v["low_margin"] = v["profit_margin"] < 8
         else:
             v["expected_profit"] = None; v["profit_margin"] = None; v["low_margin"] = False
+        v["has_photo"] = v["id"] in photo_vehicle_ids
         return v
     role = cu.get("role", "admin")
     return [_hide_financials_for_role(enrich_with_expenses(v, exps_by_vehicle.get(v["id"], [])), role) for v in vehicles]

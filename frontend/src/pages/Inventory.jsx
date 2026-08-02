@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { Plus, Search, Eye, Trash2, Filter, X, UploadCloud, EyeOff, Package, Wallet, DollarSign, Lock, Moon, Archive, Sparkles, Store, User, Wrench, Clock, CheckCircle2, AlertTriangle } from "lucide-react";
+import { Plus, Search, Eye, Trash2, Filter, X, UploadCloud, EyeOff, Package, Wallet, DollarSign, Lock, Moon, Archive, Sparkles, Store, User, Wrench, Clock, CheckCircle2, AlertTriangle, ImageOff } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
 import { formatNPR, getAgingStyle, getStatusStyle, BRANDS, VEHICLE_STATUS_OPTIONS, formatOwnership } from "../utils/helpers";
@@ -54,6 +54,7 @@ export default function Inventory() {
   const [brandFilter, setBrandFilter] = useState("all");
   const [agingFilter, setAgingFilter] = useState(searchParams.get("aging") || "all");
   const [dateFilter, setDateFilter] = useState("");
+  const [noPhotoFilter, setNoPhotoFilter] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const [form, setForm] = useState(EMPTY);
   const [saving, setSaving] = useState(false);
@@ -103,6 +104,7 @@ export default function Inventory() {
     if (agingFilter !== "all") result = result.filter(v => v.aging?.category === agingFilter);
     if (brandFilter !== "all") result = result.filter(v => v.brand === brandFilter);
     if (dateFilter) result = result.filter(v => v.created_at?.slice(0, 10) === dateFilter);
+    if (noPhotoFilter) result = result.filter(v => !v.has_photo);
     if (search) {
       const q = search.toLowerCase();
       const qNoSlash = q.replace(/\//g, "");
@@ -115,6 +117,26 @@ export default function Inventory() {
     acc[s] = result.length;
     return acc;
   }, {});
+
+  // Count of vehicles missing a photo, applying every other active filter the same way
+  // statusCounts does, so the toggle's badge matches what clicking it would actually show.
+  const noPhotoCount = (() => {
+    let result = vehicles.filter(v => v.status !== "sold" && !v.has_photo);
+    if (statusFilter !== "all") result = result.filter(v => v.status === statusFilter);
+    if (agingFilter !== "all") result = result.filter(v => v.aging?.category === agingFilter);
+    if (brandFilter !== "all") result = result.filter(v => v.brand === brandFilter);
+    if (dateFilter) result = result.filter(v => v.created_at?.slice(0, 10) === dateFilter);
+    if (search) {
+      const q = search.toLowerCase();
+      const qNoSlash = q.replace(/\//g, "");
+      result = result.filter(v =>
+        v.brand?.toLowerCase().includes(q) || v.model?.toLowerCase().includes(q) ||
+        v.registration_number?.toLowerCase().replace(/\//g, "").includes(qNoSlash) ||
+        v.purchase_source?.toLowerCase().includes(q)
+      );
+    }
+    return result.length;
+  })();
 
   const hideUnpriced = async () => {
     if (unpricedVisible.length === 0) return;
@@ -167,6 +189,7 @@ export default function Inventory() {
     if (agingFilter !== "all") result = result.filter(v => v.aging?.category === agingFilter);
     if (brandFilter !== "all") result = result.filter(v => v.brand === brandFilter);
     if (dateFilter) result = result.filter(v => v.created_at?.slice(0, 10) === dateFilter);
+    if (noPhotoFilter) result = result.filter(v => !v.has_photo);
     if (search) {
       const q = search.toLowerCase();
       const qNoSlash = q.replace(/\//g, "");
@@ -180,7 +203,7 @@ export default function Inventory() {
     result.sort(sortStock);
 
     setFiltered(result);
-  }, [vehicles, search, statusFilter, brandFilter, agingFilter, dateFilter]);
+  }, [vehicles, search, statusFilter, brandFilter, agingFilter, dateFilter, noPhotoFilter]);
 
   const handleSave = async (e) => {
     e.preventDefault();
@@ -362,6 +385,20 @@ export default function Inventory() {
             </button>
           );
         })}
+        <button
+          onClick={() => setNoPhotoFilter(p => !p)}
+          data-testid="no-photo-filter-toggle"
+          title="Show only vehicles with no photo uploaded"
+          className={`flex items-center gap-1.5 shrink-0 px-3.5 py-2 rounded-full text-sm font-medium border transition-colors whitespace-nowrap ${
+            noPhotoFilter ? "bg-blue-600 border-blue-600 text-white" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
+          }`}
+        >
+          <ImageOff size={14} />
+          No Photo
+          <span className={`text-xs px-1.5 py-0.5 rounded-full ${noPhotoFilter ? "bg-white/20 text-white" : "bg-slate-100 text-slate-500"}`}>
+            {noPhotoCount}
+          </span>
+        </button>
       </div>
 
       {/* Filters — sticky so search/filters stay reachable while scrolling a long list */}
@@ -499,7 +536,7 @@ export default function Inventory() {
           <p className="text-sm mt-1">
             {agingFilter !== "all"
               ? "No vehicles fall into this stock age range right now."
-              : search || statusFilter !== "all" || brandFilter !== "all" || dateFilter
+              : search || statusFilter !== "all" || brandFilter !== "all" || dateFilter || noPhotoFilter
                 ? "Try adjusting your filters"
                 : "Add your first vehicle to get started"}
           </p>
