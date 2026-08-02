@@ -203,7 +203,7 @@ export default function Vendors() {
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
             <div className="flex items-center justify-between p-5 border-b border-slate-100">
               <h2 className="text-lg font-bold text-slate-900">{editItem ? "Edit Vendor" : "Add Vendor"}</h2>
-              <button onClick={() => setShowModal(false)} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500">✕</button>
+              <button onClick={() => setShowModal(false)} className="w-11 h-11 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500">✕</button>
             </div>
             <form onSubmit={handleSave} className="p-5 space-y-4">
               {[["Full Name","name","text","e.g. Ram Bahadur Shrestha",true],["Phone Number","phone","tel","e.g. 9841234567",true],["Address","address","text","City/Area",false]].map(([label, key, type, ph, req]) => (
@@ -244,7 +244,7 @@ export default function Vendors() {
                 <h2 className="text-lg font-bold text-slate-900">Record Payment</h2>
                 <p className="text-xs text-slate-500 mt-0.5">To: {selectedVendor.name} · Due: {formatNPR(selectedVendor.remaining_due)}</p>
               </div>
-              <button onClick={() => setShowPayModal(false)} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500">✕</button>
+              <button onClick={() => setShowPayModal(false)} className="w-11 h-11 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500">✕</button>
             </div>
             <form onSubmit={handlePayment} className="p-5 space-y-4">
               <div>

@@ -145,7 +145,7 @@ export default function EMI() {
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between p-5 border-b border-slate-100">
               <h2 className="text-lg font-bold text-slate-900">Create EMI Plan</h2>
-              <button onClick={() => setShowModal(false)} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500">✕</button>
+              <button onClick={() => setShowModal(false)} className="w-11 h-11 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500">✕</button>
             </div>
             <form onSubmit={handleSave} className="p-5 space-y-4">
               <div><label className="block text-xs font-medium text-slate-600 mb-1">Customer <span className="text-red-500">*</span></label>
@@ -192,7 +192,7 @@ export default function EMI() {
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
             <div className="flex items-center justify-between p-5 border-b border-slate-100">
               <div><h2 className="text-lg font-bold text-slate-900">Record EMI Payment</h2><p className="text-xs text-slate-500 mt-0.5">{selectedEmi.customer_name} · Monthly: {formatNPR(selectedEmi.monthly_installment)}</p></div>
-              <button onClick={() => setShowPayModal(false)} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-100">✕</button>
+              <button onClick={() => setShowPayModal(false)} className="w-11 h-11 flex items-center justify-center rounded-lg hover:bg-slate-100">✕</button>
             </div>
             <form onSubmit={handlePayment} className="p-5 space-y-4">
               <div><label className="block text-xs font-medium text-slate-600 mb-1">Amount (NPR)</label><input type="number" value={payForm.amount} onChange={e => setPayForm({...payForm, amount: e.target.value})} className={inp} /></div>

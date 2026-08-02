@@ -436,7 +436,7 @@ export default function JobCards() {
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between p-5 border-b border-slate-100">
               <h2 className="text-lg font-bold text-slate-900">{editingJob ? `Edit Job Card ${editingJob.job_number || ""}` : "Create Job Card"}</h2>
-              <button onClick={closeModal} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500">✕</button>
+              <button onClick={closeModal} className="w-11 h-11 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500">✕</button>
             </div>
             <form onSubmit={submitJob} className="p-5 space-y-4">
               {editingJob ? (

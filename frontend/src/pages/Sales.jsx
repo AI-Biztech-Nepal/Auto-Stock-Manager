@@ -395,7 +395,7 @@ export default function Sales() {
           <div className="bg-white sm:rounded-2xl shadow-2xl w-full h-full sm:h-auto sm:max-w-xl sm:max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between p-4 sm:p-5 border-b border-slate-100 sticky top-0 bg-white z-10">
               <h2 className="text-lg font-bold text-slate-900">Record Sale</h2>
-              <button onClick={() => setShowModal(false)} className="w-9 h-9 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500 shrink-0">✕</button>
+              <button onClick={() => setShowModal(false)} className="w-11 h-11 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500 shrink-0">✕</button>
             </div>
             <form onSubmit={handleSave} className="p-4 sm:p-5 space-y-4">
 
@@ -425,7 +425,7 @@ export default function Sales() {
                       <option key={c.id} value={c.id}>{c.name} — {c.contact_number}</option>
                     ))}
                   </select>
-                  <button type="button" onClick={() => setShowAddCust(!showAddCust)} title="Add new customer" data-testid="add-customer-inline-btn" className={`shrink-0 w-9 h-9 flex items-center justify-center rounded-lg border transition-colors ${showAddCust ? "bg-blue-600 text-white border-blue-600" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}>
+                  <button type="button" onClick={() => setShowAddCust(!showAddCust)} title="Add new customer" data-testid="add-customer-inline-btn" className={`shrink-0 w-11 h-11 flex items-center justify-center rounded-lg border transition-colors ${showAddCust ? "bg-blue-600 text-white border-blue-600" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}>
                     <UserPlus size={15} />
                   </button>
                 </div>

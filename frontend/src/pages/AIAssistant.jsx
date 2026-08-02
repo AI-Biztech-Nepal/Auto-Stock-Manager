@@ -322,7 +322,7 @@ function ChatbotTab() {
             onClick={sendMessage}
             disabled={loading || !input.trim()}
             data-testid="chatbot-send-btn"
-            className="w-9 h-9 bg-blue-600 hover:bg-blue-700 text-white rounded-xl flex items-center justify-center transition-all active:scale-95 disabled:opacity-50"
+            className="w-11 h-11 bg-blue-600 hover:bg-blue-700 text-white rounded-xl flex items-center justify-center transition-all active:scale-95 disabled:opacity-50 shrink-0"
           >
             {loading ? <Loader2 size={15} className="animate-spin" /> : <Send size={15} />}
           </button>

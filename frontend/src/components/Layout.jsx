@@ -46,7 +46,7 @@ export default function Layout() {
           <div className="text-xs text-slate-400">Inventory Manager</div>
         </div>
         {mobile && (
-          <button className="ml-auto w-9 h-9 -mr-1.5 rounded-lg flex items-center justify-center text-slate-400 hover:text-white hover:bg-slate-800 transition-colors" onClick={() => setSidebarOpen(false)}>
+          <button className="ml-auto w-11 h-11 -mr-2.5 rounded-lg flex items-center justify-center text-slate-400 hover:text-white hover:bg-slate-800 transition-colors" onClick={() => setSidebarOpen(false)}>
             <X size={18} />
           </button>
         )}
@@ -112,14 +112,14 @@ export default function Layout() {
         {/* Header */}
         <header className="sticky top-0 z-30 bg-white border-b border-slate-200 shadow-sm h-14 flex items-center px-4 lg:px-6 gap-4">
           <button
-            className="lg:hidden w-9 h-9 -ml-1.5 rounded-lg flex items-center justify-center text-slate-500 hover:bg-slate-50 hover:text-slate-900 transition-colors"
+            className="lg:hidden w-11 h-11 -ml-2.5 rounded-lg flex items-center justify-center text-slate-500 hover:bg-slate-50 hover:text-slate-900 transition-colors"
             onClick={() => setSidebarOpen(true)}
             data-testid="mobile-menu-button"
           >
             <Menu size={20} />
           </button>
           <div className="flex-1" />
-          <button className="w-9 h-9 rounded-lg border border-slate-200 flex items-center justify-center text-slate-500 hover:bg-slate-50 transition-colors">
+          <button className="w-11 h-11 rounded-lg border border-slate-200 flex items-center justify-center text-slate-500 hover:bg-slate-50 transition-colors">
             <Bell size={17} />
           </button>
           <div className="flex items-center gap-2">

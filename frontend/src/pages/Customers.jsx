@@ -177,7 +177,7 @@ export default function Customers() {
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
             <div className="flex items-center justify-between p-5 border-b border-slate-100">
               <h2 className="text-lg font-bold text-slate-900">{editItem ? "Edit Customer" : "Add Customer"}</h2>
-              <button onClick={() => setShowModal(false)} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500">✕</button>
+              <button onClick={() => setShowModal(false)} className="w-11 h-11 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500">✕</button>
             </div>
             <form onSubmit={handleSave} className="p-5 space-y-4">
               {[["Full Name","name","text","e.g. Ram Sharma",true],["Contact Number","contact_number","tel","e.g. 9841234567",true],["Address","address","text","City/Area",false]].map(([label, key, type, ph, req]) => (
@@ -209,7 +209,7 @@ export default function Customers() {
                 <h2 className="text-lg font-bold text-slate-900">{viewCustomer.name}</h2>
                 <p className="text-xs text-slate-500 mt-0.5">{viewCustomer.contact_number}{viewCustomer.address ? ` · ${viewCustomer.address}` : ""}</p>
               </div>
-              <button onClick={() => setViewCustomer(null)} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500">✕</button>
+              <button onClick={() => setViewCustomer(null)} className="w-11 h-11 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500">✕</button>
             </div>
             <div className="p-5 space-y-4">
               {viewCustomer.notes && (
