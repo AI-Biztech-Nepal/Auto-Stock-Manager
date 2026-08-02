@@ -184,7 +184,7 @@ export default function BSDatePicker({ value, onChange, required, className = ""
         className="w-full h-10 sm:h-9 px-3 text-sm border border-slate-200 rounded-lg bg-white flex items-center justify-between gap-2 hover:border-blue-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
         data-testid="bs-date-trigger"
       >
-        <span className={selectedBS ? "text-slate-800" : "text-slate-400"}>
+        <span className={`truncate ${selectedBS ? "text-slate-800" : "text-slate-400"}`}>
           {selectedBS ? `${formatBSDate(value)} BS` : "Select date (BS)"}
         </span>
         <Calendar size={15} className="text-slate-400 shrink-0" />
