@@ -160,15 +160,24 @@ export function VehicleDetailModal({ id, onClose }) {
     catch (err) { console.error("Failed to load documents:", err); }
   }, [id]);
 
-  const uploadPhoto = async (file) => {
-    const fd = new FormData(); fd.append("file", file);
+  // Uploads every selected/dropped file in parallel — so picking several photos on mobile
+  // doesn't mean sitting through one upload delay per photo, one at a time.
+  const uploadPhotos = async (files) => {
+    const fileList = Array.from(files);
+    if (fileList.length === 0) return;
     setUploadingPhoto(true);
     try {
-      const r = await api.post(`/vehicles/${id}/photos`, fd, { headers: { "Content-Type": "multipart/form-data" } });
-      setPhotos(prev => [...prev, r.data]);
-      toast.success("Photo uploaded!");
-    } catch (e) { toast.error(e.response?.data?.detail || "Upload failed"); }
-    finally { setUploadingPhoto(false); }
+      const results = await Promise.allSettled(fileList.map(file => {
+        const fd = new FormData(); fd.append("file", file);
+        return api.post(`/vehicles/${id}/photos`, fd, { headers: { "Content-Type": "multipart/form-data" } });
+      }));
+      const uploaded = results.filter(r => r.status === "fulfilled").map(r => r.value.data);
+      if (uploaded.length > 0) setPhotos(prev => [...prev, ...uploaded]);
+      const failed = results.length - uploaded.length;
+      if (failed === 0) toast.success(uploaded.length > 1 ? `${uploaded.length} photos uploaded!` : "Photo uploaded!");
+      else if (uploaded.length === 0) toast.error("Upload failed");
+      else toast.error(`${uploaded.length} uploaded, ${failed} failed`);
+    } finally { setUploadingPhoto(false); }
   };
 
   const onPhotoDragOver = (e) => { e.preventDefault(); setIsDraggingPhoto(true); };
@@ -176,8 +185,7 @@ export function VehicleDetailModal({ id, onClose }) {
   const onPhotoDrop = (e) => {
     e.preventDefault();
     setIsDraggingPhoto(false);
-    const file = e.dataTransfer.files?.[0];
-    if (file) uploadPhoto(file);
+    if (e.dataTransfer.files?.length) uploadPhotos(e.dataTransfer.files);
   };
 
   const deletePhoto = async (photoId) => {
@@ -524,8 +532,8 @@ export function VehicleDetailModal({ id, onClose }) {
                   className={`border-2 border-dashed rounded-xl h-32 flex flex-col items-center justify-center cursor-pointer transition-colors ${isDraggingPhoto ? "border-blue-400 bg-blue-50 text-blue-500" : "border-slate-200 text-slate-400 hover:border-blue-300 hover:text-blue-400"}`}
                 >
                   <p className="text-sm font-medium">{uploadingPhoto ? "Uploading..." : "No photos yet"}</p>
-                  {!uploadingPhoto && <p className="text-xs mt-0.5">Click or drop a photo to upload</p>}
-                  <input type="file" accept="image/*" className="hidden" disabled={uploadingPhoto} onChange={e => { if (e.target.files[0]) uploadPhoto(e.target.files[0]); e.target.value = ""; }} />
+                  {!uploadingPhoto && <p className="text-xs mt-0.5">Click or drop photos to upload</p>}
+                  <input type="file" accept="image/*" multiple className="hidden" disabled={uploadingPhoto} onChange={e => { if (e.target.files.length) uploadPhotos(e.target.files); e.target.value = ""; }} />
                 </label>
               ) : (
                 <div className="border-2 border-dashed border-slate-200 rounded-xl h-32 flex flex-col items-center justify-center text-slate-400">
@@ -561,7 +569,7 @@ export function VehicleDetailModal({ id, onClose }) {
                 >
                   <Plus size={20} />
                   <span className="text-xs mt-1">{uploadingPhoto ? "Uploading..." : "Add"}</span>
-                  <input type="file" accept="image/*" className="hidden" disabled={uploadingPhoto} onChange={e => { if (e.target.files[0]) uploadPhoto(e.target.files[0]); e.target.value = ""; }} />
+                  <input type="file" accept="image/*" multiple className="hidden" disabled={uploadingPhoto} onChange={e => { if (e.target.files.length) uploadPhotos(e.target.files); e.target.value = ""; }} />
                 </label>
                 )}
               </div>
