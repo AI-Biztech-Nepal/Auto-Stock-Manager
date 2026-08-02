@@ -6,11 +6,25 @@ import api from "../utils/api";
 import { formatNPR, formatOwnership } from "../utils/helpers";
 import HoverADDate from "../components/HoverADDate";
 import { useAuth } from "../context/AuthContext";
+import { adToBsDate, BS_MONTHS } from "../utils/nepali-date";
 
-const monthLabel = (ym) => {
+const monthLabelAD = (ym) => {
   if (!ym || ym === "unknown") return "Unknown Date";
   const [y, m] = ym.split("-").map(Number);
   return new Date(y, m - 1, 1).toLocaleDateString("en-US", { month: "long", year: "numeric" });
+};
+
+// Groups by the BS (Nepali) month a vehicle sold in, keyed the same "YYYY-MM" shape as the
+// AD grouping so the existing string-sort-descending logic works unchanged for either mode.
+const bsMonthKey = (adDateStr) => {
+  const bs = adToBsDate(adDateStr);
+  if (!bs) return "unknown";
+  return `${bs.year}-${String(bs.month).padStart(2, "0")}`;
+};
+const monthLabelBS = (ym) => {
+  if (!ym || ym === "unknown") return "Unknown Date";
+  const [y, m] = ym.split("-").map(Number);
+  return `${BS_MONTHS[m - 1]} ${y} BS`;
 };
 
 const daysToSell = (v) => {
@@ -30,6 +44,7 @@ export default function SoldStock() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [collapsed, setCollapsed] = useState(() => new Set());
+  const [dateMode, setDateMode] = useState("bs"); // "bs" | "ad" — which calendar groups the list into months
 
   const fetchSold = useCallback(async () => {
     try {
@@ -53,18 +68,19 @@ export default function SoldStock() {
   const groups = useMemo(() => {
     const byMonth = {};
     for (const v of filtered) {
-      const key = (v.sold_date || "").slice(0, 7) || "unknown";
+      const key = dateMode === "bs" ? bsMonthKey(v.sold_date) : (v.sold_date || "").slice(0, 7) || "unknown";
       (byMonth[key] ??= []).push(v);
     }
     const months = Object.keys(byMonth).sort((a, b) => b.localeCompare(a));
     for (const m of months) byMonth[m].sort((a, b) => (b.sold_date || "").localeCompare(a.sold_date || ""));
+    const monthLabel = dateMode === "bs" ? monthLabelBS : monthLabelAD;
     return months.map(m => ({
       key: m,
       label: monthLabel(m),
       vehicles: byMonth[m],
       revenue: byMonth[m].reduce((sum, v) => sum + (v.selling_price || 0), 0),
     }));
-  }, [filtered]);
+  }, [filtered, dateMode]);
 
   const toggleMonth = (key) => {
     setCollapsed(prev => {
@@ -83,12 +99,28 @@ export default function SoldStock() {
           </h1>
           <p className="text-sm text-slate-500">{filtered.length} vehicles sold · archived out of active inventory</p>
         </div>
-        <button
-          onClick={() => navigate("/inventory")}
-          className="text-sm text-blue-600 hover:underline"
-        >
-          Back to Inventory
-        </button>
+        <div className="flex items-center gap-3">
+          <div className="flex items-center bg-slate-100 rounded-lg p-1" data-testid="sold-stock-date-mode-toggle">
+            {[["bs", "Nepali"], ["ad", "English"]].map(([mode, label]) => (
+              <button
+                key={mode}
+                onClick={() => setDateMode(mode)}
+                data-testid={`date-mode-${mode}`}
+                className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                  dateMode === mode ? "bg-white shadow text-blue-700" : "text-slate-500 hover:text-slate-700"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <button
+            onClick={() => navigate("/inventory")}
+            className="text-sm text-blue-600 hover:underline"
+          >
+            Back to Inventory
+          </button>
+        </div>
       </div>
 
       {/* Search — sticky so it stays reachable while scrolling a long list */}
