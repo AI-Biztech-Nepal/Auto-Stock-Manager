@@ -544,8 +544,8 @@ export default function Sales() {
               </Field>
 
               <div className="flex flex-col-reverse sm:flex-row gap-3 pt-4 sm:pt-1 sticky bottom-0 sm:static -mx-4 sm:mx-0 px-4 sm:px-0 pb-4 sm:pb-0 bg-white border-t sm:border-t-0 border-slate-100">
-                <button type="button" onClick={() => setShowModal(false)} className="flex-1 h-11 sm:h-10 border border-slate-200 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50">Cancel</button>
-                <button type="submit" disabled={saving} data-testid="save-sale-btn" className="flex-1 h-11 sm:h-10 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-semibold disabled:opacity-60 active:scale-95 transition-all">
+                <button type="button" onClick={() => setShowModal(false)} className="flex-1 h-12 sm:h-10 border border-slate-200 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50">Cancel</button>
+                <button type="submit" disabled={saving} data-testid="save-sale-btn" className="flex-1 h-12 sm:h-10 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-semibold disabled:opacity-60 active:scale-95 transition-all">
                   {saving ? "Saving..." : "Record Sale"}
                 </button>
               </div>

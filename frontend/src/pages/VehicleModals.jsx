@@ -49,8 +49,8 @@ export function ExpenseModal({ onClose, onSubmit, form, setForm, saving }) {
             <input type="date" value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} className={inp} />
           </div>
           <div className="flex gap-3">
-            <button type="button" onClick={onClose} className="flex-1 h-11 sm:h-10 border border-slate-200 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50">Cancel</button>
-            <button type="submit" disabled={saving} className="flex-1 h-11 sm:h-10 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-semibold disabled:opacity-60" data-testid="save-expense-btn">
+            <button type="button" onClick={onClose} className="flex-1 h-12 sm:h-10 border border-slate-200 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50">Cancel</button>
+            <button type="submit" disabled={saving} className="flex-1 h-12 sm:h-10 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-semibold disabled:opacity-60" data-testid="save-expense-btn">
               {saving ? "Saving..." : "Add Expense"}
             </button>
           </div>
@@ -110,8 +110,8 @@ export function ReturnModal({ onClose, onSubmit, form, setForm, saving, activeSa
             <input value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} placeholder="Assessment details..." className={inp} />
           </div>
           <div className="flex gap-3">
-            <button type="button" onClick={onClose} className="flex-1 h-11 sm:h-10 border border-slate-200 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50">Cancel</button>
-            <button type="submit" disabled={saving} data-testid="submit-return-btn" className="flex-1 h-11 sm:h-10 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-sm font-semibold disabled:opacity-60">
+            <button type="button" onClick={onClose} className="flex-1 h-12 sm:h-10 border border-slate-200 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50">Cancel</button>
+            <button type="submit" disabled={saving} data-testid="submit-return-btn" className="flex-1 h-12 sm:h-10 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-sm font-semibold disabled:opacity-60">
               {saving ? "Recording..." : "Record Return"}
             </button>
           </div>
