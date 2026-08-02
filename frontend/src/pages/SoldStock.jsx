@@ -105,7 +105,7 @@ export default function SoldStock() {
           </h1>
           <p className="text-sm text-slate-500">{filtered.length} vehicles sold · archived out of active inventory</p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-start gap-3">
           <div className="flex items-center bg-slate-100 rounded-lg p-1" data-testid="sold-stock-date-mode-toggle">
             {[["bs", "Nepali"], ["ad", "English"]].map(([mode, label]) => (
               <button
