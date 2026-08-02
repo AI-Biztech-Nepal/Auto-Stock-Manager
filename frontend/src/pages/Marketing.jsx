@@ -142,7 +142,7 @@ export default function Marketing() {
         {vehicle && (
           <div className="mb-4 bg-blue-50 rounded-xl p-4 text-sm">
             <div className="font-bold text-blue-900">{vehicle.brand} {vehicle.model} {vehicle.year}</div>
-            <div className="grid grid-cols-3 gap-2 mt-2 text-xs text-blue-700">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mt-2 text-xs text-blue-700">
               <span>{vehicle.engine_cc}cc · {vehicle.fuel_type}</span>
               <span>{vehicle.color || "Color N/A"} · {vehicle.condition}</span>
               <span>{vehicle.kilometer_run ? `${vehicle.kilometer_run.toLocaleString()} km` : "Km N/A"}</span>

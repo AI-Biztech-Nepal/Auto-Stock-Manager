@@ -249,12 +249,12 @@ export default function Inventory() {
   return (
     <div className="space-y-5 animate-fade-in">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Inventory</h1>
           <p className="text-sm text-slate-500">{filtered.length} vehicles found</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           {canManageStock && (
             <button
               onClick={() => navigate("/sold-stock")}
@@ -373,7 +373,7 @@ export default function Inventory() {
               key={s}
               onClick={() => setStatusFilter(s)}
               data-testid={`status-toggle-${s}`}
-              className={`flex items-center gap-1.5 shrink-0 px-3.5 py-2 rounded-full text-sm font-medium border transition-colors whitespace-nowrap ${
+              className={`flex items-center gap-1.5 shrink-0 px-3.5 py-2.5 rounded-full text-sm font-medium border transition-colors whitespace-nowrap ${
                 active ? "bg-blue-600 border-blue-600 text-white" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
               }`}
             >
@@ -389,7 +389,7 @@ export default function Inventory() {
           onClick={() => setNoPhotoFilter(p => !p)}
           data-testid="no-photo-filter-toggle"
           title="Show only vehicles with no photo uploaded"
-          className={`flex items-center gap-1.5 shrink-0 px-3.5 py-2 rounded-full text-sm font-medium border transition-colors whitespace-nowrap ${
+          className={`flex items-center gap-1.5 shrink-0 px-3.5 py-2.5 rounded-full text-sm font-medium border transition-colors whitespace-nowrap ${
             noPhotoFilter ? "bg-blue-600 border-blue-600 text-white" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
           }`}
         >

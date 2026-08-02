@@ -76,7 +76,7 @@ export default function SoldStock() {
 
   return (
     <div className="space-y-5 animate-fade-in">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
             <Archive size={22} className="text-slate-400" /> Sold Stock
@@ -142,7 +142,7 @@ export default function SoldStock() {
                           key={v.id}
                           onClick={() => navigate(`/sold-stock/${v.id}`)}
                           data-testid="sold-vehicle-row"
-                          className="flex items-center justify-between gap-4 px-4 py-3 hover:bg-slate-50 cursor-pointer transition-colors"
+                          className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-4 px-4 py-3 hover:bg-slate-50 cursor-pointer transition-colors"
                         >
                           <div className="min-w-0 flex-1">
                             <div className="font-semibold text-slate-900 text-sm truncate">{v.brand} {v.model}</div>
@@ -151,24 +151,26 @@ export default function SoldStock() {
                               {v.registration_number && <span className="font-mono"> · {v.registration_number}</span>}
                             </div>
                           </div>
-                          <div className="text-xs text-slate-500 text-right shrink-0">
-                            <div>Sold: <HoverADDate date={v.sold_date} /></div>
-                            {dts !== null && <div className="mt-0.5">{dts}d in stock</div>}
-                          </div>
-                          {!isPartsOnly && (
-                            <div className="text-right shrink-0 w-28">
-                              <div className="text-xs text-slate-400">Selling</div>
-                              <div className="text-sm font-semibold text-slate-800">{v.selling_price ? formatNPR(v.selling_price) : "—"}</div>
+                          <div className="flex items-center gap-4 flex-wrap sm:flex-nowrap sm:shrink-0">
+                            <div className="text-xs text-slate-500 sm:text-right shrink-0">
+                              <div>Sold: <HoverADDate date={v.sold_date} /></div>
+                              {dts !== null && <div className="mt-0.5">{dts}d in stock</div>}
                             </div>
-                          )}
-                          {!hideFinancials && (
-                            <div className="text-right shrink-0 w-20">
-                              <div className="text-xs text-slate-400">Margin</div>
-                              <div className={`text-sm font-semibold ${v.low_margin ? "text-red-600" : "text-green-600"}`}>
-                                {v.profit_margin !== null && v.profit_margin !== undefined ? `${v.profit_margin}%` : "—"}
+                            {!isPartsOnly && (
+                              <div className="text-right shrink-0 sm:w-28">
+                                <div className="text-xs text-slate-400">Selling</div>
+                                <div className="text-sm font-semibold text-slate-800">{v.selling_price ? formatNPR(v.selling_price) : "—"}</div>
                               </div>
-                            </div>
-                          )}
+                            )}
+                            {!hideFinancials && (
+                              <div className="text-right shrink-0 sm:w-20">
+                                <div className="text-xs text-slate-400">Margin</div>
+                                <div className={`text-sm font-semibold ${v.low_margin ? "text-red-600" : "text-green-600"}`}>
+                                  {v.profit_margin !== null && v.profit_margin !== undefined ? `${v.profit_margin}%` : "—"}
+                                </div>
+                              </div>
+                            )}
+                          </div>
                         </div>
                       );
                     })}

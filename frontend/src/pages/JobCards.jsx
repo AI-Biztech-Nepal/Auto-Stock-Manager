@@ -295,7 +295,7 @@ export default function JobCards() {
 
   return (
     <div className="space-y-5 animate-fade-in">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Job Cards</h1>
           <p className="text-sm text-slate-500">{filtered.length} records</p>
@@ -308,7 +308,7 @@ export default function JobCards() {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         {[
           { label: "Pending", count: stats.pending, bg: "bg-yellow-50 border-yellow-100", text: "text-yellow-800" },
           { label: "In Progress", count: stats.in_progress, bg: "bg-blue-50 border-blue-100", text: "text-blue-800" },

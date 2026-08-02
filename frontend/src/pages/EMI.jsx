@@ -65,7 +65,7 @@ export default function EMI() {
 
   return (
     <div className="space-y-5 animate-fade-in">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">EMI & Financing</h1>
           <p className="text-sm text-slate-500">{activeEMIs.length} active plans · Receivable: <span className="font-semibold text-blue-600">{formatNPR(totalReceivable)}</span></p>
@@ -75,7 +75,7 @@ export default function EMI() {
         </button>
       </div>
 
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className="bg-white border border-slate-200 rounded-xl p-4 text-center shadow-sm">
           <div className="text-2xl font-bold text-slate-900">{emis.length}</div>
           <div className="text-xs text-slate-500 mt-0.5">Total Plans</div>

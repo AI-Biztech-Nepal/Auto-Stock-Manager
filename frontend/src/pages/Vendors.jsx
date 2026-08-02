@@ -81,7 +81,7 @@ export default function Vendors() {
 
   return (
     <div className="space-y-5 animate-fade-in">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Vendor Management</h1>
           <p className="text-sm text-slate-500">{vendors.length} vendors · Total Due: <span className="font-semibold text-red-600">{formatNPR(totalDue)}</span></p>
@@ -92,7 +92,7 @@ export default function Vendors() {
       </div>
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
         <div className="bg-white border border-slate-200 rounded-xl p-4 text-center shadow-sm">
           <div className="text-2xl font-bold text-slate-900" style={{ fontFamily: "Manrope" }}>{vendors.length}</div>
           <div className="text-xs text-slate-500 mt-0.5">Total Vendors</div>
@@ -167,7 +167,7 @@ export default function Vendors() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-4 gap-3 mt-4">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4">
                   <div className="bg-slate-50 rounded-lg p-3 text-center">
                     <div className="text-lg font-bold text-slate-900" style={{ fontFamily: "Manrope" }}>{v.vehicle_count}</div>
                     <div className="text-xs text-slate-500">Vehicles Bought</div>

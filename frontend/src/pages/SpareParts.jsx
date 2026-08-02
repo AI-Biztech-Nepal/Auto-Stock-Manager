@@ -436,7 +436,7 @@ export default function SpareParts() {
   return (
     <div className="space-y-5 animate-fade-in">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Spare Parts</h1>
           <p className="text-sm text-slate-500">{parts.length} parts in inventory</p>
@@ -489,7 +489,92 @@ export default function SpareParts() {
             <p className="font-medium">No parts found</p>
           </div>
         ) : (
-          <div className="overflow-x-auto">
+          <>
+            {/* Card list — phones only, avoids squeezing a 9-column table into a narrow viewport */}
+            <div className="sm:hidden divide-y divide-slate-100">
+              {filtered.map(p => {
+                const displaySupplier = p.vendor_name || p.supplier;
+                return (
+                  <div key={p.id} data-testid="part-row-mobile" className={p.low_stock ? "bg-red-50/40" : ""}>
+                    <div className="p-4">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="font-semibold text-slate-900 text-sm flex items-center gap-1.5 flex-wrap">
+                            {p.name}
+                            {(p.is_kit || p.stock_type === "set") && <span className="text-xs bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded-full font-bold flex items-center gap-1"><Boxes size={11} /> {p.stock_type === "set" ? "Set" : "Kit"}</span>}
+                            {p.low_stock && <span className="text-xs bg-red-100 text-red-700 px-1.5 py-0.5 rounded-full font-bold">Low</span>}
+                          </div>
+                          <div className="text-xs text-slate-500 mt-0.5">
+                            {p.category}{p.part_number ? ` · ${p.part_number}` : ""}
+                          </div>
+                          {p.brand_compatibility && <div className="text-xs text-slate-400 mt-0.5">{p.brand_compatibility}</div>}
+                        </div>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <button onClick={() => adjustStock(p.id, -1)} className="w-7 h-7 rounded-md bg-slate-100 hover:bg-red-100 flex items-center justify-center transition-colors"><Minus size={12} /></button>
+                          <span className={`text-sm font-bold w-6 text-center ${p.low_stock ? "text-red-600" : "text-slate-900"}`}>{p.quantity}</span>
+                          <button onClick={() => adjustStock(p.id, 1)} className="w-7 h-7 rounded-md bg-slate-100 hover:bg-green-100 flex items-center justify-center transition-colors"><Plus size={12} /></button>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-4 mt-2.5 text-xs">
+                        <div><span className="text-slate-400">Cost </span><span className="text-slate-700 font-medium">{formatNPR(p.unit_cost)}</span></div>
+                        <div><span className="text-slate-400">Sell </span>{p.selling_price ? <span className="text-green-700 font-medium">{formatNPR(p.selling_price)}</span> : <span className="text-slate-400">—</span>}</div>
+                        <div><span className="text-slate-400">Value </span><span className="text-slate-700 font-medium">{formatNPR(p.total_value)}</span></div>
+                      </div>
+                      {displaySupplier && (
+                        <div className="flex items-center gap-1 text-xs text-slate-600 mt-1.5"><Store size={12} className="text-slate-400 shrink-0" />{displaySupplier}</div>
+                      )}
+
+                      <div className="flex items-center gap-1 mt-2.5 -ml-1.5">
+                        <button onClick={() => openUsePart(p)} title="Use / Sell Part" data-testid="use-part-btn-mobile" className="p-2 hover:bg-orange-50 rounded-lg transition-colors">
+                          <ShoppingCart size={15} className="text-orange-500" />
+                        </button>
+                        {p.is_kit && (
+                          <button onClick={() => openBreakKit(p)} title={p.stock_type === "set" ? "Break Set into Components" : "Break Kit into Components"} data-testid="break-kit-btn-mobile" className="p-2 hover:bg-indigo-50 rounded-lg transition-colors">
+                            <PackageOpen size={15} className="text-indigo-500" />
+                          </button>
+                        )}
+                        <button onClick={() => toggleTxn(p.id)} title="View History" data-testid="txn-history-btn-mobile" className={`p-2 rounded-lg transition-colors ${expandedPart === p.id ? "bg-blue-100" : "hover:bg-slate-100"}`}>
+                          {expandedPart === p.id ? <ChevronUp size={15} className="text-blue-600" /> : <History size={15} className="text-slate-500" />}
+                        </button>
+                        <button onClick={() => openEdit(p)} className="p-2 hover:bg-slate-100 rounded-lg transition-colors" data-testid="edit-part-btn-mobile"><Edit size={15} className="text-slate-500" /></button>
+                        <button onClick={() => handleDelete(p.id)} className="p-2 hover:bg-red-50 rounded-lg transition-colors" data-testid="delete-part-btn-mobile"><Trash2 size={15} className="text-red-400" /></button>
+                      </div>
+                    </div>
+
+                    {expandedPart === p.id && (
+                      <div className="bg-slate-50 px-4 py-3">
+                        <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-500 mb-2">
+                          <History size={12} /> Usage History
+                        </div>
+                        {!txns[p.id] ? (
+                          <div className="text-xs text-slate-400">Loading...</div>
+                        ) : txns[p.id].length === 0 ? (
+                          <div className="text-xs text-slate-400">No usage recorded yet.</div>
+                        ) : (
+                          <div className="space-y-1.5 max-h-44 overflow-y-auto">
+                            {txns[p.id].map(t => (
+                              <div key={t.id} className="text-xs text-slate-600 bg-white rounded-lg px-3 py-2 border border-slate-100">
+                                <div className="flex items-center gap-2">
+                                  <span className="font-bold text-red-600 shrink-0">-{t.quantity}</span>
+                                  <span className="font-medium text-slate-800">{t.reason}</span>
+                                  <span className="text-slate-400 ml-auto shrink-0">{t.date?.slice(0, 10)}</span>
+                                </div>
+                                {t.notes && <div className="text-slate-400 italic mt-0.5">{t.notes}</div>}
+                                <div className="text-slate-400 mt-0.5">by {t.created_by}</div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Table — sm and up */}
+            <div className="hidden sm:block overflow-x-auto">
             <table className="w-full">
               <thead>
                 <tr className="border-b border-slate-100">
@@ -580,21 +665,22 @@ export default function SpareParts() {
                 })}
               </tbody>
             </table>
-          </div>
+            </div>
+          </>
         )}
       </div>
 
       {/* ── Add / Edit Modal ── */}
       {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between p-5 border-b border-slate-100">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 sm:p-4">
+          <div className="bg-white sm:rounded-2xl shadow-2xl w-full h-full sm:h-auto sm:max-w-xl sm:max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between p-4 sm:p-5 border-b border-slate-100 sticky top-0 bg-white z-10">
               <h2 className="text-lg font-bold text-slate-900">{editId ? "Edit Part" : "Add Spare Part"}</h2>
-              <button onClick={closePartModal} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500">✕</button>
+              <button onClick={closePartModal} className="w-9 h-9 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500 shrink-0">✕</button>
             </div>
-            <form onSubmit={handleSave} className="p-5 space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="col-span-2">
+            <form onSubmit={handleSave} className="p-4 sm:p-5 space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="sm:col-span-2">
                   <Field label="Part Name" required>
                     <input value={form.name} onChange={e => setForm({...form, name: e.target.value})} placeholder="e.g. Brake Pad Front" className={inp} data-testid="part-name-input" />
                   </Field>
@@ -612,7 +698,7 @@ export default function SpareParts() {
                 </Field>
 
                 {/* Vendor (Supplier) */}
-                <div className="col-span-2">
+                <div className="sm:col-span-2">
                   <Field label="Supplier (Vendor)">
                     <VendorCombobox
                       value={form.vendor_id}
@@ -626,7 +712,7 @@ export default function SpareParts() {
                   {showAddVendor && (
                     <div className="mt-2 p-3 bg-blue-50 border border-blue-100 rounded-xl space-y-2" data-testid="add-vendor-inline-form">
                       <p className="text-xs font-semibold text-blue-700 flex items-center gap-1.5"><Store size={11} /> New Vendor</p>
-                      <div className="grid grid-cols-2 gap-2">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                         <input value={newVendor.name} onChange={e => setNewVendor({...newVendor, name: e.target.value})} placeholder="Vendor Name *" className="h-8 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 bg-white" data-testid="new-vendor-name" />
                         <input value={newVendor.phone} onChange={e => setNewVendor({...newVendor, phone: e.target.value})} placeholder="Phone *" className="h-8 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 bg-white" data-testid="new-vendor-phone" />
                       </div>
@@ -766,9 +852,9 @@ export default function SpareParts() {
               <Field label="Notes">
                 <textarea value={form.notes} onChange={e => setForm({...form, notes: e.target.value})} rows={2} placeholder="Any notes..." className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" />
               </Field>
-              <div className="flex gap-3 pt-1">
-                <button type="button" onClick={closePartModal} className="flex-1 h-10 border border-slate-200 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50">Cancel</button>
-                <button type="submit" disabled={saving} data-testid="save-part-btn" className="flex-1 h-10 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-semibold disabled:opacity-60 active:scale-95 transition-all">{saving ? "Saving..." : editId ? "Update" : "Add Part"}</button>
+              <div className="flex flex-col-reverse sm:flex-row gap-3 pt-4 sm:pt-1 sticky bottom-0 sm:static -mx-4 sm:mx-0 px-4 sm:px-0 pb-4 sm:pb-0 bg-white border-t sm:border-t-0 border-slate-100">
+                <button type="button" onClick={closePartModal} className="flex-1 h-11 sm:h-10 border border-slate-200 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50">Cancel</button>
+                <button type="submit" disabled={saving} data-testid="save-part-btn" className="flex-1 h-11 sm:h-10 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-semibold disabled:opacity-60 active:scale-95 transition-all">{saving ? "Saving..." : editId ? "Update" : "Add Part"}</button>
               </div>
             </form>
           </div>

@@ -55,12 +55,12 @@ export default function Leads() {
 
   return (
     <div className="space-y-5 animate-fade-in">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Leads</h1>
           <p className="text-sm text-slate-500">{leads.length} submissions from the storefront (Sell / Exchange / Book Service)</p>
         </div>
-        <div className="flex gap-3">
+        <div className="flex gap-3 flex-wrap">
           <select value={typeFilter} onChange={e => setTypeFilter(e.target.value)} className={sel} data-testid="lead-type-filter">
             <option value="all">All Types</option>
             <option value="sell">Sell</option>

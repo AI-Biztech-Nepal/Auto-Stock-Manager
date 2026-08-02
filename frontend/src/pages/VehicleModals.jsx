@@ -24,10 +24,10 @@ export const Field = ({ label, required, children, full }) => (
 export function ExpenseModal({ onClose, onSubmit, form, setForm, saving }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between p-5 border-b border-slate-100">
           <h2 className="text-lg font-bold text-slate-900">Add Expense</h2>
-          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500">✕</button>
+          <button onClick={onClose} className="w-9 h-9 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500 shrink-0">✕</button>
         </div>
         <form onSubmit={onSubmit} className="p-5 space-y-4">
           <div>
@@ -49,8 +49,8 @@ export function ExpenseModal({ onClose, onSubmit, form, setForm, saving }) {
             <input type="date" value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} className={inp} />
           </div>
           <div className="flex gap-3">
-            <button type="button" onClick={onClose} className="flex-1 h-10 border border-slate-200 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50">Cancel</button>
-            <button type="submit" disabled={saving} className="flex-1 h-10 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-semibold disabled:opacity-60" data-testid="save-expense-btn">
+            <button type="button" onClick={onClose} className="flex-1 h-11 sm:h-10 border border-slate-200 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50">Cancel</button>
+            <button type="submit" disabled={saving} className="flex-1 h-11 sm:h-10 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-semibold disabled:opacity-60" data-testid="save-expense-btn">
               {saving ? "Saving..." : "Add Expense"}
             </button>
           </div>
@@ -69,10 +69,10 @@ export function ReturnModal({ onClose, onSubmit, form, setForm, saving, activeSa
   const hasValidPct = form.refund_percentage !== "" && !Number.isNaN(pct);
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between p-5 border-b border-slate-100">
           <h2 className="text-lg font-bold text-slate-900">Record Return</h2>
-          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500">✕</button>
+          <button onClick={onClose} className="w-9 h-9 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500 shrink-0">✕</button>
         </div>
         <form onSubmit={onSubmit} className="p-5 space-y-4">
           <p className="text-xs text-slate-500">
@@ -110,8 +110,8 @@ export function ReturnModal({ onClose, onSubmit, form, setForm, saving, activeSa
             <input value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} placeholder="Assessment details..." className={inp} />
           </div>
           <div className="flex gap-3">
-            <button type="button" onClick={onClose} className="flex-1 h-10 border border-slate-200 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50">Cancel</button>
-            <button type="submit" disabled={saving} data-testid="submit-return-btn" className="flex-1 h-10 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-sm font-semibold disabled:opacity-60">
+            <button type="button" onClick={onClose} className="flex-1 h-11 sm:h-10 border border-slate-200 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50">Cancel</button>
+            <button type="submit" disabled={saving} data-testid="submit-return-btn" className="flex-1 h-11 sm:h-10 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-sm font-semibold disabled:opacity-60">
               {saving ? "Recording..." : "Record Return"}
             </button>
           </div>
@@ -126,10 +126,10 @@ export function QRLabelModal({ onClose, qrData }) {
   if (!qrData) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between p-5 border-b border-slate-100">
           <h2 className="text-lg font-bold text-slate-900">Vehicle QR Label</h2>
-          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500">✕</button>
+          <button onClick={onClose} className="w-9 h-9 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500 shrink-0">✕</button>
         </div>
         <div className="p-6 flex flex-col items-center gap-4" id="qr-label-content">
           <div className="text-center">

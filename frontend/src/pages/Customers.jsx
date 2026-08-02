@@ -69,7 +69,7 @@ export default function Customers() {
 
   return (
     <div className="space-y-5 animate-fade-in">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Customers</h1>
           <p className="text-sm text-slate-500">{filtered.length} customers</p>
@@ -88,7 +88,7 @@ export default function Customers() {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className="bg-white border border-slate-200 rounded-xl p-4 text-center shadow-sm">
           <div className="text-2xl font-bold text-slate-900" style={{ fontFamily: "Manrope" }}>{customers.length}</div>
           <div className="text-xs text-slate-500 mt-0.5">Total Customers</div>

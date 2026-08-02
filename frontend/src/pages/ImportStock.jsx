@@ -118,7 +118,7 @@ export default function ImportStock() {
 
       {result && (
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6 space-y-4" data-testid="import-result">
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div className="bg-green-50 border border-green-100 rounded-xl p-4 text-center">
               <div className="text-2xl font-bold text-green-700" style={{ fontFamily: "Manrope" }}>
                 {result.committed ? result.inserted : result.total_rows - result.skipped}

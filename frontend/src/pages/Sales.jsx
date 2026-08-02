@@ -192,7 +192,7 @@ export default function Sales() {
   return (
     <div className="space-y-5 animate-fade-in">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Sales</h1>
           <p className="text-sm text-slate-500">{sales.length} sales recorded</p>
@@ -289,75 +289,115 @@ export default function Sales() {
             <p className="text-xs mt-1 text-slate-400">Click "Record Sale" to add one</p>
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-slate-100">
-                  {["Vehicle", "Customer", "Sale Price", "Extra Expenses", "Total", "Payment", "Date", ""].map(h => (
-                    <th key={h} className="text-left text-xs font-semibold uppercase tracking-wider text-slate-500 px-4 py-3 whitespace-nowrap">{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-50">
-                {filtered.map(s => (
-                  <tr
-                    key={s.id}
-                    data-testid="sale-row"
-                    onClick={() => navigate(`/sales/${s.id}`)}
-                    className="table-row-hover cursor-pointer transition-colors"
-                  >
-                    <td className="px-4 py-3">
-                      <div className="font-semibold text-slate-900 text-sm">{s.vehicle_info || "—"}</div>
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="text-sm text-slate-700">{s.customer_name}</div>
-                      {s.customer_contact && <div className="text-xs text-slate-400">{s.customer_contact}</div>}
-                    </td>
-                    <td className="px-4 py-3 text-sm font-medium text-slate-800 whitespace-nowrap">{formatNPR(s.sale_price)}</td>
-                    <td className="px-4 py-3 text-sm text-slate-600 whitespace-nowrap">
-                      {s.extra_expenses?.length > 0 ? (
-                        <span className="text-orange-600 font-medium">{formatNPR(s.expenses_total)} ({s.extra_expenses.length} items)</span>
-                      ) : <span className="text-slate-400">—</span>}
-                    </td>
-                    <td className="px-4 py-3 text-sm font-bold text-green-700 whitespace-nowrap">{formatNPR(s.total_amount)}</td>
-                    <td className="px-4 py-3">
-                      <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-700">{s.payment_method}</span>
+          <>
+            {/* Card list — phones only, avoids squeezing an 8-column table into a narrow viewport */}
+            <div className="sm:hidden divide-y divide-slate-100">
+              {filtered.map(s => (
+                <div
+                  key={s.id}
+                  data-testid="sale-row-mobile"
+                  onClick={() => navigate(`/sales/${s.id}`)}
+                  className="p-4 active:bg-slate-50 cursor-pointer"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="font-semibold text-slate-900 text-sm truncate">{s.vehicle_info || "—"}</div>
+                      <div className="text-xs text-slate-500 mt-0.5 truncate">{s.customer_name}{s.customer_contact ? ` · ${s.customer_contact}` : ""}</div>
+                    </div>
+                    {isAdmin && (
+                      <button onClick={e => { e.stopPropagation(); handleDelete(s.id); }} className="p-1.5 -mr-1.5 -mt-1.5 shrink-0 hover:bg-red-50 rounded-lg transition-colors" data-testid="delete-sale-btn-mobile">
+                        <Trash2 size={14} className="text-red-400" />
+                      </button>
+                    )}
+                  </div>
+                  <div className="flex items-center justify-between mt-2">
+                    <span className="text-sm font-bold text-green-700">{formatNPR(s.total_amount)}</span>
+                    <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-700">{s.payment_method}</span>
+                  </div>
+                  {s.extra_expenses?.length > 0 && (
+                    <div className="mt-1 text-xs text-orange-600 font-medium">+{formatNPR(s.expenses_total)} extra expenses ({s.extra_expenses.length})</div>
+                  )}
                   {s.due_amount > 0 ? (
                     <div className="mt-1 text-xs font-semibold text-red-600" data-testid="due-badge">Due: {formatNPR(s.due_amount)}{s.due_date ? ` (by ${s.due_date})` : ""}</div>
                   ) : (
                     <div className="mt-1 text-xs text-green-600">Fully Paid</div>
                   )}
-                    </td>
-                    <td className="px-4 py-3 text-sm text-slate-500 whitespace-nowrap">{s.sale_date}</td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-1">
-                        <button onClick={e => { e.stopPropagation(); navigate(`/sales/${s.id}`); }} className="p-1.5 hover:bg-slate-100 rounded-lg transition-colors" data-testid="view-sale-btn">
-                          <Eye size={14} className="text-slate-500" />
-                        </button>
-                        {isAdmin && (
-                          <button onClick={e => { e.stopPropagation(); handleDelete(s.id); }} className="p-1.5 hover:bg-red-50 rounded-lg transition-colors" data-testid="delete-sale-btn">
-                            <Trash2 size={14} className="text-red-400" />
-                          </button>
-                        )}
-                      </div>
-                    </td>
+                  <div className="mt-1.5 text-xs text-slate-400">{s.sale_date}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* Table — sm and up */}
+            <div className="hidden sm:block overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-slate-100">
+                    {["Vehicle", "Customer", "Sale Price", "Extra Expenses", "Total", "Payment", "Date", ""].map(h => (
+                      <th key={h} className="text-left text-xs font-semibold uppercase tracking-wider text-slate-500 px-4 py-3 whitespace-nowrap">{h}</th>
+                    ))}
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody className="divide-y divide-slate-50">
+                  {filtered.map(s => (
+                    <tr
+                      key={s.id}
+                      data-testid="sale-row"
+                      onClick={() => navigate(`/sales/${s.id}`)}
+                      className="table-row-hover cursor-pointer transition-colors"
+                    >
+                      <td className="px-4 py-3">
+                        <div className="font-semibold text-slate-900 text-sm">{s.vehicle_info || "—"}</div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="text-sm text-slate-700">{s.customer_name}</div>
+                        {s.customer_contact && <div className="text-xs text-slate-400">{s.customer_contact}</div>}
+                      </td>
+                      <td className="px-4 py-3 text-sm font-medium text-slate-800 whitespace-nowrap">{formatNPR(s.sale_price)}</td>
+                      <td className="px-4 py-3 text-sm text-slate-600 whitespace-nowrap">
+                        {s.extra_expenses?.length > 0 ? (
+                          <span className="text-orange-600 font-medium">{formatNPR(s.expenses_total)} ({s.extra_expenses.length} items)</span>
+                        ) : <span className="text-slate-400">—</span>}
+                      </td>
+                      <td className="px-4 py-3 text-sm font-bold text-green-700 whitespace-nowrap">{formatNPR(s.total_amount)}</td>
+                      <td className="px-4 py-3">
+                        <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-700">{s.payment_method}</span>
+                    {s.due_amount > 0 ? (
+                      <div className="mt-1 text-xs font-semibold text-red-600" data-testid="due-badge">Due: {formatNPR(s.due_amount)}{s.due_date ? ` (by ${s.due_date})` : ""}</div>
+                    ) : (
+                      <div className="mt-1 text-xs text-green-600">Fully Paid</div>
+                    )}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-slate-500 whitespace-nowrap">{s.sale_date}</td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-1">
+                          <button onClick={e => { e.stopPropagation(); navigate(`/sales/${s.id}`); }} className="p-1.5 hover:bg-slate-100 rounded-lg transition-colors" data-testid="view-sale-btn">
+                            <Eye size={14} className="text-slate-500" />
+                          </button>
+                          {isAdmin && (
+                            <button onClick={e => { e.stopPropagation(); handleDelete(s.id); }} className="p-1.5 hover:bg-red-50 rounded-lg transition-colors" data-testid="delete-sale-btn">
+                              <Trash2 size={14} className="text-red-400" />
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
         )}
       </div>
 
       {/* Record Sale Modal */}
       {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between p-5 border-b border-slate-100">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 sm:p-4">
+          <div className="bg-white sm:rounded-2xl shadow-2xl w-full h-full sm:h-auto sm:max-w-xl sm:max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between p-4 sm:p-5 border-b border-slate-100 sticky top-0 bg-white z-10">
               <h2 className="text-lg font-bold text-slate-900">Record Sale</h2>
-              <button onClick={() => setShowModal(false)} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500">✕</button>
+              <button onClick={() => setShowModal(false)} className="w-9 h-9 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500 shrink-0">✕</button>
             </div>
-            <form onSubmit={handleSave} className="p-5 space-y-4">
+            <form onSubmit={handleSave} className="p-4 sm:p-5 space-y-4">
 
               {/* Vehicle */}
               <Field label="Vehicle" required>
@@ -406,7 +446,7 @@ export default function Sales() {
               </Field>
 
               {/* Sale Price + Payment */}
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <Field label="Sale Price (NPR)" required>
                   <input type="text" inputMode="numeric" value={form.sale_price} onChange={e => setForm({...form, sale_price: e.target.value})} placeholder="e.g. 185000" className={inp} data-testid="sale-price-input" />
                 </Field>
@@ -503,9 +543,9 @@ export default function Sales() {
                 <input value={form.notes} onChange={e => setForm({...form, notes: e.target.value})} placeholder="Any notes about this sale..." className={inp} />
               </Field>
 
-              <div className="flex gap-3 pt-1">
-                <button type="button" onClick={() => setShowModal(false)} className="flex-1 h-10 border border-slate-200 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50">Cancel</button>
-                <button type="submit" disabled={saving} data-testid="save-sale-btn" className="flex-1 h-10 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-semibold disabled:opacity-60 active:scale-95 transition-all">
+              <div className="flex flex-col-reverse sm:flex-row gap-3 pt-4 sm:pt-1 sticky bottom-0 sm:static -mx-4 sm:mx-0 px-4 sm:px-0 pb-4 sm:pb-0 bg-white border-t sm:border-t-0 border-slate-100">
+                <button type="button" onClick={() => setShowModal(false)} className="flex-1 h-11 sm:h-10 border border-slate-200 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50">Cancel</button>
+                <button type="submit" disabled={saving} data-testid="save-sale-btn" className="flex-1 h-11 sm:h-10 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-semibold disabled:opacity-60 active:scale-95 transition-all">
                   {saving ? "Saving..." : "Record Sale"}
                 </button>
               </div>
