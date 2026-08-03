@@ -1,4 +1,5 @@
-import { useEffect, useState, useCallback, useMemo, useRef } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef, useLayoutEffect } from "react";
+import { createPortal } from "react-dom";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Plus, Search, Eye, Trash2, Filter, X, UploadCloud, EyeOff, Package, Wallet, DollarSign, Lock, Moon, Archive, Sparkles, Store, User, Wrench, Clock, CheckCircle2, AlertTriangle, ImageOff, ChevronDown } from "lucide-react";
 import { toast } from "sonner";
@@ -63,13 +64,55 @@ export default function Inventory() {
   // null = off, "none" = zero photos, "low" = fewer than MIN_PHOTOS
   const [photoFilter, setPhotoFilter] = useState(null);
   const [photoMenuOpen, setPhotoMenuOpen] = useState(false);
+  const [photoMenuCoords, setPhotoMenuCoords] = useState(null); // { top, left } in viewport (fixed) coordinates
+  const photoTriggerRef = useRef(null);
   const photoMenuRef = useRef(null);
 
-  useEffect(() => {
-    const onClickOutside = (e) => { if (photoMenuRef.current && !photoMenuRef.current.contains(e.target)) setPhotoMenuOpen(false); };
-    document.addEventListener("mousedown", onClickOutside);
-    return () => document.removeEventListener("mousedown", onClickOutside);
+  // The trigger sits in a horizontally-scrolling row (overflow-x-auto), which per the CSS
+  // overflow spec forces overflow-y to auto too — so a plain absolutely-positioned dropdown
+  // gets clipped and turns the whole row into a tiny scroll box instead of opening beside the
+  // button. Rendering it through a portal at fixed viewport coordinates (same approach as
+  // BSDatePicker's popover) sidesteps that clipping entirely.
+  const positionPhotoMenu = useCallback(() => {
+    const trigger = photoTriggerRef.current;
+    if (!trigger) return;
+    const rect = trigger.getBoundingClientRect();
+    const menuWidth = 190;
+    const menuHeight = photoMenuRef.current?.offsetHeight ?? 90;
+    const gap = 6;
+
+    const spaceRight = window.innerWidth - rect.right;
+    const placeLeft = spaceRight < menuWidth + gap && rect.left > menuWidth + gap;
+    const left = placeLeft
+      ? Math.max(8, rect.left - menuWidth - gap)
+      : Math.min(rect.right + gap, window.innerWidth - menuWidth - 8);
+    const top = Math.min(Math.max(8, rect.top), window.innerHeight - menuHeight - 8);
+
+    setPhotoMenuCoords({ top, left });
   }, []);
+
+  useLayoutEffect(() => {
+    if (!photoMenuOpen) return;
+    positionPhotoMenu();
+  }, [photoMenuOpen, positionPhotoMenu]);
+
+  useEffect(() => {
+    if (!photoMenuOpen) return;
+    const onClickOutside = (e) => {
+      if (photoTriggerRef.current?.contains(e.target)) return;
+      if (photoMenuRef.current?.contains(e.target)) return;
+      setPhotoMenuOpen(false);
+    };
+    const onReposition = () => positionPhotoMenu();
+    document.addEventListener("mousedown", onClickOutside);
+    window.addEventListener("resize", onReposition);
+    window.addEventListener("scroll", onReposition, true);
+    return () => {
+      document.removeEventListener("mousedown", onClickOutside);
+      window.removeEventListener("resize", onReposition);
+      window.removeEventListener("scroll", onReposition, true);
+    };
+  }, [photoMenuOpen, positionPhotoMenu]);
   const [showModal, setShowModal] = useState(false);
   const [form, setForm] = useState(EMPTY);
   const [saving, setSaving] = useState(false);
@@ -422,46 +465,52 @@ export default function Inventory() {
             </button>
           );
         })}
-        <div className="relative shrink-0" ref={photoMenuRef}>
-          <button
-            onClick={() => setPhotoMenuOpen(o => !o)}
-            data-testid="photo-filter-toggle"
-            title="Filter by photo coverage"
-            className={`flex items-center gap-1.5 px-3.5 py-3 rounded-full text-sm font-medium border transition-colors whitespace-nowrap ${
-              photoFilter ? "bg-blue-600 border-blue-600 text-white" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
-            }`}
-          >
-            <ImageOff size={14} />
-            Photo Filter
-            <span className={`text-xs px-1.5 py-0.5 rounded-full ${photoFilter ? "bg-white/20 text-white" : "bg-slate-100 text-slate-500"}`}>
-              {photoFilter === "none" ? noPhotoCount : lowPhotoCount}
-            </span>
-            <ChevronDown size={14} className={photoMenuOpen ? "rotate-180 transition-transform" : "transition-transform"} />
-          </button>
-          {photoMenuOpen && (
-            <div className="absolute z-20 top-full mt-1 left-0 bg-white border border-slate-200 rounded-lg shadow-lg py-1 min-w-[190px]" data-testid="photo-filter-menu">
-              <button
-                type="button"
-                data-testid="photo-filter-option-none"
-                onClick={() => { setPhotoFilter(p => p === "none" ? null : "none"); setPhotoMenuOpen(false); }}
-                className={`w-full flex items-center justify-between gap-3 px-3 py-2 text-sm hover:bg-slate-50 ${photoFilter === "none" ? "text-blue-600 font-semibold" : "text-slate-700"}`}
-              >
-                No Photos
-                <span className="text-xs text-slate-400">{noPhotoCount}</span>
-              </button>
-              <button
-                type="button"
-                data-testid="photo-filter-option-low"
-                onClick={() => { setPhotoFilter(p => p === "low" ? null : "low"); setPhotoMenuOpen(false); }}
-                className={`w-full flex items-center justify-between gap-3 px-3 py-2 text-sm hover:bg-slate-50 ${photoFilter === "low" ? "text-blue-600 font-semibold" : "text-slate-700"}`}
-              >
-                Min {MIN_PHOTOS} Photos
-                <span className="text-xs text-slate-400">{lowPhotoCount}</span>
-              </button>
-            </div>
-          )}
-        </div>
+        <button
+          ref={photoTriggerRef}
+          onClick={() => setPhotoMenuOpen(o => !o)}
+          data-testid="photo-filter-toggle"
+          title="Filter by photo coverage"
+          className={`flex items-center gap-1.5 shrink-0 px-3.5 py-3 rounded-full text-sm font-medium border transition-colors whitespace-nowrap ${
+            photoFilter ? "bg-blue-600 border-blue-600 text-white" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
+          }`}
+        >
+          <ImageOff size={14} />
+          Photo Filter
+          <span className={`text-xs px-1.5 py-0.5 rounded-full ${photoFilter ? "bg-white/20 text-white" : "bg-slate-100 text-slate-500"}`}>
+            {photoFilter === "none" ? noPhotoCount : lowPhotoCount}
+          </span>
+          <ChevronDown size={14} className={photoMenuOpen ? "rotate-180 transition-transform" : "transition-transform"} />
+        </button>
       </div>
+
+      {photoMenuOpen && photoMenuCoords && createPortal(
+        <div
+          ref={photoMenuRef}
+          className="fixed z-50 bg-white border border-slate-200 rounded-lg shadow-2xl py-1 min-w-[190px]"
+          style={{ top: photoMenuCoords.top, left: photoMenuCoords.left }}
+          data-testid="photo-filter-menu"
+        >
+          <button
+            type="button"
+            data-testid="photo-filter-option-none"
+            onClick={() => { setPhotoFilter(p => p === "none" ? null : "none"); setPhotoMenuOpen(false); }}
+            className={`w-full flex items-center justify-between gap-3 px-3 py-2 text-sm hover:bg-slate-50 ${photoFilter === "none" ? "text-blue-600 font-semibold" : "text-slate-700"}`}
+          >
+            No Photos
+            <span className="text-xs text-slate-400">{noPhotoCount}</span>
+          </button>
+          <button
+            type="button"
+            data-testid="photo-filter-option-low"
+            onClick={() => { setPhotoFilter(p => p === "low" ? null : "low"); setPhotoMenuOpen(false); }}
+            className={`w-full flex items-center justify-between gap-3 px-3 py-2 text-sm hover:bg-slate-50 ${photoFilter === "low" ? "text-blue-600 font-semibold" : "text-slate-700"}`}
+          >
+            Min {MIN_PHOTOS} Photos
+            <span className="text-xs text-slate-400">{lowPhotoCount}</span>
+          </button>
+        </div>,
+        document.body
+      )}
 
       {/* Filters — sticky so search/filters stay reachable while scrolling a long list */}
       <div className="sticky top-0 z-20 bg-white rounded-xl border border-slate-200 shadow-sm p-4 flex flex-wrap gap-3 items-center">
