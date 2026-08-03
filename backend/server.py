@@ -621,7 +621,7 @@ class VehicleStatusUpdate(BaseModel):
     status: str
 
 class VehicleReturnRequest(BaseModel):
-    refund_percentage: float  # % of the sale's total_amount handed back to the customer, after condition assessment
+    refund_amount: float  # NPR amount of the sale's total_amount handed back to the customer, after condition assessment
     new_status: str = "available"  # where the vehicle re-enters stock: available / unlisted / reserved / scrap / in_repair
     notes: Optional[str] = None
 
@@ -1243,17 +1243,12 @@ async def get_active_sale(vid: str, cu: dict = Depends(admin_only)):
 # Recondition-house return: unlike the plain status dropdown above (which the /sales/reconcile
 # ribbon is specifically meant to catch if someone bypasses proper channels), this is the one
 # sanctioned path for taking a sold vehicle back. The shop assesses the vehicle's condition and
-# refunds only a percentage of what the customer paid, keeping the rest — so the sale record is
+# refunds only part of what the customer paid, keeping the rest — so the sale record is
 # tagged "returned" (not deleted) with that split preserved, and the vehicle re-enters stock at
 # whatever status the assessment calls for. There is no time limit — a vehicle can come back
 # for return long after its warranty window has closed.
 @api_router.post("/vehicles/{vid}/return")
 async def return_vehicle(vid: str, body: VehicleReturnRequest, cu: dict = Depends(admin_only)):
-    if not (0 <= body.refund_percentage <= 100):
-        raise HTTPException(400, "Refund percentage must be between 0 and 100")
-    if body.new_status not in VEHICLE_STATUSES or body.new_status == "sold":
-        raise HTTPException(400, f"Invalid return status '{body.new_status}'")
-
     existing = await db.vehicles.find_one({"id": vid}, {"_id": 0})
     if not existing: raise HTTPException(404, "Vehicle not found")
     if existing.get("status") != "sold":
@@ -1264,14 +1259,18 @@ async def return_vehicle(vid: str, body: VehicleReturnRequest, cu: dict = Depend
         raise HTTPException(404, "No active sale found for this vehicle")
 
     total_amount = sale.get("total_amount", 0)
-    refund_amount = round(total_amount * body.refund_percentage / 100, 2)
+    if not (0 <= body.refund_amount <= total_amount):
+        raise HTTPException(400, f"Refund amount must be between 0 and the sale total ({total_amount})")
+    if body.new_status not in VEHICLE_STATUSES or body.new_status == "sold":
+        raise HTTPException(400, f"Invalid return status '{body.new_status}'")
+
+    refund_amount = round(body.refund_amount, 2)
     retained_amount = round(total_amount - refund_amount, 2)
 
     await db.sales.update_one({"id": sale["id"]}, {"$set": {
         "returned": True,
         "returned_at": datetime.now(timezone.utc).isoformat(),
         "returned_status": body.new_status,
-        "refund_percentage": body.refund_percentage,
         "refund_amount": refund_amount,
         "retained_amount": retained_amount,
         "return_notes": body.notes,
@@ -1287,7 +1286,7 @@ async def return_vehicle(vid: str, body: VehicleReturnRequest, cu: dict = Depend
 
     await db.audit_logs.insert_one({"action": "vehicle_returned", "vehicle_id": vid,
         "user": cu["username"], "timestamp": datetime.now(timezone.utc).isoformat(),
-        "details": f"Sale {sale['id']} returned at {body.refund_percentage}% refund, vehicle set to {body.new_status}"})
+        "details": f"Sale {sale['id']} returned with {refund_amount} refunded, vehicle set to {body.new_status}"})
 
     v = await db.vehicles.find_one({"id": vid}, {"_id": 0})
     return {"vehicle": v, "refund_amount": refund_amount, "retained_amount": retained_amount}

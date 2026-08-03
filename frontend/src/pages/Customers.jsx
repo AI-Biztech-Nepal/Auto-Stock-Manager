@@ -277,7 +277,7 @@ export default function Customers() {
                               <td className="px-3 py-2 font-bold text-green-700 whitespace-nowrap">{formatNPR(s.total_amount)}</td>
                               <td className="px-3 py-2 whitespace-nowrap">
                                 {s.returned ? (
-                                  <span className="text-amber-700">Refunded {s.refund_percentage}% · Kept {formatNPR(s.retained_amount || 0)}</span>
+                                  <span className="text-amber-700">Refunded {formatNPR(s.refund_amount || 0)} · Kept {formatNPR(s.retained_amount || 0)}</span>
                                 ) : (
                                   <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-700">{s.payment_method}</span>
                                 )}

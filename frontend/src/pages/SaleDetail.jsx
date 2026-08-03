@@ -76,7 +76,7 @@ export default function SaleDetail() {
   const [addingCust, setAddingCust] = useState(false);
 
   const [showReturnModal, setShowReturnModal] = useState(false);
-  const [returnForm, setReturnForm] = useState({ refund_percentage: "", new_status: "available", notes: "" });
+  const [returnForm, setReturnForm] = useState({ refund_amount: "", new_status: "available", notes: "" });
   const [returning, setReturning] = useState(false);
 
   const fetchSale = useCallback(async () => {
@@ -184,21 +184,21 @@ export default function SaleDetail() {
   };
 
   const openReturnModal = () => {
-    setReturnForm({ refund_percentage: "", new_status: "available", notes: "" });
+    setReturnForm({ refund_amount: "", new_status: "available", notes: "" });
     setShowReturnModal(true);
   };
 
   const submitReturn = async (e) => {
     e.preventDefault();
-    const pct = Number(returnForm.refund_percentage);
-    if (returnForm.refund_percentage === "" || Number.isNaN(pct) || pct < 0 || pct > 100) {
-      toast.error("Enter a refund percentage between 0 and 100");
+    const amt = Number(returnForm.refund_amount);
+    if (returnForm.refund_amount === "" || Number.isNaN(amt) || amt < 0 || amt > sale.total_amount) {
+      toast.error("Enter a valid refund amount");
       return;
     }
     setReturning(true);
     try {
       await api.post(`/vehicles/${sale.vehicle_id}/return`, {
-        refund_percentage: pct,
+        refund_amount: amt,
         new_status: returnForm.new_status,
         notes: returnForm.notes || null,
       });
@@ -408,7 +408,6 @@ export default function SaleDetail() {
           {sale.returned && (
             <div className="bg-amber-50 border border-amber-200 rounded-xl p-5">
               <h3 className="text-sm font-bold text-amber-800 mb-1 flex items-center gap-1.5"><Undo2 size={15} /> Return Details</h3>
-              <Row label="Refund Percentage"><span className="text-sm font-medium text-slate-900 sm:text-right">{sale.refund_percentage}%</span></Row>
               <Row label="Refunded to Customer"><span className="text-sm font-medium text-slate-900 sm:text-right">{formatNPR(sale.refund_amount || 0)}</span></Row>
               <Row label="Retained (kept)"><span className="text-sm font-medium text-slate-900 sm:text-right">{formatNPR(sale.retained_amount || 0)}</span></Row>
               <Row label="Vehicle Restocked As"><span className="text-sm font-medium text-slate-900 sm:text-right capitalize">{sale.returned_status}</span></Row>
@@ -467,21 +466,21 @@ export default function SaleDetail() {
               <button onClick={() => setShowReturnModal(false)} className="w-11 h-11 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500">✕</button>
             </div>
             <form onSubmit={submitReturn} className="p-5 space-y-4">
-              <p className="text-xs text-slate-500">Assess the vehicle's condition and set what percentage of the sale amount ({formatNPR(sale.total_amount)}) gets refunded to the customer. The rest is kept by the shop, and the sale is marked returned rather than deleted.</p>
-              <Field label="Refund Percentage" required>
+              <p className="text-xs text-slate-500">Assess the vehicle's condition and set how much of the sale amount ({formatNPR(sale.total_amount)}) gets refunded to the customer. The rest is kept by the shop, and the sale is marked returned rather than deleted.</p>
+              <Field label="Refund Amount (NPR)" required>
                 <input
-                  type="number" min="0" max="100" step="0.01"
-                  value={returnForm.refund_percentage}
-                  onChange={e => setReturnForm({ ...returnForm, refund_percentage: e.target.value })}
-                  placeholder="e.g. 80"
+                  type="number" min="0" max={sale.total_amount} step="0.01"
+                  value={returnForm.refund_amount}
+                  onChange={e => setReturnForm({ ...returnForm, refund_amount: e.target.value })}
+                  placeholder="e.g. 96000"
                   className={inp}
-                  data-testid="return-refund-percentage-input"
+                  data-testid="return-refund-amount-input"
                 />
               </Field>
-              {returnForm.refund_percentage !== "" && !Number.isNaN(Number(returnForm.refund_percentage)) && (
+              {returnForm.refund_amount !== "" && !Number.isNaN(Number(returnForm.refund_amount)) && (
                 <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-slate-700 space-y-0.5">
-                  <div>Refund to customer: <span className="font-semibold">{formatNPR(sale.total_amount * Number(returnForm.refund_percentage) / 100)}</span></div>
-                  <div>Retained by shop: <span className="font-semibold">{formatNPR(sale.total_amount * (100 - Number(returnForm.refund_percentage)) / 100)}</span></div>
+                  <div>Refund to customer: <span className="font-semibold">{formatNPR(Number(returnForm.refund_amount))}</span></div>
+                  <div>Retained by shop: <span className="font-semibold">{formatNPR(sale.total_amount - Number(returnForm.refund_amount))}</span></div>
                 </div>
               )}
               <Field label="Vehicle Re-enters Stock As" required>

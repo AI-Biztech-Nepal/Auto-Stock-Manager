@@ -65,8 +65,8 @@ export function ExpenseModal({ onClose, onSubmit, form, setForm, saving }) {
 // GET /vehicles/{vid}/active-sale — used only to preview the refund/retained split
 // before submitting; the actual split is computed server-side from that same sale.
 export function ReturnModal({ onClose, onSubmit, form, setForm, saving, activeSale }) {
-  const pct = Number(form.refund_percentage);
-  const hasValidPct = form.refund_percentage !== "" && !Number.isNaN(pct);
+  const amt = Number(form.refund_amount);
+  const hasValidAmt = form.refund_amount !== "" && !Number.isNaN(amt);
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto">
@@ -76,23 +76,23 @@ export function ReturnModal({ onClose, onSubmit, form, setForm, saving, activeSa
         </div>
         <form onSubmit={onSubmit} className="p-5 space-y-4">
           <p className="text-xs text-slate-500">
-            Assess the vehicle's condition and set what percentage of the sale amount{activeSale ? ` (${formatNPR(activeSale.total_amount)})` : ""} gets refunded to the customer. The rest is kept by the shop, and the sale is marked returned rather than deleted. There's no time limit — this works no matter how long ago it was sold.
+            Assess the vehicle's condition and set how much of the sale amount{activeSale ? ` (${formatNPR(activeSale.total_amount)})` : ""} gets refunded to the customer. The rest is kept by the shop, and the sale is marked returned rather than deleted. There's no time limit — this works no matter how long ago it was sold.
           </p>
           <div>
-            <label className="block text-xs font-medium text-slate-600 mb-1">Refund Percentage <span className="text-red-500">*</span></label>
+            <label className="block text-xs font-medium text-slate-600 mb-1">Refund Amount (NPR) <span className="text-red-500">*</span></label>
             <input
-              type="number" min="0" max="100" step="0.01"
-              value={form.refund_percentage}
-              onChange={e => setForm({ ...form, refund_percentage: e.target.value })}
-              placeholder="e.g. 80"
+              type="number" min="0" max={activeSale?.total_amount} step="0.01"
+              value={form.refund_amount}
+              onChange={e => setForm({ ...form, refund_amount: e.target.value })}
+              placeholder="e.g. 96000"
               className={inp}
-              data-testid="return-refund-percentage-input"
+              data-testid="return-refund-amount-input"
             />
           </div>
-          {hasValidPct && activeSale && (
+          {hasValidAmt && activeSale && (
             <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-slate-700 space-y-0.5">
-              <div>Refund to customer: <span className="font-semibold">{formatNPR(activeSale.total_amount * pct / 100)}</span></div>
-              <div>Retained by shop: <span className="font-semibold">{formatNPR(activeSale.total_amount * (100 - pct) / 100)}</span></div>
+              <div>Refund to customer: <span className="font-semibold">{formatNPR(amt)}</span></div>
+              <div>Retained by shop: <span className="font-semibold">{formatNPR(activeSale.total_amount - amt)}</span></div>
             </div>
           )}
           <div>

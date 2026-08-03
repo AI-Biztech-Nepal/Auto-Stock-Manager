@@ -53,7 +53,7 @@ export function VehicleDetailModal({ id, onClose }) {
   const [saving, setSaving] = useState(false);
 
   const [showReturnModal, setShowReturnModal] = useState(false);
-  const [returnForm, setReturnForm] = useState({ refund_percentage: "", new_status: "available", notes: "" });
+  const [returnForm, setReturnForm] = useState({ refund_amount: "", new_status: "available", notes: "" });
   const [returning, setReturning] = useState(false);
   const [activeSale, setActiveSale] = useState(null);
 
@@ -99,22 +99,22 @@ export function VehicleDetailModal({ id, onClose }) {
     try {
       const r = await api.get(`/vehicles/${id}/active-sale`);
       setActiveSale(r.data);
-      setReturnForm({ refund_percentage: "", new_status: "available", notes: "" });
+      setReturnForm({ refund_amount: "", new_status: "available", notes: "" });
       setShowReturnModal(true);
     } catch (err) { toast.error(err.response?.data?.detail || "No active sale found for this vehicle"); }
   };
 
   const submitReturn = async (e) => {
     e.preventDefault();
-    const pct = Number(returnForm.refund_percentage);
-    if (returnForm.refund_percentage === "" || Number.isNaN(pct) || pct < 0 || pct > 100) {
-      toast.error("Enter a refund percentage between 0 and 100");
+    const amt = Number(returnForm.refund_amount);
+    if (returnForm.refund_amount === "" || Number.isNaN(amt) || amt < 0 || amt > (activeSale?.total_amount ?? Infinity)) {
+      toast.error("Enter a valid refund amount");
       return;
     }
     setReturning(true);
     try {
       await api.post(`/vehicles/${id}/return`, {
-        refund_percentage: pct,
+        refund_amount: amt,
         new_status: returnForm.new_status,
         notes: returnForm.notes || null,
       });
