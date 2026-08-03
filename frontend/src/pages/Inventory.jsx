@@ -156,14 +156,18 @@ export default function Inventory() {
 
   // Counts per status toggle, applying every other active filter so switching tabs shows
   // what would actually appear rather than a total unaffected by search/brand/aging/date.
+  // Scrap has no toggle of its own (it's a do-not-disturb terminal stage) and is deliberately
+  // excluded from the "all" total below — it's still tracked for the investment it holds, and
+  // still visible in the plain unfiltered list, it just shouldn't inflate the active stock count.
   const statusCounts = STATUSES.reduce((acc, s) => {
     let result = vehicles.filter(v => v.status !== "sold");
-    if (s !== "all") result = result.filter(v => v.status === s);
+    if (s === "all") result = result.filter(v => v.status !== "scrap");
+    else result = result.filter(v => v.status === s);
     if (agingFilter !== "all") result = result.filter(v => v.aging?.category === agingFilter);
     if (brandFilter !== "all") result = result.filter(v => v.brand === brandFilter);
     if (dateFilter) result = result.filter(v => v.created_at?.slice(0, 10) === dateFilter);
-    if (photoFilter === "none") result = result.filter(v => !v.has_photo);
-    else if (photoFilter === "low") result = result.filter(v => (v.photo_count ?? 0) < MIN_PHOTOS);
+    if (photoFilter === "none") result = result.filter(v => !v.has_photo && v.status !== "scrap");
+    else if (photoFilter === "low") result = result.filter(v => (v.photo_count ?? 0) < MIN_PHOTOS && v.status !== "scrap");
     if (search) {
       const q = search.toLowerCase();
       const qNoSlash = q.replace(/\//g, "");
@@ -179,8 +183,9 @@ export default function Inventory() {
 
   // Count of vehicles missing a photo, applying every other active filter the same way
   // statusCounts does, so the toggle's badge matches what clicking it would actually show.
+  // Scrap is excluded here too — same reasoning as the "all" status count above.
   const noPhotoCount = (() => {
-    let result = vehicles.filter(v => v.status !== "sold" && !v.has_photo);
+    let result = vehicles.filter(v => v.status !== "sold" && v.status !== "scrap" && !v.has_photo);
     if (statusFilter !== "all") result = result.filter(v => v.status === statusFilter);
     if (agingFilter !== "all") result = result.filter(v => v.aging?.category === agingFilter);
     if (brandFilter !== "all") result = result.filter(v => v.brand === brandFilter);
@@ -199,8 +204,9 @@ export default function Inventory() {
 
   // Count of vehicles that fall short of MIN_PHOTOS (this includes the zero-photo vehicles
   // noPhotoCount already catches — a vehicle with 1 photo still isn't storefront-ready).
+  // Scrap is excluded here too — same reasoning as the "all" status count above.
   const lowPhotoCount = (() => {
-    let result = vehicles.filter(v => v.status !== "sold" && (v.photo_count ?? 0) < MIN_PHOTOS);
+    let result = vehicles.filter(v => v.status !== "sold" && v.status !== "scrap" && (v.photo_count ?? 0) < MIN_PHOTOS);
     if (statusFilter !== "all") result = result.filter(v => v.status === statusFilter);
     if (agingFilter !== "all") result = result.filter(v => v.aging?.category === agingFilter);
     if (brandFilter !== "all") result = result.filter(v => v.brand === brandFilter);
@@ -268,8 +274,8 @@ export default function Inventory() {
     if (agingFilter !== "all") result = result.filter(v => v.aging?.category === agingFilter);
     if (brandFilter !== "all") result = result.filter(v => v.brand === brandFilter);
     if (dateFilter) result = result.filter(v => v.created_at?.slice(0, 10) === dateFilter);
-    if (photoFilter === "none") result = result.filter(v => !v.has_photo);
-    else if (photoFilter === "low") result = result.filter(v => (v.photo_count ?? 0) < MIN_PHOTOS);
+    if (photoFilter === "none") result = result.filter(v => !v.has_photo && v.status !== "scrap");
+    else if (photoFilter === "low") result = result.filter(v => (v.photo_count ?? 0) < MIN_PHOTOS && v.status !== "scrap");
     if (search) {
       const q = search.toLowerCase();
       const qNoSlash = q.replace(/\//g, "");
