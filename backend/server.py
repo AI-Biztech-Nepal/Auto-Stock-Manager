@@ -810,9 +810,14 @@ async def get_vehicles(status: Optional[str] = None, brand: Optional[str] = None
     exps_by_vehicle: dict = {}
     for e in all_exps:
         exps_by_vehicle.setdefault(e["vehicle_id"], []).append(e)
-    # Batch-load which vehicles have at least one photo, so the frontend can filter
-    # for missing photos without an N+1 fetch of /vehicles/{id}/photos per row.
-    photo_vehicle_ids = set(await db.vehicle_photos.distinct("vehicle_id", {"vehicle_id": {"$in": vehicle_ids}}))
+    # Batch-load each vehicle's photo count in one query (projected to just the id field —
+    # photo docs carry a base64 image blob we don't want pulled into memory here), so the
+    # frontend can filter for missing/insufficient photos without an N+1 fetch of
+    # /vehicles/{id}/photos per row.
+    photo_docs = await db.vehicle_photos.find({"vehicle_id": {"$in": vehicle_ids}}, {"_id": 0, "vehicle_id": 1}).to_list(10000)
+    photo_count_by_vehicle: dict = {}
+    for p in photo_docs:
+        photo_count_by_vehicle[p["vehicle_id"]] = photo_count_by_vehicle.get(p["vehicle_id"], 0) + 1
     # Enrich each vehicle using pre-loaded expenses
     def enrich_with_expenses(v: dict, exps: list) -> dict:
         v["aging"] = stock_aging(v.get("purchase_date", ""))
@@ -826,7 +831,8 @@ async def get_vehicles(status: Optional[str] = None, brand: Optional[str] = None
             v["low_margin"] = v["profit_margin"] < 8
         else:
             v["expected_profit"] = None; v["profit_margin"] = None; v["low_margin"] = False
-        v["has_photo"] = v["id"] in photo_vehicle_ids
+        v["photo_count"] = photo_count_by_vehicle.get(v["id"], 0)
+        v["has_photo"] = v["photo_count"] > 0
         return v
     role = cu.get("role", "admin")
     return [_hide_financials_for_role(enrich_with_expenses(v, exps_by_vehicle.get(v["id"], [])), role) for v in vehicles]

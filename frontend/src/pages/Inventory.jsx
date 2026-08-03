@@ -19,6 +19,10 @@ const STATUS_ICONS = { all: Filter, unlisted: EyeOff, in_repair: Wrench, availab
 const AGING_CATEGORIES = ["all", "fresh", "normal", "slow", "dead"];
 const AGING_RANGES = { fresh: "0–30 days", normal: "31–45 days", slow: "46–60 days", dead: "60+ days" };
 
+// A single photo isn't enough for a storefront listing — this is the bar a vehicle
+// needs to clear before it's considered adequately photographed.
+const MIN_PHOTOS = 4;
+
 // Orders active stock newest first (most recently added). Scrap is a "do not disturb" stage —
 // it's excluded from that ordering and always pinned to the bottom, regardless of how many days
 // it has sat there.
@@ -55,6 +59,7 @@ export default function Inventory() {
   const [agingFilter, setAgingFilter] = useState(searchParams.get("aging") || "all");
   const [dateFilter, setDateFilter] = useState("");
   const [noPhotoFilter, setNoPhotoFilter] = useState(false);
+  const [lowPhotoFilter, setLowPhotoFilter] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const [form, setForm] = useState(EMPTY);
   const [saving, setSaving] = useState(false);
@@ -105,6 +110,7 @@ export default function Inventory() {
     if (brandFilter !== "all") result = result.filter(v => v.brand === brandFilter);
     if (dateFilter) result = result.filter(v => v.created_at?.slice(0, 10) === dateFilter);
     if (noPhotoFilter) result = result.filter(v => !v.has_photo);
+    if (lowPhotoFilter) result = result.filter(v => (v.photo_count ?? 0) < MIN_PHOTOS);
     if (search) {
       const q = search.toLowerCase();
       const qNoSlash = q.replace(/\//g, "");
@@ -122,6 +128,26 @@ export default function Inventory() {
   // statusCounts does, so the toggle's badge matches what clicking it would actually show.
   const noPhotoCount = (() => {
     let result = vehicles.filter(v => v.status !== "sold" && !v.has_photo);
+    if (statusFilter !== "all") result = result.filter(v => v.status === statusFilter);
+    if (agingFilter !== "all") result = result.filter(v => v.aging?.category === agingFilter);
+    if (brandFilter !== "all") result = result.filter(v => v.brand === brandFilter);
+    if (dateFilter) result = result.filter(v => v.created_at?.slice(0, 10) === dateFilter);
+    if (search) {
+      const q = search.toLowerCase();
+      const qNoSlash = q.replace(/\//g, "");
+      result = result.filter(v =>
+        v.brand?.toLowerCase().includes(q) || v.model?.toLowerCase().includes(q) ||
+        v.registration_number?.toLowerCase().replace(/\//g, "").includes(qNoSlash) ||
+        v.purchase_source?.toLowerCase().includes(q)
+      );
+    }
+    return result.length;
+  })();
+
+  // Count of vehicles that fall short of MIN_PHOTOS (this includes the zero-photo vehicles
+  // noPhotoCount already catches — a vehicle with 1 photo still isn't storefront-ready).
+  const lowPhotoCount = (() => {
+    let result = vehicles.filter(v => v.status !== "sold" && (v.photo_count ?? 0) < MIN_PHOTOS);
     if (statusFilter !== "all") result = result.filter(v => v.status === statusFilter);
     if (agingFilter !== "all") result = result.filter(v => v.aging?.category === agingFilter);
     if (brandFilter !== "all") result = result.filter(v => v.brand === brandFilter);
@@ -190,6 +216,7 @@ export default function Inventory() {
     if (brandFilter !== "all") result = result.filter(v => v.brand === brandFilter);
     if (dateFilter) result = result.filter(v => v.created_at?.slice(0, 10) === dateFilter);
     if (noPhotoFilter) result = result.filter(v => !v.has_photo);
+    if (lowPhotoFilter) result = result.filter(v => (v.photo_count ?? 0) < MIN_PHOTOS);
     if (search) {
       const q = search.toLowerCase();
       const qNoSlash = q.replace(/\//g, "");
@@ -203,7 +230,7 @@ export default function Inventory() {
     result.sort(sortStock);
 
     setFiltered(result);
-  }, [vehicles, search, statusFilter, brandFilter, agingFilter, dateFilter, noPhotoFilter]);
+  }, [vehicles, search, statusFilter, brandFilter, agingFilter, dateFilter, noPhotoFilter, lowPhotoFilter]);
 
   const handleSave = async (e) => {
     e.preventDefault();
@@ -399,6 +426,20 @@ export default function Inventory() {
             {noPhotoCount}
           </span>
         </button>
+        <button
+          onClick={() => setLowPhotoFilter(p => !p)}
+          data-testid="low-photo-filter-toggle"
+          title={`Show only vehicles with fewer than ${MIN_PHOTOS} photos`}
+          className={`flex items-center gap-1.5 shrink-0 px-3.5 py-3 rounded-full text-sm font-medium border transition-colors whitespace-nowrap ${
+            lowPhotoFilter ? "bg-blue-600 border-blue-600 text-white" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
+          }`}
+        >
+          <ImageOff size={14} />
+          Needs More Photos
+          <span className={`text-xs px-1.5 py-0.5 rounded-full ${lowPhotoFilter ? "bg-white/20 text-white" : "bg-slate-100 text-slate-500"}`}>
+            {lowPhotoCount}
+          </span>
+        </button>
       </div>
 
       {/* Filters — sticky so search/filters stay reachable while scrolling a long list */}
@@ -536,7 +577,7 @@ export default function Inventory() {
           <p className="text-sm mt-1">
             {agingFilter !== "all"
               ? "No vehicles fall into this stock age range right now."
-              : search || statusFilter !== "all" || brandFilter !== "all" || dateFilter || noPhotoFilter
+              : search || statusFilter !== "all" || brandFilter !== "all" || dateFilter || noPhotoFilter || lowPhotoFilter
                 ? "Try adjusting your filters"
                 : "Add your first vehicle to get started"}
           </p>
