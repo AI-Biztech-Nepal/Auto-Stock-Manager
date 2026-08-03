@@ -78,9 +78,6 @@ export const BRANDS = ["Honda", "Yamaha", "TVS", "Bajaj", "Suzuki", "Hero", "KTM
 export const SOURCES = ["Direct Owner", "Auction", "Exchange", "Dealer", "Other"];
 export const CONDITIONS = ["Excellent", "Good", "Fair", "Poor"];
 export const FUEL_TYPES = ["Petrol", "Electric", "Hybrid"];
-export const ENGINE_CCS = [50, 100, 110, 125, 150, 160, 200, 250, 300, 400, 500];
-export const DOC_STATUSES = ["ok", "pending", "missing"];
-export const VEHICLE_STATUSES = ["available", "reserved", "sold", "in_repair", "exchange", "finance_pending"];
 export const EXPENSE_CATEGORIES = [
   { value: "denting_paint", label: "Denting/Paint" },
   { value: "servicing", label: "Servicing" },
@@ -90,34 +87,6 @@ export const EXPENSE_CATEGORIES = [
   { value: "commissions", label: "Commissions" },
   { value: "other", label: "Other" },
 ];
-
-export const USER_ROLES = [
-  { value: "admin", label: "Admin" },
-  { value: "partner", label: "Partner" },
-  { value: "sales_manager", label: "Sales Manager" },
-  { value: "sales_staff", label: "Sales Staff" },
-  { value: "mechanic", label: "Mechanic" },
-  { value: "accountant", label: "Accountant" },
-  { value: "branch_manager", label: "Branch Manager" },
-];
-
-// Bikram Sambat (BS) approximate conversion
-export const adToBS = (adDateStr) => {
-  if (!adDateStr) return "—";
-  try {
-    const d = new Date(adDateStr);
-    if (isNaN(d.getTime())) return "—";
-    const yr = d.getFullYear();
-    const mo = d.getMonth();
-    const day = d.getDate();
-    // Nepal New Year is ~April 13-14; after that, BS year = AD year + 57, before = +56
-    const bsYear = (mo > 3 || (mo === 3 && day >= 14)) ? yr + 57 : yr + 56;
-    const nepMonths = ["Baisakh","Jestha","Ashadh","Shrawan","Bhadra","Ashwin","Kartik","Mangsir","Poush","Magh","Falgun","Chaitra"];
-    // BS month ≈ AD month shifted by ~8.5 months (very approximate)
-    const bsMonthIdx = (mo + 9) % 12;
-    return `${bsYear} ${nepMonths[bsMonthIdx]} BS`;
-  } catch { return "—"; }
-};
 
 // Builds a wa.me deep link. Nepali phone numbers are stored locally (e.g. "98XXXXXXXX");
 // wa.me requires the country code with no leading zero or "+".
