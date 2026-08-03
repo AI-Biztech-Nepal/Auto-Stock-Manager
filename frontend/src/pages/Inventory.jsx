@@ -1,6 +1,6 @@
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { Plus, Search, Eye, Trash2, Filter, X, UploadCloud, EyeOff, Package, Wallet, DollarSign, Lock, Moon, Archive, Sparkles, Store, User, Wrench, Clock, CheckCircle2, AlertTriangle, ImageOff } from "lucide-react";
+import { Plus, Search, Eye, Trash2, Filter, X, UploadCloud, EyeOff, Package, Wallet, DollarSign, Lock, Moon, Archive, Sparkles, Store, User, Wrench, Clock, CheckCircle2, AlertTriangle, ImageOff, ChevronDown } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
 import { formatNPR, getAgingStyle, getStatusStyle, BRANDS, VEHICLE_STATUS_OPTIONS, formatOwnership } from "../utils/helpers";
@@ -13,15 +13,17 @@ import { useAuth } from "../context/AuthContext";
 import { hasFullVehicleAccess } from "../utils/permissions";
 
 // Sold vehicles get their own archive (Sold Stock page) rather than sitting in the active
-// pipeline grid, so "sold" is left out of this page's status filter entirely.
-const STATUSES = ["all", ...VEHICLE_STATUS_OPTIONS.filter(o => o.value !== "sold").map(o => o.value)];
-const STATUS_ICONS = { all: Filter, unlisted: EyeOff, in_repair: Wrench, available: CheckCircle2, reserved: Clock, scrap: Moon };
+// pipeline grid, so "sold" is left out of this page's status filter entirely. Scrap has no
+// dedicated toggle either — it's a do-not-disturb terminal stage, not something staff need
+// to quick-filter to day to day; it's still reachable via "All Status".
+const STATUSES = ["all", ...VEHICLE_STATUS_OPTIONS.filter(o => o.value !== "sold" && o.value !== "scrap").map(o => o.value)];
+const STATUS_ICONS = { all: Filter, unlisted: EyeOff, in_repair: Wrench, available: CheckCircle2, reserved: Clock };
 const AGING_CATEGORIES = ["all", "fresh", "normal", "slow", "dead"];
 const AGING_RANGES = { fresh: "0–30 days", normal: "31–45 days", slow: "46–60 days", dead: "60+ days" };
 
 // A single photo isn't enough for a storefront listing — this is the bar a vehicle
 // needs to clear before it's considered adequately photographed.
-const MIN_PHOTOS = 4;
+const MIN_PHOTOS = 2;
 
 // Orders active stock newest first (most recently added). Scrap is a "do not disturb" stage —
 // it's excluded from that ordering and always pinned to the bottom, regardless of how many days
@@ -58,8 +60,16 @@ export default function Inventory() {
   const [brandFilter, setBrandFilter] = useState("all");
   const [agingFilter, setAgingFilter] = useState(searchParams.get("aging") || "all");
   const [dateFilter, setDateFilter] = useState("");
-  const [noPhotoFilter, setNoPhotoFilter] = useState(false);
-  const [lowPhotoFilter, setLowPhotoFilter] = useState(false);
+  // null = off, "none" = zero photos, "low" = fewer than MIN_PHOTOS
+  const [photoFilter, setPhotoFilter] = useState(null);
+  const [photoMenuOpen, setPhotoMenuOpen] = useState(false);
+  const photoMenuRef = useRef(null);
+
+  useEffect(() => {
+    const onClickOutside = (e) => { if (photoMenuRef.current && !photoMenuRef.current.contains(e.target)) setPhotoMenuOpen(false); };
+    document.addEventListener("mousedown", onClickOutside);
+    return () => document.removeEventListener("mousedown", onClickOutside);
+  }, []);
   const [showModal, setShowModal] = useState(false);
   const [form, setForm] = useState(EMPTY);
   const [saving, setSaving] = useState(false);
@@ -109,8 +119,8 @@ export default function Inventory() {
     if (agingFilter !== "all") result = result.filter(v => v.aging?.category === agingFilter);
     if (brandFilter !== "all") result = result.filter(v => v.brand === brandFilter);
     if (dateFilter) result = result.filter(v => v.created_at?.slice(0, 10) === dateFilter);
-    if (noPhotoFilter) result = result.filter(v => !v.has_photo);
-    if (lowPhotoFilter) result = result.filter(v => (v.photo_count ?? 0) < MIN_PHOTOS);
+    if (photoFilter === "none") result = result.filter(v => !v.has_photo);
+    else if (photoFilter === "low") result = result.filter(v => (v.photo_count ?? 0) < MIN_PHOTOS);
     if (search) {
       const q = search.toLowerCase();
       const qNoSlash = q.replace(/\//g, "");
@@ -215,8 +225,8 @@ export default function Inventory() {
     if (agingFilter !== "all") result = result.filter(v => v.aging?.category === agingFilter);
     if (brandFilter !== "all") result = result.filter(v => v.brand === brandFilter);
     if (dateFilter) result = result.filter(v => v.created_at?.slice(0, 10) === dateFilter);
-    if (noPhotoFilter) result = result.filter(v => !v.has_photo);
-    if (lowPhotoFilter) result = result.filter(v => (v.photo_count ?? 0) < MIN_PHOTOS);
+    if (photoFilter === "none") result = result.filter(v => !v.has_photo);
+    else if (photoFilter === "low") result = result.filter(v => (v.photo_count ?? 0) < MIN_PHOTOS);
     if (search) {
       const q = search.toLowerCase();
       const qNoSlash = q.replace(/\//g, "");
@@ -230,7 +240,7 @@ export default function Inventory() {
     result.sort(sortStock);
 
     setFiltered(result);
-  }, [vehicles, search, statusFilter, brandFilter, agingFilter, dateFilter, noPhotoFilter, lowPhotoFilter]);
+  }, [vehicles, search, statusFilter, brandFilter, agingFilter, dateFilter, photoFilter]);
 
   const handleSave = async (e) => {
     e.preventDefault();
@@ -412,34 +422,45 @@ export default function Inventory() {
             </button>
           );
         })}
-        <button
-          onClick={() => setNoPhotoFilter(p => !p)}
-          data-testid="no-photo-filter-toggle"
-          title="Show only vehicles with no photo uploaded"
-          className={`flex items-center gap-1.5 shrink-0 px-3.5 py-3 rounded-full text-sm font-medium border transition-colors whitespace-nowrap ${
-            noPhotoFilter ? "bg-blue-600 border-blue-600 text-white" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
-          }`}
-        >
-          <ImageOff size={14} />
-          No Photo
-          <span className={`text-xs px-1.5 py-0.5 rounded-full ${noPhotoFilter ? "bg-white/20 text-white" : "bg-slate-100 text-slate-500"}`}>
-            {noPhotoCount}
-          </span>
-        </button>
-        <button
-          onClick={() => setLowPhotoFilter(p => !p)}
-          data-testid="low-photo-filter-toggle"
-          title={`Show only vehicles with fewer than ${MIN_PHOTOS} photos`}
-          className={`flex items-center gap-1.5 shrink-0 px-3.5 py-3 rounded-full text-sm font-medium border transition-colors whitespace-nowrap ${
-            lowPhotoFilter ? "bg-blue-600 border-blue-600 text-white" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
-          }`}
-        >
-          <ImageOff size={14} />
-          Needs More Photos
-          <span className={`text-xs px-1.5 py-0.5 rounded-full ${lowPhotoFilter ? "bg-white/20 text-white" : "bg-slate-100 text-slate-500"}`}>
-            {lowPhotoCount}
-          </span>
-        </button>
+        <div className="relative shrink-0" ref={photoMenuRef}>
+          <button
+            onClick={() => setPhotoMenuOpen(o => !o)}
+            data-testid="photo-filter-toggle"
+            title="Filter by photo coverage"
+            className={`flex items-center gap-1.5 px-3.5 py-3 rounded-full text-sm font-medium border transition-colors whitespace-nowrap ${
+              photoFilter ? "bg-blue-600 border-blue-600 text-white" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
+            }`}
+          >
+            <ImageOff size={14} />
+            Photo Filter
+            <span className={`text-xs px-1.5 py-0.5 rounded-full ${photoFilter ? "bg-white/20 text-white" : "bg-slate-100 text-slate-500"}`}>
+              {photoFilter === "none" ? noPhotoCount : lowPhotoCount}
+            </span>
+            <ChevronDown size={14} className={photoMenuOpen ? "rotate-180 transition-transform" : "transition-transform"} />
+          </button>
+          {photoMenuOpen && (
+            <div className="absolute z-20 top-full mt-1 left-0 bg-white border border-slate-200 rounded-lg shadow-lg py-1 min-w-[190px]" data-testid="photo-filter-menu">
+              <button
+                type="button"
+                data-testid="photo-filter-option-none"
+                onClick={() => { setPhotoFilter(p => p === "none" ? null : "none"); setPhotoMenuOpen(false); }}
+                className={`w-full flex items-center justify-between gap-3 px-3 py-2 text-sm hover:bg-slate-50 ${photoFilter === "none" ? "text-blue-600 font-semibold" : "text-slate-700"}`}
+              >
+                No Photos
+                <span className="text-xs text-slate-400">{noPhotoCount}</span>
+              </button>
+              <button
+                type="button"
+                data-testid="photo-filter-option-low"
+                onClick={() => { setPhotoFilter(p => p === "low" ? null : "low"); setPhotoMenuOpen(false); }}
+                className={`w-full flex items-center justify-between gap-3 px-3 py-2 text-sm hover:bg-slate-50 ${photoFilter === "low" ? "text-blue-600 font-semibold" : "text-slate-700"}`}
+              >
+                Min {MIN_PHOTOS} Photos
+                <span className="text-xs text-slate-400">{lowPhotoCount}</span>
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Filters — sticky so search/filters stay reachable while scrolling a long list */}
@@ -577,7 +598,7 @@ export default function Inventory() {
           <p className="text-sm mt-1">
             {agingFilter !== "all"
               ? "No vehicles fall into this stock age range right now."
-              : search || statusFilter !== "all" || brandFilter !== "all" || dateFilter || noPhotoFilter || lowPhotoFilter
+              : search || statusFilter !== "all" || brandFilter !== "all" || dateFilter || photoFilter
                 ? "Try adjusting your filters"
                 : "Add your first vehicle to get started"}
           </p>
