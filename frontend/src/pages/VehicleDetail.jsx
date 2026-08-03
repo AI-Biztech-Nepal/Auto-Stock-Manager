@@ -26,6 +26,18 @@ const DocCard = ({ label, status }) => {
   );
 };
 
+// A backend-rejected upload (bad file type, too large, no permission) always carries
+// e.response.data.detail. No response at all means the request never reached/returned
+// from the API cleanly (wrong backend URL, CORS block, cold-start timeout) — surface
+// that distinction instead of a generic "Upload failed" so it's actually debuggable.
+const describeUploadError = (e) => {
+  if (!e) return "Upload failed";
+  if (e.response?.data?.detail) return e.response.data.detail;
+  if (e.code === "ECONNABORTED") return "Upload timed out — server may be waking up, try again";
+  if (!e.response) return `Upload failed: could not reach server (${e.message || e.code || "network error"})`;
+  return `Upload failed (${e.response.status})`;
+};
+
 const Row = ({ label, children }) => (
   <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1.5 sm:gap-3 py-2 border-b border-slate-50">
     <span className="text-sm text-slate-500 shrink-0">{label}</span>
@@ -175,7 +187,7 @@ export function VehicleDetailModal({ id, onClose }) {
       if (uploaded.length > 0) setPhotos(prev => [...prev, ...uploaded]);
       const failed = results.length - uploaded.length;
       if (failed === 0) toast.success(uploaded.length > 1 ? `${uploaded.length} photos uploaded!` : "Photo uploaded!");
-      else if (uploaded.length === 0) toast.error("Upload failed");
+      else if (uploaded.length === 0) toast.error(describeUploadError(results.find(r => r.status === "rejected")?.reason));
       else toast.error(`${uploaded.length} uploaded, ${failed} failed`);
     } finally { setUploadingPhoto(false); }
   };
@@ -203,7 +215,7 @@ export function VehicleDetailModal({ id, onClose }) {
     try {
       await api.post(`/vehicles/${id}/legal-documents`, fd, { headers: { "Content-Type": "multipart/form-data" } });
       toast.success("Document uploaded!"); loadDocs(); fetchVehicle();
-    } catch (e) { toast.error(e.response?.data?.detail || "Upload failed"); }
+    } catch (e) { toast.error(describeUploadError(e)); }
     finally { setUploadingDoc(false); }
   };
 
