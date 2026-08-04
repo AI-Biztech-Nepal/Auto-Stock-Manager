@@ -21,20 +21,6 @@ export default function Settings() {
   const [siteForm, setSiteForm] = useState(null);
   const [savingSite, setSavingSite] = useState(false);
 
-  // ── TEMP: testing-only inventory flush, remove this whole block + its JSX section when done ──
-  const [clearingInventory, setClearingInventory] = useState(false);
-  const clearAllInventory = async () => {
-    if (!window.confirm("Delete ALL vehicles (every status, including sold)? Job cards are kept. This cannot be undone.")) return;
-    if (window.prompt('Type DELETE ALL to confirm:') !== "DELETE ALL") { toast.error("Cancelled"); return; }
-    setClearingInventory(true);
-    try {
-      const r = await api.delete("/vehicles", { params: { confirm: "DELETE ALL" } });
-      toast.success(r.data?.message || "Inventory cleared");
-    } catch (err) { toast.error(err.response?.data?.detail || "Failed to clear inventory"); }
-    finally { setClearingInventory(false); }
-  };
-  // ── END TEMP ──
-
   useEffect(() => {
     if (!isAdmin) return;
     api.get("/settings").then(r => setSiteForm(r.data || {})).catch(() => toast.error("Failed to load storefront settings"));
@@ -160,34 +146,6 @@ export default function Settings() {
           ))}
         </div>
       </div>
-
-      {/* Default Credentials (Super admin only) */}
-      {isAdmin && (
-        <div className="bg-amber-50 border border-amber-100 rounded-xl p-4">
-          <h3 className="text-sm font-bold text-amber-900 mb-2">Default Login Credentials</h3>
-          <div className="text-xs text-amber-700 space-y-0.5">
-            <p>Super admin — Username: <span className="font-mono font-bold">admin</span> | Password: <span className="font-mono font-bold">admin123</span></p>
-            <p>Front desk stock — Username: <span className="font-mono font-bold">frontdesk</span> | Password: <span className="font-mono font-bold">frontdesk123</span></p>
-            <p>Parts department — Username: <span className="font-mono font-bold">parts</span> | Password: <span className="font-mono font-bold">parts123</span></p>
-          </div>
-          <p className="text-xs text-amber-600 mt-1.5">Please change these default passwords for security.</p>
-        </div>
-      )}
-
-      {/* TEMP: testing-only, remove this block (and the handler above) when done */}
-      {isAdmin && (
-        <div className="bg-red-50 border border-red-200 rounded-xl p-4">
-          <h3 className="text-sm font-bold text-red-900 mb-1">Clear Inventory (testing only)</h3>
-          <p className="text-xs text-red-700 mb-3">Deletes every vehicle record, every status, including sold. Job cards are left untouched. Not reversible.</p>
-          <button
-            onClick={clearAllInventory}
-            disabled={clearingInventory}
-            className="h-9 px-4 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-semibold disabled:opacity-60 transition-all active:scale-95"
-          >
-            {clearingInventory ? "Clearing..." : "Clear All Vehicle Inventory"}
-          </button>
-        </div>
-      )}
     </div>
   );
 }
