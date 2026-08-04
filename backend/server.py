@@ -2432,6 +2432,32 @@ async def get_legal_documents(vid: str, cu: dict = Depends(require("vehicle_medi
     docs = await db.legal_documents.find({"vehicle_id": vid}, {"_id": 0}).sort("uploaded_at", 1).to_list(200)
     return [_doc_out(d) for d in docs]
 
+@api_router.post("/admin/backfill-compress-documents")
+async def backfill_compress_documents(cu: dict = Depends(admin_only)):
+    """One-off migration: recompresses legal_documents uploaded before
+    server-side compression existed. Safe to call repeatedly — skips docs
+    already stored as compressed JPEG and leaves PDFs untouched (Pillow
+    can't re-encode them). Remove this route once run."""
+    results = []
+    async for d in db.legal_documents.find({}):
+        if not d.get("content_type", "").startswith("image/"):
+            continue  # PDFs aren't touched
+        if d.get("content_type") == "image/jpeg" and d.get("size", 0) < 1_000_000:
+            continue  # already compressed
+        raw = base64.b64decode(d["data"])
+        try:
+            compressed, content_type = _compress_document_image(raw)
+        except Exception as e:
+            results.append({"id": d["id"], "error": str(e)})
+            continue
+        await db.legal_documents.update_one(
+            {"id": d["id"]},
+            {"$set": {"data": base64.b64encode(compressed).decode("ascii"),
+                      "content_type": content_type, "size": len(compressed)}},
+        )
+        results.append({"id": d["id"], "before": len(raw), "after": len(compressed)})
+    return {"processed": len(results), "results": results}
+
 @api_router.post("/vehicles/{vid}/legal-documents")
 async def upload_legal_document(vid: str, file: UploadFile = File(...), doc_type: str = Form("other"), cu: dict = Depends(require("vehicle_media", "create"))):
     v = await db.vehicles.find_one({"id": vid})
