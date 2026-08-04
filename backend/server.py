@@ -2492,6 +2492,37 @@ async def delete_legal_document(vid: str, doc_id: str, cu: dict = Depends(requir
     if r.deleted_count == 0: raise HTTPException(404, "Document not found")
     return {"message": "Document deleted"}
 
+@api_router.get("/admin/storage-usage")
+async def storage_usage(cu: dict = Depends(admin_only)):
+    """Aggregates storage used by uploaded vehicle photos and legal documents —
+    the only two collections holding binary file data (base64 in Mongo, not disk).
+    `bytes` here is the decoded file size recorded at upload time; the base64 text
+    actually stored is ~33% larger than that on top."""
+    photos = await db.vehicle_photos.find({}, {"_id": 0, "vehicle_id": 1, "size": 1}).to_list(100000)
+    docs = await db.legal_documents.find({}, {"_id": 0, "vehicle_id": 1, "size": 1}).to_list(100000)
+    photos_bytes = sum(p.get("size", 0) or 0 for p in photos)
+    docs_bytes = sum(d.get("size", 0) or 0 for d in docs)
+
+    by_vehicle = {}
+    for item in photos + docs:
+        vid = item.get("vehicle_id")
+        by_vehicle[vid] = by_vehicle.get(vid, 0) + (item.get("size", 0) or 0)
+
+    top = sorted(by_vehicle.items(), key=lambda kv: kv[1], reverse=True)[:10]
+    top_vehicles = []
+    for vid, size in top:
+        v = await db.vehicles.find_one({"id": vid}, {"_id": 0, "brand": 1, "model": 1, "registration_number": 1})
+        label = f"{v['brand']} {v['model']}" if v else "Unknown vehicle"
+        if v and v.get("registration_number"): label += f" ({v['registration_number']})"
+        top_vehicles.append({"vehicle_id": vid, "label": label, "bytes": size})
+
+    return {
+        "photos": {"count": len(photos), "bytes": photos_bytes},
+        "documents": {"count": len(docs), "bytes": docs_bytes},
+        "total_bytes": photos_bytes + docs_bytes,
+        "top_vehicles": top_vehicles,
+    }
+
 # ══════════════════════════════════════════════════════════════════════
 # ── SPARE PARTS ───────────────────────────────────────────────────────
 # ══════════════════════════════════════════════════════════════════════

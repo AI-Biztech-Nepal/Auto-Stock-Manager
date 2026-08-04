@@ -1,9 +1,10 @@
 import { useEffect, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
-import { AlertTriangle, TrendingUp, Package, Users, Wrench, DollarSign, Clock, ShoppingCart, CalendarDays, TrendingDown, Banknote } from "lucide-react";
+import { AlertTriangle, TrendingUp, Package, Users, Wrench, DollarSign, Clock, ShoppingCart, CalendarDays, TrendingDown, Banknote, Sparkles } from "lucide-react";
 import api from "../utils/api";
 import { formatNPR } from "../utils/helpers";
+import HoverADDate from "../components/HoverADDate";
 import {
   getCurrentBSDate, getCurrentBSMonthRange, getCurrentBSYearRange,
   getTodayAD, BS_MONTHS,
@@ -66,6 +67,21 @@ function AccountingSummary() {
   const [activePeriod, setActivePeriod] = useState("daily");
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [recentSales, setRecentSales] = useState([]);
+
+  // Independent of the period tabs above — always a rolling last-24-hours window,
+  // same pattern as the "Recently Added" stock ribbon on the Inventory page.
+  useEffect(() => {
+    const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
+    api.get("/sales")
+      .then(r => {
+        const recent = r.data
+          .filter(s => s.created_at && new Date(s.created_at).getTime() >= oneDayAgo)
+          .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+        setRecentSales(recent);
+      })
+      .catch(() => {});
+  }, []);
 
   const fetchSummary = useCallback(async (period) => {
     setLoading(true); setData(null);
@@ -154,6 +170,35 @@ function AccountingSummary() {
         </div>
       ) : (
         <p className="text-sm text-slate-400 text-center py-6">Could not load data</p>
+      )}
+
+      {/* Recent Sales Highlight */}
+      {recentSales.length > 0 && (
+        <div className="bg-green-50 rounded-xl border border-green-200 shadow-sm p-4 mt-4" data-testid="recent-sales-section">
+          <div className="flex items-center gap-2 mb-3">
+            <Sparkles size={16} className="text-green-600" />
+            <h2 className="text-sm font-bold text-green-900">Recent Sales</h2>
+            <span className="text-xs font-medium text-green-700 bg-green-100 px-2 py-0.5 rounded-full">
+              {recentSales.length} in the last 24 hours
+            </span>
+          </div>
+          <div className="flex gap-3 overflow-x-auto pb-1">
+            {recentSales.map(s => (
+              <div
+                key={s.id}
+                data-testid="recent-sale-card"
+                className="shrink-0 w-56 bg-white rounded-lg border border-green-100 shadow-sm p-3"
+              >
+                <div className="font-bold text-slate-900 text-sm truncate mb-1" style={{ fontFamily: "Manrope" }}>
+                  {s.vehicle_info || "Vehicle"}
+                </div>
+                <div className="text-xs text-slate-500 mb-1 truncate">{s.customer_name}</div>
+                <div className="text-sm font-semibold text-green-700 mb-1">{formatNPR(s.sale_price)}</div>
+                <div className="text-xs text-slate-500">Sold: <HoverADDate date={s.sale_date} /></div>
+              </div>
+            ))}
+          </div>
+        </div>
       )}
     </div>
   );

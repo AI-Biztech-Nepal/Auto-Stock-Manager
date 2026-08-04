@@ -13,6 +13,14 @@ const SITE_FIELDS = [
   ["Service Section Image URL", "service_image_url", "url"],
 ];
 
+const formatBytes = (bytes) => {
+  if (!bytes) return "0 B";
+  const units = ["B", "KB", "MB", "GB"];
+  let i = 0, n = bytes;
+  while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
+  return `${n.toFixed(i === 0 ? 0 : 2)} ${units[i]}`;
+};
+
 export default function Settings() {
   const { user, logout } = useAuth();
   const isAdmin = user?.role === "admin";
@@ -20,10 +28,12 @@ export default function Settings() {
   const [saving, setSaving] = useState(false);
   const [siteForm, setSiteForm] = useState(null);
   const [savingSite, setSavingSite] = useState(false);
+  const [storage, setStorage] = useState(null);
 
   useEffect(() => {
     if (!isAdmin) return;
     api.get("/settings").then(r => setSiteForm(r.data || {})).catch(() => toast.error("Failed to load storefront settings"));
+    api.get("/admin/storage-usage").then(r => setStorage(r.data)).catch(() => {});
   }, [isAdmin]);
 
   const saveSiteSettings = async (e) => {
@@ -127,6 +137,44 @@ export default function Settings() {
           </button>
         </form>
       </div>
+
+      {/* Storage Usage (Super admin only) */}
+      {isAdmin && storage && (
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6" data-testid="storage-usage-card">
+          <h2 className="text-base font-bold text-slate-900 mb-1" style={{ fontFamily: "Manrope" }}>Storage Usage</h2>
+          <p className="text-xs text-slate-500 mb-4">Space used by uploaded vehicle photos and legal documents</p>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
+            <div className="rounded-lg bg-slate-50 p-3">
+              <p className="text-xs text-slate-500">Photos</p>
+              <p className="text-lg font-bold text-slate-900" style={{ fontFamily: "Manrope" }}>{formatBytes(storage.photos.bytes)}</p>
+              <p className="text-xs text-slate-400">{storage.photos.count} file{storage.photos.count !== 1 ? "s" : ""}</p>
+            </div>
+            <div className="rounded-lg bg-slate-50 p-3">
+              <p className="text-xs text-slate-500">Documents</p>
+              <p className="text-lg font-bold text-slate-900" style={{ fontFamily: "Manrope" }}>{formatBytes(storage.documents.bytes)}</p>
+              <p className="text-xs text-slate-400">{storage.documents.count} file{storage.documents.count !== 1 ? "s" : ""}</p>
+            </div>
+            <div className="rounded-lg bg-blue-50 p-3">
+              <p className="text-xs text-blue-600">Total</p>
+              <p className="text-lg font-bold text-blue-900" style={{ fontFamily: "Manrope" }}>{formatBytes(storage.total_bytes)}</p>
+              <p className="text-xs text-blue-400">{storage.photos.count + storage.documents.count} files</p>
+            </div>
+          </div>
+          {storage.top_vehicles.length > 0 && (
+            <div>
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Heaviest Vehicles</p>
+              <div className="space-y-1.5">
+                {storage.top_vehicles.map(v => (
+                  <div key={v.vehicle_id} className="flex items-center justify-between text-sm py-1 border-b border-slate-50 last:border-0">
+                    <span className="text-slate-700 truncate">{v.label}</span>
+                    <span className="font-medium text-slate-900 shrink-0 ml-3">{formatBytes(v.bytes)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* App Info */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
