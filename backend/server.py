@@ -2311,6 +2311,13 @@ async def startup():
             "service_image_url": "",
         })
 
+    # Run in the background so neither ever delays the app becoming ready — shrinks
+    # any vehicle photo or legal document over their 2MB cap left over from before
+    # those caps existed, or from a run that got interrupted last time. See
+    # _compress_oversized_photos / _compress_oversized_documents.
+    asyncio.create_task(_compress_oversized_photos())
+    asyncio.create_task(_compress_oversized_documents())
+
 app.add_middleware(CORSMiddleware, allow_credentials=True,
                    allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
                    allow_methods=["*"], allow_headers=["*"])
@@ -2351,29 +2358,77 @@ def _resolved_content_type(file: UploadFile) -> str:
     ext = os.path.splitext(file.filename or "")[1].lower()
     return _EXT_CONTENT_TYPES.get(ext, file.content_type or "application/octet-stream")
 
-MAX_PHOTO_SIZE = 5 * 1024 * 1024  # 5 MB, enforced on the compressed output
 RAW_UPLOAD_MAX = 25 * 1024 * 1024  # 25 MB cap on the original file straight off a phone camera
 PHOTO_MAX_DIMENSION = 1600  # px, longest side
 PHOTO_JPEG_QUALITY = 80
+PHOTO_MAX_BYTES = 2 * 1024 * 1024  # hard cap — same 2MB ceiling as legal documents
 
 def _compress_photo(content: bytes) -> tuple[bytes, str]:
     """Downscales and re-encodes an uploaded photo as JPEG. Raw phone-camera
     uploads were routinely 2-3MB+, which meant next/image on the storefront
     had to download the full original from Render on every cache miss just
     to produce a ~30KB resized thumbnail — this is why the storefront felt
-    slow. Compressing once at upload time fixes it for every consumer."""
+    slow. Compressing once at upload time fixes it for every consumer. Quality
+    is stepped down and, if that's still not enough, the image is shrunk
+    further in a loop — same approach as _compress_document_image — so no
+    photo leaves this function larger than PHOTO_MAX_BYTES."""
     img = Image.open(io.BytesIO(content))
     img = ImageOps.exif_transpose(img)  # respect phone camera orientation before resizing
     if img.mode not in ("RGB", "L"):
         img = img.convert("RGB")
     img.thumbnail((PHOTO_MAX_DIMENSION, PHOTO_MAX_DIMENSION), Image.LANCZOS)
-    out = io.BytesIO()
-    img.save(out, format="JPEG", quality=PHOTO_JPEG_QUALITY, optimize=True)
-    return out.getvalue(), "image/jpeg"
+
+    def encode(quality):
+        out = io.BytesIO()
+        img.save(out, format="JPEG", quality=quality, optimize=True)
+        return out.getvalue()
+
+    quality = PHOTO_JPEG_QUALITY
+    data = encode(quality)
+    while len(data) > PHOTO_MAX_BYTES and quality > 30:
+        quality -= 15
+        data = encode(quality)
+    while len(data) > PHOTO_MAX_BYTES and max(img.size) > 500:
+        img.thumbnail((int(img.width * 0.8), int(img.height * 0.8)), Image.LANCZOS)
+        data = encode(max(quality, 50))
+    return data, "image/jpeg"
 
 def _photo_out(p: dict) -> dict:
     return {"id": p["id"], "filename": p["filename"], "uploaded_at": p["uploaded_at"],
             "size": p["size"], "url": f"data:{p['content_type']};base64,{p['data']}"}
+
+async def _compress_oversized_photos():
+    """Same idea as _compress_oversized_documents (below), for vehicle_photos —
+    kicked off once from the startup event, no button. Shrinks every photo
+    currently over PHOTO_MAX_BYTES via _compress_photo, so anything uploaded
+    before that cap (or before compression existed at all) gets caught too.
+    Safe to run every startup — already-small photos are skipped."""
+    photos = await db.vehicle_photos.find({}, {"_id": 0, "id": 1, "size": 1}).to_list(100000)
+    oversized_ids = [p["id"] for p in photos if (p.get("size") or 0) > PHOTO_MAX_BYTES]
+    if not oversized_ids:
+        return
+    logger.info(f"Compressing {len(oversized_ids)} oversized vehicle photo(s)...")
+    succeeded = 0
+    for photo_id in oversized_ids:
+        p = await db.vehicle_photos.find_one({"id": photo_id})
+        if not p:
+            continue
+        raw = base64.b64decode(p["data"])
+        try:
+            compressed, new_content_type = _compress_photo(raw)
+        except Exception:
+            logger.warning(f"Failed to compress vehicle photo {photo_id}", exc_info=True)
+            continue
+        if len(compressed) >= len(raw):
+            continue  # didn't actually help — leave the original in place
+        await db.vehicle_photos.update_one(
+            {"id": photo_id},
+            {"$set": {"data": base64.b64encode(compressed).decode("ascii"),
+                      "content_type": new_content_type, "size": len(compressed)}},
+        )
+        succeeded += 1
+        await asyncio.sleep(0)  # yield to the event loop between photos
+    logger.info(f"Photo compression sweep done: {succeeded}/{len(oversized_ids)} shrunk.")
 
 @api_router.get("/vehicles/{vid}/photos")
 async def get_vehicle_photos(vid: str, cu: dict = Depends(require("vehicle_media", "view"))):
@@ -2396,8 +2451,10 @@ async def upload_vehicle_photo(vid: str, file: UploadFile = File(...), cu: dict 
         content, content_type = _compress_photo(content)
     except Exception:
         logger.warning(f"Photo compression failed for upload to vehicle {vid}, storing original", exc_info=True)
-    if len(content) > MAX_PHOTO_SIZE:
-        raise HTTPException(400, "File too large. Max 5MB.")
+    if len(content) > PHOTO_MAX_BYTES:
+        # Only reachable if compression above failed and fell back to the raw upload —
+        # the compressor itself guarantees output under PHOTO_MAX_BYTES on success.
+        raise HTTPException(400, "File too large and could not be compressed. Try a smaller photo.")
     photo_id = str(uuid.uuid4())
     photo = {
         "id": photo_id, "vehicle_id": vid, "filename": file.filename or f"{photo_id}.jpg",
@@ -2502,24 +2559,23 @@ async def get_legal_documents(vid: str, cu: dict = Depends(require("vehicle_medi
     docs = await db.legal_documents.find({"vehicle_id": vid}, {"_id": 0}).sort("uploaded_at", 1).to_list(200)
     return [_doc_out(d) for d in docs]
 
-@api_router.post("/admin/backfill-compress-documents")
-async def backfill_compress_documents(limit: int = 25, cu: dict = Depends(admin_only)):
-    """Recompresses legal_documents currently over DOC_MAX_BYTES (2MB) — images
-    via _compress_document_image, PDFs via _compress_pdf — so old uploads and
-    anything from before this cap existed get shrunk down too, not just new
-    ones. Processes at most `limit` per call and reports how many are still
-    left, so a single request can't run long enough to time out on a large
-    backlog; the Settings page's "Compress Documents" button calls this in a
-    loop until `remaining` hits 0. Safe to call repeatedly — anything already
-    under the cap, or where compression wouldn't actually shrink it, is skipped."""
-    oversized = await db.legal_documents.find(
-        {}, {"_id": 0, "id": 1, "size": 1}
-    ).to_list(100000)
-    oversized = [d for d in oversized if (d.get("size") or 0) > DOC_MAX_BYTES]
-    batch_ids = [d["id"] for d in oversized[:limit]]
-
-    results = []
-    for doc_id in batch_ids:
+async def _compress_oversized_documents():
+    """Background sweep, kicked off once from the startup event (see below) —
+    no button, no admin endpoint. Recompresses every legal_document currently
+    over DOC_MAX_BYTES (images via _compress_document_image, PDFs via
+    _compress_pdf) so old uploads and anything from before this cap existed
+    get shrunk down too, not just new ones (which are already capped at
+    upload time). Awaits between documents so this never blocks the event
+    loop for other requests, and is safe to run every startup — anything
+    already under the cap, or where compressing wouldn't actually shrink it,
+    is skipped, so a repeat run does almost nothing."""
+    docs = await db.legal_documents.find({}, {"_id": 0, "id": 1, "size": 1}).to_list(100000)
+    oversized_ids = [d["id"] for d in docs if (d.get("size") or 0) > DOC_MAX_BYTES]
+    if not oversized_ids:
+        return
+    logger.info(f"Compressing {len(oversized_ids)} oversized legal document(s)...")
+    succeeded = 0
+    for doc_id in oversized_ids:
         d = await db.legal_documents.find_one({"id": doc_id})
         if not d:
             continue
@@ -2532,8 +2588,8 @@ async def backfill_compress_documents(limit: int = 25, cu: dict = Depends(admin_
                 compressed, new_content_type = _compress_pdf(raw), content_type
             else:
                 continue
-        except Exception as e:
-            results.append({"id": doc_id, "error": str(e)})
+        except Exception:
+            logger.warning(f"Failed to compress legal document {doc_id}", exc_info=True)
             continue
         if len(compressed) >= len(raw):
             continue  # didn't actually help — leave the original in place
@@ -2542,19 +2598,9 @@ async def backfill_compress_documents(limit: int = 25, cu: dict = Depends(admin_
             {"$set": {"data": base64.b64encode(compressed).decode("ascii"),
                       "content_type": new_content_type, "size": len(compressed)}},
         )
-        results.append({"id": doc_id, "before": len(raw), "after": len(compressed)})
-
-    # "processed" is how many actually got smaller (what the caller should show as
-    # progress); "attempted" is the raw batch size, used by the caller to detect a
-    # batch that made zero progress (e.g. every doc in it is an uncompressible type)
-    # and stop looping instead of retrying the same stuck documents forever.
-    succeeded = sum(1 for r in results if "error" not in r)
-    return {
-        "processed": succeeded,
-        "attempted": len(batch_ids),
-        "remaining": max(len(oversized) - len(batch_ids), 0),
-        "results": results,
-    }
+        succeeded += 1
+        await asyncio.sleep(0)  # yield to the event loop between documents
+    logger.info(f"Document compression sweep done: {succeeded}/{len(oversized_ids)} shrunk.")
 
 @api_router.post("/vehicles/{vid}/legal-documents")
 async def upload_legal_document(vid: str, file: UploadFile = File(...), doc_type: str = Form("other"), cu: dict = Depends(require("vehicle_media", "create"))):
