@@ -43,6 +43,28 @@ const AlertCard = ({ title, count, description, color, onClick }) => (
   </div>
 );
 
+// Ticks every second and renders Nepal Standard Time (UTC+5:45). Uses the IANA
+// "Asia/Kathmandu" zone via Intl rather than manually offsetting UTC, so the
+// half-hour-plus-15-minutes quirk (and any DST-style edge case) is handled by
+// the platform's timezone database instead of hand-rolled math.
+const LiveClock = () => {
+  const [now, setNow] = useState(new Date());
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  const timeStr = now.toLocaleTimeString("en-US", {
+    timeZone: "Asia/Kathmandu",
+    hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: true,
+  });
+  return (
+    <div className="flex items-center gap-2 bg-blue-50 border border-blue-100 px-3 py-1.5 rounded-lg" data-testid="npt-clock">
+      <Clock size={14} className="text-blue-600" />
+      <span className="text-xs font-semibold text-blue-700 tabular-nums">{timeStr} NPT</span>
+    </div>
+  );
+};
+
 const AccountingKPI = ({ label, value, color, icon: Icon, sub }) => (
   <div className={`rounded-xl p-4 ${color} flex items-center gap-4`}>
     <div className="w-10 h-10 rounded-lg bg-white/30 flex items-center justify-center">
@@ -252,9 +274,12 @@ export default function Dashboard() {
           <p className="text-sm text-slate-500 mt-0.5">Overview of Hamro G n G Auto operations</p>
         </div>
         {bsDateStr && (
-          <div className="hidden sm:flex items-center gap-2 bg-blue-50 border border-blue-100 px-3 py-1.5 rounded-lg" data-testid="bs-today-display">
-            <CalendarDays size={14} className="text-blue-600" />
-            <span className="text-xs font-semibold text-blue-700">{bsDateStr}</span>
+          <div className="hidden sm:flex flex-col items-end gap-1.5">
+            <div className="flex items-center gap-2 bg-blue-50 border border-blue-100 px-3 py-1.5 rounded-lg" data-testid="bs-today-display">
+              <CalendarDays size={14} className="text-blue-600" />
+              <span className="text-xs font-semibold text-blue-700">{bsDateStr}</span>
+            </div>
+            <LiveClock />
           </div>
         )}
       </div>
