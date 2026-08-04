@@ -708,7 +708,6 @@ class PartStockOut(BaseModel):
     reason: str  # Sale | Used in Job Card | Damaged | Return
     date: Optional[str] = None
     job_id: Optional[str] = None
-    customer_id: Optional[str] = None
     notes: Optional[str] = None
 
 class SaleCreate(BaseModel):
@@ -733,12 +732,6 @@ class SaleUpdate(BaseModel):
     paid_bank: float = 0
     due_date: Optional[str] = None
     sale_date: Optional[str] = None
-    notes: Optional[str] = None
-
-class SalePaymentCreate(BaseModel):
-    amount: float
-    method: str = "Cash"
-    payment_date: Optional[str] = None
     notes: Optional[str] = None
 
 class CustomerCreate(BaseModel):
@@ -1135,7 +1128,6 @@ async def import_vehicles(file: UploadFile = File(...), confirm: bool = False, c
             "due_amount": d["selling_price"],
             "due_date": None,
             "payment_status": "Unpaid",
-            "payment_history": [],
             "sale_date": d["sold_date"],
             "notes": "Auto-created: vehicle imported with status=Sold — review customer/payment details.",
             "created_by": cu.get("username"),
@@ -1211,7 +1203,6 @@ async def update_vehicle(vid: str, vehicle: VehicleUpdate, cu: dict = Depends(re
             "due_amount": sale_price,
             "due_date": None,
             "payment_status": "Unpaid",
-            "payment_history": [],
             "sale_date": sale_date,
             "notes": "Auto-created: vehicle marked Sold directly from Inventory",
             "created_by": cu.get("username"),
@@ -1276,7 +1267,6 @@ async def update_vehicle_status(vid: str, body: VehicleStatusUpdate, cu: dict = 
             "due_amount": sale_price,
             "due_date": None,
             "payment_status": "Unpaid",
-            "payment_history": [],
             "sale_date": upd["sold_date"],
             "notes": "Auto-created: vehicle marked Sold directly from Inventory",
             "created_by": cu.get("username"),
@@ -1647,7 +1637,6 @@ async def create_sale(sale: SaleCreate, cu: dict = Depends(require("sales", "cre
         "due_amount": due_amount,
         "due_date": sale.due_date,
         "payment_status": payment_status,
-        "payment_history": [],
         "sale_date": sale_date,
         "notes": sale.notes,
         "created_by": cu.get("username"),

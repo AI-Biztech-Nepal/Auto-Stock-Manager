@@ -16,7 +16,7 @@
 --   * A handful of list/dict fields that are only ever read/written as a whole
 --     blob (never filtered or sorted on) are MySQL JSON columns instead of being
 --     normalized into child tables: ai_chat_sessions.messages,
---     sales.extra_expenses, sales.payment_history, job_cards.parts, leads.images.
+--     sales.extra_expenses, job_cards.parts, leads.images.
 --   * `vehicles.linked_contact_id` stays a single polymorphic VARCHAR (no FK
 --     constraint) exactly as it behaved in Mongo — it resolves to either
 --     customers.id or vendors.id depending on the sibling linked_contact_type
@@ -160,7 +160,6 @@ CREATE TABLE IF NOT EXISTS sales (
   due_amount DOUBLE,
   due_date VARCHAR(20),
   payment_status VARCHAR(20),
-  payment_history JSON,
   sale_date VARCHAR(20),
   notes TEXT,
   created_by VARCHAR(100),
