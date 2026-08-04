@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { Plus, Trash2, Edit, CheckCircle, AlertCircle, Clock, QrCode, Undo2, Store, User } from "lucide-react";
+import { Plus, Trash2, Edit, CheckCircle, AlertCircle, Clock, QrCode, Undo2, Store, User, Download } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
 import { formatNPR, getAgingStyle, getStatusStyle, getDocStyle, EXPENSE_CATEGORIES, VEHICLE_STATUS_OPTIONS, CONDITIONS, SOURCES, BRANDS, FUEL_TYPES, OWNERSHIP_OPTIONS, formatOwnership } from "../utils/helpers";
@@ -157,6 +157,7 @@ export function VehicleDetailModal({ id, onClose }) {
   const [qrData, setQrData] = useState(null);
   const [photos, setPhotos] = useState([]);
   const [previewPhoto, setPreviewPhoto] = useState(null);
+  const [previewDoc, setPreviewDoc] = useState(null);
   const [legalDocs, setLegalDocs] = useState([]);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [isDraggingPhoto, setIsDraggingPhoto] = useState(false);
@@ -606,7 +607,7 @@ export function VehicleDetailModal({ id, onClose }) {
                     )}
                     {docs.map(doc => (
                       <div key={doc.id} className="mt-1.5 flex items-center justify-between bg-slate-50 rounded-lg px-2 py-1" data-testid="uploaded-doc">
-                        <a href={doc.url} download={doc.original_name} target="_blank" rel="noreferrer" className="text-xs text-blue-600 hover:underline truncate max-w-[80px]">{doc.original_name}</a>
+                        <button type="button" onClick={() => setPreviewDoc(doc)} className="text-xs text-blue-600 hover:underline truncate max-w-[80px] text-left">{doc.original_name}</button>
                         {canManageStock && (
                           <button onClick={() => deleteDoc(doc.id)} className="text-red-400 hover:text-red-600 ml-1 flex-shrink-0" title="Delete"><Trash2 size={11} /></button>
                         )}
@@ -623,7 +624,7 @@ export function VehicleDetailModal({ id, onClose }) {
                 <div className="space-y-1">
                   {legalDocs.filter(d => d.doc_type === "other").map(doc => (
                     <div key={doc.id} className="flex items-center justify-between bg-slate-50 rounded-lg px-3 py-2" data-testid="uploaded-doc-other">
-                      <a href={doc.url} download={doc.original_name} target="_blank" rel="noreferrer" className="text-sm text-blue-600 hover:underline truncate">{doc.original_name}</a>
+                      <button type="button" onClick={() => setPreviewDoc(doc)} className="text-sm text-blue-600 hover:underline truncate text-left">{doc.original_name}</button>
                       {canManageStock && (
                         <button onClick={() => deleteDoc(doc.id)} className="text-red-400 hover:text-red-600 ml-2 flex-shrink-0"><Trash2 size={13} /></button>
                       )}
@@ -669,6 +670,20 @@ export function VehicleDetailModal({ id, onClose }) {
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-4" onClick={() => setPreviewPhoto(null)}>
           <button onClick={() => setPreviewPhoto(null)} className="absolute top-4 right-4 w-11 h-11 flex items-center justify-center rounded-lg bg-white/10 hover:bg-white/20 text-white">✕</button>
           <img src={previewPhoto} alt="Vehicle full size" className="max-w-full max-h-full object-contain rounded-lg" onClick={e => e.stopPropagation()} />
+        </div>
+      )}
+
+      {previewDoc && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-4" onClick={() => setPreviewDoc(null)}>
+          <div className="absolute top-4 right-4 flex items-center gap-2">
+            <a href={previewDoc.url} download={previewDoc.original_name} onClick={e => e.stopPropagation()} className="w-11 h-11 flex items-center justify-center rounded-lg bg-white/10 hover:bg-white/20 text-white" title="Download"><Download size={18} /></a>
+            <button onClick={() => setPreviewDoc(null)} className="w-11 h-11 flex items-center justify-center rounded-lg bg-white/10 hover:bg-white/20 text-white">✕</button>
+          </div>
+          {previewDoc.url.startsWith("data:application/pdf") ? (
+            <iframe src={previewDoc.url} title={previewDoc.original_name} className="w-full h-full max-w-4xl bg-white rounded-lg" onClick={e => e.stopPropagation()} />
+          ) : (
+            <img src={previewDoc.url} alt={previewDoc.original_name} className="max-w-full max-h-full object-contain rounded-lg" onClick={e => e.stopPropagation()} />
+          )}
         </div>
       )}
     </div>

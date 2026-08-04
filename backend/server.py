@@ -2403,6 +2403,22 @@ async def delete_vehicle_photo(vid: str, photo_id: str, cu: dict = Depends(requi
 ALLOWED_DOC_TYPES = {"application/pdf", "image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"}
 DOC_EXTENSIONS = IMAGE_EXTENSIONS | {".pdf"}
 DOC_TYPES = ["bluebook", "insurance", "tax_clearance", "transfer", "other"]
+DOC_MAX_DIMENSION = 2000  # px, longest side — higher than photos so scanned text/fine print stays legible
+DOC_JPEG_QUALITY = 85
+
+def _compress_document_image(content: bytes) -> tuple[bytes, str]:
+    """Same approach as _compress_photo but tuned for document scans (bluebook,
+    insurance card, etc.) — a higher resolution/quality ceiling since these get
+    zoomed in on to read fine print, at the cost of a smaller size reduction.
+    PDFs aren't touched here; Pillow can't re-encode them."""
+    img = Image.open(io.BytesIO(content))
+    img = ImageOps.exif_transpose(img)
+    if img.mode not in ("RGB", "L"):
+        img = img.convert("RGB")
+    img.thumbnail((DOC_MAX_DIMENSION, DOC_MAX_DIMENSION), Image.LANCZOS)
+    out = io.BytesIO()
+    img.save(out, format="JPEG", quality=DOC_JPEG_QUALITY, optimize=True)
+    return out.getvalue(), "image/jpeg"
 
 def _doc_out(d: dict) -> dict:
     return {"id": d["id"], "filename": d["filename"], "doc_type": d["doc_type"],
@@ -2425,10 +2441,16 @@ async def upload_legal_document(vid: str, file: UploadFile = File(...), doc_type
     content = await file.read()
     if len(content) > 10 * 1024 * 1024:
         raise HTTPException(400, "File too large. Max 10MB.")
+    content_type = _resolved_content_type(file)
+    if content_type.startswith("image/"):
+        try:
+            content, content_type = _compress_document_image(content)
+        except Exception:
+            logger.warning(f"Document image compression failed for upload to vehicle {vid}, storing original", exc_info=True)
     doc_id = str(uuid.uuid4())
     doc = {
         "id": doc_id, "vehicle_id": vid, "filename": file.filename or f"{doc_id}.pdf",
-        "content_type": _resolved_content_type(file), "data": base64.b64encode(content).decode("ascii"),
+        "content_type": content_type, "data": base64.b64encode(content).decode("ascii"),
         "doc_type": doc_type, "original_name": file.filename,
         "uploaded_at": datetime.now(timezone.utc).isoformat(), "size": len(content),
     }
