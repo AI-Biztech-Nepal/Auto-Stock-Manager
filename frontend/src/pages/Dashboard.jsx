@@ -68,19 +68,29 @@ function AccountingSummary() {
   const [loading, setLoading] = useState(false);
   const [recentSales, setRecentSales] = useState([]);
 
-  // Independent of the period tabs above — always a rolling last-24-hours window,
-  // same pattern as the "Recently Added" stock ribbon on the Inventory page.
+  // Mirrors the same period tabs as the accounting KPIs above — "Today" shows
+  // only sales dated today, "This Week" shows the whole Sunday–Saturday range.
   useEffect(() => {
-    const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
+    const today = getTodayAD();
+    let start, end;
+    if (activePeriod === "daily") {
+      start = today; end = today;
+    } else {
+      const range = getCurrentWeekRange();
+      start = range.start; end = range.end;
+    }
     api.get("/sales")
       .then(r => {
-        const recent = r.data
-          .filter(s => s.created_at && new Date(s.created_at).getTime() >= oneDayAgo)
-          .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-        setRecentSales(recent);
+        const inRange = r.data
+          .filter(s => {
+            const d = s.sale_date?.slice(0, 10);
+            return d && d >= start && d <= end;
+          })
+          .sort((a, b) => new Date(b.sale_date) - new Date(a.sale_date));
+        setRecentSales(inRange);
       })
       .catch(() => {});
-  }, []);
+  }, [activePeriod]);
 
   const fetchSummary = useCallback(async (period) => {
     setLoading(true); setData(null);
@@ -168,14 +178,16 @@ function AccountingSummary() {
         <p className="text-sm text-slate-400 text-center py-6">Could not load data</p>
       )}
 
-      {/* Recent Sales Highlight */}
+      {/* Sales Highlight — follows the same period tabs as the KPIs above */}
       {recentSales.length > 0 && (
         <div className="bg-green-50 rounded-xl border border-green-200 shadow-sm p-4 mt-4" data-testid="recent-sales-section">
           <div className="flex items-center gap-2 mb-3">
             <Sparkles size={16} className="text-green-600" />
-            <h2 className="text-sm font-bold text-green-900">Recent Sales</h2>
+            <h2 className="text-sm font-bold text-green-900">
+              {activePeriod === "daily" ? "Today's Sale" : "Sale over a week"}
+            </h2>
             <span className="text-xs font-medium text-green-700 bg-green-100 px-2 py-0.5 rounded-full">
-              {recentSales.length} in the last 24 hours
+              {recentSales.length} {activePeriod === "daily" ? "today" : "this week"}
             </span>
           </div>
           <div className="flex gap-3 overflow-x-auto pb-1">
