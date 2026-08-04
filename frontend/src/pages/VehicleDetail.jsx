@@ -605,21 +605,33 @@ export function VehicleDetailModal({ id, onClose }) {
                         <input type="file" accept="image/*,.pdf" className="hidden" disabled={uploadingDoc} onChange={e => { if (e.target.files[0]) uploadDoc(e.target.files[0], key); e.target.value = ""; }} />
                       </label>
                     )}
-                    {docs.map(doc => (
-                      <div key={doc.id} className="mt-1.5 flex items-center justify-between bg-slate-50 rounded-lg px-2 py-1" data-testid="uploaded-doc">
-                        <button type="button" onClick={() => setPreviewDoc(doc)} className="flex items-center gap-1.5 min-w-0 text-left">
-                          {doc.url.startsWith("data:image") ? (
-                            <img src={doc.url} alt="" className="w-4 h-4 rounded-sm object-cover flex-shrink-0" />
-                          ) : (
-                            <FileText size={14} className="text-slate-400 flex-shrink-0" />
-                          )}
-                          <span className="text-xs text-blue-600 hover:underline truncate max-w-[64px]">{doc.original_name}</span>
-                        </button>
-                        {canManageStock && (
-                          <button onClick={() => deleteDoc(doc.id)} className="text-red-400 hover:text-red-600 ml-1 flex-shrink-0" title="Delete"><Trash2 size={11} /></button>
-                        )}
+                    {docs.length > 0 && (
+                      <div className="mt-2 grid grid-cols-2 gap-1.5">
+                        {docs.map(doc => (
+                          <div key={doc.id} className="relative rounded-md overflow-hidden aspect-square bg-slate-100" data-testid="uploaded-doc">
+                            <button type="button" onClick={() => setPreviewDoc(doc)} className="block w-full h-full" title={doc.original_name}>
+                              {doc.url.startsWith("data:image") ? (
+                                <img src={doc.url} alt={doc.original_name} className="w-full h-full object-cover" />
+                              ) : (
+                                <div className="w-full h-full flex items-center justify-center">
+                                  <FileText size={18} className="text-slate-400" />
+                                </div>
+                              )}
+                            </button>
+                            {canManageStock && (
+                              <button
+                                type="button"
+                                onClick={() => deleteDoc(doc.id)}
+                                className="absolute top-0.5 right-0.5 w-4 h-4 rounded bg-black/50 hover:bg-red-600 text-white flex items-center justify-center transition-colors"
+                                title="Delete"
+                              >
+                                <Trash2 size={9} />
+                              </button>
+                            )}
+                          </div>
+                        ))}
                       </div>
-                    ))}
+                    )}
                   </div>
                 );
               })}
@@ -628,19 +640,27 @@ export function VehicleDetailModal({ id, onClose }) {
             {legalDocs.filter(d => d.doc_type === "other").length > 0 && (
               <div>
                 <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Other Documents</p>
-                <div className="space-y-1">
+                <div className="grid grid-cols-4 sm:grid-cols-6 gap-2">
                   {legalDocs.filter(d => d.doc_type === "other").map(doc => (
-                    <div key={doc.id} className="flex items-center justify-between bg-slate-50 rounded-lg px-3 py-2" data-testid="uploaded-doc-other">
-                      <button type="button" onClick={() => setPreviewDoc(doc)} className="flex items-center gap-2 min-w-0 text-left">
+                    <div key={doc.id} className="relative rounded-md overflow-hidden aspect-square bg-slate-100" data-testid="uploaded-doc-other">
+                      <button type="button" onClick={() => setPreviewDoc(doc)} className="block w-full h-full" title={doc.original_name}>
                         {doc.url.startsWith("data:image") ? (
-                          <img src={doc.url} alt="" className="w-5 h-5 rounded-sm object-cover flex-shrink-0" />
+                          <img src={doc.url} alt={doc.original_name} className="w-full h-full object-cover" />
                         ) : (
-                          <FileText size={16} className="text-slate-400 flex-shrink-0" />
+                          <div className="w-full h-full flex items-center justify-center">
+                            <FileText size={20} className="text-slate-400" />
+                          </div>
                         )}
-                        <span className="text-sm text-blue-600 hover:underline truncate">{doc.original_name}</span>
                       </button>
                       {canManageStock && (
-                        <button onClick={() => deleteDoc(doc.id)} className="text-red-400 hover:text-red-600 ml-2 flex-shrink-0"><Trash2 size={13} /></button>
+                        <button
+                          type="button"
+                          onClick={() => deleteDoc(doc.id)}
+                          className="absolute top-0.5 right-0.5 w-5 h-5 rounded bg-black/50 hover:bg-red-600 text-white flex items-center justify-center transition-colors"
+                          title="Delete"
+                        >
+                          <Trash2 size={11} />
+                        </button>
                       )}
                     </div>
                   ))}
