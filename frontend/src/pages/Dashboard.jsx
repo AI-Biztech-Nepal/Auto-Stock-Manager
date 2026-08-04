@@ -6,7 +6,7 @@ import api from "../utils/api";
 import { formatNPR } from "../utils/helpers";
 import HoverADDate from "../components/HoverADDate";
 import {
-  getCurrentBSDate, getCurrentBSMonthRange, getCurrentBSYearRange,
+  getCurrentBSDate, getCurrentWeekRange,
   getTodayAD, BS_MONTHS,
 } from "../utils/nepali-date";
 
@@ -59,8 +59,7 @@ const AccountingKPI = ({ label, value, color, icon: Icon, sub }) => (
 // ── Accounting Summary Block ───────────────────────────────────────────
 const PERIODS = [
   { key: "daily", label: "Today" },
-  { key: "monthly", label: "This Month (BS)" },
-  { key: "yearly", label: "This Year (BS)" },
+  { key: "weekly", label: "This Week" },
 ];
 
 function AccountingSummary() {
@@ -92,14 +91,11 @@ function AccountingSummary() {
         start = today; end = today;
         const bs = getCurrentBSDate();
         label = bs ? `${BS_MONTHS[bs.month - 1]} ${bs.day}, ${bs.year} BS` : today;
-      } else if (period === "monthly") {
-        const range = getCurrentBSMonthRange();
-        start = range.start; end = range.end;
-        label = `${BS_MONTHS[range.bsMonth - 1]} ${range.bsYear} BS`;
       } else {
-        const range = getCurrentBSYearRange();
+        const range = getCurrentWeekRange();
         start = range.start; end = range.end;
-        label = `${range.bsYear} BS`;
+        const fmt = (d) => new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+        label = `${fmt(range.start)} – ${fmt(range.end)}`;
       }
       const res = await api.get(`/reports/accounting-summary?start_date=${start}&end_date=${end}`);
       setData({ ...res.data, periodLabel: label });

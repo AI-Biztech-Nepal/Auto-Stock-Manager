@@ -79,3 +79,14 @@ export function getCurrentBSYearRange() {
 export function getTodayAD() {
   return new Date().toISOString().slice(0, 10);
 }
+
+// AD range for the current calendar week (Sunday–Saturday) → { start, end }
+export function getCurrentWeekRange() {
+  const now = new Date();
+  const start = new Date(now);
+  start.setDate(now.getDate() - now.getDay());
+  const end = new Date(start);
+  end.setDate(start.getDate() + 6);
+  const fmt = (d) => d.toISOString().slice(0, 10);
+  return { start: fmt(start), end: fmt(end) };
+}
