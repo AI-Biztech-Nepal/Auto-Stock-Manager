@@ -29,6 +29,39 @@
 
 ---
 
+## Step 1B — Migrating the database to Hostinger MySQL (optional)
+
+Hostinger shared/business hosting only offers MySQL, not MongoDB, so this isn't
+a drop-in swap of `MONGO_URL` — the backend talks to MySQL through a
+compatibility layer, `backend/sqldb.py`, so the 96 API endpoints don't need
+individual rewrites. See `backend/schema.sql` for the table definitions.
+
+1. **hPanel → Databases → MySQL Databases**: create a database + user, note
+   the host/port/user/password/database name.
+2. **hPanel → Databases → Remote MySQL**: add an allowed host (`%` for
+   "anywhere", matching the Atlas `0.0.0.0/0` setting already in use) so
+   Render can reach it — shared hosting doesn't allow inbound connections
+   from arbitrary hosts by default.
+3. Apply the schema via **phpMyAdmin** (Hostinger's hPanel links straight to
+   it) or any MySQL client: import `backend/schema.sql`.
+4. Add the `MYSQL_*` variables below to Render (leave `DB_BACKEND=mongo` for
+   now — nothing changes yet).
+5. Run the migration script **locally**, pointed at a scratch/staging copy
+   first, then at production during a short maintenance window:
+   ```bash
+   cd backend
+   pip install -r requirements.txt
+   MONGO_URL=... DB_NAME=... \
+   MYSQL_HOST=... MYSQL_PORT=3306 MYSQL_USER=... MYSQL_PASSWORD=... MYSQL_DB=... \
+   python migrate_to_mysql.py
+   ```
+   It prints a per-collection row-count verification report at the end —
+   confirm every line says `OK` before cutting over.
+6. Flip Render's `DB_BACKEND` to `mysql` and redeploy. Keep the Atlas cluster
+   intact (don't delete it) for a rollback window before decommissioning it.
+
+---
+
 ## Step 2 — Render (Backend)
 
 1. Go to **[render.com](https://render.com)** → Login with GitHub
@@ -101,8 +134,10 @@ Render free tier does **not** support persistent disk. Options:
 ### Render (Backend)
 | Variable | Required | Description |
 |---|---|---|
-| `MONGO_URL` | ✅ | MongoDB Atlas connection string |
+| `DB_BACKEND` | ❌ | `mongo` (default) or `mysql` — see Step 1B |
+| `MONGO_URL` | ✅ if `DB_BACKEND=mongo` | MongoDB Atlas connection string |
 | `DB_NAME` | ✅ | `hamro_gng_auto` |
+| `MYSQL_HOST` / `MYSQL_PORT` / `MYSQL_USER` / `MYSQL_PASSWORD` / `MYSQL_DB` | ✅ if `DB_BACKEND=mysql` | Hostinger MySQL connection details |
 | `JWT_SECRET` | ✅ | Random secret for auth tokens |
 | `EMERGENT_LLM_KEY` | ✅ | For AI features (Pricing, Chatbot, Festival) |
 | `CORS_ORIGINS` | ✅ | Your Vercel frontend URL |
@@ -136,7 +171,8 @@ Default login: **admin / admin123** (change this after first login!)
 | Issue | Fix |
 |---|---|
 | `CORS error` on frontend | Check `CORS_ORIGINS` in Render matches your Vercel URL exactly |
-| `Cannot connect to DB` | Check MongoDB Atlas network access allows `0.0.0.0/0` |
+| `Cannot connect to DB` (Mongo) | Check MongoDB Atlas network access allows `0.0.0.0/0` |
+| `Cannot connect to DB` (MySQL) | Check Hostinger hPanel → Remote MySQL has an allowed host covering Render's outbound traffic |
 | `AI features not working` | Verify `EMERGENT_LLM_KEY` is set in Render variables |
 | `Photos not loading after redeploy` | Add a Render disk at `/app/uploads` (paid plan) |
 | `Build failed on Render` | Check Render logs → usually a missing env var |

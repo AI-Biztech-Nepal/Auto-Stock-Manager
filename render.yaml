@@ -5,10 +5,24 @@ services:
     dockerfilePath: ./Dockerfile
     healthCheckPath: /api/health
     envVars:
+      # DB_BACKEND=mysql switches the app to Hostinger MySQL (backend/sqldb.py)
+      # instead of MongoDB Atlas. Leave unset/"mongo" until cutover is verified.
+      - key: DB_BACKEND
+        value: mongo
       - key: MONGO_URL
         sync: false
       - key: DB_NAME
         value: hamro_gng_auto
+      - key: MYSQL_HOST
+        sync: false
+      - key: MYSQL_PORT
+        value: "3306"
+      - key: MYSQL_USER
+        sync: false
+      - key: MYSQL_PASSWORD
+        sync: false
+      - key: MYSQL_DB
+        sync: false
       - key: JWT_SECRET
         sync: false
       - key: EMERGENT_LLM_KEY

@@ -28,15 +28,24 @@ from pymongo import ReturnDocument
 os.environ["SSL_CERT_FILE"] = certifi.where()
 os.environ["REQUESTS_CA_BUNDLE"] = certifi.where()
 
-mongo_url = os.environ['MONGO_URL']
-_is_atlas = "mongodb+srv" in mongo_url or "mongodb.net" in mongo_url
-client = AsyncIOMotorClient(
-    mongo_url,
-    tls=True,
-    tlsCAFile=certifi.where(),
-    server_api=ServerApi('1')
-) if _is_atlas else AsyncIOMotorClient(mongo_url)
-db = client[os.environ['DB_NAME']]
+# DB_BACKEND=mysql points the app at Hostinger MySQL (backend/sqldb.py, a thin
+# shim over the same db.<collection>.<method>(...) calls below) instead of
+# MongoDB Atlas. Defaults to mongo so this switch is safe to deploy before cutover.
+DB_BACKEND = os.environ.get('DB_BACKEND', 'mongo').lower()
+if DB_BACKEND == 'mysql':
+    from sqldb import MySQLDatabase
+    db = MySQLDatabase()
+    client = db  # shutdown() below calls client.close(); same object serves both roles
+else:
+    mongo_url = os.environ['MONGO_URL']
+    _is_atlas = "mongodb+srv" in mongo_url or "mongodb.net" in mongo_url
+    client = AsyncIOMotorClient(
+        mongo_url,
+        tls=True,
+        tlsCAFile=certifi.where(),
+        server_api=ServerApi('1')
+    ) if _is_atlas else AsyncIOMotorClient(mongo_url)
+    db = client[os.environ['DB_NAME']]
 
 JWT_SECRET = os.environ.get('JWT_SECRET', 'hamro-gng-2024')
 
