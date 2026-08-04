@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 from PIL import Image, ImageOps
 import pillow_heif
 pillow_heif.register_heif_opener()  # lets Image.open() decode HEIC/HEIF from iPhone cameras
+from pypdf import PdfReader, PdfWriter
 from google import genai
 from google.genai import types as genai_types
 import httpx
@@ -2423,20 +2424,71 @@ DOC_EXTENSIONS = IMAGE_EXTENSIONS | {".pdf"}
 DOC_TYPES = ["bluebook", "insurance", "tax_clearance", "transfer", "other"]
 DOC_MAX_DIMENSION = 2000  # px, longest side — higher than photos so scanned text/fine print stays legible
 DOC_JPEG_QUALITY = 85
+DOC_MAX_BYTES = 2 * 1024 * 1024  # hard cap — every stored document must land under this, however big the source
 
 def _compress_document_image(content: bytes) -> tuple[bytes, str]:
-    """Same approach as _compress_photo but tuned for document scans (bluebook,
-    insurance card, etc.) — a higher resolution/quality ceiling since these get
-    zoomed in on to read fine print, at the cost of a smaller size reduction.
-    PDFs aren't touched here; Pillow can't re-encode them."""
+    """Same starting point as _compress_photo but tuned for document scans
+    (bluebook, insurance card, etc.) — a higher resolution/quality ceiling since
+    these get zoomed in on to read fine print. On top of that, quality is
+    stepped down and, if that alone isn't enough, the image is shrunk further
+    in a loop until the encoded size is under DOC_MAX_BYTES — no document
+    leaves this function larger than the 2MB cap, regardless of the source."""
     img = Image.open(io.BytesIO(content))
     img = ImageOps.exif_transpose(img)
     if img.mode not in ("RGB", "L"):
         img = img.convert("RGB")
     img.thumbnail((DOC_MAX_DIMENSION, DOC_MAX_DIMENSION), Image.LANCZOS)
-    out = io.BytesIO()
-    img.save(out, format="JPEG", quality=DOC_JPEG_QUALITY, optimize=True)
-    return out.getvalue(), "image/jpeg"
+
+    def encode(quality):
+        out = io.BytesIO()
+        img.save(out, format="JPEG", quality=quality, optimize=True)
+        return out.getvalue()
+
+    quality = DOC_JPEG_QUALITY
+    data = encode(quality)
+    while len(data) > DOC_MAX_BYTES and quality > 30:
+        quality -= 15
+        data = encode(quality)
+    while len(data) > DOC_MAX_BYTES and max(img.size) > 600:
+        img.thumbnail((int(img.width * 0.8), int(img.height * 0.8)), Image.LANCZOS)
+        data = encode(max(quality, 50))
+    return data, "image/jpeg"
+
+def _compress_pdf(content: bytes) -> bytes:
+    """Recompresses every embedded raster image inside a PDF in place (JPEG
+    re-encode via pypdf's ImageFile.replace) instead of rasterizing whole
+    pages, so any vector text/annotations survive untouched. Runs a second,
+    more aggressive pass if the first doesn't get under DOC_MAX_BYTES. Falls
+    back to the original bytes if pypdf can't parse the file, there are no
+    images to shrink (born-digital PDF), or compressing didn't actually help —
+    a document is never made worse by running it through this."""
+    def recompress(source: bytes, dimension: int, quality: int) -> bytes:
+        writer = PdfWriter()
+        writer.append(PdfReader(io.BytesIO(source)))
+        for page in writer.pages:
+            for pimg in page.images:
+                try:
+                    pil_img = pimg.image
+                    if pil_img.mode not in ("RGB", "L"):
+                        pil_img = pil_img.convert("RGB")
+                    pil_img.thumbnail((dimension, dimension), Image.LANCZOS)
+                    pimg.replace(pil_img, quality=quality)
+                except Exception:
+                    continue  # leave this one image as-is rather than risk corrupting the PDF
+        out = io.BytesIO()
+        writer.write(out)
+        return out.getvalue()
+
+    try:
+        data = recompress(content, DOC_MAX_DIMENSION, DOC_JPEG_QUALITY)
+        if len(data) > DOC_MAX_BYTES:
+            harder = recompress(content, 1200, 50)
+            if len(harder) < len(data):
+                data = harder
+        return data if len(data) < len(content) else content
+    except Exception:
+        logger.warning("PDF compression failed, storing original", exc_info=True)
+        return content
 
 def _doc_out(d: dict) -> dict:
     return {"id": d["id"], "filename": d["filename"], "doc_type": d["doc_type"],
@@ -2451,30 +2503,58 @@ async def get_legal_documents(vid: str, cu: dict = Depends(require("vehicle_medi
     return [_doc_out(d) for d in docs]
 
 @api_router.post("/admin/backfill-compress-documents")
-async def backfill_compress_documents(cu: dict = Depends(admin_only)):
-    """One-off migration: recompresses legal_documents uploaded before
-    server-side compression existed. Safe to call repeatedly — skips docs
-    already stored as compressed JPEG and leaves PDFs untouched (Pillow
-    can't re-encode them). Remove this route once run."""
+async def backfill_compress_documents(limit: int = 25, cu: dict = Depends(admin_only)):
+    """Recompresses legal_documents currently over DOC_MAX_BYTES (2MB) — images
+    via _compress_document_image, PDFs via _compress_pdf — so old uploads and
+    anything from before this cap existed get shrunk down too, not just new
+    ones. Processes at most `limit` per call and reports how many are still
+    left, so a single request can't run long enough to time out on a large
+    backlog; the Settings page's "Compress Documents" button calls this in a
+    loop until `remaining` hits 0. Safe to call repeatedly — anything already
+    under the cap, or where compression wouldn't actually shrink it, is skipped."""
+    oversized = await db.legal_documents.find(
+        {}, {"_id": 0, "id": 1, "size": 1}
+    ).to_list(100000)
+    oversized = [d for d in oversized if (d.get("size") or 0) > DOC_MAX_BYTES]
+    batch_ids = [d["id"] for d in oversized[:limit]]
+
     results = []
-    async for d in db.legal_documents.find({}):
-        if not d.get("content_type", "").startswith("image/"):
-            continue  # PDFs aren't touched
-        if d.get("content_type") == "image/jpeg" and d.get("size", 0) < 1_000_000:
-            continue  # already compressed
-        raw = base64.b64decode(d["data"])
-        try:
-            compressed, content_type = _compress_document_image(raw)
-        except Exception as e:
-            results.append({"id": d["id"], "error": str(e)})
+    for doc_id in batch_ids:
+        d = await db.legal_documents.find_one({"id": doc_id})
+        if not d:
             continue
+        raw = base64.b64decode(d["data"])
+        content_type = d.get("content_type", "")
+        try:
+            if content_type.startswith("image/"):
+                compressed, new_content_type = _compress_document_image(raw)
+            elif content_type == "application/pdf":
+                compressed, new_content_type = _compress_pdf(raw), content_type
+            else:
+                continue
+        except Exception as e:
+            results.append({"id": doc_id, "error": str(e)})
+            continue
+        if len(compressed) >= len(raw):
+            continue  # didn't actually help — leave the original in place
         await db.legal_documents.update_one(
-            {"id": d["id"]},
+            {"id": doc_id},
             {"$set": {"data": base64.b64encode(compressed).decode("ascii"),
-                      "content_type": content_type, "size": len(compressed)}},
+                      "content_type": new_content_type, "size": len(compressed)}},
         )
-        results.append({"id": d["id"], "before": len(raw), "after": len(compressed)})
-    return {"processed": len(results), "results": results}
+        results.append({"id": doc_id, "before": len(raw), "after": len(compressed)})
+
+    # "processed" is how many actually got smaller (what the caller should show as
+    # progress); "attempted" is the raw batch size, used by the caller to detect a
+    # batch that made zero progress (e.g. every doc in it is an uncompressible type)
+    # and stop looping instead of retrying the same stuck documents forever.
+    succeeded = sum(1 for r in results if "error" not in r)
+    return {
+        "processed": succeeded,
+        "attempted": len(batch_ids),
+        "remaining": max(len(oversized) - len(batch_ids), 0),
+        "results": results,
+    }
 
 @api_router.post("/vehicles/{vid}/legal-documents")
 async def upload_legal_document(vid: str, file: UploadFile = File(...), doc_type: str = Form("other"), cu: dict = Depends(require("vehicle_media", "create"))):
@@ -2491,6 +2571,8 @@ async def upload_legal_document(vid: str, file: UploadFile = File(...), doc_type
             content, content_type = _compress_document_image(content)
         except Exception:
             logger.warning(f"Document image compression failed for upload to vehicle {vid}, storing original", exc_info=True)
+    elif content_type == "application/pdf":
+        content = _compress_pdf(content)
     doc_id = str(uuid.uuid4())
     doc = {
         "id": doc_id, "vehicle_id": vid, "filename": file.filename or f"{doc_id}.pdf",

@@ -159,7 +159,6 @@ export function VehicleDetailModal({ id, onClose }) {
   const [previewPhoto, setPreviewPhoto] = useState(null);
   const [previewDoc, setPreviewDoc] = useState(null);
   const [legalDocs, setLegalDocs] = useState([]);
-  const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [isDraggingPhoto, setIsDraggingPhoto] = useState(false);
   const [uploadingDoc, setUploadingDoc] = useState(false);
 
@@ -173,24 +172,28 @@ export function VehicleDetailModal({ id, onClose }) {
     catch (err) { console.error("Failed to load documents:", err); }
   }, [id]);
 
-  // Uploads every selected/dropped file in parallel — so picking several photos on mobile
-  // doesn't mean sitting through one upload delay per photo, one at a time.
-  const uploadPhotos = async (files) => {
+  // Shows each picked/dropped file instantly as a local blob-URL preview (a "pending"
+  // photo entry), then uploads it in the background and swaps the preview for the real
+  // server copy the moment that single upload resolves — so the UI never waits on the
+  // network, and a slow photo doesn't hold up the others finishing first. A pending
+  // count is exposed so the close button can warn before an in-flight upload is lost.
+  const uploadPhotos = (files) => {
     const fileList = Array.from(files);
     if (fileList.length === 0) return;
-    setUploadingPhoto(true);
-    try {
-      const results = await Promise.allSettled(fileList.map(file => {
-        const fd = new FormData(); fd.append("file", file);
-        return api.post(`/vehicles/${id}/photos`, fd, { headers: { "Content-Type": "multipart/form-data" } });
-      }));
-      const uploaded = results.filter(r => r.status === "fulfilled").map(r => r.value.data);
-      if (uploaded.length > 0) setPhotos(prev => [...prev, ...uploaded]);
-      const failed = results.length - uploaded.length;
-      if (failed === 0) toast.success(uploaded.length > 1 ? `${uploaded.length} photos uploaded!` : "Photo uploaded!");
-      else if (uploaded.length === 0) toast.error(describeUploadError(results.find(r => r.status === "rejected")?.reason));
-      else toast.error(`${uploaded.length} uploaded, ${failed} failed`);
-    } finally { setUploadingPhoto(false); }
+    fileList.forEach(file => {
+      const tempId = `pending-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const previewUrl = URL.createObjectURL(file);
+      setPhotos(prev => [...prev, { id: tempId, url: previewUrl, pending: true }]);
+
+      const fd = new FormData(); fd.append("file", file);
+      api.post(`/vehicles/${id}/photos`, fd, { headers: { "Content-Type": "multipart/form-data" } })
+        .then(r => setPhotos(prev => prev.map(p => (p.id === tempId ? r.data : p))))
+        .catch(err => {
+          setPhotos(prev => prev.filter(p => p.id !== tempId));
+          toast.error(describeUploadError(err));
+        })
+        .finally(() => URL.revokeObjectURL(previewUrl));
+    });
   };
 
   const onPhotoDragOver = (e) => { e.preventDefault(); setIsDraggingPhoto(true); };
@@ -254,6 +257,15 @@ export function VehicleDetailModal({ id, onClose }) {
     ];
   }, [vehicle, hideFinancials]);
 
+  const pendingPhotoCount = photos.filter(p => p.pending).length;
+  const handleClose = () => {
+    if (pendingPhotoCount > 0) {
+      const noun = pendingPhotoCount > 1 ? "photos are" : "photo is";
+      if (!window.confirm(`${pendingPhotoCount} ${noun} still uploading. Close anyway? ${pendingPhotoCount > 1 ? "They" : "It"} won't be saved.`)) return;
+    }
+    onClose();
+  };
+
   if (loading) {
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
@@ -275,7 +287,15 @@ export function VehicleDetailModal({ id, onClose }) {
             <h2 className="text-lg font-bold text-slate-900 truncate" style={{ fontFamily: "Manrope, sans-serif" }}>{vehicle.brand} {vehicle.model}</h2>
             <p className="text-xs text-slate-500">{vehicle.year} · {vehicle.engine_cc}cc · {vehicle.fuel_type}{vehicle.registration_number ? ` · ${vehicle.registration_number}` : ""}</p>
           </div>
-          <button onClick={onClose} className="w-11 h-11 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500 shrink-0">✕</button>
+          <div className="flex items-center gap-3 shrink-0">
+            {pendingPhotoCount > 0 && (
+              <span className="hidden sm:flex items-center gap-1.5 text-xs text-blue-600 font-medium" data-testid="photo-upload-indicator">
+                <span className="animate-spin w-3 h-3 border-2 border-blue-400 border-t-transparent rounded-full" />
+                Uploading {pendingPhotoCount} photo{pendingPhotoCount > 1 ? "s" : ""}…
+              </span>
+            )}
+            <button onClick={handleClose} className="w-11 h-11 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500 shrink-0">✕</button>
+          </div>
         </div>
 
         <div className="p-4 sm:p-5 space-y-4">
@@ -544,9 +564,9 @@ export function VehicleDetailModal({ id, onClose }) {
                   data-testid="upload-photo-btn"
                   className={`border-2 border-dashed rounded-xl h-32 flex flex-col items-center justify-center cursor-pointer transition-colors ${isDraggingPhoto ? "border-blue-400 bg-blue-50 text-blue-500" : "border-slate-200 text-slate-400 hover:border-blue-300 hover:text-blue-400"}`}
                 >
-                  <p className="text-sm font-medium">{uploadingPhoto ? "Uploading..." : "No photos yet"}</p>
-                  {!uploadingPhoto && <p className="text-xs mt-0.5">Click or drop photos to upload</p>}
-                  <input type="file" accept="image/*" multiple className="hidden" disabled={uploadingPhoto} onChange={e => { if (e.target.files.length) uploadPhotos(e.target.files); e.target.value = ""; }} />
+                  <p className="text-sm font-medium">No photos yet</p>
+                  <p className="text-xs mt-0.5">Click or drop photos to upload</p>
+                  <input type="file" accept="image/*" multiple className="hidden" onChange={e => { if (e.target.files.length) uploadPhotos(e.target.files); e.target.value = ""; }} />
                 </label>
               ) : (
                 <div className="border-2 border-dashed border-slate-200 rounded-xl h-32 flex flex-col items-center justify-center text-slate-400">
@@ -557,10 +577,15 @@ export function VehicleDetailModal({ id, onClose }) {
               <div className="grid grid-cols-3 sm:grid-cols-5 gap-3">
                 {photos.map(photo => (
                   <div key={photo.id} className="relative rounded-xl overflow-hidden aspect-square bg-slate-100" data-testid="vehicle-photo">
-                    <button type="button" onClick={() => setPreviewPhoto(photo.url)} className="block w-full h-full">
-                      <img src={photo.url} alt="Vehicle" className="w-full h-full object-cover" />
+                    <button type="button" onClick={() => !photo.pending && setPreviewPhoto(photo.url)} className="block w-full h-full">
+                      <img src={photo.url} alt="Vehicle" className={`w-full h-full object-cover transition-opacity ${photo.pending ? "opacity-50" : ""}`} />
                     </button>
-                    {canManageStock && (
+                    {photo.pending && (
+                      <div className="absolute inset-0 flex items-center justify-center bg-black/10 pointer-events-none">
+                        <div className="animate-spin w-5 h-5 border-2 border-white border-t-transparent rounded-full" />
+                      </div>
+                    )}
+                    {canManageStock && !photo.pending && (
                       <button
                         type="button"
                         onClick={() => deletePhoto(photo.id)}
@@ -581,8 +606,8 @@ export function VehicleDetailModal({ id, onClose }) {
                   className={`border-2 border-dashed rounded-xl aspect-square flex flex-col items-center justify-center cursor-pointer transition-colors ${isDraggingPhoto ? "border-blue-400 bg-blue-50 text-blue-500" : "border-slate-200 text-slate-400 hover:border-blue-400 hover:text-blue-500"}`}
                 >
                   <Plus size={20} />
-                  <span className="text-xs mt-1">{uploadingPhoto ? "Uploading..." : "Add"}</span>
-                  <input type="file" accept="image/*" multiple className="hidden" disabled={uploadingPhoto} onChange={e => { if (e.target.files.length) uploadPhotos(e.target.files); e.target.value = ""; }} />
+                  <span className="text-xs mt-1">Add</span>
+                  <input type="file" accept="image/*" multiple className="hidden" onChange={e => { if (e.target.files.length) uploadPhotos(e.target.files); e.target.value = ""; }} />
                 </label>
                 )}
               </div>

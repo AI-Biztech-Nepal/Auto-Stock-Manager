@@ -29,12 +29,42 @@ export default function Settings() {
   const [siteForm, setSiteForm] = useState(null);
   const [savingSite, setSavingSite] = useState(false);
   const [storage, setStorage] = useState(null);
+  const [compressing, setCompressing] = useState(false);
+  const [compressProgress, setCompressProgress] = useState(null);
+
+  const refreshStorage = () => api.get("/admin/storage-usage").then(r => setStorage(r.data)).catch(() => {});
 
   useEffect(() => {
     if (!isAdmin) return;
     api.get("/settings").then(r => setSiteForm(r.data || {})).catch(() => toast.error("Failed to load storefront settings"));
-    api.get("/admin/storage-usage").then(r => setStorage(r.data)).catch(() => {});
+    refreshStorage();
   }, [isAdmin]);
+
+  // Calls the backfill endpoint in a loop (25 documents per call) instead of one big
+  // request, since compressing hundreds of documents in a single HTTP call risks a
+  // platform request timeout. Stops as soon as a batch makes zero actual progress —
+  // otherwise a document that simply can't be shrunk further (an unsupported type, or
+  // one already at the compression floor) would keep getting retried forever.
+  const compressDocuments = async () => {
+    setCompressing(true);
+    let totalSucceeded = 0;
+    try {
+      for (let guard = 0; guard < 200; guard++) {
+        const r = await api.post("/admin/backfill-compress-documents?limit=25");
+        totalSucceeded += r.data.processed;
+        setCompressProgress({ processed: totalSucceeded, remaining: r.data.remaining });
+        if (r.data.remaining <= 0) break;
+        if (r.data.processed === 0) break;
+      }
+      toast.success(totalSucceeded > 0 ? `Compressed ${totalSucceeded} document${totalSucceeded !== 1 ? "s" : ""}` : "No documents needed compression");
+      await refreshStorage();
+    } catch {
+      toast.error("Compression stopped due to an error — click again to resume");
+    } finally {
+      setCompressing(false);
+      setCompressProgress(null);
+    }
+  };
 
   const saveSiteSettings = async (e) => {
     e.preventDefault();
@@ -141,8 +171,23 @@ export default function Settings() {
       {/* Storage Usage (Super admin only) */}
       {isAdmin && storage && (
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6" data-testid="storage-usage-card">
-          <h2 className="text-base font-bold text-slate-900 mb-1" style={{ fontFamily: "Manrope" }}>Storage Usage</h2>
-          <p className="text-xs text-slate-500 mb-4">Space used by uploaded vehicle photos and legal documents</p>
+          <div className="flex items-start justify-between gap-3 mb-4">
+            <div>
+              <h2 className="text-base font-bold text-slate-900 mb-1" style={{ fontFamily: "Manrope" }}>Storage Usage</h2>
+              <p className="text-xs text-slate-500">Space used by uploaded vehicle photos and legal documents</p>
+              <p className="text-xs text-slate-400 mt-1">"Compress Documents" shrinks every document over 2MB (images and PDFs) under that cap — safe to run anytime, already-small documents are left alone.</p>
+            </div>
+            <button
+              onClick={compressDocuments}
+              disabled={compressing}
+              data-testid="compress-documents-btn"
+              className="shrink-0 h-9 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold disabled:opacity-60 transition-all active:scale-95 whitespace-nowrap"
+            >
+              {compressing
+                ? `Compressing… ${compressProgress?.processed ?? 0}`
+                : "Compress Documents"}
+            </button>
+          </div>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
             <div className="rounded-lg bg-slate-50 p-3">
               <p className="text-xs text-slate-500">Photos</p>
