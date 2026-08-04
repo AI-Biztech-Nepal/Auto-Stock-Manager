@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { Plus, Trash2, Edit, CheckCircle, AlertCircle, Clock, QrCode, Undo2, Store, User, Download } from "lucide-react";
+import { Plus, Trash2, Edit, CheckCircle, AlertCircle, Clock, QrCode, Undo2, Store, User, Download, FileText } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
 import { formatNPR, getAgingStyle, getStatusStyle, getDocStyle, EXPENSE_CATEGORIES, VEHICLE_STATUS_OPTIONS, CONDITIONS, SOURCES, BRANDS, FUEL_TYPES, OWNERSHIP_OPTIONS, formatOwnership } from "../utils/helpers";
@@ -593,7 +593,7 @@ export function VehicleDetailModal({ id, onClose }) {
           <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
             <h2 className="text-sm font-bold text-slate-900 mb-3" style={{ fontFamily: "Manrope" }}>Legal Documents</h2>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
-              {[["bluebook", "Bluebook"], ["insurance", "Insurance"], ["tax_clearance", "Tax Clearance"], ["transfer", "Transfer"]].map(([key, label]) => {
+              {[["bluebook", "Bluebook"], ["transfer", "Transfer"], ["tax_clearance", "Tax Clearance"], ["insurance", "Insurance"]].map(([key, label]) => {
                 const status = vehicle[`${key}_status`];
                 const docs = legalDocs.filter(d => d.doc_type === key);
                 return (
@@ -607,7 +607,14 @@ export function VehicleDetailModal({ id, onClose }) {
                     )}
                     {docs.map(doc => (
                       <div key={doc.id} className="mt-1.5 flex items-center justify-between bg-slate-50 rounded-lg px-2 py-1" data-testid="uploaded-doc">
-                        <button type="button" onClick={() => setPreviewDoc(doc)} className="text-xs text-blue-600 hover:underline truncate max-w-[80px] text-left">{doc.original_name}</button>
+                        <button type="button" onClick={() => setPreviewDoc(doc)} className="flex items-center gap-1.5 min-w-0 text-left">
+                          {doc.url.startsWith("data:image") ? (
+                            <img src={doc.url} alt="" className="w-4 h-4 rounded-sm object-cover flex-shrink-0" />
+                          ) : (
+                            <FileText size={14} className="text-slate-400 flex-shrink-0" />
+                          )}
+                          <span className="text-xs text-blue-600 hover:underline truncate max-w-[64px]">{doc.original_name}</span>
+                        </button>
                         {canManageStock && (
                           <button onClick={() => deleteDoc(doc.id)} className="text-red-400 hover:text-red-600 ml-1 flex-shrink-0" title="Delete"><Trash2 size={11} /></button>
                         )}
@@ -624,7 +631,14 @@ export function VehicleDetailModal({ id, onClose }) {
                 <div className="space-y-1">
                   {legalDocs.filter(d => d.doc_type === "other").map(doc => (
                     <div key={doc.id} className="flex items-center justify-between bg-slate-50 rounded-lg px-3 py-2" data-testid="uploaded-doc-other">
-                      <button type="button" onClick={() => setPreviewDoc(doc)} className="text-sm text-blue-600 hover:underline truncate text-left">{doc.original_name}</button>
+                      <button type="button" onClick={() => setPreviewDoc(doc)} className="flex items-center gap-2 min-w-0 text-left">
+                        {doc.url.startsWith("data:image") ? (
+                          <img src={doc.url} alt="" className="w-5 h-5 rounded-sm object-cover flex-shrink-0" />
+                        ) : (
+                          <FileText size={16} className="text-slate-400 flex-shrink-0" />
+                        )}
+                        <span className="text-sm text-blue-600 hover:underline truncate">{doc.original_name}</span>
+                      </button>
                       {canManageStock && (
                         <button onClick={() => deleteDoc(doc.id)} className="text-red-400 hover:text-red-600 ml-2 flex-shrink-0"><Trash2 size={13} /></button>
                       )}
