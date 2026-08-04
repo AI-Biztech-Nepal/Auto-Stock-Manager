@@ -101,15 +101,13 @@ function AccountingSummary() {
       const range = getCurrentWeekRange();
       start = range.start; end = range.end;
     }
-    api.get("/sales")
+    // Filtered server-side now (start_date/end_date) instead of fetching the
+    // entire sales history and filtering client-side — that full-history fetch
+    // plus its N+1 vehicle/customer lookups was why the ribbon felt slow.
+    api.get(`/sales?start_date=${start}&end_date=${end}`)
       .then(r => {
-        const inRange = r.data
-          .filter(s => {
-            const d = s.sale_date?.slice(0, 10);
-            return d && d >= start && d <= end;
-          })
-          .sort((a, b) => new Date(b.sale_date) - new Date(a.sale_date));
-        setRecentSales(inRange);
+        const sorted = [...r.data].sort((a, b) => new Date(b.sale_date) - new Date(a.sale_date));
+        setRecentSales(sorted);
       })
       .catch(() => {});
   }, [activePeriod]);

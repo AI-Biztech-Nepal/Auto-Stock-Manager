@@ -1584,12 +1584,30 @@ async def delete_customer(cid: str, cu: dict = Depends(require("customers", "del
 
 # ── SALES ─────────────────────────────────────────────────────────────
 @api_router.get("/sales")
-async def get_sales(cu: dict = Depends(require("sales", "view"))):
-    sales = await db.sales.find({}, {"_id": 0}).sort("created_at", -1).to_list(1000)
+async def get_sales(start_date: Optional[str] = None, end_date: Optional[str] = None, cu: dict = Depends(require("sales", "view"))):
+    """start_date/end_date (both required together) filter by sale_date server-side —
+    lets callers like the Dashboard's sales ribbon fetch just "today" or "this week"
+    instead of the full history. Vehicle/customer lookups are batched with $in instead
+    of one query per sale, which is what made this endpoint slow to begin with."""
+    query = {}
+    if start_date and end_date:
+        query["sale_date"] = {"$gte": start_date, "$lte": end_date}
+    sales = await db.sales.find(query, {"_id": 0}).sort("created_at", -1).to_list(1000)
+
+    vehicle_ids = list({s["vehicle_id"] for s in sales if s.get("vehicle_id")})
+    customer_ids = list({s["customer_id"] for s in sales if s.get("customer_id")})
+    vehicles_by_id, customers_by_id = {}, {}
+    if vehicle_ids:
+        vs = await db.vehicles.find({"id": {"$in": vehicle_ids}}, {"_id": 0, "id": 1, "brand": 1, "model": 1, "year": 1, "registration_number": 1}).to_list(len(vehicle_ids))
+        vehicles_by_id = {v["id"]: v for v in vs}
+    if customer_ids:
+        cs = await db.customers.find({"id": {"$in": customer_ids}}, {"_id": 0, "id": 1, "name": 1, "contact_number": 1}).to_list(len(customer_ids))
+        customers_by_id = {c["id"]: c for c in cs}
+
     for s in sales:
-        v = await db.vehicles.find_one({"id": s.get("vehicle_id")}, {"_id": 0, "brand": 1, "model": 1, "year": 1, "registration_number": 1})
+        v = vehicles_by_id.get(s.get("vehicle_id"))
         if v: s["vehicle_info"] = f"{v['brand']} {v['model']} {v.get('year','')}" + (f" ({v['registration_number']})" if v.get("registration_number") else "")
-        c = await db.customers.find_one({"id": s.get("customer_id")}, {"_id": 0, "name": 1, "contact_number": 1}) if s.get("customer_id") else None
+        c = customers_by_id.get(s.get("customer_id"))
         s["customer_name"] = c["name"] if c else "Walk-in Customer"
         s["customer_contact"] = c.get("contact_number") if c else None
     return sales
