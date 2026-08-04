@@ -252,11 +252,57 @@ async def _vendor_payable(vendor_id: str) -> float:
     paid = sum(p["amount"] for p in pmts)
     return max(0.0, owed - paid)
 
+# ── Batched variants of the above — same results, one round-trip per list
+# instead of one per item. Used by endpoints that loop over many vehicles/
+# vendors (dashboard, accounting summary) where per-item queries add up to
+# a very visible delay once the DB isn't in the same region as the backend.
+async def _batch_vehicle_investment(vehicles: list) -> dict:
+    vehicle_ids = [v["id"] for v in vehicles]
+    if not vehicle_ids:
+        return {}
+    all_exps = await db.expenses.find({"vehicle_id": {"$in": vehicle_ids}}, {"_id": 0}).to_list(20000)
+    exps_by_vehicle: dict = {}
+    for e in all_exps:
+        exps_by_vehicle.setdefault(e["vehicle_id"], []).append(e)
+    return {
+        v["id"]: v.get("purchase_price", 0) + v.get("accessories_cost", 0)
+        + sum(e["amount"] for e in exps_by_vehicle.get(v["id"], []))
+        for v in vehicles
+    }
+
+async def _batch_vendor_payable(vendor_ids: list) -> dict:
+    if not vendor_ids:
+        return {}
+    veh = await db.vehicles.find(
+        {"$or": [{"vendor_id": {"$in": vendor_ids}}, {"linked_contact_type": "vendor", "linked_contact_id": {"$in": vendor_ids}}]},
+        {"_id": 0, "vendor_id": 1, "linked_contact_type": 1, "linked_contact_id": 1, "purchase_price": 1},
+    ).to_list(20000)
+    owed: dict = {}
+    for v in veh:
+        vid = v.get("vendor_id") or (v.get("linked_contact_id") if v.get("linked_contact_type") == "vendor" else None)
+        if vid:
+            owed[vid] = owed.get(vid, 0) + v.get("purchase_price", 0)
+    pmts = await db.vendor_payments.find({"vendor_id": {"$in": vendor_ids}}, {"_id": 0}).to_list(20000)
+    paid: dict = {}
+    for p in pmts:
+        paid[p["vendor_id"]] = paid.get(p["vendor_id"], 0) + p["amount"]
+    return {vid: max(0.0, owed.get(vid, 0) - paid.get(vid, 0)) for vid in vendor_ids}
+
 # ── Helper: compute total remaining balance for an EMI record ─────────
 async def _emi_remaining(emi_id: str, loan_amount: float) -> float:
     pmts = await db.emi_payments.find({"emi_id": emi_id}, {"_id": 0}).to_list(200)
     paid = sum(p["amount"] for p in pmts)
     return max(0.0, loan_amount - paid)
+
+async def _batch_emi_remaining(emis: list) -> dict:
+    emi_ids = [e["id"] for e in emis]
+    if not emi_ids:
+        return {}
+    all_pmts = await db.emi_payments.find({"emi_id": {"$in": emi_ids}}, {"_id": 0}).to_list(20000)
+    paid_by_emi: dict = {}
+    for p in all_pmts:
+        paid_by_emi[p["emi_id"]] = paid_by_emi.get(p["emi_id"], 0) + p["amount"]
+    return {e["id"]: max(0.0, e.get("loan_amount", 0) - paid_by_emi.get(e["id"], 0)) for e in emis}
 
 # ── Helper: classify aging counts for a list of available vehicles ────
 def _aging_counts(vehicles: list) -> dict:
@@ -1999,29 +2045,27 @@ async def add_emi_payment(payment: EMIPaymentCreate, cu: dict = Depends(admin_on
 async def finance_summary(cu: dict = Depends(admin_only)):
     # Inventory value (available vehicles)
     avail = await db.vehicles.find({"status": "available"}, {"_id": 0}).to_list(1000)
-    inventory_value = sum(
-        [await _vehicle_investment(v["id"], v) for v in avail]
-    )
+    inventory_value = sum((await _batch_vehicle_investment(avail)).values())
     # Revenue & COGS from Sales table (single source of truth)
     sales_records = await db.sales.find({}, {"_id": 0}).to_list(1000)
     total_revenue = sum(_sale_revenue(s) for s in sales_records)
     # Dedupe: a vehicle sold, returned, then resold appears in two sales rows but its
     # investment (purchase price + expenses) should only count once toward COGS.
-    sold_vehicle_ids = {s["vehicle_id"] for s in sales_records}
-    total_cogs = 0
-    for vid in sold_vehicle_ids:
-        v = await db.vehicles.find_one({"id": vid}, {"_id": 0})
-        if v:
-            total_cogs += await _vehicle_investment(vid, v)
+    sold_vehicle_ids = list({s["vehicle_id"] for s in sales_records})
+    sold_vehicles = (
+        await db.vehicles.find({"id": {"$in": sold_vehicle_ids}}, {"_id": 0}).to_list(5000)
+        if sold_vehicle_ids else []
+    )
+    total_cogs = sum((await _batch_vehicle_investment(sold_vehicles)).values())
     gross_profit = total_revenue - total_cogs
 
     # Vendor payables
     vendors = await db.vendors.find({}, {"_id": 0}).to_list(100)
-    vendor_payables = sum([await _vendor_payable(v["id"]) for v in vendors])
+    vendor_payables = sum((await _batch_vendor_payable([v["id"] for v in vendors])).values())
 
     # EMI receivables
     emis = await db.emi_records.find({"status": "active"}, {"_id": 0}).to_list(200)
-    emi_receivables = sum([await _emi_remaining(e["id"], e.get("loan_amount", 0)) for e in emis])
+    emi_receivables = sum((await _batch_emi_remaining(emis)).values())
 
     partners = await db.partners.find({}, {"_id": 0}).to_list(100)
     total_capital = sum(p.get("capital_contribution", 0) for p in partners)
@@ -2048,12 +2092,24 @@ async def dashboard_stats(cu: dict = Depends(admin_only)):
     in_repair = await db.vehicles.count_documents({"status": "in_repair"})
 
     avail_v = await db.vehicles.find({"status": "available"}, {"_id": 0}).to_list(1000)
-    locked_capital = sum([await _vehicle_investment(v["id"], v) for v in avail_v])
+    investment_by_vehicle = await _batch_vehicle_investment(avail_v)
+    locked_capital = sum(investment_by_vehicle.values())
     aging = _aging_counts(avail_v)
 
     # Use Sales table as single source of truth for sold count & profit
     sales_records = await db.sales.find({}, {"_id": 0}).to_list(1000)
     sold = len(sales_records)
+
+    # Sold vehicles' investment feeds both the profit loop below and total_cogs —
+    # fetch + batch-compute once instead of once per sale/vehicle.
+    sold_vehicle_ids = list({s["vehicle_id"] for s in sales_records})
+    sold_vehicles = (
+        await db.vehicles.find({"id": {"$in": sold_vehicle_ids}}, {"_id": 0}).to_list(5000)
+        if sold_vehicle_ids else []
+    )
+    sold_investment_by_vehicle = await _batch_vehicle_investment(sold_vehicles)
+    sold_vehicle_ids_existing = {v["id"] for v in sold_vehicles}
+
     total_profit = 0
     for s in sales_records:
         if s.get("returned"):
@@ -2062,23 +2118,17 @@ async def dashboard_stats(cu: dict = Depends(admin_only)):
             # counts as profit here, so it isn't double-charged against COGS.
             total_profit += s.get("retained_amount", 0)
             continue
-        v = await db.vehicles.find_one({"id": s["vehicle_id"]}, {"_id": 0})
-        if v:
-            inv = await _vehicle_investment(s["vehicle_id"], v)
-            total_profit += s.get("total_amount", 0) - inv
+        if s["vehicle_id"] in sold_vehicle_ids_existing:
+            total_profit += s.get("total_amount", 0) - sold_investment_by_vehicle.get(s["vehicle_id"], 0)
 
     total_revenue = sum(_sale_revenue(s) for s in sales_records)
     # Dedupe: a vehicle sold, returned, then resold appears in two sales rows but its
     # investment (purchase price + expenses) should only count once toward COGS.
-    sold_vehicle_ids = {s["vehicle_id"] for s in sales_records}
-    total_cogs = 0
-    for vid in sold_vehicle_ids:
-        v = await db.vehicles.find_one({"id": vid}, {"_id": 0})
-        if v:
-            total_cogs += await _vehicle_investment(vid, v)
+    total_cogs = sum(sold_investment_by_vehicle.values())
 
     vendors = await db.vendors.find({}, {"_id": 0}).to_list(100)
-    total_vendor_due = sum([await _vendor_payable(v["id"]) for v in vendors])
+    payable_by_vendor = await _batch_vendor_payable([v["id"] for v in vendors])
+    total_vendor_due = sum(payable_by_vendor.values())
 
     return {
         "total_vehicles": total, "available": available, "sold": sold,
@@ -2151,26 +2201,31 @@ async def accounting_summary(start_date: str, end_date: str, cu: dict = Depends(
     purchased = await db.vehicles.find(
         {"purchase_date": {"$gte": start_date, "$lte": end_date}}, {"_id": 0}
     ).to_list(5000)
-    total_cost, purchase_count = 0, len(purchased)
-    for v in purchased:
-        exps = await db.expenses.find({"vehicle_id": v["id"]}, {"_id": 0}).to_list(200)
-        total_cost += v.get("purchase_price", 0) + v.get("accessories_cost", 0) + sum(e["amount"] for e in exps)
+    purchase_count = len(purchased)
+    total_cost = sum((await _batch_vehicle_investment(purchased)).values())
 
     # Sales in period — use Sales table as source of truth
     sales_in_period = await db.sales.find(
         {"sale_date": {"$gte": start_date, "$lte": end_date}}, {"_id": 0}
     ).to_list(5000)
-    total_sales, total_investment_sold, sold_count = 0, 0, len(sales_in_period)
-    for s in sales_in_period:
-        total_sales += _sale_revenue(s)
-        if s.get("returned"):
-            # Retained refund fee has no cost basis subtracted — the vehicle's investment
-            # is still attributed to inventory until it's actually resold.
-            continue
-        v = await db.vehicles.find_one({"id": s["vehicle_id"]}, {"_id": 0})
-        if v:
-            exps = await db.expenses.find({"vehicle_id": s["vehicle_id"]}, {"_id": 0}).to_list(200)
-            total_investment_sold += v.get("purchase_price", 0) + v.get("accessories_cost", 0) + sum(e["amount"] for e in exps)
+    sold_count = len(sales_in_period)
+    total_sales = sum(_sale_revenue(s) for s in sales_in_period)
+
+    # Retained refund fee (returned sales) has no cost basis subtracted — the vehicle's
+    # investment is still attributed to inventory until it's actually resold. Note this
+    # intentionally does NOT dedupe by vehicle_id: if the same vehicle was sold, returned,
+    # and resold (all non-returned sales) within the period, its investment is meant to
+    # count once per sale here — this mirrors the original per-sale-record calculation.
+    non_returned = [s for s in sales_in_period if not s.get("returned")]
+    sold_vehicle_ids = list({s["vehicle_id"] for s in non_returned})
+    sold_vehicles = (
+        await db.vehicles.find({"id": {"$in": sold_vehicle_ids}}, {"_id": 0}).to_list(5000)
+        if sold_vehicle_ids else []
+    )
+    investment_by_vehicle = await _batch_vehicle_investment(sold_vehicles)
+    total_investment_sold = sum(
+        investment_by_vehicle[s["vehicle_id"]] for s in non_returned if s["vehicle_id"] in investment_by_vehicle
+    )
 
     net_profit = total_sales - total_investment_sold
     return {
@@ -2805,10 +2860,22 @@ async def public_list_vehicles(request: Request):
     Returns one cover photo URL per vehicle (the first uploaded) to keep the payload light —
     use /public/vehicles/{id} for the full photo gallery of a single vehicle."""
     vehicles = await db.vehicles.find({"status": "available"}, {"_id": 0}).sort("created_at", -1).to_list(200)
+    vehicle_ids = [v["id"] for v in vehicles]
+    # One batched fetch (id/vehicle_id/uploaded_at only — never the base64 `data`) instead of
+    # a per-vehicle find_one, then keep the earliest photo per vehicle as its cover.
+    all_photos = (
+        await db.vehicle_photos.find(
+            {"vehicle_id": {"$in": vehicle_ids}}, {"_id": 0, "id": 1, "vehicle_id": 1, "uploaded_at": 1}
+        ).sort("uploaded_at", 1).to_list(20000)
+        if vehicle_ids else []
+    )
+    cover_by_vehicle = {}
+    for p in all_photos:
+        cover_by_vehicle.setdefault(p["vehicle_id"], p)  # sorted ascending, so first seen = earliest
     out = []
     for v in vehicles:
         item = _public_vehicle_fields(v)
-        cover = await db.vehicle_photos.find_one({"vehicle_id": v["id"]}, {"_id": 0}, sort=[("uploaded_at", 1)])
+        cover = cover_by_vehicle.get(v["id"])
         item["cover_photo"] = _public_photo_url(request, v["id"], cover["id"]) if cover else None
         item["image_urls"] = [item["cover_photo"]] if cover else []
         out.append(item)

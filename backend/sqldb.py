@@ -140,7 +140,11 @@ def build_where(filt: dict):
                 elif op == "$lte":
                     clauses.append(f"{_quote(key)} <= %s"); params.append(opval)
                 elif op == "$ne":
-                    clauses.append(f"{_quote(key)} != %s"); params.append(opval)
+                    # SQL's three-valued logic means `col != %s` is NULL (not true) when col
+                    # IS NULL, silently excluding those rows — but Mongo's $ne treats a
+                    # missing/null field as satisfying the condition. Match that explicitly,
+                    # or every row where this field was never set gets wrongly filtered out.
+                    clauses.append(f"({_quote(key)} != %s OR {_quote(key)} IS NULL)"); params.append(opval)
                 elif op == "$in":
                     items = list(opval)
                     if not items:
