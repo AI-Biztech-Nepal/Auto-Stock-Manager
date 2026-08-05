@@ -2864,7 +2864,7 @@ def _apply_vat(unit_cost: float, vat_rate: Optional[float]) -> float:
 @api_router.post("/spare-parts")
 async def create_spare_part(part: SparePartCreate, cu: dict = Depends(require("spare_parts", "create"))):
     doc = {"id": str(uuid.uuid4()), **part.dict(), "created_at": datetime.now(timezone.utc).isoformat()}
-    doc["unit_cost"] = _apply_vat(doc.get("unit_cost", 0), doc.get("vat_rate"))
+    doc["unit_cost"] = _apply_vat(doc.get("unit_cost", 0), doc.pop("vat_rate", None))
     _check_set_component_rates(doc.get("unit_cost", 0), doc.get("set_components", []))
     if not doc.get("entry_date"): doc["entry_date"] = datetime.now(timezone.utc).date().isoformat()
     await db.spare_parts.insert_one(doc)
