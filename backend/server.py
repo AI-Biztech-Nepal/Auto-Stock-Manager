@@ -3,6 +3,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.responses import StreamingResponse, Response
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
+from starlette.middleware.gzip import GZipMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from passlib.context import CryptContext
 from typing import Optional, List
@@ -2394,6 +2395,9 @@ async def startup():
 app.add_middleware(CORSMiddleware, allow_credentials=True,
                    allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
                    allow_methods=["*"], allow_headers=["*"])
+# Compresses JSON responses over 1KB (list endpoints especially) before they hit the
+# network — no API/behavior change, just a smaller wire payload.
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 
 # ══════════════════════════════════════════════════════════════════════
