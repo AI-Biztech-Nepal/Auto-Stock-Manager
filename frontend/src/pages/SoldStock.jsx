@@ -121,7 +121,7 @@ export default function SoldStock() {
             ))}
           </div>
           <div className="w-44" data-testid="sold-stock-date-filter-input">
-            <BSDatePicker value={dateFilter} onChange={setDateFilter} />
+            <BSDatePicker value={dateFilter} onChange={setDateFilter} mode={dateMode} />
           </div>
           {dateFilter && (
             <button
@@ -164,7 +164,9 @@ export default function SoldStock() {
           <p className="font-medium">No sold vehicles found</p>
           <p className="text-sm mt-1">
             {dateFilter
-              ? `No vehicles sold on ${formatBSDate(dateFilter)} BS`
+              ? (dateMode === "bs"
+                  ? `No vehicles sold on ${formatBSDate(dateFilter)} BS`
+                  : `No vehicles sold on ${new Date(`${dateFilter}T00:00:00`).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}`)
               : search
               ? "Try adjusting your search"
               : "Vehicles marked sold will appear here, grouped by month."}

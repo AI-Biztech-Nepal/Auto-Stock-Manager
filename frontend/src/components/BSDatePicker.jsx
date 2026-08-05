@@ -4,10 +4,16 @@ import { Calendar, ChevronLeft, ChevronRight, Check } from "lucide-react";
 import { adToBsDate, bsToAdDate, getBSMonthMaxDays, getCurrentBSDate, BS_MONTHS, formatBSDate } from "../utils/nepali-date";
 
 const WEEKDAYS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
+const AD_MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
 // Wide enough for old vehicle purchase dates (well into the past) plus a couple of future years
 function getBSYearList() {
   const cur = getCurrentBSDate()?.year || 2083;
+  return Array.from({ length: 18 }, (_, i) => cur - 15 + i);
+}
+
+function getADYearList() {
+  const cur = new Date().getFullYear();
   return Array.from({ length: 18 }, (_, i) => cur - 15 + i);
 }
 
@@ -19,20 +25,45 @@ function firstWeekdayOfBSMonth(year, month) {
   return new Date(`${adStr}T00:00:00`).getDay();
 }
 
+function firstWeekdayOfADMonth(year, month) {
+  return new Date(year, month - 1, 1).getDay();
+}
+
+function adMonthMaxDays(year, month) {
+  return new Date(year, month, 0).getDate();
+}
+
+const pad2 = (n) => String(n).padStart(2, "0");
+
+function adDateToParts(adStr) {
+  if (!adStr) return null;
+  const [y, m, d] = adStr.slice(0, 10).split("-").map(Number);
+  if (!y || !m || !d) return null;
+  return { year: y, month: m, day: d };
+}
+
+function formatADDate(adStr) {
+  if (!adStr) return "—";
+  return new Date(`${adStr}T00:00:00`).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+}
+
 const POPOVER_WIDTH = 288; // matches w-72
 const VIEWPORT_MARGIN = 8;
 
 /**
- * BSDatePicker — Nepali (Bikram Sambat) calendar picker.
- * The user only ever picks a BS date; value/onChange stay plain AD "YYYY-MM-DD"
- * strings (via @sbmdkl/nepali-date-converter under nepali-date.js), so the rest
- * of the form, the API payload, and the database are unaffected.
+ * BSDatePicker — calendar picker that defaults to Nepali (Bikram Sambat) but can
+ * render a Gregorian (AD) calendar instead via `mode="ad"` — same trigger/popover
+ * chrome and positioning either way, just a different grid and month/year source.
+ * value/onChange are always a plain AD "YYYY-MM-DD" string regardless of mode
+ * (BS is converted via @sbmdkl/nepali-date-converter under nepali-date.js), so
+ * the rest of the form, the API payload, and the database are unaffected.
  * The calendar popover is rendered via a portal into document.body and
  * positioned in fixed viewport coordinates so it always stays fully visible —
  * flipping above the trigger and clamping horizontally — instead of being
  * clipped by a modal's overflow or the edge of the browser window.
  */
-export default function BSDatePicker({ value, onChange, required, className = "" }) {
+export default function BSDatePicker({ value, onChange, required, className = "", mode = "bs" }) {
+  const isBS = mode !== "ad";
   const [open, setOpen] = useState(false);
   const [viewYear, setViewYear] = useState(null);
   const [viewMonth, setViewMonth] = useState(null);
@@ -40,15 +71,17 @@ export default function BSDatePicker({ value, onChange, required, className = ""
   const triggerRef = useRef(null);
   const popoverRef = useRef(null);
 
-  const selectedBS = adToBsDate(value);
+  const selectedBS = isBS ? adToBsDate(value) : null;
+  const selectedAD = isBS ? null : adDateToParts(value);
+  const selected = isBS ? selectedBS : selectedAD;
 
   useEffect(() => {
     if (!open) return;
-    const base = selectedBS || getCurrentBSDate();
-    setViewYear(base?.year ?? 2083);
+    const base = isBS ? (selectedBS || getCurrentBSDate()) : (selectedAD || adDateToParts(new Date().toISOString()));
+    setViewYear(base?.year ?? (isBS ? 2083 : new Date().getFullYear()));
     setViewMonth(base?.month ?? 1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
+  }, [open, isBS]);
 
   useEffect(() => {
     if (!open) return;
@@ -103,9 +136,10 @@ export default function BSDatePicker({ value, onChange, required, className = ""
     };
   }, [open, positionPopover]);
 
-  const maxDays = viewYear && viewMonth ? getBSMonthMaxDays(viewYear, viewMonth) : 30;
-  const leadingBlanks = viewYear && viewMonth ? firstWeekdayOfBSMonth(viewYear, viewMonth) : 0;
-  const years = getBSYearList();
+  const maxDays = viewYear && viewMonth ? (isBS ? getBSMonthMaxDays(viewYear, viewMonth) : adMonthMaxDays(viewYear, viewMonth)) : 30;
+  const leadingBlanks = viewYear && viewMonth ? (isBS ? firstWeekdayOfBSMonth(viewYear, viewMonth) : firstWeekdayOfADMonth(viewYear, viewMonth)) : 0;
+  const years = isBS ? getBSYearList() : getADYearList();
+  const monthLabel = isBS ? BS_MONTHS[viewMonth - 1] : AD_MONTHS[viewMonth - 1];
 
   const changeMonth = (delta) => {
     let m = viewMonth + delta;
@@ -116,7 +150,7 @@ export default function BSDatePicker({ value, onChange, required, className = ""
   };
 
   const pickDay = (day) => {
-    const ad = bsToAdDate(viewYear, viewMonth, day);
+    const ad = isBS ? bsToAdDate(viewYear, viewMonth, day) : `${viewYear}-${pad2(viewMonth)}-${pad2(day)}`;
     if (ad) onChange(ad);
     setOpen(false);
   };
@@ -134,7 +168,7 @@ export default function BSDatePicker({ value, onChange, required, className = ""
               <ChevronLeft size={16} />
             </button>
             <div className="flex items-center gap-1.5">
-              <span className="text-sm font-semibold text-slate-800">{BS_MONTHS[viewMonth - 1]}</span>
+              <span className="text-sm font-semibold text-slate-800">{monthLabel}</span>
               <select
                 value={viewYear}
                 onChange={e => setViewYear(Number(e.target.value))}
@@ -154,7 +188,7 @@ export default function BSDatePicker({ value, onChange, required, className = ""
           <div className="grid grid-cols-7 gap-1">
             {Array.from({ length: leadingBlanks }).map((_, i) => <div key={`blank-${i}`} />)}
             {Array.from({ length: maxDays }, (_, i) => i + 1).map(day => {
-              const isSelected = selectedBS && selectedBS.year === viewYear && selectedBS.month === viewMonth && selectedBS.day === day;
+              const isSelected = selected && selected.year === viewYear && selected.month === viewMonth && selected.day === day;
               return (
                 <button
                   key={day}
@@ -184,15 +218,23 @@ export default function BSDatePicker({ value, onChange, required, className = ""
         className="w-full h-10 sm:h-9 px-3 text-sm border border-slate-200 rounded-lg bg-white flex items-center justify-between gap-2 hover:border-blue-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
         data-testid="bs-date-trigger"
       >
-        <span className={`truncate ${selectedBS ? "text-slate-800" : "text-slate-400"}`}>
-          {selectedBS ? `${formatBSDate(value)} BS` : "Select date (BS)"}
+        <span className={`truncate ${selected ? "text-slate-800" : "text-slate-400"}`}>
+          {isBS
+            ? (selectedBS ? `${formatBSDate(value)} BS` : "Select date (BS)")
+            : (selectedAD ? formatADDate(value) : "Select date (AD)")}
         </span>
         <Calendar size={15} className="text-slate-400 shrink-0" />
       </button>
 
       <div className="mt-1.5 flex items-center gap-1.5 text-xs text-slate-500" data-testid="bs-date-ad-readout">
-        <span>Equivalent AD:</span>
-        <span className="font-mono font-medium text-slate-700">{value || "—"}</span>
+        {isBS ? (
+          <>
+            <span>Equivalent AD:</span>
+            <span className="font-mono font-medium text-slate-700">{value || "—"}</span>
+          </>
+        ) : (
+          <span>Equivalent BS: <span className="font-medium text-slate-700">{value ? `${formatBSDate(value)} BS` : "—"}</span></span>
+        )}
         {value && <Check size={13} className="text-green-600" />}
       </div>
 
