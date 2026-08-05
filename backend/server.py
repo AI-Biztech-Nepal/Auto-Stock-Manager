@@ -1186,6 +1186,17 @@ async def update_vehicle(vid: str, vehicle: VehicleUpdate, cu: dict = Depends(re
     if became_sold and not existing.get("selling_price") and "selling_price" not in upd:
         upd["selling_price"] = sale_price
 
+    # Unlisted vehicles are hidden from the storefront specifically because they had
+    # no price yet ("Move ... With No Price To Unlisted" in Inventory) — the moment a
+    # price is added, it's ready to sell, so relist it automatically instead of making
+    # someone remember to flip the status separately. The edit form always re-submits
+    # the current status (even when untouched), so this checks the resulting status
+    # rather than requiring it be absent from the payload — an explicit status change
+    # to something other than "unlisted" in the same request still wins.
+    if (upd.get("status", existing.get("status")) == "unlisted"
+            and not existing.get("selling_price") and upd.get("selling_price")):
+        upd["status"] = "available"
+
     r = await db.vehicles.update_one({"id": vid}, {"$set": upd})
     if r.matched_count == 0: raise HTTPException(404, "Vehicle not found")
 
