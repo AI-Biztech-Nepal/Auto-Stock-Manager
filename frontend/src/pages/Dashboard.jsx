@@ -198,18 +198,19 @@ function AccountingSummary() {
         <p className="text-sm text-slate-400 text-center py-6">Could not load data</p>
       )}
 
-      {/* Sales Highlight — follows the same period tabs as the KPIs above */}
-      {recentSales.length > 0 && (
-        <div className="bg-green-50 rounded-xl border border-green-200 shadow-sm p-4 mt-4" data-testid="recent-sales-section">
-          <div className="flex items-center gap-2 mb-3">
-            <Sparkles size={16} className="text-green-600" />
-            <h2 className="text-sm font-bold text-green-900">
-              {activePeriod === "daily" ? "Today's Sale" : "Sale over a week"}
-            </h2>
-            <span className="text-xs font-medium text-green-700 bg-green-100 px-2 py-0.5 rounded-full">
-              {recentSales.length} {activePeriod === "daily" ? "today" : "this week"}
-            </span>
-          </div>
+      {/* Sales Highlight — follows the same period tabs as the KPIs above.
+          Always rendered (even with zero sales) so the period doesn't look broken. */}
+      <div className="bg-green-50 rounded-xl border border-green-200 shadow-sm p-4 mt-4" data-testid="recent-sales-section">
+        <div className="flex items-center gap-2 mb-3">
+          <Sparkles size={16} className="text-green-600" />
+          <h2 className="text-sm font-bold text-green-900">
+            {activePeriod === "daily" ? "Today's Sale" : "Sale over a week"}
+          </h2>
+          <span className="text-xs font-medium text-green-700 bg-green-100 px-2 py-0.5 rounded-full">
+            {recentSales.length} {activePeriod === "daily" ? "today" : "this week"}
+          </span>
+        </div>
+        {recentSales.length > 0 ? (
           <div className="flex gap-3 overflow-x-auto pb-1">
             {recentSales.map(s => (
               <div
@@ -226,8 +227,12 @@ function AccountingSummary() {
               </div>
             ))}
           </div>
-        </div>
-      )}
+        ) : (
+          <p className="text-sm text-green-700/80 text-center py-3" data-testid="recent-sales-empty">
+            {activePeriod === "daily" ? "No sales for today as of now!" : "No sales this week as of now!"}
+          </p>
+        )}
+      </div>
     </div>
   );
 }
