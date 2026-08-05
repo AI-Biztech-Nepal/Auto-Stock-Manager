@@ -4,6 +4,7 @@ import { Plus, Search, Trash2, Eye, TrendingUp, DollarSign, Calendar, ShoppingBa
 import { toast } from "sonner";
 import api from "../utils/api";
 import { formatNPR } from "../utils/helpers";
+import { getCurrentBSMonthRange } from "../utils/nepali-date";
 import { useAuth } from "../context/AuthContext";
 import VehicleComboBox from "../components/VehicleComboBox";
 import BSDatePicker from "../components/BSDatePicker";
@@ -179,6 +180,16 @@ export default function Sales() {
     } catch (err) { toast.error(getErrMsg(err, "Failed to delete")); }
   };
 
+  // "This Month" card: the backend's this_month_sales counts by Gregorian month
+  // (sale_date.startswith AD year-month), but BS months don't line up with AD
+  // month boundaries — most of a BS month's sales fall in the *previous* AD
+  // month, so that count reads as far lower than what the business considers
+  // "this month". Recompute it here against the current BS month's AD range instead.
+  const bsMonthRange = getCurrentBSMonthRange();
+  const thisMonthSalesCount = bsMonthRange
+    ? sales.filter(s => s.sale_date >= bsMonthRange.start && s.sale_date <= bsMonthRange.end).length
+    : summary?.this_month_sales;
+
   const filtered = sales.filter(s => {
     if (!search) return true;
     const q = search.toLowerCase();
@@ -208,7 +219,7 @@ export default function Sales() {
           {[
             { label: "Total Sales", value: summary.total_sales, icon: ShoppingBag, color: "bg-blue-500" },
             { label: "Total Revenue", value: formatNPR(summary.total_revenue), icon: TrendingUp, color: "bg-green-500" },
-            { label: "This Month", value: summary.this_month_sales + " sales", icon: Calendar, color: "bg-indigo-500" },
+            { label: "This Month", value: thisMonthSalesCount + " sales", icon: Calendar, color: "bg-indigo-500" },
             { label: "Avg Sale Price", value: formatNPR(summary.avg_sale_price), icon: DollarSign, color: "bg-purple-500" },
           ].map(c => (
             <div key={c.label} className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 flex items-center gap-3">
