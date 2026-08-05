@@ -281,26 +281,28 @@ export function VehicleDetailModal({ id, onClose }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 sm:p-4">
       <div className="bg-white sm:rounded-2xl shadow-2xl w-full h-full sm:h-auto sm:max-w-3xl sm:max-h-[90vh] overflow-y-auto">
-        {/* Header */}
-        <div className="flex items-center justify-between gap-3 p-4 sm:p-5 border-b border-slate-100 sticky top-0 bg-white z-10">
-          <div className="min-w-0">
-            <h2 className="text-lg font-bold text-slate-900 truncate" style={{ fontFamily: "Manrope, sans-serif" }}>{vehicle.brand} {vehicle.model}</h2>
-            <p className="text-xs text-slate-500">{vehicle.year} · {vehicle.engine_cc}cc · {vehicle.fuel_type}{vehicle.registration_number ? ` · ${vehicle.registration_number}` : ""}</p>
+        {/* Header + Status/Actions — sticky as one block so Cancel/Save Changes
+           (and the other action buttons) stay reachable without scrolling back
+           up, no matter how far down the form the fields go. */}
+        <div className="sticky top-0 bg-white z-10 border-b border-slate-100">
+          <div className="flex items-center justify-between gap-3 p-4 sm:p-5 pb-3">
+            <div className="min-w-0">
+              <h2 className="text-lg font-bold text-slate-900 truncate" style={{ fontFamily: "Manrope, sans-serif" }}>{vehicle.brand} {vehicle.model}</h2>
+              <p className="text-xs text-slate-500">{vehicle.year} · {vehicle.engine_cc}cc · {vehicle.fuel_type}{vehicle.registration_number ? ` · ${vehicle.registration_number}` : ""}</p>
+            </div>
+            <div className="flex items-center gap-3 shrink-0">
+              {pendingPhotoCount > 0 && (
+                <span className="hidden sm:flex items-center gap-1.5 text-xs text-blue-600 font-medium" data-testid="photo-upload-indicator">
+                  <span className="animate-spin w-3 h-3 border-2 border-blue-400 border-t-transparent rounded-full" />
+                  Uploading {pendingPhotoCount} photo{pendingPhotoCount > 1 ? "s" : ""}…
+                </span>
+              )}
+              <button onClick={handleClose} className="w-11 h-11 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500 shrink-0">✕</button>
+            </div>
           </div>
-          <div className="flex items-center gap-3 shrink-0">
-            {pendingPhotoCount > 0 && (
-              <span className="hidden sm:flex items-center gap-1.5 text-xs text-blue-600 font-medium" data-testid="photo-upload-indicator">
-                <span className="animate-spin w-3 h-3 border-2 border-blue-400 border-t-transparent rounded-full" />
-                Uploading {pendingPhotoCount} photo{pendingPhotoCount > 1 ? "s" : ""}…
-              </span>
-            )}
-            <button onClick={handleClose} className="w-11 h-11 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500 shrink-0">✕</button>
-          </div>
-        </div>
 
-        <div className="p-4 sm:p-5 space-y-4">
           {/* Status + Actions */}
-          <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-center gap-2 flex-wrap px-4 sm:px-5 pb-4 sm:pb-5">
             <span className={`px-2.5 py-1 rounded-full text-xs font-semibold uppercase tracking-wide ${ag.bg} ${ag.text}`}>{vehicle.aging?.days}d · {ag.label}</span>
             {!isEditing && (
               <select
@@ -337,7 +339,9 @@ export function VehicleDetailModal({ id, onClose }) {
               <button onClick={loadQR} className="flex items-center gap-1.5 px-3 py-3 border border-slate-200 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors" data-testid="qr-btn"><QrCode size={14} /> QR Label</button>
             )}
           </div>
+        </div>
 
+        <div className="p-4 sm:p-5 space-y-4">
           {/* Financial Summary */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
             {financialCards.map(({ label, value, bold, highlight }) => {
