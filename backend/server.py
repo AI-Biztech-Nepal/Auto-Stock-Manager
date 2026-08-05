@@ -2783,7 +2783,8 @@ class SparePartCreate(BaseModel):
     brand_compatibility: Optional[str] = None
     part_number: Optional[str] = None
     quantity: int = 0
-    unit_cost: float = 0
+    unit_cost: float = 0  # net cost, i.e. before vat_rate is applied
+    vat_rate: Optional[float] = None  # e.g. 13 for 13% — applied server-side so unit_cost is always saved VAT-inclusive
     selling_price: Optional[float] = None
     vendor_id: Optional[str] = None
     bill_no: Optional[str] = None
@@ -2807,6 +2808,7 @@ class SparePartUpdate(BaseModel):
     part_number: Optional[str] = None
     quantity: Optional[int] = None
     unit_cost: Optional[float] = None
+    vat_rate: Optional[float] = None  # e.g. 13 for 13% — applied server-side against the incoming (or existing) unit_cost
     selling_price: Optional[float] = None
     vendor_id: Optional[str] = None
     bill_no: Optional[str] = None
@@ -2854,9 +2856,15 @@ def _check_set_component_rates(unit_cost: float, set_components: list):
     if total > unit_cost:
         raise HTTPException(400, f"Component rates add up to NPR {total}, which is more than the set's own rate (NPR {unit_cost})")
 
+def _apply_vat(unit_cost: float, vat_rate: Optional[float]) -> float:
+    if not vat_rate:
+        return unit_cost
+    return round(unit_cost * (1 + vat_rate / 100), 2)
+
 @api_router.post("/spare-parts")
 async def create_spare_part(part: SparePartCreate, cu: dict = Depends(require("spare_parts", "create"))):
     doc = {"id": str(uuid.uuid4()), **part.dict(), "created_at": datetime.now(timezone.utc).isoformat()}
+    doc["unit_cost"] = _apply_vat(doc.get("unit_cost", 0), doc.get("vat_rate"))
     _check_set_component_rates(doc.get("unit_cost", 0), doc.get("set_components", []))
     if not doc.get("entry_date"): doc["entry_date"] = datetime.now(timezone.utc).date().isoformat()
     await db.spare_parts.insert_one(doc)
@@ -2867,6 +2875,12 @@ async def create_spare_part(part: SparePartCreate, cu: dict = Depends(require("s
 async def update_spare_part(pid: str, part: SparePartUpdate, cu: dict = Depends(require("spare_parts", "edit"))):
     upd = {k: v for k, v in part.dict().items() if v is not None}
     if not upd: raise HTTPException(400, "No fields to update")
+    # vat_rate only makes sense paired with a fresh unit_cost in the same request (it's the net
+    # cost being re-entered) — applying it against the existing stored cost would double-apply VAT
+    # on parts that were already saved VAT-inclusive at creation time.
+    vat_rate = upd.pop("vat_rate", None)
+    if vat_rate and "unit_cost" in upd:
+        upd["unit_cost"] = _apply_vat(upd["unit_cost"], vat_rate)
     if "set_components" in upd or "unit_cost" in upd:
         existing = await db.spare_parts.find_one({"id": pid}, {"_id": 0, "unit_cost": 1, "set_components": 1})
         if not existing: raise HTTPException(404, "Not found")
