@@ -75,7 +75,7 @@ individual rewrites. See `backend/schema.sql` for the table definitions.
    | `MONGO_URL` | Your Atlas connection string |
    | `DB_NAME` | `hamro_gng_auto` |
    | `JWT_SECRET` | Any long random string |
-   | `EMERGENT_LLM_KEY` | From Emergent Profile → Universal Key |
+   | `GEMINI_API_KEY` | From [aistudio.google.com/apikey](https://aistudio.google.com/apikey) — powers the AI Assistant tab |
    | `CORS_ORIGINS` | *(set after Step 3)* |
 
 6. Click **Create Web Service** → wait for build to finish
@@ -139,13 +139,18 @@ Render free tier does **not** support persistent disk. Options:
 | `DB_NAME` | ✅ | `hamro_gng_auto` |
 | `MYSQL_HOST` / `MYSQL_PORT` / `MYSQL_USER` / `MYSQL_PASSWORD` / `MYSQL_DB` | ✅ if `DB_BACKEND=mysql` | Hostinger MySQL connection details |
 | `JWT_SECRET` | ✅ | Random secret for auth tokens |
-| `EMERGENT_LLM_KEY` | ✅ | For AI features (Pricing, Chatbot, Festival) |
+| `GEMINI_API_KEY` | ✅ | For AI features (Pricing, Chatbot, Festival) — get one at [aistudio.google.com/apikey](https://aistudio.google.com/apikey) |
 | `CORS_ORIGINS` | ✅ | Your Vercel frontend URL |
 
 ### Vercel (Frontend)
 | Variable | Required | Description |
 |---|---|---|
 | `REACT_APP_BACKEND_URL` | ✅ | Your Render backend URL (no trailing slash) |
+
+Vercel only hosts the React frontend, which calls the AI features through the backend's
+`/api/ai/*` routes — it never touches `GEMINI_API_KEY` directly, so deleting/recreating
+the Vercel project cannot affect the AI Assistant. If AI features stop working, the key
+is missing (or was reset) on **Render**, not Vercel — see the table above.
 
 ---
 
@@ -173,7 +178,7 @@ Default login: **admin / admin123** (change this after first login!)
 | `CORS error` on frontend | Check `CORS_ORIGINS` in Render matches your Vercel URL exactly |
 | `Cannot connect to DB` (Mongo) | Check MongoDB Atlas network access allows `0.0.0.0/0` |
 | `Cannot connect to DB` (MySQL) | Check Hostinger hPanel → Remote MySQL has an allowed host covering Render's outbound traffic |
-| `AI features not working` | Verify `EMERGENT_LLM_KEY` is set in Render variables |
+| `AI features not working` | Verify `GEMINI_API_KEY` is set in Render → your service → Environment (not Vercel) |
 | `Photos not loading after redeploy` | Add a Render disk at `/app/uploads` (paid plan) |
 | `Build failed on Render` | Check Render logs → usually a missing env var |
 | Login works but pages crash | Check `REACT_APP_BACKEND_URL` in Vercel has no trailing slash |
