@@ -17,6 +17,7 @@ pillow_heif.register_heif_opener()  # lets Image.open() decode HEIC/HEIF from iP
 from pypdf import PdfReader, PdfWriter
 from google import genai
 from google.genai import types as genai_types
+from google.genai import errors as genai_errors
 import httpx
 
 ROOT_DIR = Path(__file__).parent
@@ -375,10 +376,21 @@ MARKDOWN_NOTE = 'Format your reply as plain text with **bold** for emphasis and 
 async def _ai_text(system: str, contents, max_tokens: int = 1024) -> str:
     if not ai_client:
         raise HTTPException(503, "AI Assistant is not configured. Set GEMINI_API_KEY on the server.")
-    resp = await ai_client.aio.models.generate_content(
-        model=AI_MODEL, contents=contents,
-        config=genai_types.GenerateContentConfig(system_instruction=system, max_output_tokens=max_tokens),
-    )
+    try:
+        resp = await ai_client.aio.models.generate_content(
+            model=AI_MODEL, contents=contents,
+            config=genai_types.GenerateContentConfig(system_instruction=system, max_output_tokens=max_tokens),
+        )
+    except genai_errors.APIError as e:
+        # Previously unhandled — any Gemini-side error (rate limit, transient outage,
+        # quota) crashed through as a bare 500 with no JSON body, which is why the
+        # frontend fell back to a generic "Sorry, I couldn't connect" with no real
+        # cause. Surfacing the actual code/message here lets the UI show something
+        # the user can act on (e.g. "rate limited, try again shortly").
+        logger.warning(f"Gemini API error {e.code}: {e.message}", exc_info=True)
+        if e.code == 429:
+            raise HTTPException(429, "The AI is getting a lot of requests right now (Gemini rate limit) — please wait a few seconds and try again.")
+        raise HTTPException(502, f"AI Assistant couldn't reach Gemini right now ({e.message or f'error {e.code}'}). Please try again.")
     return resp.text or ""
 
 # Builds a comprehensive, read-only snapshot of live business data for the AI assistant's
