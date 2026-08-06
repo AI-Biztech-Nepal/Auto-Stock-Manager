@@ -496,7 +496,7 @@ export default function SpareParts() {
                 const displaySupplier = p.vendor_name || p.supplier;
                 return (
                   <div key={p.id} data-testid="part-row-mobile" className={p.low_stock ? "bg-red-50/40" : ""}>
-                    <div className="p-4">
+                    <div className="p-4 cursor-pointer" onClick={() => openEdit(p)} title="Click to edit part">
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0">
                           <div className="font-semibold text-slate-900 text-sm flex items-center gap-1.5 flex-wrap">
@@ -509,7 +509,7 @@ export default function SpareParts() {
                           </div>
                           {p.brand_compatibility && <div className="text-xs text-slate-400 mt-0.5">{p.brand_compatibility}</div>}
                         </div>
-                        <div className="flex items-center gap-1.5 shrink-0 cursor-pointer" onClick={() => openEdit(p)} title="Click to edit part">
+                        <div className="flex items-center gap-1.5 shrink-0">
                           <button onClick={(e) => { e.stopPropagation(); adjustStock(p.id, -1); }} className="w-11 h-11 rounded-md bg-slate-100 hover:bg-red-100 flex items-center justify-center transition-colors"><Minus size={12} /></button>
                           <span className={`text-sm font-bold w-6 text-center ${p.low_stock ? "text-red-600" : "text-slate-900"}`}>{p.quantity}</span>
                           <button onClick={(e) => { e.stopPropagation(); adjustStock(p.id, 1); }} className="w-11 h-11 rounded-md bg-slate-100 hover:bg-green-100 flex items-center justify-center transition-colors"><Plus size={12} /></button>
@@ -526,19 +526,19 @@ export default function SpareParts() {
                       )}
 
                       <div className="flex items-center gap-1 mt-2.5 -ml-1.5">
-                        <button onClick={() => openUsePart(p)} title="Use / Sell Part" data-testid="use-part-btn-mobile" className="w-11 h-11 flex items-center justify-center hover:bg-orange-50 rounded-lg transition-colors">
+                        <button onClick={(e) => { e.stopPropagation(); openUsePart(p); }} title="Use / Sell Part" data-testid="use-part-btn-mobile" className="w-11 h-11 flex items-center justify-center hover:bg-orange-50 rounded-lg transition-colors">
                           <ShoppingCart size={15} className="text-orange-500" />
                         </button>
                         {p.is_kit && (
-                          <button onClick={() => openBreakKit(p)} title={p.stock_type === "set" ? "Break Set into Components" : "Break Kit into Components"} data-testid="break-kit-btn-mobile" className="w-11 h-11 flex items-center justify-center hover:bg-indigo-50 rounded-lg transition-colors">
+                          <button onClick={(e) => { e.stopPropagation(); openBreakKit(p); }} title={p.stock_type === "set" ? "Break Set into Components" : "Break Kit into Components"} data-testid="break-kit-btn-mobile" className="w-11 h-11 flex items-center justify-center hover:bg-indigo-50 rounded-lg transition-colors">
                             <PackageOpen size={15} className="text-indigo-500" />
                           </button>
                         )}
-                        <button onClick={() => toggleTxn(p.id)} title="View History" data-testid="txn-history-btn-mobile" className={`p-2 rounded-lg transition-colors ${expandedPart === p.id ? "bg-blue-100" : "hover:bg-slate-100"}`}>
+                        <button onClick={(e) => { e.stopPropagation(); toggleTxn(p.id); }} title="View History" data-testid="txn-history-btn-mobile" className={`p-2 rounded-lg transition-colors ${expandedPart === p.id ? "bg-blue-100" : "hover:bg-slate-100"}`}>
                           {expandedPart === p.id ? <ChevronUp size={15} className="text-blue-600" /> : <History size={15} className="text-slate-500" />}
                         </button>
-                        <button onClick={() => openEdit(p)} className="w-11 h-11 flex items-center justify-center hover:bg-slate-100 rounded-lg transition-colors" data-testid="edit-part-btn-mobile"><Edit size={15} className="text-slate-500" /></button>
-                        <button onClick={() => handleDelete(p.id)} className="w-11 h-11 flex items-center justify-center hover:bg-red-50 rounded-lg transition-colors" data-testid="delete-part-btn-mobile"><Trash2 size={15} className="text-red-400" /></button>
+                        <button onClick={(e) => { e.stopPropagation(); openEdit(p); }} className="w-11 h-11 flex items-center justify-center hover:bg-slate-100 rounded-lg transition-colors" data-testid="edit-part-btn-mobile"><Edit size={15} className="text-slate-500" /></button>
+                        <button onClick={(e) => { e.stopPropagation(); handleDelete(p.id); }} className="w-11 h-11 flex items-center justify-center hover:bg-red-50 rounded-lg transition-colors" data-testid="delete-part-btn-mobile"><Trash2 size={15} className="text-red-400" /></button>
                       </div>
                     </div>
 
@@ -588,7 +588,7 @@ export default function SpareParts() {
                   const displaySupplier = p.vendor_name || p.supplier;
                   const rows = [];
                   rows.push(
-                    <tr key={p.id} data-testid="part-row" className={`transition-colors ${p.low_stock ? "bg-red-50/40" : "hover:bg-slate-50"}`}>
+                    <tr key={p.id} data-testid="part-row" onClick={() => openEdit(p)} title="Click to edit part" className={`cursor-pointer transition-colors ${p.low_stock ? "bg-red-50/40" : "hover:bg-slate-50"}`}>
                       <td className="px-4 py-3">
                         <div className="font-semibold text-slate-900 text-sm flex items-center gap-2">
                           {p.name}
@@ -599,7 +599,7 @@ export default function SpareParts() {
                       </td>
                       <td className="px-4 py-3 text-sm text-slate-600 whitespace-nowrap">{p.category}</td>
                       <td className="px-4 py-3 text-xs font-mono text-slate-500">{p.part_number || "—"}</td>
-                      <td className="px-4 py-3 cursor-pointer" onClick={() => openEdit(p)} title="Click to edit part">
+                      <td className="px-4 py-3">
                         <div className="flex items-center gap-1.5">
                           <button onClick={(e) => { e.stopPropagation(); adjustStock(p.id, -1); }} className="w-6 h-6 rounded-md bg-slate-100 hover:bg-red-100 flex items-center justify-center transition-colors"><Minus size={11} /></button>
                           <span className={`text-sm font-bold w-7 text-center ${p.low_stock ? "text-red-600" : "text-slate-900"}`}>{p.quantity}</span>
@@ -616,19 +616,19 @@ export default function SpareParts() {
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-1">
-                          <button onClick={() => openUsePart(p)} title="Use / Sell Part" data-testid="use-part-btn" className="p-1.5 hover:bg-orange-50 rounded-lg transition-colors">
+                          <button onClick={(e) => { e.stopPropagation(); openUsePart(p); }} title="Use / Sell Part" data-testid="use-part-btn" className="p-1.5 hover:bg-orange-50 rounded-lg transition-colors">
                             <ShoppingCart size={14} className="text-orange-500" />
                           </button>
                           {p.is_kit && (
-                            <button onClick={() => openBreakKit(p)} title={p.stock_type === "set" ? "Break Set into Components" : "Break Kit into Components"} data-testid="break-kit-btn" className="p-1.5 hover:bg-indigo-50 rounded-lg transition-colors">
+                            <button onClick={(e) => { e.stopPropagation(); openBreakKit(p); }} title={p.stock_type === "set" ? "Break Set into Components" : "Break Kit into Components"} data-testid="break-kit-btn" className="p-1.5 hover:bg-indigo-50 rounded-lg transition-colors">
                               <PackageOpen size={14} className="text-indigo-500" />
                             </button>
                           )}
-                          <button onClick={() => toggleTxn(p.id)} title="View History" data-testid="txn-history-btn" className={`p-1.5 rounded-lg transition-colors ${expandedPart === p.id ? "bg-blue-100" : "hover:bg-slate-100"}`}>
+                          <button onClick={(e) => { e.stopPropagation(); toggleTxn(p.id); }} title="View History" data-testid="txn-history-btn" className={`p-1.5 rounded-lg transition-colors ${expandedPart === p.id ? "bg-blue-100" : "hover:bg-slate-100"}`}>
                             {expandedPart === p.id ? <ChevronUp size={14} className="text-blue-600" /> : <History size={14} className="text-slate-500" />}
                           </button>
-                          <button onClick={() => openEdit(p)} className="p-1.5 hover:bg-slate-100 rounded-lg transition-colors" data-testid="edit-part-btn"><Edit size={14} className="text-slate-500" /></button>
-                          <button onClick={() => handleDelete(p.id)} className="p-1.5 hover:bg-red-50 rounded-lg transition-colors" data-testid="delete-part-btn"><Trash2 size={14} className="text-red-400" /></button>
+                          <button onClick={(e) => { e.stopPropagation(); openEdit(p); }} className="p-1.5 hover:bg-slate-100 rounded-lg transition-colors" data-testid="edit-part-btn"><Edit size={14} className="text-slate-500" /></button>
+                          <button onClick={(e) => { e.stopPropagation(); handleDelete(p.id); }} className="p-1.5 hover:bg-red-50 rounded-lg transition-colors" data-testid="delete-part-btn"><Trash2 size={14} className="text-red-400" /></button>
                         </div>
                       </td>
                     </tr>
