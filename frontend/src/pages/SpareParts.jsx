@@ -509,10 +509,10 @@ export default function SpareParts() {
                           </div>
                           {p.brand_compatibility && <div className="text-xs text-slate-400 mt-0.5">{p.brand_compatibility}</div>}
                         </div>
-                        <div className="flex items-center gap-1.5 shrink-0">
-                          <button onClick={() => adjustStock(p.id, -1)} className="w-11 h-11 rounded-md bg-slate-100 hover:bg-red-100 flex items-center justify-center transition-colors"><Minus size={12} /></button>
+                        <div className="flex items-center gap-1.5 shrink-0 cursor-pointer" onClick={() => openEdit(p)} title="Click to edit part">
+                          <button onClick={(e) => { e.stopPropagation(); adjustStock(p.id, -1); }} className="w-11 h-11 rounded-md bg-slate-100 hover:bg-red-100 flex items-center justify-center transition-colors"><Minus size={12} /></button>
                           <span className={`text-sm font-bold w-6 text-center ${p.low_stock ? "text-red-600" : "text-slate-900"}`}>{p.quantity}</span>
-                          <button onClick={() => adjustStock(p.id, 1)} className="w-11 h-11 rounded-md bg-slate-100 hover:bg-green-100 flex items-center justify-center transition-colors"><Plus size={12} /></button>
+                          <button onClick={(e) => { e.stopPropagation(); adjustStock(p.id, 1); }} className="w-11 h-11 rounded-md bg-slate-100 hover:bg-green-100 flex items-center justify-center transition-colors"><Plus size={12} /></button>
                         </div>
                       </div>
 
@@ -599,11 +599,11 @@ export default function SpareParts() {
                       </td>
                       <td className="px-4 py-3 text-sm text-slate-600 whitespace-nowrap">{p.category}</td>
                       <td className="px-4 py-3 text-xs font-mono text-slate-500">{p.part_number || "—"}</td>
-                      <td className="px-4 py-3">
+                      <td className="px-4 py-3 cursor-pointer" onClick={() => openEdit(p)} title="Click to edit part">
                         <div className="flex items-center gap-1.5">
-                          <button onClick={() => adjustStock(p.id, -1)} className="w-6 h-6 rounded-md bg-slate-100 hover:bg-red-100 flex items-center justify-center transition-colors"><Minus size={11} /></button>
+                          <button onClick={(e) => { e.stopPropagation(); adjustStock(p.id, -1); }} className="w-6 h-6 rounded-md bg-slate-100 hover:bg-red-100 flex items-center justify-center transition-colors"><Minus size={11} /></button>
                           <span className={`text-sm font-bold w-7 text-center ${p.low_stock ? "text-red-600" : "text-slate-900"}`}>{p.quantity}</span>
-                          <button onClick={() => adjustStock(p.id, 1)} className="w-6 h-6 rounded-md bg-slate-100 hover:bg-green-100 flex items-center justify-center transition-colors"><Plus size={11} /></button>
+                          <button onClick={(e) => { e.stopPropagation(); adjustStock(p.id, 1); }} className="w-6 h-6 rounded-md bg-slate-100 hover:bg-green-100 flex items-center justify-center transition-colors"><Plus size={11} /></button>
                         </div>
                       </td>
                       <td className="px-4 py-3 text-sm text-slate-700 whitespace-nowrap">{formatNPR(p.unit_cost)}</td>
