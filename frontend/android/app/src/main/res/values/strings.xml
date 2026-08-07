@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Hamro G&amp;G Auto</string>
+    <string name="title_activity_main">Hamro G&amp;G Auto</string>
+    <string name="package_name">com.hamrognandg.autostockmanager</string>
+    <string name="custom_url_scheme">com.hamrognandg.autostockmanager</string>
+</resources>
