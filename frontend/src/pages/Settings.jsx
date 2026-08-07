@@ -1,7 +1,9 @@
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
+import { Fingerprint } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import api from "../utils/api";
+import { isNative, isBiometricAvailable, hasSavedCredentials, saveCredentials, deleteCredentials, verifyIdentity } from "../utils/biometric";
 
 const SITE_FIELDS = [
   ["Business Name", "business_name", "text"],
@@ -29,12 +31,50 @@ export default function Settings() {
   const [siteForm, setSiteForm] = useState(null);
   const [savingSite, setSavingSite] = useState(false);
   const [storage, setStorage] = useState(null);
+  const [bioSupported, setBioSupported] = useState(false);
+  const [bioEnabled, setBioEnabled] = useState(false);
+  const [bioPassword, setBioPassword] = useState("");
+  const [bioBusy, setBioBusy] = useState(false);
 
   useEffect(() => {
     if (!isAdmin) return;
     api.get("/settings").then(r => setSiteForm(r.data || {})).catch(() => toast.error("Failed to load storefront settings"));
     api.get("/admin/storage-usage").then(r => setStorage(r.data)).catch(() => {});
   }, [isAdmin]);
+
+  useEffect(() => {
+    if (!isNative()) return;
+    (async () => {
+      const available = await isBiometricAvailable();
+      setBioSupported(available);
+      if (available) setBioEnabled(await hasSavedCredentials());
+    })();
+  }, []);
+
+  const enableBiometric = async (e) => {
+    e.preventDefault();
+    if (!bioPassword) { toast.error("Enter your password to enable biometric login"); return; }
+    setBioBusy(true);
+    try {
+      await api.post("/auth/login", { username: user.username, password: bioPassword });
+      await verifyIdentity("Enable biometric login");
+      await saveCredentials(user.username, bioPassword);
+      setBioEnabled(true);
+      setBioPassword("");
+      toast.success("Biometric login enabled");
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "Incorrect password");
+    } finally { setBioBusy(false); }
+  };
+
+  const disableBiometric = async () => {
+    setBioBusy(true);
+    try {
+      await deleteCredentials();
+      setBioEnabled(false);
+      toast.success("Biometric login disabled");
+    } finally { setBioBusy(false); }
+  };
 
   const saveSiteSettings = async (e) => {
     e.preventDefault();
@@ -107,6 +147,52 @@ export default function Settings() {
               ))}
               <button type="submit" disabled={savingSite} data-testid="save-site-settings-btn" className="h-10 px-6 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-semibold disabled:opacity-60 transition-all active:scale-95">
                 {savingSite ? "Saving..." : "Save Storefront Settings"}
+              </button>
+            </form>
+          )}
+        </div>
+      )}
+
+      {/* Biometric Login */}
+      {bioSupported && (
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
+          <div className="flex items-center gap-2 mb-1">
+            <Fingerprint size={18} className="text-blue-600" />
+            <h2 className="text-base font-bold text-slate-900" style={{ fontFamily: "Manrope" }}>Biometric Login</h2>
+          </div>
+          <p className="text-xs text-slate-500 mb-4">Use your fingerprint or face to sign in instead of typing your password.</p>
+          {bioEnabled ? (
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-emerald-600 font-medium">Enabled on this device</span>
+              <button
+                onClick={disableBiometric}
+                disabled={bioBusy}
+                data-testid="disable-biometric-btn"
+                className="h-9 px-4 border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-lg text-sm font-semibold disabled:opacity-60 transition-all active:scale-95"
+              >
+                {bioBusy ? "Working..." : "Disable"}
+              </button>
+            </div>
+          ) : (
+            <form onSubmit={enableBiometric} className="flex items-end gap-3">
+              <div className="flex-1">
+                <label className="block text-xs font-medium text-slate-600 mb-1.5">Confirm Password</label>
+                <input
+                  type="password"
+                  value={bioPassword}
+                  onChange={e => setBioPassword(e.target.value)}
+                  className={inp}
+                  data-testid="bio-confirm-password"
+                  placeholder="••••••••"
+                />
+              </div>
+              <button
+                type="submit"
+                disabled={bioBusy}
+                data-testid="enable-biometric-btn"
+                className="h-10 px-5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-semibold disabled:opacity-60 transition-all active:scale-95"
+              >
+                {bioBusy ? "Verifying..." : "Enable"}
               </button>
             </form>
           )}

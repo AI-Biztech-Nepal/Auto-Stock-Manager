@@ -1141,6 +1141,11 @@
   dependencies:
     tslib "^2.1.0"
 
+"@capgo/capacitor-native-biometric@^8.6.3":
+  version "8.6.3"
+  resolved "https://registry.yarnpkg.com/@capgo/capacitor-native-biometric/-/capacitor-native-biometric-8.6.3.tgz#63a7cda43bd84f1ff5f1bd0f2f3d391cc595374c"
+  integrity sha512-R0Q1fdhz2EZl22ANaLtt8yuaJ6E+uJwU+cXaTSbm9QzCb99TTtUWLMchsX0Eb/4h2pJh5oDab4kQYD4mEOmsaA==
+
 "@craco/craco@^7.1.0":
   version "7.1.0"
   resolved "https://registry.npmjs.org/@craco/craco/-/craco-7.1.0.tgz"

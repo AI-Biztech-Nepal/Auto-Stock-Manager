@@ -1,27 +1,58 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
+import { Fingerprint } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import api from "../utils/api";
+import { isNative, isBiometricAvailable, hasSavedCredentials, saveCredentials, verifyAndGetCredentials } from "../utils/biometric";
 
 export default function Login() {
   const { login } = useAuth();
   const navigate = useNavigate();
   const [form, setForm] = useState({ username: "", password: "" });
   const [loading, setLoading] = useState(false);
+  const [showBiometric, setShowBiometric] = useState(false);
+  const [bioLoading, setBioLoading] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      if (await isBiometricAvailable() && await hasSavedCredentials()) setShowBiometric(true);
+    })();
+  }, []);
+
+  const doLogin = async (credentials) => {
+    const res = await api.post("/auth/login", credentials);
+    login({ username: res.data.username, name: res.data.name, role: res.data.role }, res.data.token);
+    toast.success(`Welcome back, ${res.data.name}!`);
+    navigate("/");
+    return res;
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!form.username || !form.password) { toast.error("Please enter username and password"); return; }
     setLoading(true);
     try {
-      const res = await api.post("/auth/login", form);
-      login({ username: res.data.username, name: res.data.name, role: res.data.role }, res.data.token);
-      toast.success(`Welcome back, ${res.data.name}!`);
-      navigate("/");
+      await doLogin(form);
+      if (isNative() && await isBiometricAvailable() && !(await hasSavedCredentials())) {
+        try {
+          await saveCredentials(form.username, form.password);
+          toast.success("Biometric login enabled — you can turn it off in Settings");
+        } catch { /* user can enable later from Settings */ }
+      }
     } catch (err) {
       toast.error(err.response?.data?.detail || "Login failed");
     } finally { setLoading(false); }
+  };
+
+  const handleBiometricLogin = async () => {
+    setBioLoading(true);
+    try {
+      const creds = await verifyAndGetCredentials();
+      await doLogin({ username: creds.username, password: creds.password });
+    } catch (err) {
+      if (err?.message && !/cancel/i.test(err.message)) toast.error("Biometric login failed");
+    } finally { setBioLoading(false); }
   };
 
   return (
@@ -82,6 +113,26 @@ export default function Login() {
               {loading ? "Signing in..." : "Sign In"}
             </button>
           </form>
+
+          {showBiometric && (
+            <>
+              <div className="flex items-center gap-3 my-5">
+                <div className="h-px bg-slate-200 flex-1" />
+                <span className="text-xs text-slate-400">or</span>
+                <div className="h-px bg-slate-200 flex-1" />
+              </div>
+              <button
+                type="button"
+                data-testid="biometric-login-button"
+                onClick={handleBiometricLogin}
+                disabled={bioLoading}
+                className="w-full h-10 border border-slate-200 hover:bg-slate-50 text-slate-700 font-semibold rounded-lg transition-all active:scale-95 disabled:opacity-60 flex items-center justify-center gap-2"
+              >
+                <Fingerprint size={18} />
+                {bioLoading ? "Verifying..." : "Login with biometrics"}
+              </button>
+            </>
+          )}
         </div>
       </div>
     </div>

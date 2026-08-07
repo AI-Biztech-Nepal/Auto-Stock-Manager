@@ -3,6 +3,7 @@
   "appName": "Hamro G&G Auto",
   "webDir": "build",
   "server": {
-    "androidScheme": "https"
+    "androidScheme": "https",
+    "url": "https://auto-stock-manager.vercel.app"
   }
 }
