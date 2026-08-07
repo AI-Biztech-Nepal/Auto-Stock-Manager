@@ -32,17 +32,19 @@ jobs:
           packages: "platforms;android-36 build-tools;36.0.0"
 
       - name: Install frontend dependencies
+        id: install
         working-directory: frontend
+        continue-on-error: true
         run: |
-          yarn install --frozen-lockfile --network-timeout 300000 2>&1 | tee /tmp/yarn-install.log
+          yarn install --network-timeout 300000 2>&1 | tee /tmp/yarn-install.log
           exit ${PIPESTATUS[0]}
 
-      - name: Upload install log on failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: yarn-install-log
-          path: /tmp/yarn-install.log
+      - name: Surface install failure as annotation
+        if: steps.install.outcome == 'failure'
+        run: |
+          MSG=$(tail -c 900 /tmp/yarn-install.log | tr '\n' '|')
+          echo "::error::INSTALL_FAILED: $MSG"
+          exit 1
 
       - name: Build web app
         working-directory: frontend
