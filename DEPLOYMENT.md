@@ -79,7 +79,7 @@ individual rewrites. See `backend/schema.sql` for the table definitions.
    | `CORS_ORIGINS` | *(set after Step 3)* |
 
 6. Click **Create Web Service** → wait for build to finish
-7. Copy your Render URL: `https://hamro-gng-auto-backend.onrender.com`
+7. Copy your Render URL: `https://auto-stock-manager.onrender.com`
 
 > **Free tier note:** Render free services spin down after 15 min of inactivity (cold start ~30s).
 > Upgrade to the $7/mo Starter plan for always-on uptime.
@@ -94,7 +94,7 @@ individual rewrites. See `backend/schema.sql` for the table definitions.
 4. Framework: Vercel auto-detects **Create React App** ✓
 5. Add Environment Variable:
    ```
-   REACT_APP_BACKEND_URL = https://hamro-gng-auto-backend.onrender.com
+   REACT_APP_BACKEND_URL = https://auto-stock-manager.onrender.com
    ```
    (use the Render URL from Step 2 — no trailing slash)
 6. Click **Deploy** → Done!
