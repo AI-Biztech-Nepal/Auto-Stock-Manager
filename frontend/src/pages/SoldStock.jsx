@@ -222,10 +222,10 @@ export default function SoldStock() {
                               </div>
                             )}
                             {!hideFinancials && (
-                              <div className="text-right shrink-0 sm:w-20">
+                              <div className="text-right shrink-0 sm:w-28">
                                 <div className="text-xs text-slate-400">Margin</div>
                                 <div className={`text-sm font-semibold ${v.low_margin ? "text-red-600" : "text-green-600"}`}>
-                                  {v.profit_margin !== null && v.profit_margin !== undefined ? `${v.profit_margin}%` : "—"}
+                                  {v.expected_profit !== null && v.expected_profit !== undefined ? formatNPR(v.expected_profit) : "—"}
                                 </div>
                               </div>
                             )}
