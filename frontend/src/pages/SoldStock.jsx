@@ -353,9 +353,8 @@ export default function SoldStock() {
                       return (
                         <div
                           key={s.id}
-                          onClick={() => navigate(`/sales/${s.id}`)}
                           data-testid="returned-vehicle-row"
-                          className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-4 px-4 py-3 hover:bg-slate-50 cursor-pointer transition-colors"
+                          className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-4 px-4 py-3"
                         >
                           <div className="min-w-0 flex-1">
                             <div className="flex items-center gap-1.5 flex-wrap">
