@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback } from "react";
 import { Plus, Search, Wrench, X, Package, Pencil, ShoppingBag } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
-import { formatNPR, getJobStyle } from "../utils/helpers";
+import { formatNPR, getJobStyle, getStatusStyle, VEHICLE_STATUS_OPTIONS } from "../utils/helpers";
 import { formatBSDate } from "../utils/nepali-date";
 import VehicleComboBox from "../components/VehicleComboBox";
 import BSDatePicker from "../components/BSDatePicker";
@@ -11,6 +11,8 @@ import { useAuth } from "../context/AuthContext";
 import { canEditJobs, canDeleteJobs } from "../utils/permissions";
 
 const STATUSES = ["all", "pending", "in_progress", "completed"];
+// Vehicle pipeline-status filter — "external" covers job cards with no linked inventory vehicle.
+const VEHICLE_STATUSES = ["all", ...VEHICLE_STATUS_OPTIONS.map(o => o.value), "external"];
 // Sold vehicles carry a 6-month warranty — still pickable for a job card within that window.
 // Keep in sync with VEHICLE_WARRANTY_DAYS in backend/server.py.
 const WARRANTY_DAYS = 182;
@@ -45,6 +47,7 @@ export default function JobCards() {
   const [filtered, setFiltered] = useState([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState("all");
+  const [vehicleStatusFilter, setVehicleStatusFilter] = useState("all");
   const [search, setSearch] = useState("");
   const [showModal, setShowModal] = useState(false);
   const [editingJob, setEditingJob] = useState(null);
@@ -88,6 +91,11 @@ export default function JobCards() {
   useEffect(() => {
     let result = [...jobs];
     if (statusFilter !== "all") result = result.filter(j => j.status === statusFilter);
+    if (vehicleStatusFilter !== "all") {
+      result = vehicleStatusFilter === "external"
+        ? result.filter(j => !j.vehicle_id)
+        : result.filter(j => j.vehicle_status === vehicleStatusFilter);
+    }
     if (search) {
       const q = search.toLowerCase();
       result = result.filter(j =>
@@ -101,7 +109,7 @@ export default function JobCards() {
       );
     }
     setFiltered(result);
-  }, [jobs, statusFilter, search]);
+  }, [jobs, statusFilter, vehicleStatusFilter, search]);
 
   const partsTotalCost = jobParts.reduce((s, p) => s + p.quantity * p.unit_cost, 0);
 
@@ -334,6 +342,14 @@ export default function JobCards() {
             </button>
           ))}
         </div>
+        <div className="w-full flex items-center gap-2 flex-wrap">
+          <span className="text-xs font-medium text-slate-400 shrink-0">Vehicle status:</span>
+          {VEHICLE_STATUSES.map(s => (
+            <button key={s} onClick={() => setVehicleStatusFilter(s)} data-testid={`job-vehicle-filter-${s}`} className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${vehicleStatusFilter === s ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}>
+              {s === "all" ? "All" : s === "external" ? "External" : getStatusStyle(s).label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Job Cards */}
@@ -345,6 +361,7 @@ export default function JobCards() {
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {filtered.map(job => {
             const js = getJobStyle(job.status);
+            const vs = job.vehicle_id ? getStatusStyle(job.vehicle_status) : null;
             const overBudget = job.actual_cost && job.actual_cost > job.estimated_cost;
             const partsTotal = job.parts?.reduce((s, p) => s + p.quantity * p.unit_cost, 0) || 0;
             return (
@@ -358,6 +375,9 @@ export default function JobCards() {
                       )}
                       {job.is_warranty && (
                         <span className="px-1.5 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide bg-teal-100 text-teal-700">Warranty</span>
+                      )}
+                      {vs && (
+                        <span data-testid="job-vehicle-status-badge" className={`px-1.5 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide ${vs.bg} ${vs.text}`}>{vs.label}</span>
                       )}
                     </div>
                     <div className="font-bold text-slate-900 text-sm mt-0.5" style={{ fontFamily: "Manrope" }}>

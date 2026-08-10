@@ -1416,11 +1416,25 @@ async def delete_expense(eid: str, cu: dict = Depends(require("expenses", "delet
 
 # ── JOB CARDS ─────────────────────────────────────────────────────────
 @api_router.get("/jobs")
-async def get_jobs(status: Optional[str] = None, vehicle_id: Optional[str] = None, cu: dict = Depends(require("jobs", "view"))):
+async def get_jobs(status: Optional[str] = None, vehicle_id: Optional[str] = None, vehicle_status: Optional[str] = None, cu: dict = Depends(require("jobs", "view"))):
     q = {}
     if status and status != "all": q["status"] = status
     if vehicle_id: q["vehicle_id"] = vehicle_id
-    return await db.job_cards.find(q, {"_id": 0}).sort("created_at", -1).to_list(1000)
+    jobs = await db.job_cards.find(q, {"_id": 0}).sort("created_at", -1).to_list(1000)
+    if not jobs:
+        return []
+    # Batch-load current vehicle status in one query (avoids N+1) so the frontend can show/filter
+    # by the vehicle's live pipeline stage (available/sold/in_repair/...) alongside the job's own status.
+    ids = list({j["vehicle_id"] for j in jobs if j.get("vehicle_id")})
+    status_by_vehicle: dict = {}
+    if ids:
+        vs = await db.vehicles.find({"id": {"$in": ids}}, {"_id": 0, "id": 1, "status": 1}).to_list(10000)
+        status_by_vehicle = {v["id"]: v.get("status") for v in vs}
+    for j in jobs:
+        j["vehicle_status"] = status_by_vehicle.get(j.get("vehicle_id"))
+    if vehicle_status and vehicle_status != "all":
+        jobs = [j for j in jobs if j.get("vehicle_status") == vehicle_status]
+    return jobs
 
 async def _job_part_current_stock(part_id: str, component_name: Optional[str]):
     """Looks up the current usable stock for a job-card part row — either a plain part's own
