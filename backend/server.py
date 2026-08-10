@@ -1636,14 +1636,18 @@ async def delete_customer(cid: str, cu: dict = Depends(require("customers", "del
 
 # ── SALES ─────────────────────────────────────────────────────────────
 @api_router.get("/sales")
-async def get_sales(start_date: Optional[str] = None, end_date: Optional[str] = None, cu: dict = Depends(require("sales", "view"))):
+async def get_sales(start_date: Optional[str] = None, end_date: Optional[str] = None, returned: Optional[bool] = None, cu: dict = Depends(require("sales", "view"))):
     """start_date/end_date (both required together) filter by sale_date server-side —
     lets callers like the Dashboard's sales ribbon fetch just "today" or "this week"
-    instead of the full history. Vehicle/customer lookups are batched with $in instead
-    of one query per sale, which is what made this endpoint slow to begin with."""
+    instead of the full history. `returned` lets callers like the Sold Stock page's
+    Returned tab fetch just the sales that were later returned. Vehicle/customer lookups
+    are batched with $in instead of one query per sale, which is what made this endpoint
+    slow to begin with."""
     query = {}
     if start_date and end_date:
         query["sale_date"] = {"$gte": start_date, "$lte": end_date}
+    if returned is not None:
+        query["returned"] = True if returned else {"$ne": True}
     sales = await db.sales.find(query, {"_id": 0}).sort("created_at", -1).to_list(1000)
 
     vehicle_ids = list({s["vehicle_id"] for s in sales if s.get("vehicle_id")})
@@ -1658,7 +1662,10 @@ async def get_sales(start_date: Optional[str] = None, end_date: Optional[str] = 
 
     for s in sales:
         v = vehicles_by_id.get(s.get("vehicle_id"))
-        if v: s["vehicle_info"] = f"{v['brand']} {v['model']} {v.get('year','')}" + (f" ({v['registration_number']})" if v.get("registration_number") else "")
+        if v:
+            s["vehicle_info"] = f"{v['brand']} {v['model']} {v.get('year','')}" + (f" ({v['registration_number']})" if v.get("registration_number") else "")
+            s["vehicle_brand"] = v.get("brand"); s["vehicle_model"] = v.get("model")
+            s["vehicle_year"] = v.get("year"); s["registration_number"] = v.get("registration_number")
         c = customers_by_id.get(s.get("customer_id"))
         s["customer_name"] = c["name"] if c else "Walk-in Customer"
         s["customer_contact"] = c.get("contact_number") if c else None
