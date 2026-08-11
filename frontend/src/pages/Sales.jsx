@@ -144,24 +144,6 @@ export default function Sales() {
 
   const removeExpenseItem = (idx) => setExpenseItems(prev => prev.filter((_, i) => i !== idx));
 
-  // A vehicle that went through the Repair pipeline before landing back in Available
-  // stock may already carry job card costs — pull those in as expense line items the
-  // moment it's picked, same as the preset fees, so they land in Extra Expenses instead
-  // of being invisible until someone remembers to add them by hand.
-  useEffect(() => {
-    if (!form.vehicle_id) return;
-    api.get("/jobs", { params: { vehicle_id: form.vehicle_id } }).then(r => {
-      const jobItems = (r.data || [])
-        .map(j => ({ name: `Job Card ${j.job_number} — ${j.work_description}`, amount: j.actual_cost ?? j.estimated_cost }))
-        .filter(item => item.amount > 0);
-      setExpenseItems(prev => {
-        const existingNames = new Set(prev.map(e => e.name));
-        const newOnes = jobItems.filter(j => !existingNames.has(j.name));
-        return newOnes.length ? [...prev, ...newOnes] : prev;
-      });
-    }).catch(() => {});
-  }, [form.vehicle_id]);
-
   const handleSave = async (e) => {
     e.preventDefault();
     if (!form.vehicle_id || !form.sale_price) { toast.error("Vehicle and Sale Price are required"); return; }

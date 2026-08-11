@@ -109,19 +109,6 @@ export default function SaleDetail() {
       const [v, c] = await Promise.all([api.get("/vehicles"), api.get("/customers")]);
       setVehicles(v.data); setCustomers(c.data);
     } catch { toast.error("Failed to load vehicles/customers"); }
-    // Pull in any job card costs on this vehicle not already reflected as an expense
-    // line item — same as Sales.jsx does when a vehicle is first picked for a new sale.
-    try {
-      const j = await api.get("/jobs", { params: { vehicle_id: sale.vehicle_id } });
-      const jobItems = (j.data || [])
-        .map(job => ({ name: `Job Card ${job.job_number} — ${job.work_description}`, amount: job.actual_cost ?? job.estimated_cost }))
-        .filter(item => item.amount > 0);
-      setExpenseItems(prev => {
-        const existingNames = new Set(prev.map(e => e.name));
-        const newOnes = jobItems.filter(job => !existingNames.has(job.name));
-        return newOnes.length ? [...prev, ...newOnes] : prev;
-      });
-    } catch { /* non-critical — presets/manual entry still work */ }
   };
 
   const cancelEdit = () => setIsEditing(false);
