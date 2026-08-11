@@ -371,13 +371,21 @@ export default function SaleDetail() {
           <div className="grid grid-cols-2 lg:grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-4">
             {[
               { label: "Sale Price", value: formatNPR(sale.sale_price) },
-              { label: "Extra Expenses", value: formatNPR(sale.expenses_total || 0) },
+              {
+                label: "Extra Expenses",
+                value: formatNPR((sale.expenses_total || 0) + (sale.job_card_cost || 0)),
+                // Job card cost is shown here for visibility only — it's a shop cost
+                // (reduces margin via Total Investment below), not billed to the
+                // customer, so it's deliberately left out of Grand Total/Amount Due.
+                sub: sale.job_card_cost > 0 ? `incl. ${formatNPR(sale.job_card_cost)} job card (not billed)` : null,
+              },
               { label: "Grand Total", value: formatNPR(sale.total_amount), bold: true },
               { label: "Amount Due", value: formatNPR(sale.due_amount || 0), highlight: sale.due_amount > 0 },
             ].map(c => (
               <div key={c.label} className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 min-w-0">
                 <div className="text-xs text-slate-500 mb-1 truncate">{c.label}</div>
                 <div className={`text-lg font-bold truncate ${c.highlight ? "text-red-600" : "text-slate-900"}`} style={{ fontFamily: "Manrope" }}>{c.value}</div>
+                {c.sub && <div className="text-[11px] text-slate-400 mt-0.5 truncate">{c.sub}</div>}
               </div>
             ))}
           </div>

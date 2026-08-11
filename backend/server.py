@@ -243,6 +243,16 @@ async def _vehicle_investment(vehicle_id: str, vehicle: dict) -> float:
     return (vehicle.get("purchase_price", 0) + vehicle.get("accessories_cost", 0)
             + sum(e["amount"] for e in exps) + sum(_job_card_cost(j) for j in jobs))
 
+# Job card cost for a sale's Extra Expenses card — display only. Warranty job cards
+# (opened after the sale) are excluded, same reasoning as investment: that's free
+# post-sale service, not a cost of the sale itself. This number is NOT part of
+# expenses_total/total_amount/due_amount — see _strip_job_card_extra_expenses — so it
+# never changes what the customer is billed; it only tells the shop what to expect the
+# vehicle's job cards to cost against margin.
+async def _job_card_cost_total(vehicle_id: str) -> float:
+    jobs = await db.job_cards.find({"vehicle_id": vehicle_id, "is_warranty": {"$ne": True}}, {"_id": 0}).to_list(200)
+    return sum(_job_card_cost(j) for j in jobs)
+
 # For a sale returned via POST /vehicles/{vid}/return, only the retained (unrefunded) portion
 # is real revenue — the rest went back to the customer. Every revenue/profit aggregate should
 # read a sale's amount through this instead of "total_amount" directly.
@@ -1696,6 +1706,11 @@ async def get_sales(start_date: Optional[str] = None, end_date: Optional[str] = 
     if customer_ids:
         cs = await db.customers.find({"id": {"$in": customer_ids}}, {"_id": 0, "id": 1, "name": 1, "contact_number": 1}).to_list(len(customer_ids))
         customers_by_id = {c["id"]: c for c in cs}
+    job_cost_by_vehicle: dict = {}
+    if vehicle_ids:
+        all_jobs = await db.job_cards.find({"vehicle_id": {"$in": vehicle_ids}, "is_warranty": {"$ne": True}}, {"_id": 0}).to_list(20000)
+        for j in all_jobs:
+            job_cost_by_vehicle[j["vehicle_id"]] = job_cost_by_vehicle.get(j["vehicle_id"], 0) + _job_card_cost(j)
 
     for s in sales:
         v = vehicles_by_id.get(s.get("vehicle_id"))
@@ -1706,6 +1721,7 @@ async def get_sales(start_date: Optional[str] = None, end_date: Optional[str] = 
         c = customers_by_id.get(s.get("customer_id"))
         s["customer_name"] = c["name"] if c else "Walk-in Customer"
         s["customer_contact"] = c.get("contact_number") if c else None
+        s["job_card_cost"] = job_cost_by_vehicle.get(s.get("vehicle_id"), 0)
     return sales
 
 @api_router.post("/sales")
@@ -1868,6 +1884,7 @@ async def get_sale(sid: str, cu: dict = Depends(require("sales", "view"))):
         s["vehicle_year"] = v.get("year"); s["registration_number"] = v.get("registration_number")
         s["engine_cc"] = v.get("engine_cc"); s["fuel_type"] = v.get("fuel_type")
         s["vehicle_status"] = v.get("status")
+    s["job_card_cost"] = await _job_card_cost_total(s["vehicle_id"]) if s.get("vehicle_id") else 0
     c = await db.customers.find_one({"id": s.get("customer_id")}, {"_id": 0}) if s.get("customer_id") else None
     s["customer_name"] = c["name"] if c else "Walk-in Customer"
     s["customer_contact"] = c.get("contact_number") if c else None

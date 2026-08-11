@@ -325,8 +325,8 @@ export default function Sales() {
                     <span className="text-sm font-bold text-green-700">{formatNPR(s.total_amount)}</span>
                     <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-700">{s.payment_method}</span>
                   </div>
-                  {s.extra_expenses?.length > 0 && (
-                    <div className="mt-1 text-xs text-orange-600 font-medium">+{formatNPR(s.expenses_total)} extra expenses ({s.extra_expenses.length})</div>
+                  {((s.expenses_total || 0) + (s.job_card_cost || 0)) > 0 && (
+                    <div className="mt-1 text-xs text-orange-600 font-medium">+{formatNPR((s.expenses_total || 0) + (s.job_card_cost || 0))} extra expenses{s.extra_expenses?.length > 0 ? ` (${s.extra_expenses.length})` : ""}</div>
                   )}
                   {s.due_amount > 0 ? (
                     <div className="mt-1 text-xs font-semibold text-red-600" data-testid="due-badge">Due: {formatNPR(s.due_amount)}{s.due_date ? ` (by ${s.due_date})` : ""}</div>
@@ -365,8 +365,11 @@ export default function Sales() {
                       </td>
                       <td className="px-4 py-3 text-sm font-medium text-slate-800 whitespace-nowrap">{formatNPR(s.sale_price)}</td>
                       <td className="px-4 py-3 text-sm text-slate-600 whitespace-nowrap">
-                        {s.extra_expenses?.length > 0 ? (
-                          <span className="text-orange-600 font-medium">{formatNPR(s.expenses_total)} ({s.extra_expenses.length} items)</span>
+                        {((s.expenses_total || 0) + (s.job_card_cost || 0)) > 0 ? (
+                          <span className="text-orange-600 font-medium">
+                            {formatNPR((s.expenses_total || 0) + (s.job_card_cost || 0))}
+                            {s.extra_expenses?.length > 0 ? ` (${s.extra_expenses.length} items)` : ""}
+                          </span>
                         ) : <span className="text-slate-400">—</span>}
                       </td>
                       <td className="px-4 py-3 text-sm font-bold text-green-700 whitespace-nowrap">{formatNPR(s.total_amount)}</td>
