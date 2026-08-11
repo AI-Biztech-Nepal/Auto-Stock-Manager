@@ -10,13 +10,13 @@ import BillPrintModal from "../components/BillPrintModal";
 
 const KCard = ({ title, value, sub, color, icon: Icon }) => (
   <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 hover:shadow-md transition-shadow">
-    <div className="flex items-start justify-between">
-      <div>
-        <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1">{title}</p>
-        <p className="text-xl font-bold text-slate-900" style={{ fontFamily: "Manrope" }}>{value}</p>
-        {sub && <p className="text-xs text-slate-400 mt-0.5">{sub}</p>}
+    <div className="flex items-start justify-between gap-2">
+      <div className="min-w-0">
+        <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1 truncate">{title}</p>
+        <p className="text-xl font-bold text-slate-900 truncate" style={{ fontFamily: "Manrope" }}>{value}</p>
+        {sub && <p className="text-xs text-slate-400 mt-0.5 truncate">{sub}</p>}
       </div>
-      <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${color}`}>
+      <div className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 ${color}`}>
         <Icon size={18} className="text-white" />
       </div>
     </div>
@@ -114,7 +114,7 @@ export default function Finance() {
 
       {tab === "overview" && summary && (
         <div className="space-y-5">
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 lg:grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-4">
             <KCard title="Gross Profit" value={formatNPR(summary.gross_profit)} sub={`${summary.profit_margin_pct}% margin`} icon={DollarSign} color="bg-emerald-500" />
             <KCard title="Vendor Payables" value={formatNPR(summary.vendor_payables)} icon={CreditCard} color="bg-red-500" />
             <KCard title="Partner Capital" value={formatNPR(summary.total_partner_capital)} icon={Wallet} color="bg-purple-500" />

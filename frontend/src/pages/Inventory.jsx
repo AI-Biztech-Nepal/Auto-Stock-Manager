@@ -573,20 +573,20 @@ export default function Inventory() {
 
       {/* Summary */}
       {!loading && (
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 lg:grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-4">
           {[
             { label: "Total Vehicles", value: filtered.length, icon: Package, color: "bg-blue-500" },
             !hideFinancials && { label: "Total Investment", value: formatNPR(totalInvestment), icon: Wallet, color: "bg-indigo-500" },
             !hideFinancials && { label: "Locked Capital", value: formatNPR(lockedCapital), icon: Lock, color: "bg-purple-500" },
             !isPartsOnly && { label: "Total Selling Price", value: formatNPR(totalSellingPrice), icon: DollarSign, color: "bg-green-500" },
           ].filter(Boolean).map(c => (
-            <div key={c.label} className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 flex items-center gap-3">
+            <div key={c.label} className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 flex items-center gap-3 min-w-0">
               <div className={`w-9 h-9 rounded-lg ${c.color} flex items-center justify-center shrink-0`}>
                 <c.icon size={16} className="text-white" />
               </div>
-              <div>
-                <div className="text-xs text-slate-500 font-medium">{c.label}</div>
-                <div className="text-lg font-bold text-slate-900" style={{ fontFamily: "Manrope" }}>{c.value}</div>
+              <div className="min-w-0">
+                <div className="text-xs text-slate-500 font-medium truncate">{c.label}</div>
+                <div className="text-lg font-bold text-slate-900 truncate" style={{ fontFamily: "Manrope" }}>{c.value}</div>
               </div>
             </div>
           ))}

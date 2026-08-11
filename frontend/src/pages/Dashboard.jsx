@@ -19,13 +19,13 @@ const KPICard = ({ title, value, subtitle, icon: Icon, color, testid, onClick })
     onClick={onClick}
     className={`bg-white rounded-xl border border-slate-200 shadow-sm p-5 hover:shadow-md transition-shadow duration-200 animate-fade-in ${onClick ? "cursor-pointer" : ""}`}
   >
-    <div className="flex items-start justify-between">
-      <div>
-        <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1">{title}</p>
-        <p className="text-2xl font-bold text-slate-900" style={{ fontFamily: "Manrope, sans-serif" }}>{value}</p>
-        {subtitle && <p className="text-xs text-slate-500 mt-1">{subtitle}</p>}
+    <div className="flex items-start justify-between gap-2">
+      <div className="min-w-0">
+        <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1 truncate">{title}</p>
+        <p className="text-2xl font-bold text-slate-900 truncate" style={{ fontFamily: "Manrope, sans-serif" }}>{value}</p>
+        {subtitle && <p className="text-xs text-slate-500 mt-1 truncate">{subtitle}</p>}
       </div>
-      <div className={`w-11 h-11 rounded-lg flex items-center justify-center ${color}`}>
+      <div className={`w-11 h-11 rounded-lg flex items-center justify-center shrink-0 ${color}`}>
         <Icon size={20} className="text-white" />
       </div>
     </div>
@@ -291,7 +291,7 @@ export default function Dashboard() {
       <AccountingSummary />
 
       {/* Financial Overview (moved from Finance tab) */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-4">
         <KPICard title="Total Revenue" value={formatNPR(stats.total_revenue)} icon={TrendingUp} color="bg-blue-500" testid="kpi-total-revenue" onClick={() => navigate("/finance")} />
         <KPICard title="Inventory Value" value={formatNPR(stats.inventory_value)} icon={Package} color="bg-indigo-500" testid="kpi-inventory-value" subtitle={`${stats.available} vehicles`} onClick={() => navigate("/inventory")} />
         <KPICard title="Vehicles Sold" value={stats.sold} icon={ShoppingCart} color="bg-green-500" testid="kpi-sold" onClick={() => navigate("/sold-stock")} />
@@ -299,7 +299,7 @@ export default function Dashboard() {
       </div>
 
       {/* KPI Row 1 */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-4">
         <KPICard title="Available Vehicles" value={stats.available} icon={Package} color="bg-blue-500" testid="kpi-available" onClick={() => navigate("/inventory")} />
         <KPICard title="Locked Capital" value={formatNPR(stats.locked_capital)} icon={DollarSign} color="bg-indigo-500" testid="kpi-capital" subtitle="In available stock" onClick={() => navigate("/inventory")} />
         <KPICard title="Realized Profit" value={formatNPR(stats.total_realized_profit)} icon={TrendingUp} color="bg-emerald-500" testid="kpi-profit" subtitle="From sold vehicles" onClick={() => navigate("/finance")} />

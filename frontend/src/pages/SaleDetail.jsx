@@ -109,6 +109,19 @@ export default function SaleDetail() {
       const [v, c] = await Promise.all([api.get("/vehicles"), api.get("/customers")]);
       setVehicles(v.data); setCustomers(c.data);
     } catch { toast.error("Failed to load vehicles/customers"); }
+    // Pull in any job card costs on this vehicle not already reflected as an expense
+    // line item — same as Sales.jsx does when a vehicle is first picked for a new sale.
+    try {
+      const j = await api.get("/jobs", { params: { vehicle_id: sale.vehicle_id } });
+      const jobItems = (j.data || [])
+        .map(job => ({ name: `Job Card ${job.job_number} — ${job.work_description}`, amount: job.actual_cost ?? job.estimated_cost }))
+        .filter(item => item.amount > 0);
+      setExpenseItems(prev => {
+        const existingNames = new Set(prev.map(e => e.name));
+        const newOnes = jobItems.filter(job => !existingNames.has(job.name));
+        return newOnes.length ? [...prev, ...newOnes] : prev;
+      });
+    } catch { /* non-critical — presets/manual entry still work */ }
   };
 
   const cancelEdit = () => setIsEditing(false);
@@ -368,16 +381,16 @@ export default function SaleDetail() {
       ) : (
         <>
           {/* Amount Summary */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 lg:grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-4">
             {[
               { label: "Sale Price", value: formatNPR(sale.sale_price) },
               { label: "Extra Expenses", value: formatNPR(sale.expenses_total || 0) },
               { label: "Grand Total", value: formatNPR(sale.total_amount), bold: true },
               { label: "Amount Due", value: formatNPR(sale.due_amount || 0), highlight: sale.due_amount > 0 },
             ].map(c => (
-              <div key={c.label} className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
-                <div className="text-xs text-slate-500 mb-1">{c.label}</div>
-                <div className={`text-lg font-bold ${c.highlight ? "text-red-600" : "text-slate-900"}`} style={{ fontFamily: "Manrope" }}>{c.value}</div>
+              <div key={c.label} className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 min-w-0">
+                <div className="text-xs text-slate-500 mb-1 truncate">{c.label}</div>
+                <div className={`text-lg font-bold truncate ${c.highlight ? "text-red-600" : "text-slate-900"}`} style={{ fontFamily: "Manrope" }}>{c.value}</div>
               </div>
             ))}
           </div>

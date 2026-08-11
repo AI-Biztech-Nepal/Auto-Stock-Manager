@@ -64,7 +64,7 @@ export default function Reports() {
       {/* Summary Tab */}
       {activeTab === "summary" && dashboard && (
         <div className="space-y-5">
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 lg:grid-cols-[repeat(auto-fit,minmax(160px,1fr))] gap-4">
             {[
               { label: "Total Vehicles", val: dashboard.total_vehicles, color: "text-slate-900", aging: null },
               { label: "Available", val: dashboard.available, color: "text-blue-600", aging: null },
@@ -77,13 +77,13 @@ export default function Reports() {
             ].map(({ label, val, color, aging }) => (
               <div
                 key={label}
-                className={`bg-white rounded-xl border border-slate-200 shadow-sm p-4 ${aging ? "cursor-pointer hover:shadow-md hover:border-blue-300 transition-all" : ""}`}
+                className={`bg-white rounded-xl border border-slate-200 shadow-sm p-4 min-w-0 ${aging ? "cursor-pointer hover:shadow-md hover:border-blue-300 transition-all" : ""}`}
                 data-testid="report-kpi-card"
                 onClick={() => aging && navigate(`/inventory?aging=${aging}`)}
                 title={aging ? `Click to view ${label} vehicles in Inventory` : undefined}
               >
-                <div className="text-xs text-slate-500 mb-1">{label}</div>
-                <div className={`text-xl font-bold ${color}`} style={{ fontFamily: "Manrope" }}>{val}</div>
+                <div className="text-xs text-slate-500 mb-1 truncate">{label}</div>
+                <div className={`text-xl font-bold truncate ${color}`} style={{ fontFamily: "Manrope" }}>{val}</div>
                 {aging && <div className="text-xs text-blue-500 mt-1">View in Inventory →</div>}
               </div>
             ))}
