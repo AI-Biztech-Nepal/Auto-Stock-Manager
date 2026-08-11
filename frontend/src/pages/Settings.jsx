@@ -271,7 +271,7 @@ export default function Settings() {
             ["Version", "1.0.0"],
             ["Currency", "NPR (Nepalese Rupee)"],
             ["AI Engine", "Google Gemini"],
-            ["Database", "MongoDB"],
+            ["Database", "MySQL (Hostinger)"],
           ].map(([k, v]) => (
             <div key={k} className="flex justify-between py-2 border-b border-slate-50 last:border-0">
               <span className="text-slate-500">{k}</span>
