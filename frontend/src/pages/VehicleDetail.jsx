@@ -368,7 +368,7 @@ export function VehicleDetailModal({ id, onClose }) {
                 <button key={tab} onClick={() => setActiveTab(tab)} data-testid={`tab-${tab}`}
                   className={`px-5 py-3.5 text-sm font-medium capitalize transition-colors ${activeTab === tab ? "border-b-2 border-blue-600 text-blue-600" : "text-slate-500 hover:text-slate-700"}`}>
                   {tab.charAt(0).toUpperCase() + tab.slice(1)}
-                  {tab === "expenses" && vehicle.expenses?.length > 0 && <span className="ml-1.5 bg-slate-100 text-slate-600 text-xs px-1.5 py-0.5 rounded-full">{vehicle.expenses.length}</span>}
+                  {tab === "expenses" && (vehicle.expenses?.length > 0 || vehicle.job_cards?.length > 0) && <span className="ml-1.5 bg-slate-100 text-slate-600 text-xs px-1.5 py-0.5 rounded-full">{(vehicle.expenses?.length || 0) + (vehicle.job_cards?.length || 0)}</span>}
                 </button>
               ))}
             </div>
@@ -526,7 +526,7 @@ export function VehicleDetailModal({ id, onClose }) {
                       </button>
                     )}
                   </div>
-                  {vehicle.expenses?.length === 0 ? (
+                  {vehicle.expenses?.length === 0 && vehicle.job_cards?.length === 0 ? (
                     <div className="text-center py-8 text-slate-400 text-sm">No expenses recorded yet</div>
                   ) : (
                     <div className="divide-y divide-slate-50">
@@ -547,6 +547,24 @@ export function VehicleDetailModal({ id, onClose }) {
                           </div>
                         );
                       })}
+                      {/* Job cards contribute to the vehicle's expense total too (actual_cost once
+                         completed, otherwise the estimate) — listed read-only here since they're
+                         managed from the Job Cards page, not this modal. */}
+                      {vehicle.job_cards?.map(job => (
+                        <div key={job.id} data-testid="job-card-expense-row" className="flex items-center justify-between py-3">
+                          <div>
+                            <div className="text-sm font-medium text-slate-900 flex items-center gap-1.5">
+                              {job.work_description}
+                              <span className="px-1.5 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide bg-purple-100 text-purple-700">Job Card</span>
+                              {job.status !== "completed" && (
+                                <span className="px-1.5 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide bg-amber-100 text-amber-700">Estimate</span>
+                              )}
+                            </div>
+                            <div className="text-xs text-slate-500">{job.job_number} · {job.mechanic_name}</div>
+                          </div>
+                          <span className="font-semibold text-slate-900">{formatNPR(job.actual_cost ?? job.estimated_cost)}</span>
+                        </div>
+                      ))}
                     </div>
                   )}
                 </div>

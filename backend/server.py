@@ -199,10 +199,18 @@ def _hide_financials_for_role(v: dict, role: str) -> dict:
             v.pop(f, None)
     return v
 
+# A job card's contribution to vehicle cost — the settled actual_cost once the job is
+# marked complete, or its estimate while still pending/in progress so the work isn't
+# invisible from the vehicle's expense total until someone closes it out.
+def _job_card_cost(jc: dict) -> float:
+    ac = jc.get("actual_cost")
+    return ac if ac is not None else jc.get("estimated_cost", 0)
+
 async def enrich_vehicle(v: dict) -> dict:
     v["aging"] = stock_aging(v.get("purchase_date", ""))
     exps = await db.expenses.find({"vehicle_id": v["id"]}, {"_id": 0}).to_list(200)
-    total_exp = sum(e["amount"] for e in exps)
+    jobs = await db.job_cards.find({"vehicle_id": v["id"]}, {"_id": 0}).to_list(200)
+    total_exp = sum(e["amount"] for e in exps) + sum(_job_card_cost(j) for j in jobs)
     v["total_expenses"] = total_exp
     v["total_investment"] = v.get("purchase_price", 0) + total_exp + v.get("accessories_cost", 0)
     sp = v.get("selling_price") or 0
@@ -229,15 +237,24 @@ def _within_warranty(vehicle: dict) -> bool:
 
 # ── Helper: compute total investment for a vehicle ────────────────────
 async def _vehicle_investment(vehicle_id: str, vehicle: dict) -> float:
-    """Returns purchase_price + accessories + all expenses for a vehicle."""
+    """Returns purchase_price + accessories + all expenses + all job card costs for a vehicle."""
     exps = await db.expenses.find({"vehicle_id": vehicle_id}, {"_id": 0}).to_list(200)
-    return vehicle.get("purchase_price", 0) + vehicle.get("accessories_cost", 0) + sum(e["amount"] for e in exps)
+    jobs = await db.job_cards.find({"vehicle_id": vehicle_id}, {"_id": 0}).to_list(200)
+    return (vehicle.get("purchase_price", 0) + vehicle.get("accessories_cost", 0)
+            + sum(e["amount"] for e in exps) + sum(_job_card_cost(j) for j in jobs))
 
 # For a sale returned via POST /vehicles/{vid}/return, only the retained (unrefunded) portion
 # is real revenue — the rest went back to the customer. Every revenue/profit aggregate should
 # read a sale's amount through this instead of "total_amount" directly.
+#
+# Deliberately uses "sale_price", not "total_amount": total_amount also folds in extra_expenses
+# (registration transfer, insurance transfer, delivery, etc.) — fees the shop collects from the
+# buyer purely to forward to a third party (RTO, insurer...), not markup on the vehicle. They
+# belong in what the customer owes (total_amount/due_amount/paid_*), but counting them as revenue
+# here would inflate profit/margin by the same amount for every fee added, with no matching cost
+# on the other side.
 def _sale_revenue(s: dict) -> float:
-    return s.get("retained_amount", 0) if s.get("returned") else s.get("total_amount", 0)
+    return s.get("retained_amount", 0) if s.get("returned") else s.get("sale_price", 0)
 
 # A vehicle can be tied to a vendor two ways: the legacy vendor_id field, or the
 # newer linked_contact_type/id (set via the Customer/Vendor picker on the stock form).
@@ -267,9 +284,14 @@ async def _batch_vehicle_investment(vehicles: list) -> dict:
     exps_by_vehicle: dict = {}
     for e in all_exps:
         exps_by_vehicle.setdefault(e["vehicle_id"], []).append(e)
+    all_jobs = await db.job_cards.find({"vehicle_id": {"$in": vehicle_ids}}, {"_id": 0}).to_list(20000)
+    job_cost_by_vehicle: dict = {}
+    for j in all_jobs:
+        job_cost_by_vehicle[j["vehicle_id"]] = job_cost_by_vehicle.get(j["vehicle_id"], 0) + _job_card_cost(j)
     return {
         v["id"]: v.get("purchase_price", 0) + v.get("accessories_cost", 0)
         + sum(e["amount"] for e in exps_by_vehicle.get(v["id"], []))
+        + job_cost_by_vehicle.get(v["id"], 0)
         for v in vehicles
     }
 
@@ -872,6 +894,12 @@ async def get_vehicles(status: Optional[str] = None, brand: Optional[str] = None
     exps_by_vehicle: dict = {}
     for e in all_exps:
         exps_by_vehicle.setdefault(e["vehicle_id"], []).append(e)
+    # Batch-load all job cards too — their cost counts toward a vehicle's expense total
+    # the same way a plain expense entry does (see _job_card_cost).
+    all_jobs = await db.job_cards.find({"vehicle_id": {"$in": vehicle_ids}}, {"_id": 0}).to_list(10000)
+    jobs_by_vehicle: dict = {}
+    for j in all_jobs:
+        jobs_by_vehicle.setdefault(j["vehicle_id"], []).append(j)
     # Batch-load each vehicle's photo count in one query (projected to just the id field —
     # photo docs carry a base64 image blob we don't want pulled into memory here), so the
     # frontend can filter for missing/insufficient photos without an N+1 fetch of
@@ -880,10 +908,10 @@ async def get_vehicles(status: Optional[str] = None, brand: Optional[str] = None
     photo_count_by_vehicle: dict = {}
     for p in photo_docs:
         photo_count_by_vehicle[p["vehicle_id"]] = photo_count_by_vehicle.get(p["vehicle_id"], 0) + 1
-    # Enrich each vehicle using pre-loaded expenses
-    def enrich_with_expenses(v: dict, exps: list) -> dict:
+    # Enrich each vehicle using pre-loaded expenses + job cards
+    def enrich_with_expenses(v: dict, exps: list, jobs: list) -> dict:
         v["aging"] = stock_aging(v.get("purchase_date", ""))
-        total_exp = sum(e["amount"] for e in exps)
+        total_exp = sum(e["amount"] for e in exps) + sum(_job_card_cost(j) for j in jobs)
         v["total_expenses"] = total_exp
         v["total_investment"] = v.get("purchase_price", 0) + total_exp + v.get("accessories_cost", 0)
         sp = v.get("selling_price") or 0
@@ -897,7 +925,7 @@ async def get_vehicles(status: Optional[str] = None, brand: Optional[str] = None
         v["has_photo"] = v["photo_count"] > 0
         return v
     role = cu.get("role", "admin")
-    return [_hide_financials_for_role(enrich_with_expenses(v, exps_by_vehicle.get(v["id"], [])), role) for v in vehicles]
+    return [_hide_financials_for_role(enrich_with_expenses(v, exps_by_vehicle.get(v["id"], []), jobs_by_vehicle.get(v["id"], [])), role) for v in vehicles]
 
 @api_router.post("/vehicles")
 async def create_vehicle(vehicle: VehicleCreate, cu: dict = Depends(require("vehicles", "create"))):
@@ -1803,7 +1831,7 @@ async def get_sale(sid: str, cu: dict = Depends(require("sales", "view"))):
     # to keep that number away from front desk, same as the vehicle-level fields.
     if cu.get("role", "admin") == "admin" and v:
         investment = await _vehicle_investment(s["vehicle_id"], v)
-        total = s.get("total_amount", 0)
+        total = _sale_revenue(s)
         s["total_investment"] = investment
         s["profit"] = total - investment
         s["profit_margin"] = round(((total - investment) / total) * 100, 2) if total else None
@@ -2201,10 +2229,10 @@ async def dashboard_stats(cu: dict = Depends(admin_only)):
             # The vehicle's investment cost stays attributed to inventory (it'll be
             # subtracted again on its actual resale) — only the retained refund fee
             # counts as profit here, so it isn't double-charged against COGS.
-            total_profit += s.get("retained_amount", 0)
+            total_profit += _sale_revenue(s)
             continue
         if s["vehicle_id"] in sold_vehicle_ids_existing:
-            total_profit += s.get("total_amount", 0) - sold_investment_by_vehicle.get(s["vehicle_id"], 0)
+            total_profit += _sale_revenue(s) - sold_investment_by_vehicle.get(s["vehicle_id"], 0)
 
     total_revenue = sum(_sale_revenue(s) for s in sales_records)
     # Dedupe: a vehicle sold, returned, then resold appears in two sales rows but its
