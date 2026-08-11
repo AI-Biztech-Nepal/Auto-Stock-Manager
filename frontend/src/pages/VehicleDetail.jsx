@@ -288,7 +288,10 @@ export function VehicleDetailModal({ id, onClose }) {
           <div className="flex items-center justify-between gap-3 p-4 sm:p-5 pb-3">
             <div className="min-w-0">
               <h2 className="text-lg font-bold text-slate-900 truncate" style={{ fontFamily: "Manrope, sans-serif" }}>{vehicle.brand} {vehicle.model}</h2>
-              <p className="text-xs text-slate-500">{vehicle.year} · {vehicle.engine_cc}cc · {vehicle.fuel_type}{vehicle.registration_number ? ` · ${vehicle.registration_number}` : ""}</p>
+              {vehicle.registration_number && (
+                <p className="text-base font-bold text-slate-700">{vehicle.registration_number}</p>
+              )}
+              <p className="text-xs text-slate-500">{vehicle.year} · {vehicle.engine_cc}cc · {vehicle.fuel_type}</p>
             </div>
             <div className="flex items-center gap-3 shrink-0">
               {pendingPhotoCount > 0 && (
