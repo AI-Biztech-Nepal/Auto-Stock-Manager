@@ -289,7 +289,7 @@ export function VehicleDetailModal({ id, onClose }) {
             <div className="min-w-0">
               <h2 className="text-lg font-bold text-slate-900 truncate" style={{ fontFamily: "Manrope, sans-serif" }}>{vehicle.brand} {vehicle.model}</h2>
               {vehicle.registration_number && (
-                <p className="text-base font-bold text-slate-700">{vehicle.registration_number}</p>
+                <p className="text-base font-mono font-bold text-slate-900">{vehicle.registration_number}</p>
               )}
               <p className="text-xs text-slate-500">{vehicle.year} · {vehicle.engine_cc}cc · {vehicle.fuel_type}</p>
             </div>
