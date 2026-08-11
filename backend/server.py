@@ -1529,6 +1529,8 @@ async def create_job(job: JobCardCreate, cu: dict = Depends(require("jobs", "cre
                     "created_by": cu.get("username"), "created_at": datetime.now(timezone.utc).isoformat(),
                 }
                 await db.part_transactions.insert_one(txn)
+    if jc.get("vehicle_id"):
+        await _sync_sale_job_card_expenses(jc["vehicle_id"])
     return jc
 
 @api_router.put("/jobs/{jid}")
@@ -1593,12 +1595,17 @@ async def update_job(jid: str, job: JobCardUpdate, cu: dict = Depends(require("j
 
     r = await db.job_cards.update_one({"id": jid}, {"$set": upd})
     if r.matched_count == 0: raise HTTPException(404, "Job not found")
+    if existing.get("vehicle_id"):
+        await _sync_sale_job_card_expenses(existing["vehicle_id"])
     return await db.job_cards.find_one({"id": jid}, {"_id": 0})
 
 @api_router.delete("/jobs/{jid}")
 async def delete_job(jid: str, cu: dict = Depends(require("jobs", "delete"))):
+    existing = await db.job_cards.find_one({"id": jid}, {"_id": 0})
     r = await db.job_cards.delete_one({"id": jid})
     if r.deleted_count == 0: raise HTTPException(404, "Job not found")
+    if existing and existing.get("vehicle_id"):
+        await _sync_sale_job_card_expenses(existing["vehicle_id"])
     return {"message": "Deleted"}
 
 # ── CUSTOMERS ─────────────────────────────────────────────────────────
@@ -1678,6 +1685,14 @@ async def get_sales(start_date: Optional[str] = None, end_date: Optional[str] = 
         query["returned"] = True if returned else {"$ne": True}
     sales = await db.sales.find(query, {"_id": 0}).sort("created_at", -1).to_list(1000)
 
+    # Safety net alongside the create/update/delete-job hooks that keep this in sync going
+    # forward — catches a sale that predates those hooks, or otherwise drifted, without
+    # anyone having to open it individually first.
+    to_sync = [s["vehicle_id"] for s in sales if s.get("vehicle_id") and not s.get("returned")]
+    if to_sync:
+        await asyncio.gather(*(_sync_sale_job_card_expenses(vid) for vid in to_sync))
+        sales = await db.sales.find(query, {"_id": 0}).sort("created_at", -1).to_list(1000)
+
     vehicle_ids = list({s["vehicle_id"] for s in sales if s.get("vehicle_id")})
     customer_ids = list({s["customer_id"] for s in sales if s.get("customer_id")})
     vehicles_by_id, customers_by_id = {}, {}
@@ -1730,7 +1745,11 @@ async def create_sale(sale: SaleCreate, cu: dict = Depends(require("sales", "cre
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     await db.sales.insert_one(doc)
-    doc.pop("_id", None)
+    # Server-side authoritative pull of job card costs — covers job cards the client
+    # didn't already fold into extra_expenses (or a request made outside the normal
+    # Sales form), so a fresh sale is correct from the moment it's created.
+    await _sync_sale_job_card_expenses(sale.vehicle_id)
+    doc = await db.sales.find_one({"id": doc["id"]}, {"_id": 0})
     # Mark vehicle as sold
     await db.vehicles.update_one({"id": sale.vehicle_id}, {"$set": {
         "status": "sold",
@@ -1812,10 +1831,57 @@ async def reconcile_sales(cu: dict = Depends(admin_only)):
             })
     return {"count": len(mismatches), "mismatches": mismatches}
 
+# Job cards opened on a vehicle *before* it was sold (reconditioning done while it sat in
+# the Repair stage) are a real cost of that sale, same as a registration or insurance fee —
+# so they belong in Extra Expenses. Job cards opened *after* the sale (is_warranty=True) are
+# free warranty service on a car the customer already bought and must never be billed to them.
+async def _job_card_expense_items(vehicle_id: str) -> list:
+    jobs = await db.job_cards.find({"vehicle_id": vehicle_id, "is_warranty": {"$ne": True}}, {"_id": 0}).to_list(200)
+    items = [{"name": f"Job Card {j['job_number']} — {j['work_description']}", "amount": _job_card_cost(j)} for j in jobs]
+    return [it for it in items if it["amount"] > 0]
+
+# Keeps a vehicle's active (non-returned) sale in sync with its job cards — called right
+# after any job card create/update/delete, and after a sale is first created, so Extra
+# Expenses/Grand Total/Amount Due are always correct without anyone having to open, edit,
+# or re-save the sale by hand. Returned sales are skipped: refund_amount/retained_amount
+# were split against the total_amount that existed at the time of the return and must stay
+# a fixed historical record.
+async def _sync_sale_job_card_expenses(vehicle_id: str):
+    s = await db.sales.find_one({"vehicle_id": vehicle_id, "returned": {"$ne": True}}, {"_id": 0}, sort=[("created_at", -1)])
+    if not s:
+        return
+    job_items = await _job_card_expense_items(vehicle_id)
+    job_amount_by_name = {it["name"]: it["amount"] for it in job_items}
+    # Rebuild from scratch every time this fires: drop any job-card line item that no
+    # longer matches a live job card (deleted, or its cost dropped to 0), keep every
+    # non-job-card item (registration fee etc.) untouched, then lay the current job-card
+    # amounts on top — self-corrects a cost that changed after being added, and stays
+    # idempotent no matter how many times it's called for the same vehicle.
+    non_job_items = [dict(e) for e in s.get("extra_expenses", []) if not str(e.get("name", "")).startswith("Job Card ")]
+    job_card_items = [{"name": name, "amount": amount} for name, amount in job_amount_by_name.items()]
+    extra_expenses = non_job_items + job_card_items
+    if extra_expenses == s.get("extra_expenses", []):
+        return
+    expenses_total = round(sum(e["amount"] for e in extra_expenses), 2)
+    total_amount = round(s.get("sale_price", 0) + expenses_total, 2)
+    paid_total = (s.get("paid_cash", 0) or 0) + (s.get("paid_bank", 0) or 0)
+    due_amount = max(round(total_amount - paid_total, 2), 0)
+    payment_status = "Paid" if due_amount <= 0 else ("Partial" if paid_total > 0 else "Unpaid")
+    await db.sales.update_one({"id": s["id"]}, {"$set": {
+        "extra_expenses": extra_expenses, "expenses_total": expenses_total,
+        "total_amount": total_amount, "due_amount": due_amount, "payment_status": payment_status,
+    }})
+
 @api_router.get("/sales/{sid}")
 async def get_sale(sid: str, cu: dict = Depends(require("sales", "view"))):
     s = await db.sales.find_one({"id": sid}, {"_id": 0})
     if not s: raise HTTPException(404, "Not found")
+    # Safety net for sales that predate the create/update/delete-job hooks above (or a job
+    # card that was somehow added without one firing) — re-syncs before returning so it
+    # doesn't take a no-op edit on the job card to notice the drift.
+    if s.get("vehicle_id") and not s.get("returned"):
+        await _sync_sale_job_card_expenses(s["vehicle_id"])
+        s = await db.sales.find_one({"id": sid}, {"_id": 0})
     v = await db.vehicles.find_one({"id": s.get("vehicle_id")}, {"_id": 0})
     if v:
         s["vehicle_info"] = f"{v.get('brand','')} {v.get('model','')} {v.get('year','')}".strip()
