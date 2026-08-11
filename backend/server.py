@@ -248,13 +248,26 @@ async def _vehicle_investment(vehicle_id: str, vehicle: dict) -> float:
 # read a sale's amount through this instead of "total_amount" directly.
 #
 # Deliberately uses "sale_price", not "total_amount": total_amount also folds in extra_expenses
-# (registration transfer, insurance transfer, delivery, etc.) — fees the shop collects from the
-# buyer purely to forward to a third party (RTO, insurer...), not markup on the vehicle. They
-# belong in what the customer owes (total_amount/due_amount/paid_*), but counting them as revenue
-# here would inflate profit/margin by the same amount for every fee added, with no matching cost
-# on the other side.
+# like registration transfer or insurance transfer — fees the shop collects from the buyer
+# purely to forward to a third party (RTO, insurer...), not markup on the vehicle. Counting
+# those as revenue would inflate profit/margin with no matching cost on the other side.
+#
+# "Job Card " line items are the one exception: unlike a passthrough fee, a job card's cost
+# IS already counted as a cost (_vehicle_investment sums job_cards same as a plain expense).
+# If the customer is billed for it via Extra Expenses and that reimbursement isn't credited
+# back here, margin gets docked for the job card twice over — once as a real cost, again by
+# ignoring the money that came back in to cover it — understating margin by the job card's
+# amount even though the shop recovered it in full. Crediting it back nets the two to zero,
+# same as if the repair and its billed-through recovery had never happened. A job card cost
+# the shop chose NOT to bill through (no such line item added) still reduces margin normally,
+# since nothing offset the cost in that case.
 def _sale_revenue(s: dict) -> float:
-    return s.get("retained_amount", 0) if s.get("returned") else s.get("sale_price", 0)
+    if s.get("returned"):
+        return s.get("retained_amount", 0)
+    job_card_recovered = sum(
+        e.get("amount", 0) for e in s.get("extra_expenses", []) if str(e.get("name", "")).startswith("Job Card ")
+    )
+    return s.get("sale_price", 0) + job_card_recovered
 
 # A vehicle can be tied to a vendor two ways: the legacy vendor_id field, or the
 # newer linked_contact_type/id (set via the Customer/Vendor picker on the stock form).
