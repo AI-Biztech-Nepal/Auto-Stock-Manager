@@ -552,7 +552,7 @@ async def ai_chatbot(req: AIChatRequest, cu: dict = Depends(admin_only)):
     business_snapshot = await _build_ai_business_snapshot()
 
     system = (
-        f"You are the AI assistant for {settings.get('business_name', 'Hamro G n G Auto')}, "
+        f"You are the AI assistant for {settings.get('business_name', 'Hamro G&G Auto')}, "
         "a used motorbike/scooter dealership in Nepal. You're used both internally by dealership staff "
         "(who can ask about anything in the live data below — inventory, photos, prices, sales, dues, "
         "customers, vendors, parts stock, EMI) and to answer prospective-customer questions about "

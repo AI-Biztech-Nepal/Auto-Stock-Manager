@@ -274,7 +274,7 @@ export default function Dashboard() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Dashboard</h1>
-          <p className="text-sm text-slate-500 mt-0.5">Overview of Hamro G n G Auto operations</p>
+          <p className="text-sm text-slate-500 mt-0.5">Overview of Hamro G&G Auto operations</p>
         </div>
         {bsDateStr && (
           <div className="hidden sm:flex flex-col items-end gap-1.5">

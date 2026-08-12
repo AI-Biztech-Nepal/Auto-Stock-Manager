@@ -42,7 +42,7 @@ export default function Layout() {
       <div className="flex items-center gap-3 px-6 py-5 border-b border-slate-700">
         <div className="w-9 h-9 rounded-lg bg-blue-600 flex items-center justify-center font-bold text-white text-sm">GG</div>
         <div>
-          <div className="font-bold text-sm leading-tight" style={{ fontFamily: "Manrope, sans-serif" }}>Hamro G n G Auto</div>
+          <div className="font-bold text-sm leading-tight" style={{ fontFamily: "Manrope, sans-serif" }}>Hamro G&G Auto</div>
           <div className="text-xs text-slate-400">Inventory Manager</div>
         </div>
         {mobile && (

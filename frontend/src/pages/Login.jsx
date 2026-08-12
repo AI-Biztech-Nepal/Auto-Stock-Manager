@@ -71,7 +71,7 @@ export default function Login() {
           <div className="flex items-center gap-3 mb-8">
             <div className="w-11 h-11 rounded-xl bg-blue-600 flex items-center justify-center font-bold text-white text-lg">GG</div>
             <div>
-              <div className="font-bold text-slate-900 text-lg leading-tight" style={{ fontFamily: "Manrope, sans-serif" }}>Hamro G n G Auto</div>
+              <div className="font-bold text-slate-900 text-lg leading-tight" style={{ fontFamily: "Manrope, sans-serif" }}>Hamro G&G Auto</div>
               <div className="text-xs text-slate-500">Inventory Manager</div>
             </div>
           </div>

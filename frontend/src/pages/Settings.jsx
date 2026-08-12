@@ -267,7 +267,7 @@ export default function Settings() {
         <h2 className="text-base font-bold text-slate-900 mb-4" style={{ fontFamily: "Manrope" }}>System Information</h2>
         <div className="space-y-3 text-sm">
           {[
-            ["Business", "Hamro G n G Auto"],
+            ["Business", "Hamro G&G Auto"],
             ["Version", "1.0.0"],
             ["Currency", "NPR (Nepalese Rupee)"],
             ["AI Engine", "Google Gemini"],
