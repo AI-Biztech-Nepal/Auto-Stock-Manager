@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { Plus, Search, Wrench, X, Package, Pencil, ShoppingBag } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
@@ -67,12 +67,18 @@ export default function JobCards() {
   const [pendingComponent, setPendingComponent] = useState("");
   const [pendingComponentQty, setPendingComponentQty] = useState("1");
 
+  // Guards against out-of-order responses: fetchJobs is re-triggered after every create/
+  // update/delete, so if an older request resolves after a newer one, applying it would
+  // silently roll the visible list back and cards would appear to vanish/revert.
+  const fetchJobsSeq = useRef(0);
   const fetchJobs = useCallback(async () => {
+    const seq = ++fetchJobsSeq.current;
     try {
       const r = await api.get("/jobs");
+      if (seq !== fetchJobsSeq.current) return;
       setJobs(r.data);
-    } catch { toast.error("Failed to load jobs"); }
-    finally { setLoading(false); }
+    } catch { if (seq === fetchJobsSeq.current) toast.error("Failed to load jobs"); }
+    finally { if (seq === fetchJobsSeq.current) setLoading(false); }
   }, []);
 
   useEffect(() => {
@@ -301,12 +307,23 @@ export default function JobCards() {
     completed: jobs.filter(j => j.status === "completed").length,
   };
 
+  const hasActiveFilters = statusFilter !== "all" || vehicleStatusFilter !== "all" || search !== "";
+  const clearFilters = () => { setStatusFilter("all"); setVehicleStatusFilter("all"); setSearch(""); };
+
   return (
     <div className="space-y-5 animate-fade-in">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Job Cards</h1>
-          <p className="text-sm text-slate-500">{filtered.length} records</p>
+          <p className="text-sm text-slate-500">
+            {hasActiveFilters ? (
+              <>
+                {filtered.length} of {jobs.length} records
+                <span className="text-slate-400"> · filters active</span>
+                <button onClick={clearFilters} data-testid="job-clear-filters" className="ml-2 text-blue-600 hover:underline font-medium">Clear filters</button>
+              </>
+            ) : `${filtered.length} records`}
+          </p>
         </div>
         {canEdit && (
           <button onClick={openModal} data-testid="create-job-button" className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-3 rounded-lg transition-all active:scale-95 shadow-sm">
@@ -356,7 +373,14 @@ export default function JobCards() {
       {loading ? (
         <div className="flex items-center justify-center h-48"><div className="animate-spin w-7 h-7 border-4 border-blue-600 border-t-transparent rounded-full" /></div>
       ) : filtered.length === 0 ? (
-        <div className="bg-white rounded-xl border border-slate-200 p-12 text-center text-slate-500">No job cards found</div>
+        <div className="bg-white rounded-xl border border-slate-200 p-12 text-center text-slate-500">
+          {hasActiveFilters ? (
+            <>
+              No job cards match the current filters ({jobs.length} total hidden).{" "}
+              <button onClick={clearFilters} className="text-blue-600 hover:underline font-medium">Clear filters</button>
+            </>
+          ) : "No job cards found"}
+        </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {filtered.map(job => {
