@@ -104,11 +104,16 @@ export default function SoldStockDetail() {
       <div className="grid grid-cols-2 lg:grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-4">
         {[
           !hideFinancials && { label: "Purchase Price", value: formatNPR(vehicle.purchase_price) },
-          { label: "Total Expenses", value: formatNPR(vehicle.total_expenses) },
+          { label: "Total Expenses", value: formatNPR(vehicle.total_expenses), clickable: true },
           !isPartsOnly && { label: "Selling Price", value: formatNPR(vehicle.selling_price), bold: true },
           !hideFinancials && { label: "Realized Profit", value: vehicle.expected_profit !== null ? formatNPR(vehicle.expected_profit) : "N/A", highlight: vehicle.profit_margin !== null },
         ].filter(Boolean).map(c => (
-          <div key={c.label} className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 min-w-0">
+          <div
+            key={c.label}
+            onClick={c.clickable ? () => navigate(`/inventory/${id}`, { state: { openTab: "expenses" } }) : undefined}
+            data-testid={c.clickable ? "total-expenses-card" : undefined}
+            className={`bg-white rounded-xl border border-slate-200 shadow-sm p-4 min-w-0 ${c.clickable ? "cursor-pointer hover:border-blue-300 hover:shadow-md transition-all" : ""}`}
+          >
             <div className="text-xs text-slate-500 mb-1 truncate">{c.label}</div>
             <div className={`text-lg font-bold truncate ${c.highlight ? (vehicle.low_margin ? "text-red-600" : "text-green-600") : "text-slate-900"}`} style={{ fontFamily: "Manrope" }}>{c.value}</div>
             {c.label === "Realized Profit" && vehicle.profit_margin !== null && (

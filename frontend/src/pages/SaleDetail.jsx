@@ -378,11 +378,17 @@ export default function SaleDetail() {
                 // (reduces margin via Total Investment below), not billed to the
                 // customer, so it's deliberately left out of Grand Total/Amount Due.
                 sub: sale.job_card_cost > 0 ? `incl. ${formatNPR(sale.job_card_cost)} job card (not billed)` : null,
+                clickable: true,
               },
               { label: "Grand Total", value: formatNPR(sale.total_amount), bold: true },
               { label: "Amount Due", value: formatNPR(sale.due_amount || 0), highlight: sale.due_amount > 0 },
             ].map(c => (
-              <div key={c.label} className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 min-w-0">
+              <div
+                key={c.label}
+                onClick={c.clickable ? () => navigate(`/inventory/${sale.vehicle_id}`, { state: { openTab: "expenses" } }) : undefined}
+                data-testid={c.clickable ? "total-expenses-card" : undefined}
+                className={`bg-white rounded-xl border border-slate-200 shadow-sm p-4 min-w-0 ${c.clickable ? "cursor-pointer hover:border-blue-300 hover:shadow-md transition-all" : ""}`}
+              >
                 <div className="text-xs text-slate-500 mb-1 truncate">{c.label}</div>
                 <div className={`text-lg font-bold truncate ${c.highlight ? "text-red-600" : "text-slate-900"}`} style={{ fontFamily: "Manrope" }}>{c.value}</div>
                 {c.sub && <div className="text-[11px] text-slate-400 mt-0.5 truncate">{c.sub}</div>}

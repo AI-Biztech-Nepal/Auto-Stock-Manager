@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { Plus, Trash2, Edit, CheckCircle, AlertCircle, Clock, QrCode, Undo2, Store, User, Download, FileText } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
@@ -55,9 +55,12 @@ export function VehicleDetailModal({ id, onClose }) {
   const isPartsOnly = user?.role === "parts_supervisor";
   const hideFinancials = isFrontDesk || isPartsOnly;
   const canManageStock = hasFullVehicleAccess(user?.role);
+  // Deep links from Sales/Sold Stock (and elsewhere) can land here with a specific tab
+  // requested via navigation state, e.g. navigate(`/inventory/${id}`, { state: { openTab: "expenses" } }).
+  const location = useLocation();
   const [vehicle, setVehicle] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState("overview");
+  const [activeTab, setActiveTab] = useState(location.state?.openTab || "overview");
   const [showExpenseModal, setShowExpenseModal] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [expForm, setExpForm] = useState({ category: "servicing", amount: "", description: "", date: "" });
