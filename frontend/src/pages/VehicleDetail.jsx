@@ -350,8 +350,14 @@ export function VehicleDetailModal({ id, onClose }) {
             {financialCards.map(({ label, value, bold, highlight }) => {
               let textClass = "text-slate-900";
               if (highlight && !bold) textClass = vehicle.low_margin ? "text-red-600" : "text-green-600";
+              const isExpenses = label === "Total Expenses";
               return (
-                <div key={label} className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
+                <div
+                  key={label}
+                  onClick={isExpenses ? () => setActiveTab("expenses") : undefined}
+                  data-testid={isExpenses ? "total-expenses-card" : undefined}
+                  className={`bg-white rounded-xl border border-slate-200 shadow-sm p-4 ${isExpenses ? "cursor-pointer hover:border-blue-300 hover:shadow-md transition-all" : ""}`}
+                >
                   <div className="text-xs text-slate-500 mb-1">{label}</div>
                   <div className={`text-lg font-bold ${bold ? "text-slate-900" : textClass}`} style={{ fontFamily: "Manrope" }}>{value}</div>
                   {label.includes("Profit") && vehicle.profit_margin !== null && (
