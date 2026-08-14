@@ -891,7 +891,7 @@ async def register(req: RegisterRequest, cu: dict = Depends(get_current_user)):
 
 # ── VEHICLES ──────────────────────────────────────────────────────────
 @api_router.get("/vehicles")
-async def get_vehicles(status: Optional[str] = None, brand: Optional[str] = None, cu: dict = Depends(require("vehicles", "view"))):
+async def get_vehicles(request: Request, status: Optional[str] = None, brand: Optional[str] = None, cu: dict = Depends(require("vehicles", "view"))):
     q = {}
     if status and status != "all":
         statuses = [s.strip() for s in status.split(",") if s.strip()]
@@ -912,10 +912,14 @@ async def get_vehicles(status: Optional[str] = None, brand: Optional[str] = None
     jobs_by_vehicle: dict = {}
     for j in all_jobs:
         jobs_by_vehicle.setdefault(j["vehicle_id"], []).append(j)
-    # Batch-load each vehicle's photos in one query, so the frontend can show a few thumbnails
-    # directly on the inventory card (and filter for missing/insufficient photos) without an
-    # N+1 fetch of /vehicles/{id}/photos per row.
-    photo_docs = await db.vehicle_photos.find({"vehicle_id": {"$in": vehicle_ids}}, {"_id": 0}).sort("uploaded_at", 1).to_list(10000)
+    # Batch-load each vehicle's photo ids in one query (never the base64 `data` field — same
+    # projection as /public/vehicles), so the frontend can show a few thumbnails directly on the
+    # inventory card (and filter for missing/insufficient photos) without an N+1 fetch of
+    # /vehicles/{id}/photos per row, and without inflating this response with image bytes that
+    # the browser could otherwise cache via a stable URL (see _public_photo_url).
+    photo_docs = await db.vehicle_photos.find(
+        {"vehicle_id": {"$in": vehicle_ids}}, {"_id": 0, "id": 1, "vehicle_id": 1, "uploaded_at": 1}
+    ).sort("uploaded_at", 1).to_list(10000)
     photos_by_vehicle: dict = {}
     for p in photo_docs:
         photos_by_vehicle.setdefault(p["vehicle_id"], []).append(p)
@@ -936,9 +940,10 @@ async def get_vehicles(status: Optional[str] = None, brand: Optional[str] = None
         v["photo_count"] = len(vehicle_photos)
         v["has_photo"] = v["photo_count"] > 0
         # Card only shows a handful of thumbnails — cap it so the list payload doesn't
-        # balloon for vehicles with a large photo library.
+        # balloon for vehicles with a large photo library. Real URLs (not embedded base64)
+        # so the browser can cache each photo instead of re-downloading it on every load.
         v["thumb_photos"] = [
-            {"id": p["id"], "url": f"data:{p['content_type']};base64,{p['data']}"}
+            {"id": p["id"], "url": _public_photo_url(request, v["id"], p["id"])}
             for p in vehicle_photos[:3]
         ]
         return v
@@ -3318,15 +3323,31 @@ async def public_get_vehicle(vid: str, request: Request):
     item["photos"] = item["image_urls"]  # kept for backwards compatibility with earlier consumers
     return item
 
+_PHOTO_BYTES_CACHE: dict = {}  # photo_id -> (raw_bytes, content_type), see public_get_photo
+
 @api_router.get("/public/vehicles/{vid}/photos/{photo_id}")
 async def public_get_photo(vid: str, photo_id: str):
     """Serves a single vehicle photo as a real image response (not JSON) — this gives
     hamroauto.com.np (or any consumer) a stable HTTPS URL per photo, so it can be added
     to an image-CDN allowlist (e.g. Next.js next/image remotePatterns) instead of having
-    to handle inline base64 data URIs."""
-    p = await db.vehicle_photos.find_one({"id": photo_id, "vehicle_id": vid}, {"_id": 0})
-    if not p: raise HTTPException(404, "Photo not found")
-    return Response(content=base64.b64decode(p["data"]), media_type=p["content_type"])
+    to handle inline base64 data URIs. Also backs the inventory list's thumbnails, where a
+    single page can reference dozens of photos at once — each one now a separate request,
+    so an in-process cache keeps that from becoming dozens of MySQL round-trips competing
+    for the connection pool on every load. Safe because a photo_id's bytes never change
+    after upload (no "replace photo" endpoint, only upload-new/delete); capped so a very
+    large photo library can't grow this unbounded."""
+    cached = _PHOTO_BYTES_CACHE.get(photo_id)
+    if cached is None:
+        p = await db.vehicle_photos.find_one({"id": photo_id, "vehicle_id": vid}, {"_id": 0})
+        if not p: raise HTTPException(404, "Photo not found")
+        cached = (base64.b64decode(p["data"]), p["content_type"])
+        if len(_PHOTO_BYTES_CACHE) < 5000:
+            _PHOTO_BYTES_CACHE[photo_id] = cached
+    content, content_type = cached
+    return Response(
+        content=content, media_type=content_type,
+        headers={"Cache-Control": "public, max-age=31536000, immutable"},
+    )
 
 @api_router.get("/public/settings")
 async def public_get_settings():
