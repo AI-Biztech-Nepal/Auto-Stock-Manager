@@ -121,6 +121,7 @@ export default function Inventory() {
   // Opening a vehicle renders VehicleDetailModal inline instead of navigating to /inventory/:id,
   // so the Inventory page underneath stays mounted (no refetch, no lost scroll/filter state).
   const [selectedVehicleId, setSelectedVehicleId] = useState(null);
+  const [previewPhoto, setPreviewPhoto] = useState(null);
 
   // Flags registration numbers reused across more than one vehicle record — usually the same
   // vehicle logged twice by mistake, or a typo that collided with another plate. Left unnoticed
@@ -740,23 +741,43 @@ export default function Inventory() {
                   </div>
                 )}
 
-                <div className="flex items-center justify-end gap-1 pt-1 border-t border-slate-50">
-                  <button
-                    onClick={e => { e.stopPropagation(); setSelectedVehicleId(v.id); }}
-                    className="w-11 h-11 flex items-center justify-center hover:bg-slate-100 rounded-lg transition-colors"
-                    data-testid="view-vehicle-btn"
-                  >
-                    <Eye size={15} className="text-slate-500" />
-                  </button>
-                  {isAdmin && (
+                <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-50">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    {[0, 1, 2].map(i => {
+                      const photo = v.thumb_photos?.[i];
+                      return photo ? (
+                        <button
+                          key={photo.id}
+                          type="button"
+                          onClick={e => { e.stopPropagation(); setPreviewPhoto(photo.url); }}
+                          className="w-11 h-11 rounded-lg overflow-hidden border border-slate-200 shrink-0"
+                          data-testid="vehicle-card-photo"
+                        >
+                          <img src={photo.url} alt="" className="w-full h-full object-cover" />
+                        </button>
+                      ) : (
+                        <div key={i} className="w-11 h-11 rounded-lg border border-dashed border-slate-200 shrink-0" />
+                      );
+                    })}
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
                     <button
-                      onClick={e => handleDelete(v.id, e)}
-                      className="w-11 h-11 flex items-center justify-center hover:bg-red-50 rounded-lg transition-colors"
-                      data-testid="delete-vehicle-btn"
+                      onClick={e => { e.stopPropagation(); setSelectedVehicleId(v.id); }}
+                      className="w-11 h-11 flex items-center justify-center hover:bg-slate-100 rounded-lg transition-colors"
+                      data-testid="view-vehicle-btn"
                     >
-                      <Trash2 size={15} className="text-red-400" />
+                      <Eye size={15} className="text-slate-500" />
                     </button>
-                  )}
+                    {isAdmin && (
+                      <button
+                        onClick={e => handleDelete(v.id, e)}
+                        className="w-11 h-11 flex items-center justify-center hover:bg-red-50 rounded-lg transition-colors"
+                        data-testid="delete-vehicle-btn"
+                      >
+                        <Trash2 size={15} className="text-red-400" />
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
             );
@@ -797,6 +818,13 @@ export default function Inventory() {
           id={selectedVehicleId}
           onClose={() => { setSelectedVehicleId(null); fetchVehicles(); }}
         />
+      )}
+
+      {previewPhoto && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-4" onClick={() => setPreviewPhoto(null)}>
+          <button onClick={() => setPreviewPhoto(null)} className="absolute top-4 right-4 w-11 h-11 flex items-center justify-center rounded-lg bg-white/10 hover:bg-white/20 text-white">✕</button>
+          <img src={previewPhoto} alt="Vehicle full size" className="max-w-full max-h-full object-contain rounded-lg" onClick={e => e.stopPropagation()} />
+        </div>
       )}
     </div>
   );

@@ -912,14 +912,13 @@ async def get_vehicles(status: Optional[str] = None, brand: Optional[str] = None
     jobs_by_vehicle: dict = {}
     for j in all_jobs:
         jobs_by_vehicle.setdefault(j["vehicle_id"], []).append(j)
-    # Batch-load each vehicle's photo count in one query (projected to just the id field —
-    # photo docs carry a base64 image blob we don't want pulled into memory here), so the
-    # frontend can filter for missing/insufficient photos without an N+1 fetch of
-    # /vehicles/{id}/photos per row.
-    photo_docs = await db.vehicle_photos.find({"vehicle_id": {"$in": vehicle_ids}}, {"_id": 0, "vehicle_id": 1}).to_list(10000)
-    photo_count_by_vehicle: dict = {}
+    # Batch-load each vehicle's photos in one query, so the frontend can show a few thumbnails
+    # directly on the inventory card (and filter for missing/insufficient photos) without an
+    # N+1 fetch of /vehicles/{id}/photos per row.
+    photo_docs = await db.vehicle_photos.find({"vehicle_id": {"$in": vehicle_ids}}, {"_id": 0}).sort("uploaded_at", 1).to_list(10000)
+    photos_by_vehicle: dict = {}
     for p in photo_docs:
-        photo_count_by_vehicle[p["vehicle_id"]] = photo_count_by_vehicle.get(p["vehicle_id"], 0) + 1
+        photos_by_vehicle.setdefault(p["vehicle_id"], []).append(p)
     # Enrich each vehicle using pre-loaded expenses + job cards
     def enrich_with_expenses(v: dict, exps: list, jobs: list) -> dict:
         v["aging"] = stock_aging(v.get("purchase_date", ""))
@@ -933,8 +932,15 @@ async def get_vehicles(status: Optional[str] = None, brand: Optional[str] = None
             v["low_margin"] = v["profit_margin"] < 8
         else:
             v["expected_profit"] = None; v["profit_margin"] = None; v["low_margin"] = False
-        v["photo_count"] = photo_count_by_vehicle.get(v["id"], 0)
+        vehicle_photos = photos_by_vehicle.get(v["id"], [])
+        v["photo_count"] = len(vehicle_photos)
         v["has_photo"] = v["photo_count"] > 0
+        # Card only shows a handful of thumbnails — cap it so the list payload doesn't
+        # balloon for vehicles with a large photo library.
+        v["thumb_photos"] = [
+            {"id": p["id"], "url": f"data:{p['content_type']};base64,{p['data']}"}
+            for p in vehicle_photos[:3]
+        ]
         return v
     role = cu.get("role", "admin")
     return [_hide_financials_for_role(enrich_with_expenses(v, exps_by_vehicle.get(v["id"], []), jobs_by_vehicle.get(v["id"], [])), role) for v in vehicles]
