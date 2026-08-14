@@ -85,6 +85,7 @@ const PERIODS = [
 ];
 
 function AccountingSummary() {
+  const navigate = useNavigate();
   const [activePeriod, setActivePeriod] = useState("daily");
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -201,9 +202,13 @@ function AccountingSummary() {
       {/* Sales Highlight — follows the same period tabs as the KPIs above.
           Always rendered (even with zero sales) so the period doesn't look broken. */}
       <div className="bg-green-50 rounded-xl border border-green-200 shadow-sm p-4 mt-4" data-testid="recent-sales-section">
-        <div className="flex items-center gap-2 mb-3">
+        <div
+          onClick={() => navigate("/sales")}
+          data-testid="recent-sales-header"
+          className="flex items-center gap-2 mb-3 cursor-pointer group w-fit"
+        >
           <Sparkles size={16} className="text-green-600" />
-          <h2 className="text-sm font-bold text-green-900">
+          <h2 className="text-sm font-bold text-green-900 group-hover:underline">
             {activePeriod === "daily" ? "Today's Sale" : "Sale over a week"}
           </h2>
           <span className="text-xs font-medium text-green-700 bg-green-100 px-2 py-0.5 rounded-full">
@@ -215,8 +220,9 @@ function AccountingSummary() {
             {recentSales.map(s => (
               <div
                 key={s.id}
+                onClick={() => navigate(`/sold-stock/${s.vehicle_id}`)}
                 data-testid="recent-sale-card"
-                className="shrink-0 w-56 bg-white rounded-lg border border-green-100 shadow-sm p-3"
+                className="shrink-0 w-56 bg-white rounded-lg border border-green-100 shadow-sm p-3 cursor-pointer hover:shadow-md hover:border-green-300 transition-all"
               >
                 <div className="font-bold text-slate-900 text-sm truncate mb-1" style={{ fontFamily: "Manrope" }}>
                   {s.vehicle_info || "Vehicle"}
