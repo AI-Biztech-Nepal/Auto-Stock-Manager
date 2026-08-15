@@ -891,7 +891,7 @@ async def register(req: RegisterRequest, cu: dict = Depends(get_current_user)):
 
 # ── VEHICLES ──────────────────────────────────────────────────────────
 @api_router.get("/vehicles")
-async def get_vehicles(request: Request, status: Optional[str] = None, brand: Optional[str] = None, cu: dict = Depends(require("vehicles", "view"))):
+async def get_vehicles(status: Optional[str] = None, brand: Optional[str] = None, cu: dict = Depends(require("vehicles", "view"))):
     q = {}
     if status and status != "all":
         statuses = [s.strip() for s in status.split(",") if s.strip()]
@@ -942,8 +942,12 @@ async def get_vehicles(request: Request, status: Optional[str] = None, brand: Op
         # Card only shows a handful of thumbnails — cap it so the list payload doesn't
         # balloon for vehicles with a large photo library. Real URLs (not embedded base64)
         # so the browser can cache each photo instead of re-downloading it on every load.
+        # Relative (not absolute via _public_photo_url) since this endpoint is only ever
+        # consumed by our own frontend — a relative path resolves against whichever origin
+        # served the page (Vercel's proxy rewrite, or the VPS mirror directly), so the
+        # browser never has to open a direct connection to the VPS's sslip.io hostname.
         v["thumb_photos"] = [
-            {"id": p["id"], "url": _public_photo_url(request, v["id"], p["id"])}
+            {"id": p["id"], "url": f"/api/public/vehicles/{v['id']}/photos/{p['id']}"}
             for p in vehicle_photos[:3]
         ]
         return v
