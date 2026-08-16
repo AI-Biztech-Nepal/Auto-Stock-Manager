@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback, useMemo, useRef, useLayoutEffect } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { Plus, Search, Eye, Trash2, Filter, X, UploadCloud, EyeOff, Package, Wallet, DollarSign, Lock, Moon, Archive, Sparkles, Store, User, Wrench, Clock, CheckCircle2, AlertTriangle, ImageOff, ChevronDown } from "lucide-react";
+import { Plus, Search, Eye, Trash2, Filter, X, UploadCloud, Download, EyeOff, Package, Wallet, DollarSign, Lock, Moon, Archive, Sparkles, Store, User, Wrench, Clock, CheckCircle2, AlertTriangle, ImageOff, ChevronDown } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
 import { formatNPR, getAgingStyle, getStatusStyle, BRANDS, VEHICLE_STATUS_OPTIONS, formatOwnership } from "../utils/helpers";
@@ -118,6 +118,7 @@ export default function Inventory() {
   const [saving, setSaving] = useState(false);
   const [photos, setPhotos] = useState([]);
   const [hidingUnpriced, setHidingUnpriced] = useState(false);
+  const [exportingStock, setExportingStock] = useState(false);
   // Opening a vehicle renders VehicleDetailModal inline instead of navigating to /inventory/:id,
   // so the Inventory page underneath stays mounted (no refetch, no lost scroll/filter state).
   const [selectedVehicleId, setSelectedVehicleId] = useState(null);
@@ -237,6 +238,19 @@ export default function Inventory() {
     } finally { setHidingUnpriced(false); }
   };
 
+  const exportStock = async () => {
+    setExportingStock(true);
+    try {
+      const res = await api.get("/reports/inventory-pipeline-export", { responseType: "blob" });
+      const blob = new Blob([res.data], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = `GG_Auto_Inventory_Pipeline_${new Date().toISOString().slice(0, 10)}.xlsx`; a.click();
+      URL.revokeObjectURL(url);
+    } catch { toast.error("Failed to export stock"); }
+    finally { setExportingStock(false); }
+  };
+
   const clearStagedPhotos = () => {
     photos.forEach(p => URL.revokeObjectURL(p.previewUrl));
     setPhotos([]);
@@ -342,6 +356,19 @@ export default function Inventory() {
           <p className="text-sm text-slate-500">{filtered.length} vehicles found</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
+          <button
+            onClick={exportStock}
+            disabled={exportingStock}
+            data-testid="export-stock-button"
+            className="flex items-center gap-2 border border-slate-200 text-slate-700 text-sm font-medium px-4 py-3 rounded-lg hover:bg-slate-50 transition-all active:scale-95 disabled:opacity-60"
+          >
+            {exportingStock ? (
+              <div className="animate-spin w-4 h-4 border-2 border-slate-400 border-t-transparent rounded-full" />
+            ) : (
+              <Download size={16} />
+            )}
+            Export Stock
+          </button>
           {canManageStock && (
             <button
               onClick={() => navigate("/sold-stock")}

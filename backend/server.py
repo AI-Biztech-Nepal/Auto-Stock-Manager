@@ -2578,6 +2578,150 @@ async def monthly_closing_export(start_date: str, end_date: str, label: str, cu:
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
+# Pipeline order mirrors VEHICLE_STATUS_OPTIONS in frontend/src/utils/helpers.js (scrap
+# excluded there too — it's a terminal/do-not-disturb stage, not part of the live pipeline).
+_INVENTORY_PIPELINE_STATUSES = ["unlisted", "in_repair", "available", "reserved", "sold"]
+_INVENTORY_STATUS_LABELS = {"unlisted": "Unlisted", "in_repair": "In Repair", "available": "Available",
+                            "reserved": "Reserved", "sold": "Sold"}
+
+def _build_inventory_pipeline_xlsx(vehicles: list, prepared_by: str) -> bytes:
+    import openpyxl
+    template_path = ROOT_DIR / "report_templates" / "inventory_pipeline_template.xlsx"
+    wb = openpyxl.load_workbook(template_path)
+    ws = wb["Inventory Pipeline"]
+
+    def cell_style(row, col):
+        c = ws.cell(row=row, column=col)
+        return {"font": copy.copy(c.font), "fill": copy.copy(c.fill), "border": copy.copy(c.border),
+                "alignment": copy.copy(c.alignment), "number_format": c.number_format}
+
+    data_row_style_odd = {col: cell_style(5, col) for col in range(1, 10)}
+    data_row_style_even = {col: cell_style(6, col) for col in range(1, 10)}
+
+    def apply_style(cell, style):
+        cell.font = style["font"]; cell.fill = style["fill"]; cell.border = style["border"]
+        cell.alignment = style["alignment"]; cell.number_format = style["number_format"]
+
+    FIRST_ROW = 5
+    ORIG_LAST_ROW = 40  # template's built-in range before any extension
+    n = max(len(vehicles), 1)
+    last_row = FIRST_ROW + n - 1
+    extra_rows = max(last_row - ORIG_LAST_ROW, 0)
+
+    # Capture summary/legend styles + text before touching anything below the original range.
+    orig_summary_title_row, orig_summary_labels_row, orig_summary_values_row = 42, 43, 44
+    orig_legend_header_row = 46
+    summary_title_style = cell_style(orig_summary_title_row, 1)
+    summary_title_text = ws.cell(row=orig_summary_title_row, column=1).value
+    summary_label_styles = [cell_style(orig_summary_labels_row, c) for c in range(1, 7)]
+    summary_label_texts = [ws.cell(row=orig_summary_labels_row, column=c).value for c in range(1, 7)]
+    summary_value_styles = [cell_style(orig_summary_values_row, c) for c in range(1, 7)]
+    legend_header_style = cell_style(orig_legend_header_row, 1)
+    legend_line_styles = [cell_style(47 + i, 1) for i in range(5)]
+    legend_texts = [ws.cell(row=47 + i, column=1).value for i in range(5)]
+
+    for rng in list(ws.merged_cells.ranges):
+        if rng.min_row >= 5:
+            ws.unmerge_cells(str(rng))
+    for row in ws.iter_rows(min_row=5, max_row=51, max_col=9):
+        for c in row:
+            c.value = None
+
+    ws["A1"] = "G&G Auto – Vehicle Inventory Pipeline"
+    today = datetime.now(timezone.utc).date().isoformat()
+    ws["A2"] = f"As of:  {today}        Prepared By:  {prepared_by or '________'}"
+
+    def vehicle_label(v):
+        parts = [v["brand"].strip(), v["model"].strip()]
+        if v.get("year"): parts.append(str(v["year"]))
+        return " ".join(parts)
+
+    for i in range(n):
+        row = FIRST_ROW + i
+        v = vehicles[i] if i < len(vehicles) else None
+        if v:
+            reg_or_chassis = v.get("registration_number") or v.get("chassis_number") or ""
+            values = {
+                1: f'=IF(C{row}="","",ROW()-{FIRST_ROW}+1)',
+                2: v.get("purchase_date") or "", 3: vehicle_label(v), 4: reg_or_chassis,
+                5: v.get("purchase_price") or 0, 6: _INVENTORY_STATUS_LABELS.get(v["status"], v["status"]),
+                7: f'=IF(OR(C{row}="",B{row}=""),"",TODAY()-B{row})',
+                8: v.get("selling_price") or 0, 9: v.get("notes") or "",
+            }
+        else:
+            values = {1: f'=IF(C{row}="","",ROW()-{FIRST_ROW}+1)',
+                      7: f'=IF(OR(C{row}="",B{row}=""),"",TODAY()-B{row})'}
+        row_style = data_row_style_odd if i % 2 == 0 else data_row_style_even
+        for col in range(1, 10):
+            cell = ws.cell(row=row, column=col, value=values.get(col))
+            apply_style(cell, row_style[col])
+
+    # Status dropdown + conditional-formatting range, widened to match however many rows
+    # were actually written (template ships scoped to F5:F40 only) — see the identical
+    # issue/fix for the Sales Closing template's Status column, above.
+    for dv in ws.data_validations.dataValidation:
+        if str(dv.sqref).startswith("F5"):
+            dv.sqref = f"F{FIRST_ROW}:F{last_row}"
+    status_cf_rules = []
+    for cf in list(ws.conditional_formatting):
+        if str(cf.sqref).startswith("F5"):
+            status_cf_rules = list(cf.rules)
+            del ws.conditional_formatting._cf_rules[cf]
+    for rule in status_cf_rules:
+        ws.conditional_formatting.add(f"F{FIRST_ROW}:F{last_row}", rule)
+
+    # ── Summary + legend, shifted down by however many extra rows we needed ────────────
+    summary_title_row = orig_summary_title_row + extra_rows
+    summary_labels_row = orig_summary_labels_row + extra_rows
+    summary_values_row = orig_summary_values_row + extra_rows
+    legend_header_row = orig_legend_header_row + extra_rows
+
+    ws.cell(row=summary_title_row, column=1, value=summary_title_text)
+    apply_style(ws.cell(row=summary_title_row, column=1), summary_title_style)
+    ws.merge_cells(start_row=summary_title_row, start_column=1, end_row=summary_title_row, end_column=9)
+
+    for c in range(1, 7):
+        cell = ws.cell(row=summary_labels_row, column=c, value=summary_label_texts[c - 1])
+        apply_style(cell, summary_label_styles[c - 1])
+    status_formulas = {
+        1: f'=COUNTIF(F{FIRST_ROW}:F{last_row},"Available")',
+        2: f'=COUNTIF(F{FIRST_ROW}:F{last_row},"Unlisted")',
+        3: f'=COUNTIF(F{FIRST_ROW}:F{last_row},"In Repair")',
+        4: f'=COUNTIF(F{FIRST_ROW}:F{last_row},"Reserved")',
+        5: f'=COUNTIF(F{FIRST_ROW}:F{last_row},"Sold")',
+        6: f'=COUNTIF(C{FIRST_ROW}:C{last_row},"?*")-COUNTIF(F{FIRST_ROW}:F{last_row},"Sold")',
+    }
+    for c in range(1, 7):
+        cell = ws.cell(row=summary_values_row, column=c, value=status_formulas[c])
+        apply_style(cell, summary_value_styles[c - 1])
+
+    lr = legend_header_row
+    ws.cell(row=lr, column=1, value="Legend:")
+    apply_style(ws.cell(row=lr, column=1), legend_header_style)
+    ws.merge_cells(start_row=lr, start_column=1, end_row=lr, end_column=9)
+    for i, text in enumerate(legend_texts):
+        r = lr + 1 + i
+        ws.cell(row=r, column=1, value=text)
+        apply_style(ws.cell(row=r, column=1), legend_line_styles[i])
+        ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=9)
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+@api_router.get("/reports/inventory-pipeline-export")
+async def inventory_pipeline_export(cu: dict = Depends(require("vehicles", "view"))):
+    vehicles = await db.vehicles.find({"status": {"$ne": "scrap"}}, {"_id": 0}).to_list(5000)
+    order = {s: i for i, s in enumerate(_INVENTORY_PIPELINE_STATUSES)}
+    vehicles.sort(key=lambda v: (order.get(v.get("status"), 99), v.get("purchase_date") or ""))
+    xlsx_bytes = _build_inventory_pipeline_xlsx(vehicles, cu.get("username", ""))
+    today = datetime.now(timezone.utc).date().isoformat()
+    return StreamingResponse(
+        io.BytesIO(xlsx_bytes),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="GG_Auto_Inventory_Pipeline_{today}.xlsx"'},
+    )
+
 # ── ACCOUNTING SUMMARY ────────────────────────────────────────────────
 @api_router.get("/reports/accounting-summary")
 async def accounting_summary(start_date: str, end_date: str, cu: dict = Depends(admin_only)):
