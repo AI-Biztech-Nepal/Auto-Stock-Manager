@@ -55,14 +55,21 @@ export function getBSMonthMaxDays(year, month) {
   return 30;
 }
 
+// AD range for any given BS year/month → { start: "YYYY-MM-DD", end: "YYYY-MM-DD" }
+export function getBSMonthRange(year, month) {
+  const start = bsToAdDate(year, month, 1);
+  if (!start) return null;
+  const maxDay = getBSMonthMaxDays(year, month);
+  const end = bsToAdDate(year, month, maxDay);
+  return { start, end };
+}
+
 // AD range for the current BS month → { start: "YYYY-MM-DD", end: "YYYY-MM-DD", bsYear, bsMonth }
 export function getCurrentBSMonthRange() {
   const bs = getCurrentBSDate();
   if (!bs) return null;
-  const start = bsToAdDate(bs.year, bs.month, 1);
-  const maxDay = getBSMonthMaxDays(bs.year, bs.month);
-  const end = bsToAdDate(bs.year, bs.month, maxDay);
-  return { start, end, bsYear: bs.year, bsMonth: bs.month };
+  const range = getBSMonthRange(bs.year, bs.month);
+  return range ? { ...range, bsYear: bs.year, bsMonth: bs.month } : null;
 }
 
 // AD range for the current BS year → { start, end, bsYear }

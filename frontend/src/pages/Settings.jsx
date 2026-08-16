@@ -124,7 +124,7 @@ export default function Settings() {
         </div>
       </div>
 
-      {/* Storefront Settings (Super admin only) */}
+      {/* Storefront Settings (Admin only) */}
       {isAdmin && (
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
           <h2 className="text-base font-bold text-slate-900 mb-1" style={{ fontFamily: "Manrope" }}>Storefront Settings</h2>
@@ -224,7 +224,7 @@ export default function Settings() {
         </form>
       </div>
 
-      {/* Storage Usage (Super admin only) */}
+      {/* Storage Usage (Admin only) */}
       {isAdmin && storage && (
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6" data-testid="storage-usage-card">
           <h2 className="text-base font-bold text-slate-900 mb-1" style={{ fontFamily: "Manrope" }}>Storage Usage</h2>

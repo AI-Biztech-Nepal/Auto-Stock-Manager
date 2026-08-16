@@ -42,8 +42,35 @@ export const AuthProvider = ({ children }) => {
     localStorage.removeItem("gng_token");
   };
 
+  // super_admin "entering" a company: stash the super_admin session aside so
+  // exitCompany() can restore it, then log in as the company-scoped user —
+  // every existing page/API call keeps working unmodified since it's just login().
+  const enterCompany = (companyUser, companyToken) => {
+    const currentUser = storage.get("gng_user");
+    let currentToken = null;
+    try { currentToken = localStorage.getItem("gng_token") || null; } catch { currentToken = null; }
+    if (currentUser && currentToken) {
+      storage.set("gng_super_user", currentUser);
+      localStorage.setItem("gng_super_token", currentToken);
+    }
+    login(companyUser, companyToken);
+  };
+
+  const exitCompany = () => {
+    const superUser = storage.get("gng_super_user");
+    let superToken = null;
+    try { superToken = localStorage.getItem("gng_super_token") || null; } catch { superToken = null; }
+    if (superUser && superToken) {
+      login(superUser, superToken);
+      storage.remove("gng_super_user");
+      localStorage.removeItem("gng_super_token");
+    }
+  };
+
+  const isImpersonating = !!storage.get("gng_super_user");
+
   return (
-    <AuthContext.Provider value={{ user, token, login, logout }}>
+    <AuthContext.Provider value={{ user, token, login, logout, enterCompany, exitCompany, isImpersonating }}>
       {children}
     </AuthContext.Provider>
   );

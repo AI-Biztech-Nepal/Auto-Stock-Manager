@@ -5,6 +5,7 @@ import { Toaster } from "sonner";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import { canAccessPath, ROLE_DEFAULT_PATH } from "./utils/permissions";
 import Layout from "./components/Layout";
+import SuperAdminLayout from "./components/SuperAdminLayout";
 
 // Route-level code splitting: previously every page was imported eagerly here,
 // so the browser downloaded and parsed the whole app's JS before the first
@@ -32,6 +33,7 @@ const SoldStock = lazy(() => import("./pages/SoldStock"));
 const SoldStockDetail = lazy(() => import("./pages/SoldStockDetail"));
 const ImportStock = lazy(() => import("./pages/ImportStock"));
 const Leads = lazy(() => import("./pages/Leads"));
+const SuperAdmin = lazy(() => import("./pages/SuperAdmin"));
 
 const RouteFallback = () => (
   <div className="flex items-center justify-center h-64">
@@ -95,6 +97,16 @@ function AppRoutes() {
           <Route path="ai" element={<RoleRoute path="/ai"><AIAssistant /></RoleRoute>} />
           <Route path="settings" element={<Settings />} />
         </Route>
+        <Route
+          path="/super-admin"
+          element={
+            <ProtectedRoute>
+              <RoleRoute path="/super-admin">
+                <SuperAdminLayout><SuperAdmin /></SuperAdminLayout>
+              </RoleRoute>
+            </ProtectedRoute>
+          }
+        />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </Suspense>
