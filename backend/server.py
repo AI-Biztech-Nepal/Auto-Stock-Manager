@@ -9,7 +9,7 @@ from passlib.context import CryptContext
 from typing import Optional, List
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
-import os, logging, jwt, uuid, json, base64, io, asyncio, re
+import os, logging, jwt, uuid, json, base64, io, asyncio, re, copy
 from pydantic import BaseModel, Field
 from PIL import Image, ImageOps
 import pillow_heif
@@ -912,10 +912,14 @@ async def get_vehicles(status: Optional[str] = None, brand: Optional[str] = None
     jobs_by_vehicle: dict = {}
     for j in all_jobs:
         jobs_by_vehicle.setdefault(j["vehicle_id"], []).append(j)
-    # Batch-load each vehicle's photos in one query, so the frontend can show a few thumbnails
-    # directly on the inventory card (and filter for missing/insufficient photos) without an
-    # N+1 fetch of /vehicles/{id}/photos per row.
-    photo_docs = await db.vehicle_photos.find({"vehicle_id": {"$in": vehicle_ids}}, {"_id": 0}).sort("uploaded_at", 1).to_list(10000)
+    # Batch-load each vehicle's photo ids in one query (never the base64 `data` field — same
+    # projection as /public/vehicles), so the frontend can show a few thumbnails directly on the
+    # inventory card (and filter for missing/insufficient photos) without an N+1 fetch of
+    # /vehicles/{id}/photos per row, and without inflating this response with image bytes that
+    # the browser could otherwise cache via a stable URL (see _public_photo_url).
+    photo_docs = await db.vehicle_photos.find(
+        {"vehicle_id": {"$in": vehicle_ids}}, {"_id": 0, "id": 1, "vehicle_id": 1, "uploaded_at": 1}
+    ).sort("uploaded_at", 1).to_list(10000)
     photos_by_vehicle: dict = {}
     for p in photo_docs:
         photos_by_vehicle.setdefault(p["vehicle_id"], []).append(p)
@@ -936,9 +940,14 @@ async def get_vehicles(status: Optional[str] = None, brand: Optional[str] = None
         v["photo_count"] = len(vehicle_photos)
         v["has_photo"] = v["photo_count"] > 0
         # Card only shows a handful of thumbnails — cap it so the list payload doesn't
-        # balloon for vehicles with a large photo library.
+        # balloon for vehicles with a large photo library. Real URLs (not embedded base64)
+        # so the browser can cache each photo instead of re-downloading it on every load.
+        # Relative (not absolute via _public_photo_url) since this endpoint is only ever
+        # consumed by our own frontend — a relative path resolves against whichever origin
+        # served the page (Vercel's proxy rewrite, or the VPS mirror directly), so the
+        # browser never has to open a direct connection to the VPS's sslip.io hostname.
         v["thumb_photos"] = [
-            {"id": p["id"], "url": f"data:{p['content_type']};base64,{p['data']}"}
+            {"id": p["id"], "url": f"/api/public/vehicles/{v['id']}/photos/{p['id']}"}
             for p in vehicle_photos[:3]
         ]
         return v
@@ -2381,6 +2390,338 @@ async def financial_report(cu: dict = Depends(admin_only)):
                        "profit_share": round(total_profit * p["stake_percentage"] / 100, 2)} for p in partners]
     return {"monthly_breakdown": monthly, "total_profit": total_profit, "partner_shares": partner_shares}
 
+# Sale rows enriched with everything the Finance tab's Monthly Breakdown (grouped into
+# real BS months client-side, since all BS/AD conversion already lives in the frontend —
+# see nepali-date.js) and its per-month closing-report export need. "extra_expense" here
+# means repair/prep cost only (vehicle_photos... no — db.expenses + non-warranty job cards),
+# deliberately excluding purchase_price: that split matches the approved Excel template's
+# own definition ("not part of what the customer owes"), not the broader "investment"
+# figure (purchase price + accessories + repair cost) used for profit elsewhere.
+async def _enriched_sales_for_closing(start_date: Optional[str] = None, end_date: Optional[str] = None):
+    query = {}
+    if start_date and end_date:
+        query["sale_date"] = {"$gte": start_date, "$lte": end_date}
+    sales = await db.sales.find(query, {"_id": 0}).sort("sale_date", 1).to_list(5000)
+    vehicle_ids = list({s["vehicle_id"] for s in sales if s.get("vehicle_id")})
+    customer_ids = list({s["customer_id"] for s in sales if s.get("customer_id")})
+    vehicles_by_id, customers_by_id = {}, {}
+    if vehicle_ids:
+        vs = await db.vehicles.find({"id": {"$in": vehicle_ids}}, {"_id": 0}).to_list(len(vehicle_ids))
+        vehicles_by_id = {v["id"]: v for v in vs}
+    if customer_ids:
+        cs = await db.customers.find({"id": {"$in": customer_ids}}, {"_id": 0, "id": 1, "name": 1, "contact_number": 1}).to_list(len(customer_ids))
+        customers_by_id = {c["id"]: c for c in cs}
+    exps_by_vehicle: dict = {}
+    jobs_by_vehicle: dict = {}
+    if vehicle_ids:
+        all_exps = await db.expenses.find({"vehicle_id": {"$in": vehicle_ids}}, {"_id": 0}).to_list(20000)
+        for e in all_exps:
+            exps_by_vehicle.setdefault(e["vehicle_id"], []).append(e)
+        all_jobs = await db.job_cards.find({"vehicle_id": {"$in": vehicle_ids}, "is_warranty": {"$ne": True}}, {"_id": 0}).to_list(20000)
+        for j in all_jobs:
+            jobs_by_vehicle.setdefault(j["vehicle_id"], []).append(j)
+
+    out = []
+    for s in sales:
+        v = vehicles_by_id.get(s.get("vehicle_id"))
+        c = customers_by_id.get(s.get("customer_id"))
+        repair_cost = (sum(e.get("amount", 0) for e in exps_by_vehicle.get(s.get("vehicle_id"), []))
+                       + sum(_job_card_cost(j) for j in jobs_by_vehicle.get(s.get("vehicle_id"), [])))
+        investment = (v.get("purchase_price", 0) + v.get("accessories_cost", 0) + repair_cost) if v else 0
+        vehicle_label = "Vehicle removed"
+        if v:
+            parts = [v["brand"], v["model"]]
+            if v.get("year"): parts.append(str(v["year"]))
+            vehicle_label = " ".join(parts) + (f" ({v['registration_number']})" if v.get("registration_number") else "")
+        out.append({
+            "id": s["id"], "sale_date": s.get("sale_date"),
+            "sale_price": s.get("sale_price", 0) or 0,
+            "due_amount": s.get("due_amount", 0) or 0,
+            "returned": bool(s.get("returned")),
+            "retained_amount": s.get("retained_amount"),
+            "vehicle_label": vehicle_label,
+            "customer_name": c["name"] if c else "Walk-in",
+            "customer_contact": c.get("contact_number") if c else None,
+            "extra_expense": round(repair_cost, 2),
+            "investment": round(investment, 2),
+        })
+    return out
+
+@api_router.get("/reports/monthly-breakdown-bs")
+async def monthly_breakdown_bs(cu: dict = Depends(admin_only)):
+    """All sales, enriched — the frontend buckets these into real Bikram Sambat months
+    (see Finance.jsx) instead of the Gregorian-month grouping /reports/financial uses."""
+    return await _enriched_sales_for_closing()
+
+def _build_closing_report_xlsx(rows: list, month_label: str, prepared_by: str) -> bytes:
+    import openpyxl
+    from openpyxl.styles import PatternFill
+
+    template_path = ROOT_DIR / "report_templates" / "sales_closing_template.xlsx"
+    wb = openpyxl.load_workbook(template_path)
+    ws = wb["Sales Closing"]
+
+    def cell_style(row, col):
+        c = ws.cell(row=row, column=col)
+        return {"font": copy.copy(c.font), "fill": copy.copy(c.fill), "border": copy.copy(c.border),
+                "alignment": copy.copy(c.alignment), "number_format": c.number_format}
+
+    # Template rows alternate white/light-gray banding (row 5 white, row 6 gray, ...) —
+    # capture both so generated rows keep that banding instead of all coming out white.
+    data_row_style_odd = {col: cell_style(5, col) for col in range(1, 11)}
+    data_row_style_even = {col: cell_style(6, col) for col in range(1, 11)}
+    total_row_style = {col: cell_style(36, col) for col in range(1, 11)}
+    legend_header_style = cell_style(38, 1)
+    legend_line_styles = [cell_style(39 + i, 1) for i in range(4)]
+    legend_texts = [ws.cell(row=39 + i, column=1).value for i in range(4)]
+    total_label = ws.cell(row=36, column=1).value
+
+    def apply_style(cell, style):
+        cell.font = style["font"]; cell.fill = style["fill"]; cell.border = style["border"]
+        cell.alignment = style["alignment"]; cell.number_format = style["number_format"]
+
+    for rng in list(ws.merged_cells.ranges):
+        if rng.min_row >= 5:
+            ws.unmerge_cells(str(rng))
+    for row in ws.iter_rows(min_row=5, max_row=42, max_col=10):
+        for c in row:
+            c.value = None
+
+    ws["A1"] = f"G&G Auto – Closing Report for the Month of {month_label}"
+    today = datetime.now(timezone.utc).date().isoformat()
+    ws["A2"] = f"Report Month:  {month_label}        Prepared By:  {prepared_by or '________'}        Date Prepared:  {today}"
+
+    RETURNED_FILL = PatternFill(start_color="FFF2CC", end_color="FFF2CC", fill_type="solid")
+    FIRST_ROW = 5
+    n = max(len(rows), 1)
+    last_row = FIRST_ROW + n - 1
+    total_row = last_row + 1
+
+    # The template's Status-column conditional formatting (green "Paid" / red "Due") is
+    # scoped to its original J5:J35 range — widen it to match however many rows we
+    # actually write, or anything past row 35 renders with no color at all. openpyxl's
+    # ConditionalFormatting objects are keyed by identity in an internal dict, so the
+    # range can't be mutated in place; remove the old entry and re-add the same rules
+    # under the new range instead.
+    status_cf_rules = []
+    for cf in list(ws.conditional_formatting):
+        if str(cf.sqref).startswith("J5"):
+            status_cf_rules = list(cf.rules)
+            del ws.conditional_formatting._cf_rules[cf]
+    for rule in status_cf_rules:
+        ws.conditional_formatting.add(f"J{FIRST_ROW}:J{last_row}", rule)
+
+    for i in range(n):
+        row = FIRST_ROW + i
+        s = rows[i] if i < len(rows) else None
+        if s:
+            is_returned = s["returned"]
+            selling_price = float(s["retained_amount"] or 0) if is_returned else float(s["sale_price"] or 0)
+            due = 0.0 if is_returned else float(s["due_amount"] or 0)
+            values = {
+                1: f'=IF(C{row}="","",ROW()-{FIRST_ROW}+1)', 2: s["sale_date"], 3: s["vehicle_label"],
+                4: s["customer_name"] or "Walk-in", 5: s["customer_contact"] or "",
+                6: selling_price, 7: s["extra_expense"], 8: due,
+                9: f'=IF(C{row}="","",F{row}-H{row})',
+                10: "Returned" if is_returned else f'=IF(C{row}="","",IF(H{row}=0,"Paid","Due"))',
+            }
+        else:
+            is_returned = False
+            values = {1: f'=IF(C{row}="","",ROW()-{FIRST_ROW}+1)', 9: f'=IF(C{row}="","",F{row}-H{row})',
+                      10: f'=IF(C{row}="","",IF(H{row}=0,"Paid","Due"))'}
+        row_style = data_row_style_odd if i % 2 == 0 else data_row_style_even
+        for col in range(1, 11):
+            cell = ws.cell(row=row, column=col, value=values.get(col))
+            apply_style(cell, row_style[col])
+            if is_returned:
+                cell.fill = RETURNED_FILL
+
+    ws.cell(row=total_row, column=1, value=total_label)
+    ws.merge_cells(start_row=total_row, start_column=1, end_row=total_row, end_column=5)
+    ws.cell(row=total_row, column=6, value=f"=SUM(F{FIRST_ROW}:F{last_row})")
+    ws.cell(row=total_row, column=7, value=f"=SUM(G{FIRST_ROW}:G{last_row})")
+    ws.cell(row=total_row, column=8, value=f"=SUM(H{FIRST_ROW}:H{last_row})")
+    ws.cell(row=total_row, column=9, value=f"=SUM(I{FIRST_ROW}:I{last_row})")
+    ws.cell(row=total_row, column=10, value=f'=COUNTIF(C{FIRST_ROW}:C{last_row},"?*")&" bikes"')
+    for col in range(1, 11):
+        apply_style(ws.cell(row=total_row, column=col), total_row_style[col])
+
+    lr = total_row + 2
+    ws.cell(row=lr, column=1, value="Legend:")
+    apply_style(ws.cell(row=lr, column=1), legend_header_style)
+    ws.merge_cells(start_row=lr, start_column=1, end_row=lr, end_column=10)
+    for i, text in enumerate(legend_texts):
+        r = lr + 1 + i
+        ws.cell(row=r, column=1, value=text)
+        apply_style(ws.cell(row=r, column=1), legend_line_styles[i])
+        ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=10)
+    note_row = lr + 1 + len(legend_texts)
+    ws.cell(row=note_row, column=1,
+            value="• Rows highlighted in yellow are sales that were later returned/refunded — Selling Price shown is the amount actually retained, not the original sale price.")
+    apply_style(ws.cell(row=note_row, column=1), legend_line_styles[-1])
+    ws.cell(row=note_row, column=1).fill = RETURNED_FILL
+    ws.merge_cells(start_row=note_row, start_column=1, end_row=note_row, end_column=10)
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+@api_router.get("/reports/monthly-closing-export")
+async def monthly_closing_export(start_date: str, end_date: str, label: str, cu: dict = Depends(admin_only)):
+    rows = await _enriched_sales_for_closing(start_date, end_date)
+    xlsx_bytes = _build_closing_report_xlsx(rows, label, cu.get("username", ""))
+    safe_label = re.sub(r"[^A-Za-z0-9]+", "_", label).strip("_")
+    filename = f"GG_Auto_Closing_Report_{safe_label}.xlsx"
+    return StreamingResponse(
+        io.BytesIO(xlsx_bytes),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+# Pipeline order mirrors VEHICLE_STATUS_OPTIONS in frontend/src/utils/helpers.js (scrap
+# excluded there too — it's a terminal/do-not-disturb stage, not part of the live pipeline).
+_INVENTORY_PIPELINE_STATUSES = ["unlisted", "in_repair", "available", "reserved", "sold"]
+_INVENTORY_STATUS_LABELS = {"unlisted": "Unlisted", "in_repair": "In Repair", "available": "Available",
+                            "reserved": "Reserved", "sold": "Sold"}
+
+def _build_inventory_pipeline_xlsx(vehicles: list, prepared_by: str) -> bytes:
+    import openpyxl
+    template_path = ROOT_DIR / "report_templates" / "inventory_pipeline_template.xlsx"
+    wb = openpyxl.load_workbook(template_path)
+    ws = wb["Inventory Pipeline"]
+
+    def cell_style(row, col):
+        c = ws.cell(row=row, column=col)
+        return {"font": copy.copy(c.font), "fill": copy.copy(c.fill), "border": copy.copy(c.border),
+                "alignment": copy.copy(c.alignment), "number_format": c.number_format}
+
+    data_row_style_odd = {col: cell_style(5, col) for col in range(1, 10)}
+    data_row_style_even = {col: cell_style(6, col) for col in range(1, 10)}
+
+    def apply_style(cell, style):
+        cell.font = style["font"]; cell.fill = style["fill"]; cell.border = style["border"]
+        cell.alignment = style["alignment"]; cell.number_format = style["number_format"]
+
+    FIRST_ROW = 5
+    ORIG_LAST_ROW = 40  # template's built-in range before any extension
+    n = max(len(vehicles), 1)
+    last_row = FIRST_ROW + n - 1
+    extra_rows = max(last_row - ORIG_LAST_ROW, 0)
+
+    # Capture summary/legend styles + text before touching anything below the original range.
+    orig_summary_title_row, orig_summary_labels_row, orig_summary_values_row = 42, 43, 44
+    orig_legend_header_row = 46
+    summary_title_style = cell_style(orig_summary_title_row, 1)
+    summary_title_text = ws.cell(row=orig_summary_title_row, column=1).value
+    summary_label_styles = [cell_style(orig_summary_labels_row, c) for c in range(1, 7)]
+    summary_label_texts = [ws.cell(row=orig_summary_labels_row, column=c).value for c in range(1, 7)]
+    summary_value_styles = [cell_style(orig_summary_values_row, c) for c in range(1, 7)]
+    legend_header_style = cell_style(orig_legend_header_row, 1)
+    legend_line_styles = [cell_style(47 + i, 1) for i in range(5)]
+    legend_texts = [ws.cell(row=47 + i, column=1).value for i in range(5)]
+
+    for rng in list(ws.merged_cells.ranges):
+        if rng.min_row >= 5:
+            ws.unmerge_cells(str(rng))
+    for row in ws.iter_rows(min_row=5, max_row=51, max_col=9):
+        for c in row:
+            c.value = None
+
+    ws["A1"] = "G&G Auto – Vehicle Inventory Pipeline"
+    today = datetime.now(timezone.utc).date().isoformat()
+    ws["A2"] = f"As of:  {today}        Prepared By:  {prepared_by or '________'}"
+
+    def vehicle_label(v):
+        parts = [v["brand"].strip(), v["model"].strip()]
+        if v.get("year"): parts.append(str(v["year"]))
+        return " ".join(parts)
+
+    for i in range(n):
+        row = FIRST_ROW + i
+        v = vehicles[i] if i < len(vehicles) else None
+        if v:
+            reg_or_chassis = v.get("registration_number") or v.get("chassis_number") or ""
+            values = {
+                1: f'=IF(C{row}="","",ROW()-{FIRST_ROW}+1)',
+                2: v.get("purchase_date") or "", 3: vehicle_label(v), 4: reg_or_chassis,
+                5: v.get("purchase_price") or 0, 6: _INVENTORY_STATUS_LABELS.get(v["status"], v["status"]),
+                7: f'=IF(OR(C{row}="",B{row}=""),"",TODAY()-B{row})',
+                8: v.get("selling_price") or 0, 9: v.get("notes") or "",
+            }
+        else:
+            values = {1: f'=IF(C{row}="","",ROW()-{FIRST_ROW}+1)',
+                      7: f'=IF(OR(C{row}="",B{row}=""),"",TODAY()-B{row})'}
+        row_style = data_row_style_odd if i % 2 == 0 else data_row_style_even
+        for col in range(1, 10):
+            cell = ws.cell(row=row, column=col, value=values.get(col))
+            apply_style(cell, row_style[col])
+
+    # Status dropdown + conditional-formatting range, widened to match however many rows
+    # were actually written (template ships scoped to F5:F40 only) — see the identical
+    # issue/fix for the Sales Closing template's Status column, above.
+    for dv in ws.data_validations.dataValidation:
+        if str(dv.sqref).startswith("F5"):
+            dv.sqref = f"F{FIRST_ROW}:F{last_row}"
+    status_cf_rules = []
+    for cf in list(ws.conditional_formatting):
+        if str(cf.sqref).startswith("F5"):
+            status_cf_rules = list(cf.rules)
+            del ws.conditional_formatting._cf_rules[cf]
+    for rule in status_cf_rules:
+        ws.conditional_formatting.add(f"F{FIRST_ROW}:F{last_row}", rule)
+
+    # ── Summary + legend, shifted down by however many extra rows we needed ────────────
+    summary_title_row = orig_summary_title_row + extra_rows
+    summary_labels_row = orig_summary_labels_row + extra_rows
+    summary_values_row = orig_summary_values_row + extra_rows
+    legend_header_row = orig_legend_header_row + extra_rows
+
+    ws.cell(row=summary_title_row, column=1, value=summary_title_text)
+    apply_style(ws.cell(row=summary_title_row, column=1), summary_title_style)
+    ws.merge_cells(start_row=summary_title_row, start_column=1, end_row=summary_title_row, end_column=9)
+
+    for c in range(1, 7):
+        cell = ws.cell(row=summary_labels_row, column=c, value=summary_label_texts[c - 1])
+        apply_style(cell, summary_label_styles[c - 1])
+    status_formulas = {
+        1: f'=COUNTIF(F{FIRST_ROW}:F{last_row},"Available")',
+        2: f'=COUNTIF(F{FIRST_ROW}:F{last_row},"Unlisted")',
+        3: f'=COUNTIF(F{FIRST_ROW}:F{last_row},"In Repair")',
+        4: f'=COUNTIF(F{FIRST_ROW}:F{last_row},"Reserved")',
+        5: f'=COUNTIF(F{FIRST_ROW}:F{last_row},"Sold")',
+        6: f'=COUNTIF(C{FIRST_ROW}:C{last_row},"?*")-COUNTIF(F{FIRST_ROW}:F{last_row},"Sold")',
+    }
+    for c in range(1, 7):
+        cell = ws.cell(row=summary_values_row, column=c, value=status_formulas[c])
+        apply_style(cell, summary_value_styles[c - 1])
+
+    lr = legend_header_row
+    ws.cell(row=lr, column=1, value="Legend:")
+    apply_style(ws.cell(row=lr, column=1), legend_header_style)
+    ws.merge_cells(start_row=lr, start_column=1, end_row=lr, end_column=9)
+    for i, text in enumerate(legend_texts):
+        r = lr + 1 + i
+        ws.cell(row=r, column=1, value=text)
+        apply_style(ws.cell(row=r, column=1), legend_line_styles[i])
+        ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=9)
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+@api_router.get("/reports/inventory-pipeline-export")
+async def inventory_pipeline_export(cu: dict = Depends(require("vehicles", "view"))):
+    vehicles = await db.vehicles.find({"status": {"$ne": "scrap"}}, {"_id": 0}).to_list(5000)
+    order = {s: i for i, s in enumerate(_INVENTORY_PIPELINE_STATUSES)}
+    vehicles.sort(key=lambda v: (order.get(v.get("status"), 99), v.get("purchase_date") or ""))
+    xlsx_bytes = _build_inventory_pipeline_xlsx(vehicles, cu.get("username", ""))
+    today = datetime.now(timezone.utc).date().isoformat()
+    return StreamingResponse(
+        io.BytesIO(xlsx_bytes),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="GG_Auto_Inventory_Pipeline_{today}.xlsx"'},
+    )
+
 # ── ACCOUNTING SUMMARY ────────────────────────────────────────────────
 @api_router.get("/reports/accounting-summary")
 async def accounting_summary(start_date: str, end_date: str, cu: dict = Depends(admin_only)):
@@ -2632,7 +2973,10 @@ async def _compress_oversized_photos():
             continue
         raw = base64.b64decode(p["data"])
         try:
-            compressed, new_content_type = _compress_photo(raw)
+            # to_thread, not a plain call: this is the actual CPU-bound work (LANCZOS
+            # resize + JPEG encode), and running it inline would freeze every other
+            # request on this single-worker server for the duration of each photo.
+            compressed, new_content_type = await asyncio.to_thread(_compress_photo, raw)
         except Exception:
             logger.warning(f"Failed to compress vehicle photo {photo_id}", exc_info=True)
             continue
@@ -2644,7 +2988,6 @@ async def _compress_oversized_photos():
                       "content_type": new_content_type, "size": len(compressed)}},
         )
         succeeded += 1
-        await asyncio.sleep(0)  # yield to the event loop between photos
     logger.info(f"Photo compression sweep done: {succeeded}/{len(oversized_ids)} shrunk.")
 
 @api_router.get("/vehicles/{vid}/photos")
@@ -2665,7 +3008,10 @@ async def upload_vehicle_photo(vid: str, file: UploadFile = File(...), cu: dict 
         raise HTTPException(400, "File too large. Max 25MB.")
     content_type = _resolved_content_type(file)
     try:
-        content, content_type = _compress_photo(content)
+        # Off the event loop — same reasoning as hash_pw_async: this server has one
+        # worker, so a synchronous LANCZOS resize + JPEG encode here would stall every
+        # other in-flight request (including other users' photo loads) until it finishes.
+        content, content_type = await asyncio.to_thread(_compress_photo, content)
     except Exception:
         logger.warning(f"Photo compression failed for upload to vehicle {vid}, storing original", exc_info=True)
     if len(content) > PHOTO_MAX_BYTES:
@@ -2783,7 +3129,8 @@ async def _compress_oversized_documents():
     _compress_pdf) so old uploads and anything from before this cap existed
     get shrunk down too, not just new ones (which are already capped at
     upload time). Awaits between documents so this never blocks the event
-    loop for other requests, and is safe to run every startup — anything
+    loop for other requests (the actual compression work runs via asyncio.to_thread,
+    not just an inter-item sleep(0)), and is safe to run every startup — anything
     already under the cap, or where compressing wouldn't actually shrink it,
     is skipped, so a repeat run does almost nothing."""
     docs = await db.legal_documents.find({}, {"_id": 0, "id": 1, "size": 1}).to_list(100000)
@@ -2800,9 +3147,9 @@ async def _compress_oversized_documents():
         content_type = d.get("content_type", "")
         try:
             if content_type.startswith("image/"):
-                compressed, new_content_type = _compress_document_image(raw)
+                compressed, new_content_type = await asyncio.to_thread(_compress_document_image, raw)
             elif content_type == "application/pdf":
-                compressed, new_content_type = _compress_pdf(raw), content_type
+                compressed, new_content_type = await asyncio.to_thread(_compress_pdf, raw), content_type
             else:
                 continue
         except Exception:
@@ -2831,11 +3178,11 @@ async def upload_legal_document(vid: str, file: UploadFile = File(...), doc_type
     content_type = _resolved_content_type(file)
     if content_type.startswith("image/"):
         try:
-            content, content_type = _compress_document_image(content)
+            content, content_type = await asyncio.to_thread(_compress_document_image, content)
         except Exception:
             logger.warning(f"Document image compression failed for upload to vehicle {vid}, storing original", exc_info=True)
     elif content_type == "application/pdf":
-        content = _compress_pdf(content)
+        content = await asyncio.to_thread(_compress_pdf, content)
     doc_id = str(uuid.uuid4())
     doc = {
         "id": doc_id, "vehicle_id": vid, "filename": file.filename or f"{doc_id}.pdf",
@@ -3278,7 +3625,18 @@ def _public_vehicle_fields(v: dict) -> dict:
     }
 
 def _public_photo_url(request: Request, vid: str, photo_id: str) -> str:
-    return f"{request.base_url}api/public/vehicles/{vid}/photos/{photo_id}"
+    """Builds an absolute URL from the client-facing scheme/host, not request.base_url —
+    that reflects whatever uvicorn itself saw, which is plain http behind an
+    nginx/Caddy TLS-terminating reverse proxy (the typical VPS setup) unless
+    X-Forwarded-Proto is both sent by the proxy and trusted by uvicorn's
+    --forwarded-allow-ips. Get that wrong and every photo URL silently becomes
+    http:// on an https:// site, which browsers and next/image's remotePatterns
+    block outright. Reading the headers directly sidesteps needing that trust
+    config to be right — safe here since this only affects a display URL, not a
+    security decision."""
+    scheme = request.headers.get("x-forwarded-proto", request.url.scheme).split(",")[0].strip()
+    host = (request.headers.get("x-forwarded-host") or request.headers.get("host") or request.url.netloc).split(",")[0].strip()
+    return f"{scheme}://{host}/api/public/vehicles/{vid}/photos/{photo_id}"
 
 @api_router.get("/public/vehicles")
 async def public_list_vehicles(request: Request):
@@ -3318,15 +3676,36 @@ async def public_get_vehicle(vid: str, request: Request):
     item["photos"] = item["image_urls"]  # kept for backwards compatibility with earlier consumers
     return item
 
+_PHOTO_BYTES_CACHE: dict = {}  # photo_id -> (raw_bytes, content_type), see public_get_photo
+_PHOTO_BYTES_CACHE_SIZE = 0  # running total of cached raw bytes — the cap below is a memory budget, not a photo count
+PHOTO_CACHE_MAX_BYTES = 300 * 1024 * 1024  # ~300MB — 5000 uncapped photos could otherwise run into the GBs on a small VPS
+
 @api_router.get("/public/vehicles/{vid}/photos/{photo_id}")
 async def public_get_photo(vid: str, photo_id: str):
     """Serves a single vehicle photo as a real image response (not JSON) — this gives
     hamroauto.com.np (or any consumer) a stable HTTPS URL per photo, so it can be added
     to an image-CDN allowlist (e.g. Next.js next/image remotePatterns) instead of having
-    to handle inline base64 data URIs."""
-    p = await db.vehicle_photos.find_one({"id": photo_id, "vehicle_id": vid}, {"_id": 0})
-    if not p: raise HTTPException(404, "Photo not found")
-    return Response(content=base64.b64decode(p["data"]), media_type=p["content_type"])
+    to handle inline base64 data URIs. Also backs the inventory list's thumbnails, where a
+    single page can reference dozens of photos at once — each one now a separate request,
+    so an in-process cache keeps that from becoming dozens of MySQL round-trips competing
+    for the connection pool on every load. Safe because a photo_id's bytes never change
+    after upload (no "replace photo" endpoint, only upload-new/delete); capped so a very
+    large photo library can't grow this unbounded."""
+    global _PHOTO_BYTES_CACHE_SIZE
+    cached = _PHOTO_BYTES_CACHE.get(photo_id)
+    if cached is None:
+        p = await db.vehicle_photos.find_one({"id": photo_id, "vehicle_id": vid}, {"_id": 0})
+        if not p: raise HTTPException(404, "Photo not found")
+        raw = base64.b64decode(p["data"])
+        cached = (raw, p["content_type"])
+        if _PHOTO_BYTES_CACHE_SIZE + len(raw) <= PHOTO_CACHE_MAX_BYTES:
+            _PHOTO_BYTES_CACHE[photo_id] = cached
+            _PHOTO_BYTES_CACHE_SIZE += len(raw)
+    content, content_type = cached
+    return Response(
+        content=content, media_type=content_type,
+        headers={"Cache-Control": "public, max-age=31536000, immutable"},
+    )
 
 @api_router.get("/public/settings")
 async def public_get_settings():
