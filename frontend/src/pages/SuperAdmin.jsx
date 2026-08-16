@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { Plus, Building2, Users, Bike, Ban, CheckCircle2, LogIn } from "lucide-react";
+import { Plus, Building2, Users, Bike, Ban, CheckCircle2, LogIn, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
 import { useAuth } from "../context/AuthContext";
@@ -16,6 +16,9 @@ export default function SuperAdmin() {
   const [form, setForm] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
   const [busyId, setBusyId] = useState(null);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [deleteConfirmText, setDeleteConfirmText] = useState("");
+  const [deleting, setDeleting] = useState(false);
 
   const fetchCompanies = useCallback(async () => {
     try { const r = await api.get("/super-admin/companies"); setCompanies(r.data); }
@@ -53,6 +56,20 @@ export default function SuperAdmin() {
     } catch {
       toast.error("Failed to update company");
     } finally { setBusyId(null); }
+  };
+
+  const handleDelete = async () => {
+    if (!deleteTarget || deleteConfirmText !== deleteTarget.code) return;
+    setDeleting(true);
+    try {
+      await api.delete(`/super-admin/companies/${deleteTarget.id}`);
+      toast.success(`${deleteTarget.name} deleted`);
+      setDeleteTarget(null);
+      setDeleteConfirmText("");
+      fetchCompanies();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "Failed to delete company");
+    } finally { setDeleting(false); }
   };
 
   const handleEnter = async (company) => {
@@ -149,6 +166,15 @@ export default function SuperAdmin() {
                       <LogIn size={12} />
                       Enter
                     </button>
+                    <button
+                      onClick={() => { setDeleteTarget(c); setDeleteConfirmText(""); }}
+                      disabled={busyId === c.id}
+                      data-testid="delete-company-btn"
+                      className="flex items-center gap-1 px-3 py-1.5 bg-white border border-red-200 text-red-600 text-xs font-semibold rounded-lg hover:bg-red-50 transition-colors disabled:opacity-60"
+                      title="Permanently delete this company"
+                    >
+                      <Trash2 size={12} />
+                    </button>
                   </div>
                 </div>
 
@@ -216,6 +242,47 @@ export default function SuperAdmin() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+      {/* Delete Company Confirmation */}
+      {deleteTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+            <div className="flex items-center justify-between p-5 border-b border-slate-100">
+              <h2 className="text-lg font-bold text-red-600 flex items-center gap-2"><Trash2 size={18} /> Delete Company</h2>
+              <button onClick={() => setDeleteTarget(null)} className="w-9 h-9 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500">✕</button>
+            </div>
+            <div className="p-5 space-y-4">
+              <p className="text-sm text-slate-700">
+                This permanently deletes <span className="font-bold">{deleteTarget.name}</span> and every record under it —
+                {" "}{deleteTarget.user_count ?? 0} user(s), {deleteTarget.vehicle_count ?? 0} vehicle(s), and all
+                other data (customers, sales, jobs, etc.). This cannot be undone.
+              </p>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1.5">
+                  Type <span className="font-mono font-bold text-slate-900">{deleteTarget.code}</span> to confirm
+                </label>
+                <input
+                  value={deleteConfirmText}
+                  onChange={(e) => setDeleteConfirmText(e.target.value)}
+                  className="w-full h-10 px-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
+                  data-testid="delete-confirm-input"
+                  autoComplete="off"
+                />
+              </div>
+              <div className="flex gap-3">
+                <button type="button" onClick={() => setDeleteTarget(null)} className="flex-1 h-10 border border-slate-200 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50">Cancel</button>
+                <button
+                  onClick={handleDelete}
+                  disabled={deleting || deleteConfirmText !== deleteTarget.code}
+                  data-testid="confirm-delete-company-btn"
+                  className="flex-1 h-10 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-semibold disabled:opacity-40 transition-all active:scale-95"
+                >
+                  {deleting ? "Deleting..." : "Delete Permanently"}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

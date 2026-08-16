@@ -989,6 +989,19 @@ async def enter_company(company_id: str, cu: dict = Depends(super_admin_only)):
     return {"token": token, "username": admin_user["username"], "name": admin_user.get("name", admin_user["username"]),
             "role": "admin", "company_id": company_id, "company_name": company["name"]}
 
+@api_router.delete("/super-admin/companies/{company_id}")
+async def delete_company(company_id: str, cu: dict = Depends(super_admin_only)):
+    """Hard delete — irreversible. Cascades across every tenant-scoped collection (the same
+    list startup() uses for the company_id backfill migration), not just the company doc
+    itself, so nothing is left orphaned under a company_id that no longer resolves to anything."""
+    company = await db.companies.find_one({"id": company_id}, {"_id": 0})
+    if not company:
+        raise HTTPException(404, "Company not found")
+    for coll in TENANT_COLLECTIONS:
+        await coll.delete_many({"company_id": company_id})
+    await db.companies.delete_one({"id": company_id})
+    return {"message": f"{company['name']} and all its data have been permanently deleted"}
+
 # ── VEHICLES ──────────────────────────────────────────────────────────
 @api_router.get("/vehicles")
 async def get_vehicles(status: Optional[str] = None, brand: Optional[str] = None, cu: dict = Depends(require("vehicles", "view"))):
