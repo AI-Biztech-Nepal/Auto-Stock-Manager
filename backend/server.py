@@ -2497,6 +2497,20 @@ def _build_closing_report_xlsx(rows: list, month_label: str, prepared_by: str) -
     last_row = FIRST_ROW + n - 1
     total_row = last_row + 1
 
+    # The template's Status-column conditional formatting (green "Paid" / red "Due") is
+    # scoped to its original J5:J35 range — widen it to match however many rows we
+    # actually write, or anything past row 35 renders with no color at all. openpyxl's
+    # ConditionalFormatting objects are keyed by identity in an internal dict, so the
+    # range can't be mutated in place; remove the old entry and re-add the same rules
+    # under the new range instead.
+    status_cf_rules = []
+    for cf in list(ws.conditional_formatting):
+        if str(cf.sqref).startswith("J5"):
+            status_cf_rules = list(cf.rules)
+            del ws.conditional_formatting._cf_rules[cf]
+    for rule in status_cf_rules:
+        ws.conditional_formatting.add(f"J{FIRST_ROW}:J{last_row}", rule)
+
     for i in range(n):
         row = FIRST_ROW + i
         s = rows[i] if i < len(rows) else None
