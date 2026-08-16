@@ -5,6 +5,7 @@ import { Toaster } from "sonner";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import { canAccessPath, ROLE_DEFAULT_PATH } from "./utils/permissions";
 import Layout from "./components/Layout";
+import SuperAdminLayout from "./components/SuperAdminLayout";
 
 // Route-level code splitting: previously every page was imported eagerly here,
 // so the browser downloaded and parsed the whole app's JS before the first
@@ -94,9 +95,18 @@ function AppRoutes() {
           <Route path="sold-stock" element={<RoleRoute path="/sold-stock"><SoldStock /></RoleRoute>} />
           <Route path="sold-stock/:id" element={<RoleRoute path="/sold-stock/detail"><SoldStockDetail /></RoleRoute>} />
           <Route path="ai" element={<RoleRoute path="/ai"><AIAssistant /></RoleRoute>} />
-          <Route path="super-admin" element={<RoleRoute path="/super-admin"><SuperAdmin /></RoleRoute>} />
           <Route path="settings" element={<Settings />} />
         </Route>
+        <Route
+          path="/super-admin"
+          element={
+            <ProtectedRoute>
+              <RoleRoute path="/super-admin">
+                <SuperAdminLayout><SuperAdmin /></SuperAdminLayout>
+              </RoleRoute>
+            </ProtectedRoute>
+          }
+        />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </Suspense>
