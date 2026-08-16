@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { Plus, Building2, Users, Bike, Ban, CheckCircle2, LogIn, Trash2, UsersRound } from "lucide-react";
+import { Plus, Building2, Users, Bike, Ban, CheckCircle2, LogIn, Trash2, UsersRound, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
 import { useAuth } from "../context/AuthContext";
@@ -22,6 +22,9 @@ export default function SuperAdmin() {
   const [teamTarget, setTeamTarget] = useState(null);
   const [teamMembers, setTeamMembers] = useState(null);
   const [teamLoading, setTeamLoading] = useState(false);
+  const [usersTarget, setUsersTarget] = useState(null);
+  const [companyUsers, setCompanyUsers] = useState(null);
+  const [usersLoading, setUsersLoading] = useState(false);
 
   const fetchCompanies = useCallback(async () => {
     try { const r = await api.get("/super-admin/companies"); setCompanies(r.data); }
@@ -86,6 +89,19 @@ export default function SuperAdmin() {
       toast.error("Failed to load team");
       setTeamMembers([]);
     } finally { setTeamLoading(false); }
+  };
+
+  const handleViewUsers = async (company) => {
+    setUsersTarget(company);
+    setCompanyUsers(null);
+    setUsersLoading(true);
+    try {
+      const r = await api.get(`/super-admin/companies/${company.id}/users`);
+      setCompanyUsers(r.data);
+    } catch {
+      toast.error("Failed to load accounts");
+      setCompanyUsers([]);
+    } finally { setUsersLoading(false); }
   };
 
   const handleEnter = async (company) => {
@@ -204,13 +220,18 @@ export default function SuperAdmin() {
                 </div>
 
                 <div className="grid grid-cols-2 gap-3 mt-4">
-                  <div className="bg-slate-50 rounded-lg p-3 text-center flex items-center justify-center gap-2">
+                  <button
+                    onClick={() => handleViewUsers(c)}
+                    data-testid="view-users-btn"
+                    title="View login accounts"
+                    className="bg-slate-50 hover:bg-slate-100 rounded-lg p-3 text-center flex items-center justify-center gap-2 transition-colors"
+                  >
                     <Users size={14} className="text-slate-400" />
                     <div>
                       <div className="text-lg font-bold text-slate-900 leading-tight" style={{ fontFamily: "Manrope" }}>{c.user_count ?? 0}</div>
                       <div className="text-xs text-slate-500">Users</div>
                     </div>
-                  </div>
+                  </button>
                   <div className="bg-blue-50 rounded-lg p-3 text-center flex items-center justify-center gap-2">
                     <Bike size={14} className="text-blue-400" />
                     <div>
@@ -309,6 +330,48 @@ export default function SuperAdmin() {
                           <div className="text-[10px] text-slate-400">commission</div>
                         </div>
                       )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Login Accounts */}
+      {usersTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[80vh] flex flex-col">
+            <div className="flex items-center justify-between p-5 border-b border-slate-100 shrink-0">
+              <div>
+                <h2 className="text-lg font-bold text-slate-900">{usersTarget.name}</h2>
+                <p className="text-xs text-slate-500">Login accounts</p>
+              </div>
+              <button onClick={() => setUsersTarget(null)} className="w-9 h-9 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500">✕</button>
+            </div>
+            <div className="p-5 overflow-y-auto">
+              {usersLoading ? (
+                <div className="flex items-center justify-center h-32"><div className="animate-spin w-6 h-6 border-4 border-blue-600 border-t-transparent rounded-full" /></div>
+              ) : companyUsers.length === 0 ? (
+                <div className="text-center text-slate-500 py-8">
+                  <ShieldCheck size={32} className="mx-auto mb-2 text-slate-300" />
+                  <p className="text-sm">No accounts found</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {companyUsers.map((u) => (
+                    <div key={u.id} data-testid="account-row" className="flex items-center justify-between gap-3 p-3 bg-slate-50 rounded-lg">
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center text-white text-xs font-bold">
+                          {u.name?.[0]?.toUpperCase() || "U"}
+                        </div>
+                        <div>
+                          <div className="text-sm font-semibold text-slate-900">{u.name}</div>
+                          <div className="text-xs text-slate-500">@{u.username}</div>
+                        </div>
+                      </div>
+                      <span className="text-[10px] font-semibold uppercase tracking-wide bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded">{u.role}</span>
                     </div>
                   ))}
                 </div>

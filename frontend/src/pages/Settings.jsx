@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
-import { Fingerprint } from "lucide-react";
+import { Fingerprint, UserPlus, Shield } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import api from "../utils/api";
 import { isNative, isBiometricAvailable, hasSavedCredentials, saveCredentials, deleteCredentials, verifyIdentity } from "../utils/biometric";
@@ -35,11 +35,20 @@ export default function Settings() {
   const [bioEnabled, setBioEnabled] = useState(false);
   const [bioPassword, setBioPassword] = useState("");
   const [bioBusy, setBioBusy] = useState(false);
+  const [companyUsers, setCompanyUsers] = useState(null);
+  const [showAddUserModal, setShowAddUserModal] = useState(false);
+  const [newUserForm, setNewUserForm] = useState({ name: "", username: "", password: "", role: "stock_supervisor" });
+  const [savingUser, setSavingUser] = useState(false);
+
+  const fetchCompanyUsers = () => {
+    api.get("/auth/users").then(r => setCompanyUsers(r.data)).catch(() => toast.error("Failed to load accounts"));
+  };
 
   useEffect(() => {
     if (!isAdmin) return;
     api.get("/settings").then(r => setSiteForm(r.data || {})).catch(() => toast.error("Failed to load storefront settings"));
     api.get("/admin/storage-usage").then(r => setStorage(r.data)).catch(() => {});
+    fetchCompanyUsers();
   }, [isAdmin]);
 
   useEffect(() => {
@@ -101,6 +110,28 @@ export default function Settings() {
     } finally { setSaving(false); }
   };
 
+  const openAddUser = () => {
+    setNewUserForm({ name: "", username: "", password: "", role: "stock_supervisor" });
+    setShowAddUserModal(true);
+  };
+
+  const handleAddUser = async (e) => {
+    e.preventDefault();
+    if (!newUserForm.name || !newUserForm.username || !newUserForm.password) { toast.error("Fill all fields"); return; }
+    if (newUserForm.password.length < 8) { toast.error("Password must be at least 8 characters"); return; }
+    setSavingUser(true);
+    try {
+      await api.post("/auth/register", newUserForm);
+      toast.success("Account created!");
+      setShowAddUserModal(false);
+      fetchCompanyUsers();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "Failed to create account");
+    } finally { setSavingUser(false); }
+  };
+
+  const ROLE_LABELS = { admin: "Admin", stock_supervisor: "Front Desk", parts_supervisor: "Parts Department" };
+
   const inp = "w-full h-10 px-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500";
 
   return (
@@ -123,6 +154,42 @@ export default function Settings() {
           </div>
         </div>
       </div>
+
+      {/* Team Accounts (Admin only) */}
+      {isAdmin && (
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
+          <div className="flex items-center justify-between mb-1">
+            <h2 className="text-base font-bold text-slate-900" style={{ fontFamily: "Manrope" }}>Team Accounts</h2>
+            <button onClick={openAddUser} data-testid="add-account-btn" className="flex items-center gap-1.5 h-9 px-3 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg transition-all active:scale-95">
+              <UserPlus size={14} /> Add Account
+            </button>
+          </div>
+          <p className="text-xs text-slate-500 mb-4">Login accounts for your employees — front desk, parts, or another admin</p>
+          {!companyUsers ? (
+            <div className="flex items-center justify-center h-16"><div className="animate-spin w-5 h-5 border-4 border-blue-600 border-t-transparent rounded-full" /></div>
+          ) : (
+            <div className="space-y-2">
+              {companyUsers.map((u) => (
+                <div key={u.id} data-testid="account-row" className="flex items-center justify-between gap-3 p-3 bg-slate-50 rounded-lg">
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center text-white text-xs font-bold">
+                      {u.name?.[0]?.toUpperCase() || "U"}
+                    </div>
+                    <div>
+                      <div className="text-sm font-semibold text-slate-900 flex items-center gap-1.5">
+                        {u.name}
+                        {u.role === "admin" && <Shield size={12} className="text-blue-500" />}
+                      </div>
+                      <div className="text-xs text-slate-500">@{u.username}</div>
+                    </div>
+                  </div>
+                  <span className="text-[10px] font-semibold uppercase tracking-wide bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded">{ROLE_LABELS[u.role] || u.role}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Storefront Settings (Admin only) */}
       {isAdmin && (
@@ -280,6 +347,43 @@ export default function Settings() {
           ))}
         </div>
       </div>
+
+      {/* Add Account Modal */}
+      {showAddUserModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm">
+            <div className="flex items-center justify-between p-5 border-b border-slate-100">
+              <h2 className="text-lg font-bold text-slate-900">Add Account</h2>
+              <button onClick={() => setShowAddUserModal(false)} className="w-9 h-9 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500">✕</button>
+            </div>
+            <form onSubmit={handleAddUser} className="p-5 space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1.5">Name</label>
+                <input value={newUserForm.name} onChange={e => setNewUserForm({ ...newUserForm, name: e.target.value })} className={inp} data-testid="new-user-name" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1.5">Username</label>
+                <input value={newUserForm.username} onChange={e => setNewUserForm({ ...newUserForm, username: e.target.value })} className={inp} data-testid="new-user-username" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1.5">Password</label>
+                <input type="password" value={newUserForm.password} onChange={e => setNewUserForm({ ...newUserForm, password: e.target.value })} placeholder="Min 8 characters" className={inp} data-testid="new-user-password" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1.5">Role</label>
+                <select value={newUserForm.role} onChange={e => setNewUserForm({ ...newUserForm, role: e.target.value })} className={inp} data-testid="new-user-role">
+                  <option value="stock_supervisor">Front Desk</option>
+                  <option value="parts_supervisor">Parts Department</option>
+                  <option value="admin">Admin</option>
+                </select>
+              </div>
+              <button type="submit" disabled={savingUser} data-testid="save-new-user-btn" className="w-full h-10 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-semibold disabled:opacity-60 transition-all active:scale-95">
+                {savingUser ? "Creating..." : "Create Account"}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

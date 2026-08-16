@@ -949,6 +949,14 @@ async def super_admin_company_team(company_id: str, cu: dict = Depends(super_adm
         raise HTTPException(404, "Company not found")
     return await db.team_members.find({"company_id": company_id}, {"_id": 0}).sort("name", 1).to_list(500)
 
+@api_router.get("/super-admin/companies/{company_id}/users")
+async def super_admin_company_users(company_id: str, cu: dict = Depends(super_admin_only)):
+    """Read-only list of this company's login accounts (admin/front desk/parts/etc.) —
+    who can actually sign in, as opposed to the team roster's sales/mechanic staff list."""
+    if not await db.companies.find_one({"id": company_id}, {"_id": 0, "id": 1}):
+        raise HTTPException(404, "Company not found")
+    return await db.users.find({"company_id": company_id}, {"_id": 0, "password_hash": 0}).sort("username", 1).to_list(500)
+
 @api_router.post("/super-admin/companies")
 async def create_company(req: CompanyCreate, cu: dict = Depends(super_admin_only)):
     code = req.code.strip().lower()
@@ -2977,13 +2985,17 @@ async def startup():
         }
         await db.companies.insert_one(dict(default_company))
         logger.info("Default company created: Hamro G&G Auto (code: hamrogng)")
+        # Backfill + settings rename only ever need to happen this one time, at the exact
+        # moment the default company is created — NOT on every subsequent restart. Running
+        # this unconditionally would keep re-matching any row that's *supposed* to have a
+        # permanently-NULL company_id (namely superadmin) via the $exists/IS NULL filter,
+        # and wrongly re-stamp it onto the default company every time the app restarts.
+        for coll in TENANT_COLLECTIONS:
+            await coll.update_many({"company_id": {"$exists": False}}, {"$set": {"company_id": default_company["id"]}})
+        # The old settings singleton was keyed "id": "general" — settings are now looked up
+        # by company_id instead, so give the original company's doc that id.
+        await db.settings.update_one({"id": "general"}, {"$set": {"id": default_company["id"]}})
     default_company_id = default_company["id"]
-
-    for coll in TENANT_COLLECTIONS:
-        await coll.update_many({"company_id": {"$exists": False}}, {"$set": {"company_id": default_company_id}})
-    # The old settings singleton was keyed "id": "general" — settings are now looked up
-    # by company_id instead, so give the original company's doc that id.
-    await db.settings.update_one({"id": "general"}, {"$set": {"id": default_company_id}})
 
     if not await db.users.find_one({"username": "superadmin"}):
         await db.users.insert_one({
