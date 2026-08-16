@@ -95,9 +95,9 @@ def verify_pw(pw: str, hashed: str) -> bool: return pwd_context.verify(pw, hashe
 async def hash_pw_async(pw: str) -> str: return await asyncio.to_thread(hash_pw, pw)
 async def verify_pw_async(pw: str, hashed: str) -> bool: return await asyncio.to_thread(verify_pw, pw, hashed)
 
-def create_token(user_id: str, username: str, role: str = "admin", company_id: Optional[str] = None) -> str:
+def create_token(user_id: str, username: str, role: str = "admin") -> str:
     return jwt.encode(
-        {"user_id": user_id, "username": username, "role": role, "company_id": company_id,
+        {"user_id": user_id, "username": username, "role": role,
          "exp": datetime.now(timezone.utc) + timedelta(days=7)},
         JWT_SECRET, algorithm="HS256"
     )
@@ -144,7 +144,7 @@ PARTS_ALLOWED_STATUSES = {"available", "in_repair", "scrap"}
 def require(resource: str, action: str):
     async def _checker(cu: dict = Depends(get_current_user)):
         role = cu.get("role", "admin")
-        if role in ("admin", "super_admin"):
+        if role == "admin":
             return cu
         if action in ROLE_PERMISSIONS.get(role, {}).get(resource, set()):
             return cu
@@ -154,7 +154,7 @@ def require(resource: str, action: str):
 def require_any(resource: str, actions: set):
     async def _checker(cu: dict = Depends(get_current_user)):
         role = cu.get("role", "admin")
-        if role in ("admin", "super_admin"):
+        if role == "admin":
             return cu
         if ROLE_PERMISSIONS.get(role, {}).get(resource, set()) & actions:
             return cu
@@ -165,19 +165,6 @@ async def admin_only(cu: dict = Depends(get_current_user)):
     if cu.get("role", "admin") != "admin":
         raise HTTPException(403, "This section is restricted to Admin accounts")
     return cu
-
-async def super_admin_only(cu: dict = Depends(get_current_user)):
-    if cu.get("role") != "super_admin":
-        raise HTTPException(403, "This section is restricted to platform administrators")
-    return cu
-
-# Every tenant-scoped query/insert across the app filters or tags documents with this —
-# see the "Multi-tenant Super Admin" plan. cu["company_id"] is only absent for a
-# super_admin's own token, which never calls company-scoped endpoints directly (it
-# operates through /super-admin/* or by entering a company, which yields a normal
-# company-scoped admin token).
-def company_scope(cu: dict) -> dict:
-    return {"company_id": cu.get("company_id")}
 
 def stock_aging(purchase_date_str: str) -> dict:
     try:
@@ -363,14 +350,14 @@ def _aging_counts(vehicles: list) -> dict:
     return counts
 
 # ── Helper: build ai_suggestions context data by type ────────────────
-async def _build_suggestions_context(context_type: str, company_id: str) -> dict:
+async def _build_suggestions_context(context_type: str) -> dict:
     if context_type == "inventory":
-        vehicles = await db.vehicles.find({"status": "available", "company_id": company_id}, {"_id": 0}).to_list(50)
+        vehicles = await db.vehicles.find({"status": "available"}, {"_id": 0}).to_list(50)
         slow_list = []
         for v in vehicles:
             ag = stock_aging(v.get("purchase_date", ""))
             if ag["category"] in ["slow", "dead"]:
-                exps = await db.expenses.find({"vehicle_id": v["id"], "company_id": company_id}, {"_id": 0}).to_list(50)
+                exps = await db.expenses.find({"vehicle_id": v["id"]}, {"_id": 0}).to_list(50)
                 slow_list.append({
                     "brand": v.get("brand"), "model": v.get("model"),
                     "days": ag["days"], "category": ag["category"],
@@ -379,21 +366,21 @@ async def _build_suggestions_context(context_type: str, company_id: str) -> dict
                 })
         return {"available_count": len(vehicles), "slow_and_dead_stock": slow_list[:6]}
     if context_type == "finance":
-        avail = await db.vehicles.find({"status": "available", "company_id": company_id}, {"_id": 0}).to_list(500)
+        avail = await db.vehicles.find({"status": "available"}, {"_id": 0}).to_list(500)
         locked = sum(v.get("purchase_price", 0) for v in avail)
         return {
             "locked_capital_NPR": locked,
-            "total_vehicles": await db.vehicles.count_documents({"company_id": company_id}),
-            "sold_vehicles": await db.vehicles.count_documents({"status": "sold", "company_id": company_id})
+            "total_vehicles": await db.vehicles.count_documents({}),
+            "sold_vehicles": await db.vehicles.count_documents({"status": "sold"})
         }
     if context_type == "customer":
-        custs = await db.customers.find({"company_id": company_id}, {"_id": 0}).to_list(20)
+        custs = await db.customers.find({}, {"_id": 0}).to_list(20)
         return {"total_customers": len(custs), "customers": [{"name": c["name"], "contact": c.get("contact_number")} for c in custs[:8]]}
     if context_type == "festival":
-        avail = await db.vehicles.find({"status": "available", "company_id": company_id}, {"_id": 0}).to_list(50)
+        avail = await db.vehicles.find({"status": "available"}, {"_id": 0}).to_list(50)
         return {"available_stock": len(avail), "vehicles": [{"brand": v.get("brand"), "model": v.get("model"), "price": v.get("selling_price")} for v in avail[:10]]}
     if context_type == "vendor":
-        vendors = await db.vendors.find({"company_id": company_id}, {"_id": 0}).to_list(20)
+        vendors = await db.vendors.find({}, {"_id": 0}).to_list(20)
         return {"total_vendors": len(vendors), "vendors_with_due": sum(1 for _ in vendors)}
     return {}
 
@@ -445,12 +432,12 @@ async def _ai_text(system: str, contents, max_tokens: int = 1024) -> str:
 # question (inventory, sales/dues, customers, vendors, parts, EMI) without a separate
 # tool-calling round trip. Every collection is bulk-fetched once and aggregated in Python
 # (no N+1 per-record queries), so this stays fast even as the business grows.
-async def _build_ai_business_snapshot(company_id: str) -> str:
-    all_vehicles = await db.vehicles.find({"company_id": company_id}, {"_id": 0}).to_list(3000)
+async def _build_ai_business_snapshot() -> str:
+    all_vehicles = await db.vehicles.find({}, {"_id": 0}).to_list(3000)
     active_vehicles = [v for v in all_vehicles if v.get("status") != "sold"]
     sold_vehicles = [v for v in all_vehicles if v.get("status") == "sold"]
     active_ids = [v["id"] for v in active_vehicles]
-    photo_ids = set(await db.vehicle_photos.distinct("vehicle_id", {"vehicle_id": {"$in": active_ids}, "company_id": company_id}))
+    photo_ids = set(await db.vehicle_photos.distinct("vehicle_id", {"vehicle_id": {"$in": active_ids}}))
 
     by_status: dict = {}
     for v in active_vehicles:
@@ -470,7 +457,7 @@ async def _build_ai_business_snapshot(company_id: str) -> str:
         return "- " + " · ".join(bits)
     vehicle_lines = "\n".join(_vline(v) for v in active_vehicles[:250]) or "(none)"
 
-    all_sales = await db.sales.find({"company_id": company_id}, {"_id": 0}).sort("sale_date", -1).to_list(3000)
+    all_sales = await db.sales.find({}, {"_id": 0}).sort("sale_date", -1).to_list(3000)
     total_revenue = round(sum(_sale_revenue(s) for s in all_sales), 2)
     due_sales = [s for s in all_sales if s.get("due_amount", 0) > 0]
     total_due = round(sum(s.get("due_amount", 0) for s in all_sales), 2)
@@ -483,7 +470,7 @@ async def _build_ai_business_snapshot(company_id: str) -> str:
         for s in due_sales[:100]
     ) or "(none)"
 
-    customers = await db.customers.find({"company_id": company_id}, {"_id": 0}).to_list(3000)
+    customers = await db.customers.find({}, {"_id": 0}).to_list(3000)
     due_by_customer: dict = {}
     for s in all_sales:
         if s.get("customer_id") and s.get("due_amount", 0) > 0:
@@ -495,9 +482,9 @@ async def _build_ai_business_snapshot(company_id: str) -> str:
     customers_due_lines = "\n".join(customers_with_due[:100])
     if len(customers_with_due) > 100: customers_due_lines += f"\n(+{len(customers_with_due) - 100} more not listed)"
 
-    vendors = await db.vendors.find({"company_id": company_id}, {"_id": 0}).to_list(500)
-    all_parts = await db.spare_parts.find({"company_id": company_id}, {"_id": 0}).to_list(3000)
-    all_vendor_payments = await db.vendor_payments.find({"company_id": company_id}, {"_id": 0}).to_list(3000)
+    vendors = await db.vendors.find({}, {"_id": 0}).to_list(500)
+    all_parts = await db.spare_parts.find({}, {"_id": 0}).to_list(3000)
+    all_vendor_payments = await db.vendor_payments.find({}, {"_id": 0}).to_list(3000)
     owed_by_vendor: dict = {}
     for v in all_vehicles:  # payable doesn't disappear once a vehicle sells
         vid = v.get("vendor_id") or (v.get("linked_contact_id") if v.get("linked_contact_type") == "vendor" else None)
@@ -521,8 +508,8 @@ async def _build_ai_business_snapshot(company_id: str) -> str:
         for p in low_stock[:80]
     ) or "(none)"
 
-    emi_records = await db.emi_records.find({"company_id": company_id}, {"_id": 0}).to_list(1000)
-    emi_payments = await db.emi_payments.find({"company_id": company_id}, {"_id": 0}).to_list(5000)
+    emi_records = await db.emi_records.find({}, {"_id": 0}).to_list(1000)
+    emi_payments = await db.emi_payments.find({}, {"_id": 0}).to_list(5000)
     paid_by_emi: dict = {}
     for p in emi_payments:
         paid_by_emi[p["emi_id"]] = paid_by_emi.get(p["emi_id"], 0) + p["amount"]
@@ -558,11 +545,11 @@ EMI / FINANCING — {len(emi_records)} plans total, {len(active_emis)} still act
 @api_router.post("/ai/chatbot")
 async def ai_chatbot(req: AIChatRequest, cu: dict = Depends(admin_only)):
     session_id = req.session_id or str(uuid.uuid4())
-    session = await db.ai_chat_sessions.find_one({"id": session_id, "company_id": cu.get("company_id")}, {"_id": 0})
+    session = await db.ai_chat_sessions.find_one({"id": session_id}, {"_id": 0})
     history = session["messages"] if session else []  # stored as [{"role": "user"|"assistant", "text": "..."}]
 
-    settings = await db.settings.find_one({"id": cu.get("company_id")}, {"_id": 0}) or {}
-    business_snapshot = await _build_ai_business_snapshot(cu.get("company_id"))
+    settings = await db.settings.find_one({"id": "general"}, {"_id": 0}) or {}
+    business_snapshot = await _build_ai_business_snapshot()
 
     system = (
         f"You are the AI assistant for {settings.get('business_name', 'Hamro G&G Auto')}, "
@@ -589,8 +576,8 @@ async def ai_chatbot(req: AIChatRequest, cu: dict = Depends(admin_only)):
     messages.append({"role": "assistant", "text": reply})
 
     await db.ai_chat_sessions.update_one(
-        {"id": session_id, "company_id": cu.get("company_id")},
-        {"$set": {"messages": messages[-20:], "updated_at": datetime.now(timezone.utc).isoformat(), "company_id": cu.get("company_id")}},
+        {"id": session_id},
+        {"$set": {"messages": messages[-20:], "updated_at": datetime.now(timezone.utc).isoformat()}},
         upsert=True,
     )
     return {"reply": reply, "session_id": session_id}
@@ -599,7 +586,7 @@ async def ai_chatbot(req: AIChatRequest, cu: dict = Depends(admin_only)):
 async def ai_price_suggestion(req: AIPriceRequest, cu: dict = Depends(admin_only)):
     v = req.vehicle
     similar = await db.vehicles.find(
-        {**company_scope(cu), "status": "sold", "brand": {"$regex": f"^{v.brand}$", "$options": "i"}, "model": {"$regex": f"^{v.model}$", "$options": "i"}},
+        {"status": "sold", "brand": {"$regex": f"^{v.brand}$", "$options": "i"}, "model": {"$regex": f"^{v.model}$", "$options": "i"}},
         {"_id": 0, "year": 1, "selling_price": 1, "kilometer_run": 1, "condition": 1, "sold_date": 1},
     ).sort("sold_date", -1).to_list(10)
 
@@ -630,7 +617,7 @@ async def ai_price_suggestion(req: AIPriceRequest, cu: dict = Depends(admin_only
 
 @api_router.get("/ai/festival-intelligence")
 async def ai_festival_intelligence(cu: dict = Depends(admin_only)):
-    avail = await db.vehicles.find({**company_scope(cu), "status": "available"}, {"_id": 0, "brand": 1}).to_list(1000)
+    avail = await db.vehicles.find({"status": "available"}, {"_id": 0, "brand": 1}).to_list(1000)
     stock_snapshot: dict = {}
     for v in avail:
         b = v.get("brand") or "Other"
@@ -652,7 +639,7 @@ async def ai_festival_intelligence(cu: dict = Depends(admin_only)):
 
 @api_router.post("/ai/suggestions")
 async def ai_suggestions(req: AISuggestionsRequest, cu: dict = Depends(admin_only)):
-    context = await _build_suggestions_context(req.context_type, cu.get("company_id"))
+    context = await _build_suggestions_context(req.context_type)
     system = (
         "You are a business advisor for a Nepali used-motorbike dealership. Give concrete, actionable "
         f"recommendations grounded only in the data provided — do not invent numbers not given. {MARKDOWN_NOTE}"
@@ -667,7 +654,6 @@ async def ai_suggestions(req: AISuggestionsRequest, cu: dict = Depends(admin_onl
 
 class LoginRequest(BaseModel):
     username: str; password: str
-    company_code: Optional[str] = None  # blank/omitted = platform (super_admin) login
 
 class RegisterRequest(BaseModel):
     username: str; password: str = Field(min_length=8); name: str
@@ -675,16 +661,6 @@ class RegisterRequest(BaseModel):
 
 class ChangePasswordRequest(BaseModel):
     current_password: str; new_password: str = Field(min_length=8)
-
-class CompanyCreate(BaseModel):
-    name: str; code: str
-    admin_name: str; admin_username: str
-    admin_password: str = Field(min_length=8)
-
-class CompanyUpdate(BaseModel):
-    name: Optional[str] = None
-    code: Optional[str] = None
-    active: Optional[bool] = None
 
 class VehicleCreate(BaseModel):
     brand: str; model: str
@@ -875,37 +851,21 @@ class SettingsUpdate(BaseModel):
 # ── AUTH ──────────────────────────────────────────────────────────────
 @api_router.post("/auth/login")
 async def login(req: LoginRequest):
-    code = (req.company_code or "").strip().lower()
-    if not code:
-        # No company code = platform-level login, only valid for super_admin accounts.
-        user = await db.users.find_one({"username": req.username, "role": "super_admin"})
-        if not user or not await verify_pw_async(req.password, user["password_hash"]):
-            raise HTTPException(401, "Invalid credentials")
-        token = create_token(user.get("id", ""), user["username"], "super_admin", None)
-        return {"token": token, "username": user["username"], "name": user.get("name", user["username"]),
-                "role": "super_admin", "company_id": None, "company_name": None}
-
-    company = await db.companies.find_one({"code": code, "active": True}, {"_id": 0})
-    if not company:
-        raise HTTPException(401, "Invalid company code")
-    user = await db.users.find_one({"username": req.username, "company_id": company["id"]})
+    user = await db.users.find_one({"username": req.username})
     if not user or not await verify_pw_async(req.password, user["password_hash"]):
         raise HTTPException(401, "Invalid credentials")
-    token = create_token(user.get("id", ""), user["username"], user.get("role", "admin"), company["id"])
+    token = create_token(user.get("id", ""), user["username"], user.get("role", "admin"))
     return {"token": token, "username": user["username"], "name": user.get("name", user["username"]),
-            "role": user.get("role", "admin"), "company_id": company["id"], "company_name": company["name"]}
+            "role": user.get("role", "admin")}
 
 @api_router.get("/auth/me")
 async def me(cu: dict = Depends(get_current_user)):
-    if cu.get("role") == "super_admin":
-        user = await db.users.find_one({"username": cu["username"], "role": "super_admin"}, {"_id": 0, "password_hash": 0})
-    else:
-        user = await db.users.find_one({"username": cu["username"], "company_id": cu.get("company_id")}, {"_id": 0, "password_hash": 0})
+    user = await db.users.find_one({"username": cu["username"]}, {"_id": 0, "password_hash": 0})
     return user
 
 @api_router.post("/auth/change-password")
 async def change_password(req: ChangePasswordRequest, cu: dict = Depends(get_current_user)):
-    lookup = {"username": cu["username"]} if cu.get("role") == "super_admin" else {"username": cu["username"], "company_id": cu.get("company_id")}
+    lookup = {"username": cu["username"]}
     user = await db.users.find_one(lookup)
     if not user or not await verify_pw_async(req.current_password, user["password_hash"]):
         raise HTTPException(400, "Current password incorrect")
@@ -914,114 +874,27 @@ async def change_password(req: ChangePasswordRequest, cu: dict = Depends(get_cur
 
 @api_router.get("/auth/users")
 async def list_users(cu: dict = Depends(get_current_user)):
-    users = await db.users.find({**company_scope(cu)}, {"_id": 0, "password_hash": 0}).to_list(100)
+    users = await db.users.find({}, {"_id": 0, "password_hash": 0}).to_list(100)
     return users
 
 @api_router.post("/auth/register")
 async def register(req: RegisterRequest, cu: dict = Depends(get_current_user)):
     if cu.get("role") != "admin":
         raise HTTPException(403, "Only admin can register users")
-    existing = await db.users.find_one({"username": req.username, "company_id": cu.get("company_id")})
+    existing = await db.users.find_one({"username": req.username})
     if existing:
         raise HTTPException(400, "Username already exists")
     user = {"id": str(uuid.uuid4()), "username": req.username,
             "password_hash": await hash_pw_async(req.password), "name": req.name, "role": req.role,
-            "company_id": cu.get("company_id"),
             "created_at": datetime.now(timezone.utc).isoformat()}
     await db.users.insert_one(user)
     user.pop("_id", None); user.pop("password_hash", None)
     return user
 
-# ── SUPER ADMIN ───────────────────────────────────────────────────────
-@api_router.get("/super-admin/companies")
-async def list_companies(cu: dict = Depends(super_admin_only)):
-    companies = await db.companies.find({}, {"_id": 0}).sort("created_at", -1).to_list(1000)
-    for c in companies:
-        c["user_count"] = await db.users.count_documents({"company_id": c["id"]})
-        c["vehicle_count"] = await db.vehicles.count_documents({"company_id": c["id"]})
-    return companies
-
-@api_router.get("/super-admin/companies/{company_id}/team")
-async def super_admin_company_team(company_id: str, cu: dict = Depends(super_admin_only)):
-    """Read-only staff roster for a company, viewed directly from the platform console —
-    doesn't require impersonating (entering) the company just to see who's on it."""
-    if not await db.companies.find_one({"id": company_id}, {"_id": 0, "id": 1}):
-        raise HTTPException(404, "Company not found")
-    return await db.team_members.find({"company_id": company_id}, {"_id": 0}).sort("name", 1).to_list(500)
-
-@api_router.get("/super-admin/companies/{company_id}/users")
-async def super_admin_company_users(company_id: str, cu: dict = Depends(super_admin_only)):
-    """Read-only list of this company's login accounts (admin/front desk/parts/etc.) —
-    who can actually sign in, as opposed to the team roster's sales/mechanic staff list."""
-    if not await db.companies.find_one({"id": company_id}, {"_id": 0, "id": 1}):
-        raise HTTPException(404, "Company not found")
-    return await db.users.find({"company_id": company_id}, {"_id": 0, "password_hash": 0}).sort("username", 1).to_list(500)
-
-@api_router.post("/super-admin/companies")
-async def create_company(req: CompanyCreate, cu: dict = Depends(super_admin_only)):
-    code = req.code.strip().lower()
-    if not code:
-        raise HTTPException(400, "Company code is required")
-    if await db.companies.find_one({"code": code}):
-        raise HTTPException(400, "Company code already in use")
-    company = {"id": str(uuid.uuid4()), "name": req.name, "code": code, "active": True,
-               "created_at": datetime.now(timezone.utc).isoformat()}
-    await db.companies.insert_one(dict(company))
-    await db.users.insert_one({
-        "id": str(uuid.uuid4()), "username": req.admin_username,
-        "password_hash": await hash_pw_async(req.admin_password), "name": req.admin_name, "role": "admin",
-        "company_id": company["id"], "created_at": datetime.now(timezone.utc).isoformat()
-    })
-    await db.settings.insert_one({
-        "id": company["id"], "logo_url": "", "business_name": req.name,
-        "contact_phone": "", "contact_email": "", "address": "",
-        "hero_image_url": "", "service_image_url": "",
-    })
-    return company
-
-@api_router.put("/super-admin/companies/{company_id}")
-async def update_company(company_id: str, req: CompanyUpdate, cu: dict = Depends(super_admin_only)):
-    updates = {k: v for k, v in req.model_dump().items() if v is not None}
-    if "code" in updates:
-        updates["code"] = updates["code"].strip().lower()
-        if await db.companies.find_one({"code": updates["code"], "id": {"$ne": company_id}}):
-            raise HTTPException(400, "Company code already in use")
-    result = await db.companies.find_one_and_update(
-        {"id": company_id}, {"$set": updates}, return_document=ReturnDocument.AFTER, projection={"_id": 0}
-    )
-    if not result:
-        raise HTTPException(404, "Company not found")
-    return result
-
-@api_router.post("/super-admin/companies/{company_id}/enter")
-async def enter_company(company_id: str, cu: dict = Depends(super_admin_only)):
-    company = await db.companies.find_one({"id": company_id}, {"_id": 0})
-    if not company:
-        raise HTTPException(404, "Company not found")
-    admin_user = await db.users.find_one({"company_id": company_id, "role": "admin"})
-    if not admin_user:
-        raise HTTPException(404, "This company has no admin account to enter as")
-    token = create_token(admin_user.get("id", ""), admin_user["username"], "admin", company_id)
-    return {"token": token, "username": admin_user["username"], "name": admin_user.get("name", admin_user["username"]),
-            "role": "admin", "company_id": company_id, "company_name": company["name"]}
-
-@api_router.delete("/super-admin/companies/{company_id}")
-async def delete_company(company_id: str, cu: dict = Depends(super_admin_only)):
-    """Hard delete — irreversible. Cascades across every tenant-scoped collection (the same
-    list startup() uses for the company_id backfill migration), not just the company doc
-    itself, so nothing is left orphaned under a company_id that no longer resolves to anything."""
-    company = await db.companies.find_one({"id": company_id}, {"_id": 0})
-    if not company:
-        raise HTTPException(404, "Company not found")
-    for coll in TENANT_COLLECTIONS:
-        await coll.delete_many({"company_id": company_id})
-    await db.companies.delete_one({"id": company_id})
-    return {"message": f"{company['name']} and all its data have been permanently deleted"}
-
 # ── VEHICLES ──────────────────────────────────────────────────────────
 @api_router.get("/vehicles")
 async def get_vehicles(status: Optional[str] = None, brand: Optional[str] = None, cu: dict = Depends(require("vehicles", "view"))):
-    q = company_scope(cu)
+    q = {}
     if status and status != "all":
         statuses = [s.strip() for s in status.split(",") if s.strip()]
         q["status"] = {"$in": statuses} if len(statuses) > 1 else statuses[0]
@@ -1031,31 +904,27 @@ async def get_vehicles(status: Optional[str] = None, brand: Optional[str] = None
         return []
     # Batch-load all expenses in one query (avoids N+1)
     vehicle_ids = [v["id"] for v in vehicles]
-    all_exps = await db.expenses.find({"vehicle_id": {"$in": vehicle_ids}, **company_scope(cu)}, {"_id": 0}).to_list(10000)
+    all_exps = await db.expenses.find({"vehicle_id": {"$in": vehicle_ids}}, {"_id": 0}).to_list(10000)
     exps_by_vehicle: dict = {}
     for e in all_exps:
         exps_by_vehicle.setdefault(e["vehicle_id"], []).append(e)
     # Batch-load all job cards too — their cost counts toward a vehicle's expense total
     # the same way a plain expense entry does (see _job_card_cost).
-    all_jobs = await db.job_cards.find({"vehicle_id": {"$in": vehicle_ids}, **company_scope(cu)}, {"_id": 0}).to_list(10000)
+    all_jobs = await db.job_cards.find({"vehicle_id": {"$in": vehicle_ids}}, {"_id": 0}).to_list(10000)
     jobs_by_vehicle: dict = {}
     for j in all_jobs:
         jobs_by_vehicle.setdefault(j["vehicle_id"], []).append(j)
     # Batch-load each vehicle's photo ids in one query (never the base64 `data` field — same
-    # projection as /public/{company_code}/vehicles), so the frontend can show a few thumbnails directly on the
+    # projection as /public/vehicles), so the frontend can show a few thumbnails directly on the
     # inventory card (and filter for missing/insufficient photos) without an N+1 fetch of
     # /vehicles/{id}/photos per row, and without inflating this response with image bytes that
     # the browser could otherwise cache via a stable URL (see _public_photo_url).
     photo_docs = await db.vehicle_photos.find(
-        {"vehicle_id": {"$in": vehicle_ids}, **company_scope(cu)}, {"_id": 0, "id": 1, "vehicle_id": 1, "uploaded_at": 1}
+        {"vehicle_id": {"$in": vehicle_ids}}, {"_id": 0, "id": 1, "vehicle_id": 1, "uploaded_at": 1}
     ).sort("uploaded_at", 1).to_list(10000)
     photos_by_vehicle: dict = {}
     for p in photo_docs:
         photos_by_vehicle.setdefault(p["vehicle_id"], []).append(p)
-    # Public photo URLs are now scoped by company_code (see /public/{company_code}/... below) —
-    # look up this company's code once so thumb_photos below can build the right path.
-    _company_doc = await db.companies.find_one({"id": cu.get("company_id")}, {"_id": 0, "code": 1})
-    company_code = _company_doc["code"] if _company_doc else ""
     # Enrich each vehicle using pre-loaded expenses + job cards
     def enrich_with_expenses(v: dict, exps: list, jobs: list) -> dict:
         v["aging"] = stock_aging(v.get("purchase_date", ""))
@@ -1080,7 +949,7 @@ async def get_vehicles(status: Optional[str] = None, brand: Optional[str] = None
         # served the page (Vercel's proxy rewrite, or the VPS mirror directly), so the
         # browser never has to open a direct connection to the VPS's sslip.io hostname.
         v["thumb_photos"] = [
-            {"id": p["id"], "url": f"/api/public/{company_code}/vehicles/{v['id']}/photos/{p['id']}"}
+            {"id": p["id"], "url": f"/api/public/vehicles/{v['id']}/photos/{p['id']}"}
             for p in vehicle_photos[:3]
         ]
         return v
@@ -1090,21 +959,20 @@ async def get_vehicles(status: Optional[str] = None, brand: Optional[str] = None
 @api_router.post("/vehicles")
 async def create_vehicle(vehicle: VehicleCreate, cu: dict = Depends(require("vehicles", "create"))):
     existing = await db.vehicles.find_one(
-        {"registration_number": {"$regex": f"^{re.escape(vehicle.registration_number.strip())}$", "$options": "i"}, **company_scope(cu)},
+        {"registration_number": {"$regex": f"^{re.escape(vehicle.registration_number.strip())}$", "$options": "i"}},
         {"_id": 0, "id": 1},
     )
     if existing:
         raise HTTPException(400, f"Registration number '{vehicle.registration_number}' is already in stock")
     v = vehicle.model_dump()
     v["id"] = str(uuid.uuid4())
-    v["company_id"] = cu.get("company_id")
     v["created_at"] = datetime.now(timezone.utc).isoformat()
     v["updated_at"] = datetime.now(timezone.utc).isoformat()
     v["sold_date"] = None; v["customer_id"] = None
     v["salesperson_id"] = None; v["salesperson_name"] = None; v["discount"] = 0
     v["created_by"] = cu["username"]
     # Audit log
-    await db.audit_logs.insert_one({"action": "vehicle_created", "vehicle_id": v["id"], "company_id": cu.get("company_id"),
+    await db.audit_logs.insert_one({"action": "vehicle_created", "vehicle_id": v["id"],
         "user": cu["username"], "timestamp": datetime.now(timezone.utc).isoformat(),
         "details": f"Added {v['brand']} {v['model']} {v['year']}"})
     await db.vehicles.insert_one(v)
@@ -1250,13 +1118,11 @@ def _parse_vehicle_import_rows(content: bytes, filename: str, created_by: str):
 async def import_vehicles(file: UploadFile = File(...), confirm: bool = False, cu: dict = Depends(admin_only)):
     content = await file.read()
     docs, errors, row_results, total_data_rows = _parse_vehicle_import_rows(content, file.filename, cu["username"])
-    for d in docs:
-        d["company_id"] = cu.get("company_id")
 
     # Duplicate registration_number check — both within the sheet itself and against
     # vehicles already in stock (case-insensitive, since dealers key inventory off this number).
     ok_indices = [i for i, r in enumerate(row_results) if r["status"] == "ok"]
-    existing_regs_lower = {d["registration_number"].strip().lower() for d in await db.vehicles.find(company_scope(cu), {"_id": 0, "registration_number": 1}).to_list(100000) if d.get("registration_number")}
+    existing_regs_lower = {d["registration_number"].strip().lower() for d in await db.vehicles.find({}, {"_id": 0, "registration_number": 1}).to_list(100000) if d.get("registration_number")}
     seen_in_sheet = {}
     kept_docs = []
     for doc, ri in zip(docs, ok_indices):
@@ -1321,7 +1187,6 @@ async def import_vehicles(file: UploadFile = File(...), confirm: bool = False, c
         now_iso = datetime.now(timezone.utc).isoformat()
         await db.sales.insert_many([{
             "id": str(uuid.uuid4()),
-            "company_id": cu.get("company_id"),
             "vehicle_id": d["id"],
             "customer_id": None,
             "sale_price": d["selling_price"],
@@ -1340,7 +1205,7 @@ async def import_vehicles(file: UploadFile = File(...), confirm: bool = False, c
             "created_at": now_iso,
         } for d in sold_docs])
 
-    await db.audit_logs.insert_one({"action": "vehicles_bulk_imported", "company_id": cu.get("company_id"),
+    await db.audit_logs.insert_one({"action": "vehicles_bulk_imported",
         "user": cu["username"], "timestamp": datetime.now(timezone.utc).isoformat(),
         "details": f"Imported {inserted} vehicles via bulk import from {file.filename}" + (f", {len(sold_docs)} auto-recorded as sales" if sold_docs else "")})
 
@@ -1357,21 +1222,21 @@ async def import_vehicles(file: UploadFile = File(...), confirm: bool = False, c
 
 @api_router.get("/vehicles/{vid}")
 async def get_vehicle(vid: str, cu: dict = Depends(require("vehicles", "view"))):
-    v = await db.vehicles.find_one({"id": vid, **company_scope(cu)}, {"_id": 0})
+    v = await db.vehicles.find_one({"id": vid}, {"_id": 0})
     if not v: raise HTTPException(404, "Vehicle not found")
     v = await enrich_vehicle(v)
-    v["expenses"] = await db.expenses.find({"vehicle_id": vid, **company_scope(cu)}, {"_id": 0}).to_list(200)
-    v["job_cards"] = await db.job_cards.find({"vehicle_id": vid, **company_scope(cu)}, {"_id": 0}).to_list(100)
+    v["expenses"] = await db.expenses.find({"vehicle_id": vid}, {"_id": 0}).to_list(200)
+    v["job_cards"] = await db.job_cards.find({"vehicle_id": vid}, {"_id": 0}).to_list(100)
     return _hide_financials_for_role(v, cu.get("role", "admin"))
 
 @api_router.put("/vehicles/{vid}")
 async def update_vehicle(vid: str, vehicle: VehicleUpdate, cu: dict = Depends(require("vehicles", "edit"))):
-    existing = await db.vehicles.find_one({"id": vid, **company_scope(cu)}, {"_id": 0})
+    existing = await db.vehicles.find_one({"id": vid}, {"_id": 0})
     if not existing: raise HTTPException(404, "Vehicle not found")
     upd = {k: val for k, val in vehicle.model_dump().items() if val is not None}
     if upd.get("registration_number") and upd["registration_number"].strip().lower() != (existing.get("registration_number") or "").strip().lower():
         dup = await db.vehicles.find_one(
-            {"id": {"$ne": vid}, "registration_number": {"$regex": f"^{re.escape(upd['registration_number'].strip())}$", "$options": "i"}, **company_scope(cu)},
+            {"id": {"$ne": vid}, "registration_number": {"$regex": f"^{re.escape(upd['registration_number'].strip())}$", "$options": "i"}},
             {"_id": 0, "id": 1},
         )
         if dup:
@@ -1401,14 +1266,13 @@ async def update_vehicle(vid: str, vehicle: VehicleUpdate, cu: dict = Depends(re
             and not existing.get("selling_price") and upd.get("selling_price")):
         upd["status"] = "available"
 
-    r = await db.vehicles.update_one({"id": vid, **company_scope(cu)}, {"$set": upd})
+    r = await db.vehicles.update_one({"id": vid}, {"$set": upd})
     if r.matched_count == 0: raise HTTPException(404, "Vehicle not found")
 
-    if became_sold and not await db.sales.find_one({"vehicle_id": vid, "returned": {"$ne": True}, **company_scope(cu)}):
+    if became_sold and not await db.sales.find_one({"vehicle_id": vid, "returned": {"$ne": True}}):
         sale_date = upd.get("sold_date", existing.get("sold_date")) or datetime.now(timezone.utc).date().isoformat()
         await db.sales.insert_one({
             "id": str(uuid.uuid4()),
-            "company_id": cu.get("company_id"),
             "vehicle_id": vid,
             "customer_id": upd.get("customer_id", existing.get("customer_id")),
             "sale_price": sale_price,
@@ -1427,11 +1291,11 @@ async def update_vehicle(vid: str, vehicle: VehicleUpdate, cu: dict = Depends(re
             "created_at": datetime.now(timezone.utc).isoformat(),
         })
 
-    await db.audit_logs.insert_one({"action": "vehicle_updated", "vehicle_id": vid, "company_id": cu.get("company_id"),
+    await db.audit_logs.insert_one({"action": "vehicle_updated", "vehicle_id": vid,
         "user": cu["username"], "timestamp": datetime.now(timezone.utc).isoformat(),
         "details": f"Updated fields: {list(upd.keys())}"})
     asyncio.create_task(_notify_storefront())
-    return await db.vehicles.find_one({"id": vid, **company_scope(cu)}, {"_id": 0})
+    return await db.vehicles.find_one({"id": vid}, {"_id": 0})
 
 VEHICLE_STATUSES = {"available", "reserved", "sold", "unlisted", "scrap", "in_repair"}
 
@@ -1446,7 +1310,7 @@ async def update_vehicle_status(vid: str, body: VehicleStatusUpdate, cu: dict = 
     role = cu.get("role", "admin")
     has_full_edit = role == "admin" or "edit" in ROLE_PERMISSIONS.get(role, {}).get("vehicles", set())
 
-    existing = await db.vehicles.find_one({"id": vid, **company_scope(cu)}, {"_id": 0})
+    existing = await db.vehicles.find_one({"id": vid}, {"_id": 0})
     if not existing: raise HTTPException(404, "Vehicle not found")
 
     if not has_full_edit:
@@ -1467,13 +1331,12 @@ async def update_vehicle_status(vid: str, body: VehicleStatusUpdate, cu: dict = 
     if became_sold and not existing.get("selling_price"):
         upd["selling_price"] = sale_price
 
-    r = await db.vehicles.update_one({"id": vid, **company_scope(cu)}, {"$set": upd})
+    r = await db.vehicles.update_one({"id": vid}, {"$set": upd})
     if r.matched_count == 0: raise HTTPException(404, "Vehicle not found")
 
-    if became_sold and not await db.sales.find_one({"vehicle_id": vid, "returned": {"$ne": True}, **company_scope(cu)}):
+    if became_sold and not await db.sales.find_one({"vehicle_id": vid, "returned": {"$ne": True}}):
         await db.sales.insert_one({
             "id": str(uuid.uuid4()),
-            "company_id": cu.get("company_id"),
             "vehicle_id": vid,
             "customer_id": existing.get("customer_id"),
             "sale_price": sale_price,
@@ -1492,11 +1355,11 @@ async def update_vehicle_status(vid: str, body: VehicleStatusUpdate, cu: dict = 
             "created_at": datetime.now(timezone.utc).isoformat(),
         })
 
-    await db.audit_logs.insert_one({"action": "vehicle_status_updated", "vehicle_id": vid, "company_id": cu.get("company_id"),
+    await db.audit_logs.insert_one({"action": "vehicle_status_updated", "vehicle_id": vid,
         "user": cu["username"], "timestamp": datetime.now(timezone.utc).isoformat(),
         "details": f"Status changed from {existing.get('status')} to {body.status}"})
     asyncio.create_task(_notify_storefront())
-    v = await db.vehicles.find_one({"id": vid, **company_scope(cu)}, {"_id": 0})
+    v = await db.vehicles.find_one({"id": vid}, {"_id": 0})
     return _hide_financials_for_role(v, role)
 
 # Lets Vehicle Detail / Sold Stock show the refund-preview numbers before opening the return
@@ -1505,7 +1368,7 @@ async def update_vehicle_status(vid: str, body: VehicleStatusUpdate, cu: dict = 
 # ago can still be returned, so this just looks for whichever sale hasn't been returned yet.
 @api_router.get("/vehicles/{vid}/active-sale")
 async def get_active_sale(vid: str, cu: dict = Depends(admin_only)):
-    sale = await db.sales.find_one({"vehicle_id": vid, "returned": {"$ne": True}, **company_scope(cu)}, {"_id": 0}, sort=[("created_at", -1)])
+    sale = await db.sales.find_one({"vehicle_id": vid, "returned": {"$ne": True}}, {"_id": 0}, sort=[("created_at", -1)])
     if not sale:
         raise HTTPException(404, "No active sale found for this vehicle")
     return sale
@@ -1519,12 +1382,12 @@ async def get_active_sale(vid: str, cu: dict = Depends(admin_only)):
 # for return long after its warranty window has closed.
 @api_router.post("/vehicles/{vid}/return")
 async def return_vehicle(vid: str, body: VehicleReturnRequest, cu: dict = Depends(admin_only)):
-    existing = await db.vehicles.find_one({"id": vid, **company_scope(cu)}, {"_id": 0})
+    existing = await db.vehicles.find_one({"id": vid}, {"_id": 0})
     if not existing: raise HTTPException(404, "Vehicle not found")
     if existing.get("status") != "sold":
         raise HTTPException(400, f"Vehicle is not currently marked Sold (status: {existing.get('status')})")
 
-    sale = await db.sales.find_one({"vehicle_id": vid, "returned": {"$ne": True}, **company_scope(cu)}, sort=[("created_at", -1)])
+    sale = await db.sales.find_one({"vehicle_id": vid, "returned": {"$ne": True}}, sort=[("created_at", -1)])
     if not sale:
         raise HTTPException(404, "No active sale found for this vehicle")
 
@@ -1537,7 +1400,7 @@ async def return_vehicle(vid: str, body: VehicleReturnRequest, cu: dict = Depend
     refund_amount = round(body.refund_amount, 2)
     retained_amount = round(total_amount - refund_amount, 2)
 
-    await db.sales.update_one({"id": sale["id"], **company_scope(cu)}, {"$set": {
+    await db.sales.update_one({"id": sale["id"]}, {"$set": {
         "returned": True,
         "returned_at": datetime.now(timezone.utc).isoformat(),
         "returned_status": body.new_status,
@@ -1547,29 +1410,29 @@ async def return_vehicle(vid: str, body: VehicleReturnRequest, cu: dict = Depend
         "due_amount": 0,
     }})
 
-    await db.vehicles.update_one({"id": vid, **company_scope(cu)}, {"$set": {
+    await db.vehicles.update_one({"id": vid}, {"$set": {
         "status": body.new_status,
         "sold_date": None,
         "customer_id": None,
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }})
 
-    await db.audit_logs.insert_one({"action": "vehicle_returned", "vehicle_id": vid, "company_id": cu.get("company_id"),
+    await db.audit_logs.insert_one({"action": "vehicle_returned", "vehicle_id": vid,
         "user": cu["username"], "timestamp": datetime.now(timezone.utc).isoformat(),
         "details": f"Sale {sale['id']} returned with {refund_amount} refunded, vehicle set to {body.new_status}"})
 
-    v = await db.vehicles.find_one({"id": vid, **company_scope(cu)}, {"_id": 0})
+    v = await db.vehicles.find_one({"id": vid}, {"_id": 0})
     return {"vehicle": v, "refund_amount": refund_amount, "retained_amount": retained_amount}
 
 @api_router.delete("/vehicles/{vid}")
 async def delete_vehicle(vid: str, cu: dict = Depends(admin_only)):
-    r = await db.vehicles.delete_one({"id": vid, **company_scope(cu)})
+    r = await db.vehicles.delete_one({"id": vid})
     if r.deleted_count == 0: raise HTTPException(404, "Vehicle not found")
-    await db.expenses.delete_many({"vehicle_id": vid, **company_scope(cu)})
-    await db.job_cards.delete_many({"vehicle_id": vid, **company_scope(cu)})
+    await db.expenses.delete_many({"vehicle_id": vid})
+    await db.job_cards.delete_many({"vehicle_id": vid})
     # Otherwise a sale record survives with no vehicle to resolve — it still counts in the
     # Sales tab total but can never show up in Sold Stock, silently desyncing the two counts.
-    await db.sales.delete_many({"vehicle_id": vid, **company_scope(cu)})
+    await db.sales.delete_many({"vehicle_id": vid})
     asyncio.create_task(_notify_storefront())
     return {"message": "Deleted"}
 
@@ -1589,15 +1452,14 @@ async def get_vehicle_qr(vid: str):
 # ── EXPENSES ──────────────────────────────────────────────────────────
 @api_router.get("/vehicles/{vid}/expenses")
 async def get_expenses(vid: str, cu: dict = Depends(require("expenses", "view"))):
-    return await db.expenses.find({"vehicle_id": vid, **company_scope(cu)}, {"_id": 0}).to_list(200)
+    return await db.expenses.find({"vehicle_id": vid}, {"_id": 0}).to_list(200)
 
 @api_router.post("/expenses")
 async def create_expense(exp: ExpenseCreate, cu: dict = Depends(require("expenses", "create"))):
-    if not await db.vehicles.find_one({"id": exp.vehicle_id, **company_scope(cu)}, {"_id": 0, "id": 1}):
+    if not await db.vehicles.find_one({"id": exp.vehicle_id}, {"_id": 0, "id": 1}):
         raise HTTPException(404, "Vehicle not found")
     e = exp.model_dump()
     e["id"] = str(uuid.uuid4())
-    e["company_id"] = cu.get("company_id")
     e["date"] = e.get("date") or datetime.now(timezone.utc).date().isoformat()
     e["added_by"] = cu["username"]
     e["created_at"] = datetime.now(timezone.utc).isoformat()
@@ -1607,14 +1469,14 @@ async def create_expense(exp: ExpenseCreate, cu: dict = Depends(require("expense
 
 @api_router.delete("/expenses/{eid}")
 async def delete_expense(eid: str, cu: dict = Depends(require("expenses", "delete"))):
-    r = await db.expenses.delete_one({"id": eid, **company_scope(cu)})
+    r = await db.expenses.delete_one({"id": eid})
     if r.deleted_count == 0: raise HTTPException(404, "Expense not found")
     return {"message": "Deleted"}
 
 # ── JOB CARDS ─────────────────────────────────────────────────────────
 @api_router.get("/jobs")
 async def get_jobs(status: Optional[str] = None, vehicle_id: Optional[str] = None, vehicle_status: Optional[str] = None, cu: dict = Depends(require("jobs", "view"))):
-    q = company_scope(cu)
+    q = {}
     if status and status != "all": q["status"] = status
     if vehicle_id: q["vehicle_id"] = vehicle_id
     jobs = await db.job_cards.find(q, {"_id": 0}).sort("created_at", -1).to_list(1000)
@@ -1625,7 +1487,7 @@ async def get_jobs(status: Optional[str] = None, vehicle_id: Optional[str] = Non
     ids = list({j["vehicle_id"] for j in jobs if j.get("vehicle_id")})
     status_by_vehicle: dict = {}
     if ids:
-        vs = await db.vehicles.find({"id": {"$in": ids}, **company_scope(cu)}, {"_id": 0, "id": 1, "status": 1}).to_list(10000)
+        vs = await db.vehicles.find({"id": {"$in": ids}}, {"_id": 0, "id": 1, "status": 1}).to_list(10000)
         status_by_vehicle = {v["id"]: v.get("status") for v in vs}
     for j in jobs:
         j["vehicle_status"] = status_by_vehicle.get(j.get("vehicle_id"))
@@ -1633,34 +1495,32 @@ async def get_jobs(status: Optional[str] = None, vehicle_id: Optional[str] = Non
         jobs = [j for j in jobs if j.get("vehicle_status") == vehicle_status]
     return jobs
 
-async def _job_part_current_stock(part_id: str, component_name: Optional[str], company_id: Optional[str] = None):
+async def _job_part_current_stock(part_id: str, component_name: Optional[str]):
     """Looks up the current usable stock for a job-card part row — either a plain part's own
     `quantity`, or (when component_name is set) one named item inside a Set's checklist, which
     is tracked independently of the set's own whole-set quantity. Returns (current, label) or
-    (None, None) if the part/component no longer exists. part_id is caller-supplied (from the
-    job's parts list), so it's scoped by company_id to prevent cross-tenant lookups."""
+    (None, None) if the part/component no longer exists."""
     if component_name:
-        pp = await db.spare_parts.find_one({"id": part_id, "company_id": company_id}, {"_id": 0, "name": 1, "set_components": 1})
+        pp = await db.spare_parts.find_one({"id": part_id}, {"_id": 0, "name": 1, "set_components": 1})
         if not pp: return None, None
         comp = next((c for c in pp.get("set_components", []) if c.get("name") == component_name), None)
         if not comp: return None, None
         return comp.get("stock", 0), f"{pp.get('name')} — {component_name}"
-    pp = await db.spare_parts.find_one({"id": part_id, "company_id": company_id}, {"_id": 0, "name": 1, "quantity": 1})
+    pp = await db.spare_parts.find_one({"id": part_id}, {"_id": 0, "name": 1, "quantity": 1})
     if not pp: return None, None
     return pp.get("quantity", 0), pp.get("name")
 
-async def _job_part_set_stock(part_id: str, component_name: Optional[str], new_value: int, company_id: Optional[str] = None):
+async def _job_part_set_stock(part_id: str, component_name: Optional[str], new_value: int):
     if component_name:
-        await db.spare_parts.update_one({"id": part_id, "company_id": company_id, "set_components.name": component_name}, {"$set": {"set_components.$.stock": new_value}})
+        await db.spare_parts.update_one({"id": part_id, "set_components.name": component_name}, {"$set": {"set_components.$.stock": new_value}})
     else:
-        await db.spare_parts.update_one({"id": part_id, "company_id": company_id}, {"$set": {"quantity": new_value}})
+        await db.spare_parts.update_one({"id": part_id}, {"$set": {"quantity": new_value}})
 
 @api_router.post("/jobs")
 async def create_job(job: JobCardCreate, cu: dict = Depends(require("jobs", "create"))):
-    count = await db.job_cards.count_documents(company_scope(cu))
+    count = await db.job_cards.count_documents({})
     jc = job.model_dump()
     jc["id"] = str(uuid.uuid4())
-    jc["company_id"] = cu.get("company_id")
     jc["job_number"] = f"JC-{datetime.now(timezone.utc).year}-{str(count + 1).zfill(3)}"
     jc["status"] = "pending"; jc["actual_cost"] = None
     jc["created_at"] = datetime.now(timezone.utc).isoformat()
@@ -1671,7 +1531,7 @@ async def create_job(job: JobCardCreate, cu: dict = Depends(require("jobs", "cre
             raise HTTPException(400, "Brand, model and registration number are required for external vehicles")
     else:
         if not job.vehicle_id: raise HTTPException(400, "vehicle_id is required")
-        v = await db.vehicles.find_one({"id": job.vehicle_id, **company_scope(cu)}, {"_id": 0})
+        v = await db.vehicles.find_one({"id": job.vehicle_id}, {"_id": 0})
         if not v: raise HTTPException(404, "Vehicle not found")
         if v.get("status") == "sold":
             if not _within_warranty(v):
@@ -1689,9 +1549,9 @@ async def create_job(job: JobCardCreate, cu: dict = Depends(require("jobs", "cre
         component_name = part.get("component_name")
         qty = int(part.get("quantity", 0))
         if part_id and qty > 0:
-            current, part_label = await _job_part_current_stock(part_id, component_name, cu.get("company_id"))
+            current, part_label = await _job_part_current_stock(part_id, component_name)
             if current is not None:
-                await _job_part_set_stock(part_id, component_name, max(0, current - qty), cu.get("company_id"))
+                await _job_part_set_stock(part_id, component_name, max(0, current - qty))
                 txn = {
                     "id": str(uuid.uuid4()), "part_id": part_id, "part_name": part_label,
                     "type": "out", "quantity": qty, "reason": "Used in Job Card",
@@ -1704,7 +1564,7 @@ async def create_job(job: JobCardCreate, cu: dict = Depends(require("jobs", "cre
 
 @api_router.put("/jobs/{jid}")
 async def update_job(jid: str, job: JobCardUpdate, cu: dict = Depends(require("jobs", "edit"))):
-    existing = await db.job_cards.find_one({"id": jid, **company_scope(cu)}, {"_id": 0})
+    existing = await db.job_cards.find_one({"id": jid}, {"_id": 0})
     if not existing: raise HTTPException(404, "Job not found")
     upd = {k: v for k, v in job.model_dump().items() if v is not None}
     if upd.get("status") == "completed":
@@ -1742,7 +1602,7 @@ async def update_job(jid: str, job: JobCardUpdate, cu: dict = Depends(require("j
             diff = new_qtys.get(key, 0) - old_qtys.get(key, 0)
             if diff == 0: continue
             part_id, component_name = key
-            current, part_label = await _job_part_current_stock(part_id, component_name, cu.get("company_id"))
+            current, part_label = await _job_part_current_stock(part_id, component_name)
             if current is None: continue
             if diff > 0 and current < diff:
                 raise HTTPException(400, f"Not enough stock for {part_label}: only {current} left")
@@ -1751,7 +1611,7 @@ async def update_job(jid: str, job: JobCardUpdate, cu: dict = Depends(require("j
         for key, diff in diffs.items():
             part_id, component_name = key
             current, part_label = stock_info[key]
-            await _job_part_set_stock(part_id, component_name, max(0, current - diff), cu.get("company_id"))
+            await _job_part_set_stock(part_id, component_name, max(0, current - diff))
             txn = {
                 "id": str(uuid.uuid4()), "part_id": part_id, "part_name": part_label,
                 "type": "out" if diff > 0 else "in", "quantity": abs(diff),
@@ -1762,25 +1622,25 @@ async def update_job(jid: str, job: JobCardUpdate, cu: dict = Depends(require("j
             }
             await db.part_transactions.insert_one(txn)
 
-    r = await db.job_cards.update_one({"id": jid, **company_scope(cu)}, {"$set": upd})
+    r = await db.job_cards.update_one({"id": jid}, {"$set": upd})
     if r.matched_count == 0: raise HTTPException(404, "Job not found")
-    return await db.job_cards.find_one({"id": jid, **company_scope(cu)}, {"_id": 0})
+    return await db.job_cards.find_one({"id": jid}, {"_id": 0})
 
 @api_router.delete("/jobs/{jid}")
 async def delete_job(jid: str, cu: dict = Depends(require("jobs", "delete"))):
-    r = await db.job_cards.delete_one({"id": jid, **company_scope(cu)})
+    r = await db.job_cards.delete_one({"id": jid})
     if r.deleted_count == 0: raise HTTPException(404, "Job not found")
     return {"message": "Deleted"}
 
 # ── CUSTOMERS ─────────────────────────────────────────────────────────
 @api_router.get("/customers")
 async def get_customers(cu: dict = Depends(require("customers", "view"))):
-    customers = await db.customers.find(company_scope(cu), {"_id": 0}).sort("created_at", -1).to_list(1000)
+    customers = await db.customers.find({}, {"_id": 0}).sort("created_at", -1).to_list(1000)
     customer_ids = [c["id"] for c in customers]
     sales_by_customer: dict = {}
     if customer_ids:
         all_sales = await db.sales.find(
-            {"customer_id": {"$in": customer_ids}, **company_scope(cu)}, {"_id": 0, "customer_id": 1, "due_amount": 1, "due_date": 1, "returned": 1}
+            {"customer_id": {"$in": customer_ids}}, {"_id": 0, "customer_id": 1, "due_amount": 1, "due_date": 1, "returned": 1}
         ).to_list(20000)
         for s in all_sales:
             sales_by_customer.setdefault(s["customer_id"], []).append(s)
@@ -1797,7 +1657,6 @@ async def get_customers(cu: dict = Depends(require("customers", "view"))):
 async def create_customer(cust: CustomerCreate, cu: dict = Depends(require("customers", "create"))):
     c = cust.model_dump()
     c["id"] = str(uuid.uuid4())
-    c["company_id"] = cu.get("company_id")
     c["created_at"] = datetime.now(timezone.utc).isoformat()
     await db.customers.insert_one(c)
     c.pop("_id", None)
@@ -1805,13 +1664,13 @@ async def create_customer(cust: CustomerCreate, cu: dict = Depends(require("cust
 
 @api_router.get("/customers/{cid}")
 async def get_customer(cid: str, cu: dict = Depends(require("customers", "view"))):
-    c = await db.customers.find_one({"id": cid, **company_scope(cu)}, {"_id": 0})
+    c = await db.customers.find_one({"id": cid}, {"_id": 0})
     if not c: raise HTTPException(404, "Not found")
-    sales = await db.sales.find({"customer_id": cid, **company_scope(cu)}, {"_id": 0}).sort("sale_date", -1).to_list(200)
+    sales = await db.sales.find({"customer_id": cid}, {"_id": 0}).sort("sale_date", -1).to_list(200)
     vehicle_ids = list({s["vehicle_id"] for s in sales if s.get("vehicle_id")})
     vehicles_by_id = {}
     if vehicle_ids:
-        vs = await db.vehicles.find({"id": {"$in": vehicle_ids}, **company_scope(cu)}, {"_id": 0, "id": 1, "brand": 1, "model": 1, "year": 1, "registration_number": 1}).to_list(len(vehicle_ids))
+        vs = await db.vehicles.find({"id": {"$in": vehicle_ids}}, {"_id": 0, "id": 1, "brand": 1, "model": 1, "year": 1, "registration_number": 1}).to_list(len(vehicle_ids))
         vehicles_by_id = {v["id"]: v for v in vs}
     for s in sales:
         v = vehicles_by_id.get(s.get("vehicle_id"))
@@ -1824,13 +1683,13 @@ async def get_customer(cid: str, cu: dict = Depends(require("customers", "view")
 
 @api_router.put("/customers/{cid}")
 async def update_customer(cid: str, cust: CustomerCreate, cu: dict = Depends(require("customers", "edit"))):
-    r = await db.customers.update_one({"id": cid, **company_scope(cu)}, {"$set": cust.model_dump()})
+    r = await db.customers.update_one({"id": cid}, {"$set": cust.model_dump()})
     if r.matched_count == 0: raise HTTPException(404, "Not found")
-    return await db.customers.find_one({"id": cid, **company_scope(cu)}, {"_id": 0})
+    return await db.customers.find_one({"id": cid}, {"_id": 0})
 
 @api_router.delete("/customers/{cid}")
 async def delete_customer(cid: str, cu: dict = Depends(require("customers", "delete"))):
-    r = await db.customers.delete_one({"id": cid, **company_scope(cu)})
+    r = await db.customers.delete_one({"id": cid})
     if r.deleted_count == 0: raise HTTPException(404, "Not found")
     return {"message": "Deleted"}
 
@@ -1843,7 +1702,7 @@ async def get_sales(start_date: Optional[str] = None, end_date: Optional[str] = 
     Returned tab fetch just the sales that were later returned. Vehicle/customer lookups
     are batched with $in instead of one query per sale, which is what made this endpoint
     slow to begin with."""
-    query = company_scope(cu)
+    query = {}
     if start_date and end_date:
         query["sale_date"] = {"$gte": start_date, "$lte": end_date}
     if returned is not None:
@@ -1861,14 +1720,14 @@ async def get_sales(start_date: Optional[str] = None, end_date: Optional[str] = 
     customer_ids = list({s["customer_id"] for s in sales if s.get("customer_id")})
     vehicles_by_id, customers_by_id = {}, {}
     if vehicle_ids:
-        vs = await db.vehicles.find({"id": {"$in": vehicle_ids}, **company_scope(cu)}, {"_id": 0, "id": 1, "brand": 1, "model": 1, "year": 1, "registration_number": 1}).to_list(len(vehicle_ids))
+        vs = await db.vehicles.find({"id": {"$in": vehicle_ids}}, {"_id": 0, "id": 1, "brand": 1, "model": 1, "year": 1, "registration_number": 1}).to_list(len(vehicle_ids))
         vehicles_by_id = {v["id"]: v for v in vs}
     if customer_ids:
-        cs = await db.customers.find({"id": {"$in": customer_ids}, **company_scope(cu)}, {"_id": 0, "id": 1, "name": 1, "contact_number": 1}).to_list(len(customer_ids))
+        cs = await db.customers.find({"id": {"$in": customer_ids}}, {"_id": 0, "id": 1, "name": 1, "contact_number": 1}).to_list(len(customer_ids))
         customers_by_id = {c["id"]: c for c in cs}
     job_cost_by_vehicle: dict = {}
     if vehicle_ids:
-        all_jobs = await db.job_cards.find({"vehicle_id": {"$in": vehicle_ids}, "is_warranty": {"$ne": True}, **company_scope(cu)}, {"_id": 0}).to_list(20000)
+        all_jobs = await db.job_cards.find({"vehicle_id": {"$in": vehicle_ids}, "is_warranty": {"$ne": True}}, {"_id": 0}).to_list(20000)
         for j in all_jobs:
             job_cost_by_vehicle[j["vehicle_id"]] = job_cost_by_vehicle.get(j["vehicle_id"], 0) + _job_card_cost(j)
 
@@ -1886,7 +1745,7 @@ async def get_sales(start_date: Optional[str] = None, end_date: Optional[str] = 
 
 @api_router.post("/sales")
 async def create_sale(sale: SaleCreate, cu: dict = Depends(require("sales", "create"))):
-    v = await db.vehicles.find_one({"id": sale.vehicle_id, **company_scope(cu)}, {"_id": 0})
+    v = await db.vehicles.find_one({"id": sale.vehicle_id}, {"_id": 0})
     if not v: raise HTTPException(404, "Vehicle not found")
     if v.get("status") != "available": raise HTTPException(400, f"Vehicle is already {v.get('status')}")
     expenses_total = sum(float(e.get("amount", 0)) for e in sale.extra_expenses)
@@ -1897,7 +1756,6 @@ async def create_sale(sale: SaleCreate, cu: dict = Depends(require("sales", "cre
     sale_date = sale.sale_date or datetime.now(timezone.utc).date().isoformat()
     doc = {
         "id": str(uuid.uuid4()),
-        "company_id": cu.get("company_id"),
         "vehicle_id": sale.vehicle_id,
         "customer_id": sale.customer_id,
         "sale_price": sale.sale_price,
@@ -1923,7 +1781,7 @@ async def create_sale(sale: SaleCreate, cu: dict = Depends(require("sales", "cre
         doc.update(cleaned)
     doc.pop("_id", None)
     # Mark vehicle as sold
-    await db.vehicles.update_one({"id": sale.vehicle_id, **company_scope(cu)}, {"$set": {
+    await db.vehicles.update_one({"id": sale.vehicle_id}, {"$set": {
         "status": "sold",
         "selling_price": sale.sale_price,
         "sold_date": sale_date,
@@ -1932,12 +1790,12 @@ async def create_sale(sale: SaleCreate, cu: dict = Depends(require("sales", "cre
     }})
     # Update customer purchase history
     if sale.customer_id:
-        await db.customers.update_one({"id": sale.customer_id, **company_scope(cu)}, {"$set": {"last_purchase_date": sale_date}})
+        await db.customers.update_one({"id": sale.customer_id}, {"$set": {"last_purchase_date": sale_date}})
     return doc
 
 @api_router.get("/sales/summary")
 async def get_sales_summary(cu: dict = Depends(require("sales", "view"))):
-    sales = await db.sales.find(company_scope(cu), {"_id": 0}).to_list(1000)
+    sales = await db.sales.find({}, {"_id": 0}).to_list(1000)
     total_revenue = sum(_sale_revenue(s) for s in sales)
     this_month = datetime.now(timezone.utc).strftime("%Y-%m")
     monthly = [s for s in sales if s.get("sale_date", "").startswith(this_month)]
@@ -1971,12 +1829,12 @@ async def reconcile_sales(cu: dict = Depends(admin_only)):
     (so it doesn't count in Sales) — happens when a vehicle's status is set to "sold" by a path
     that skips the auto-create-sale logic (e.g. bulk import, or a direct DB edit), and is checked
     separately below."""
-    sales = await db.sales.find(company_scope(cu), {"_id": 0}).to_list(1000)
+    sales = await db.sales.find({}, {"_id": 0}).to_list(1000)
     mismatches = []
     for s in sales:
         if s.get("returned"):
             continue
-        v = await db.vehicles.find_one({"id": s.get("vehicle_id"), **company_scope(cu)}, {"_id": 0})
+        v = await db.vehicles.find_one({"id": s.get("vehicle_id")}, {"_id": 0})
         if not v:
             mismatches.append({
                 "sale_id": s["id"], "vehicle_id": s.get("vehicle_id"), "issue": "vehicle_deleted",
@@ -1991,9 +1849,9 @@ async def reconcile_sales(cu: dict = Depends(admin_only)):
                 "sale_date": s.get("sale_date"), "total_amount": s.get("total_amount"),
             })
 
-    sold_vehicles = await db.vehicles.find({"status": "sold", **company_scope(cu)}, {"_id": 0}).to_list(1000)
+    sold_vehicles = await db.vehicles.find({"status": "sold"}, {"_id": 0}).to_list(1000)
     for v in sold_vehicles:
-        active_sale = await db.sales.find_one({"vehicle_id": v["id"], "returned": {"$ne": True}, **company_scope(cu)}, {"_id": 0, "id": 1})
+        active_sale = await db.sales.find_one({"vehicle_id": v["id"], "returned": {"$ne": True}}, {"_id": 0, "id": 1})
         if not active_sale:
             mismatches.append({
                 "sale_id": None, "vehicle_id": v["id"], "issue": "orphan_sold_vehicle",
@@ -2033,12 +1891,12 @@ async def _strip_job_card_extra_expenses(s: dict) -> Optional[dict]:
 
 @api_router.get("/sales/{sid}")
 async def get_sale(sid: str, cu: dict = Depends(require("sales", "view"))):
-    s = await db.sales.find_one({"id": sid, **company_scope(cu)}, {"_id": 0})
+    s = await db.sales.find_one({"id": sid}, {"_id": 0})
     if not s: raise HTTPException(404, "Not found")
     # Self-heal: strip out any job-card item a now-removed code path already billed onto
     # this sale — see _strip_job_card_extra_expenses.
     await _strip_job_card_extra_expenses(s)
-    v = await db.vehicles.find_one({"id": s.get("vehicle_id"), **company_scope(cu)}, {"_id": 0})
+    v = await db.vehicles.find_one({"id": s.get("vehicle_id")}, {"_id": 0})
     if v:
         s["vehicle_info"] = f"{v.get('brand','')} {v.get('model','')} {v.get('year','')}".strip()
         s["vehicle_brand"] = v.get("brand"); s["vehicle_model"] = v.get("model")
@@ -2046,7 +1904,7 @@ async def get_sale(sid: str, cu: dict = Depends(require("sales", "view"))):
         s["engine_cc"] = v.get("engine_cc"); s["fuel_type"] = v.get("fuel_type")
         s["vehicle_status"] = v.get("status")
     s["job_card_cost"] = await _job_card_cost_total(s["vehicle_id"]) if s.get("vehicle_id") else 0
-    c = await db.customers.find_one({"id": s.get("customer_id"), **company_scope(cu)}, {"_id": 0}) if s.get("customer_id") else None
+    c = await db.customers.find_one({"id": s.get("customer_id")}, {"_id": 0}) if s.get("customer_id") else None
     s["customer_name"] = c["name"] if c else "Walk-in Customer"
     s["customer_contact"] = c.get("contact_number") if c else None
     s["customer_address"] = c.get("address") if c else None
@@ -2064,9 +1922,9 @@ async def get_sale(sid: str, cu: dict = Depends(require("sales", "view"))):
 async def update_sale(sid: str, sale: SaleUpdate, cu: dict = Depends(get_current_user)):
     if cu.get("role") != "admin":
         raise HTTPException(403, "Only admin accounts can edit sales records")
-    existing = await db.sales.find_one({"id": sid, **company_scope(cu)}, {"_id": 0})
+    existing = await db.sales.find_one({"id": sid}, {"_id": 0})
     if not existing: raise HTTPException(404, "Not found")
-    v = await db.vehicles.find_one({"id": sale.vehicle_id, **company_scope(cu)}, {"_id": 0})
+    v = await db.vehicles.find_one({"id": sale.vehicle_id}, {"_id": 0})
     if not v: raise HTTPException(404, "Vehicle not found")
     expenses_total = sum(float(e.get("amount", 0)) for e in sale.extra_expenses)
     total_amount = sale.sale_price + expenses_total
@@ -2092,28 +1950,28 @@ async def update_sale(sid: str, sale: SaleUpdate, cu: dict = Depends(get_current
         "updated_by": cu.get("username"),
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
-    await db.sales.update_one({"id": sid, **company_scope(cu)}, {"$set": update_doc})
+    await db.sales.update_one({"id": sid}, {"$set": update_doc})
     # Keep vehicle record in sync (price/date/customer may have changed)
-    await db.vehicles.update_one({"id": sale.vehicle_id, **company_scope(cu)}, {"$set": {
+    await db.vehicles.update_one({"id": sale.vehicle_id}, {"$set": {
         "selling_price": sale.sale_price,
         "sold_date": sale_date,
         "customer_id": sale.customer_id,
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }})
     if sale.customer_id:
-        await db.customers.update_one({"id": sale.customer_id, **company_scope(cu)}, {"$set": {"last_purchase_date": sale_date}})
-    updated = await db.sales.find_one({"id": sid, **company_scope(cu)}, {"_id": 0})
+        await db.customers.update_one({"id": sale.customer_id}, {"$set": {"last_purchase_date": sale_date}})
+    updated = await db.sales.find_one({"id": sid}, {"_id": 0})
     return updated
 
 @api_router.delete("/sales/{sid}")
 async def delete_sale(sid: str, cu: dict = Depends(get_current_user)):
     if cu.get("role") != "admin":
         raise HTTPException(403, "Only admin accounts can delete sales records")
-    s = await db.sales.find_one({"id": sid, **company_scope(cu)}, {"_id": 0})
+    s = await db.sales.find_one({"id": sid}, {"_id": 0})
     if not s: raise HTTPException(404, "Not found")
-    await db.sales.delete_one({"id": sid, **company_scope(cu)})
+    await db.sales.delete_one({"id": sid})
     # Restore vehicle to available
-    await db.vehicles.update_one({"id": s["vehicle_id"], **company_scope(cu)}, {"$set": {
+    await db.vehicles.update_one({"id": s["vehicle_id"]}, {"$set": {
         "status": "available", "sold_date": None, "customer_id": None,
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }})
@@ -2122,21 +1980,21 @@ async def delete_sale(sid: str, cu: dict = Depends(get_current_user)):
 # ── TEAM ──────────────────────────────────────────────────────────────
 @api_router.get("/team")
 async def get_team(cu: dict = Depends(require("team", "view"))):
-    members = await db.team_members.find(company_scope(cu), {"_id": 0}).to_list(100)
+    members = await db.team_members.find({}, {"_id": 0}).to_list(100)
     for m in members:
         if m.get("role") == "mechanic":
-            m["total_jobs"] = await db.job_cards.count_documents({"mechanic_id": m["id"], **company_scope(cu)})
-            m["completed_jobs"] = await db.job_cards.count_documents({"mechanic_id": m["id"], "status": "completed", **company_scope(cu)})
+            m["total_jobs"] = await db.job_cards.count_documents({"mechanic_id": m["id"]})
+            m["completed_jobs"] = await db.job_cards.count_documents({"mechanic_id": m["id"], "status": "completed"})
             m["completion_rate"] = round(m["completed_jobs"] / m["total_jobs"] * 100) if m["total_jobs"] > 0 else 0
     return members
 
 @api_router.get("/team/leaderboard")
 async def get_leaderboard(cu: dict = Depends(require("team", "view"))):
-    sales_staff = await db.team_members.find({"role": "sales", **company_scope(cu)}, {"_id": 0}).to_list(50)
+    sales_staff = await db.team_members.find({"role": "sales"}, {"_id": 0}).to_list(50)
     sales_ids = [s["id"] for s in sales_staff]
     sold_by_salesperson: dict = {}
     if sales_ids:
-        sold = await db.vehicles.find({"salesperson_id": {"$in": sales_ids}, **company_scope(cu)}, {"_id": 0, "salesperson_id": 1, "selling_price": 1}).to_list(20000)
+        sold = await db.vehicles.find({"salesperson_id": {"$in": sales_ids}}, {"_id": 0, "salesperson_id": 1, "selling_price": 1}).to_list(20000)
         for v in sold:
             sold_by_salesperson.setdefault(v["salesperson_id"], []).append(v)
     sales_board = []
@@ -2146,11 +2004,11 @@ async def get_leaderboard(cu: dict = Depends(require("team", "view"))):
         sales_board.append({**s, "vehicles_sold": len(sold_vehicles), "revenue_generated": revenue})
     sales_board.sort(key=lambda x: x["vehicles_sold"], reverse=True)
 
-    mechanics = await db.team_members.find({"role": "mechanic", **company_scope(cu)}, {"_id": 0}).to_list(50)
+    mechanics = await db.team_members.find({"role": "mechanic"}, {"_id": 0}).to_list(50)
     mech_ids = [m["id"] for m in mechanics]
     jobs_by_mechanic: dict = {}
     if mech_ids:
-        jobs = await db.job_cards.find({"mechanic_id": {"$in": mech_ids}, **company_scope(cu)}, {"_id": 0, "mechanic_id": 1, "status": 1}).to_list(20000)
+        jobs = await db.job_cards.find({"mechanic_id": {"$in": mech_ids}}, {"_id": 0, "mechanic_id": 1, "status": 1}).to_list(20000)
         for j in jobs:
             jobs_by_mechanic.setdefault(j["mechanic_id"], []).append(j)
     mech_board = []
@@ -2167,7 +2025,6 @@ async def get_leaderboard(cu: dict = Depends(require("team", "view"))):
 async def create_team_member(member: TeamMemberCreate, cu: dict = Depends(require("team", "create"))):
     m = member.model_dump()
     m["id"] = str(uuid.uuid4()); m["is_active"] = True
-    m["company_id"] = cu.get("company_id")
     m["joining_date"] = m.get("joining_date") or datetime.now(timezone.utc).date().isoformat()
     m["created_at"] = datetime.now(timezone.utc).isoformat()
     await db.team_members.insert_one(m)
@@ -2176,63 +2033,62 @@ async def create_team_member(member: TeamMemberCreate, cu: dict = Depends(requir
 
 @api_router.put("/team/{mid}")
 async def update_team_member(mid: str, member: TeamMemberCreate, cu: dict = Depends(require("team", "edit"))):
-    r = await db.team_members.update_one({"id": mid, **company_scope(cu)}, {"$set": member.model_dump()})
+    r = await db.team_members.update_one({"id": mid}, {"$set": member.model_dump()})
     if r.matched_count == 0: raise HTTPException(404, "Not found")
-    return await db.team_members.find_one({"id": mid, **company_scope(cu)}, {"_id": 0})
+    return await db.team_members.find_one({"id": mid}, {"_id": 0})
 
 @api_router.delete("/team/{mid}")
 async def delete_team_member(mid: str, cu: dict = Depends(require("team", "delete"))):
-    r = await db.team_members.delete_one({"id": mid, **company_scope(cu)})
+    r = await db.team_members.delete_one({"id": mid})
     if r.deleted_count == 0: raise HTTPException(404, "Not found")
     return {"message": "Deleted"}
 
 # ── PARTNERS ──────────────────────────────────────────────────────────
 @api_router.get("/partners")
 async def get_partners(cu: dict = Depends(admin_only)):
-    return await db.partners.find(company_scope(cu), {"_id": 0}).to_list(100)
+    return await db.partners.find({}, {"_id": 0}).to_list(100)
 
 @api_router.post("/partners")
 async def create_partner(partner: PartnerCreate, cu: dict = Depends(admin_only)):
     p = partner.model_dump()
     p["id"] = str(uuid.uuid4()); p["created_at"] = datetime.now(timezone.utc).isoformat()
-    p["company_id"] = cu.get("company_id")
     await db.partners.insert_one(p)
     p.pop("_id", None)
     return p
 
 @api_router.put("/partners/{pid}")
 async def update_partner(pid: str, partner: PartnerCreate, cu: dict = Depends(admin_only)):
-    r = await db.partners.update_one({"id": pid, **company_scope(cu)}, {"$set": partner.model_dump()})
+    r = await db.partners.update_one({"id": pid}, {"$set": partner.model_dump()})
     if r.matched_count == 0: raise HTTPException(404, "Not found")
-    return await db.partners.find_one({"id": pid, **company_scope(cu)}, {"_id": 0})
+    return await db.partners.find_one({"id": pid}, {"_id": 0})
 
 @api_router.delete("/partners/{pid}")
 async def delete_partner(pid: str, cu: dict = Depends(admin_only)):
-    r = await db.partners.delete_one({"id": pid, **company_scope(cu)})
+    r = await db.partners.delete_one({"id": pid})
     if r.deleted_count == 0: raise HTTPException(404, "Not found")
     return {"message": "Deleted"}
 
 # ── VENDORS ───────────────────────────────────────────────────────────
 @api_router.get("/vendors")
 async def get_vendors(cu: dict = Depends(require("vendors", "view"))):
-    vendors = await db.vendors.find(company_scope(cu), {"_id": 0}).to_list(200)
+    vendors = await db.vendors.find({}, {"_id": 0}).to_list(200)
     vendor_ids = [v["id"] for v in vendors]
 
     vehicles_by_vendor, parts_by_vendor, payments_by_vendor = {}, {}, {}
     if vendor_ids:
         all_vehicles = await db.vehicles.find(
-            {"$or": [{"vendor_id": {"$in": vendor_ids}}, {"linked_contact_type": "vendor", "linked_contact_id": {"$in": vendor_ids}}], **company_scope(cu)},
+            {"$or": [{"vendor_id": {"$in": vendor_ids}}, {"linked_contact_type": "vendor", "linked_contact_id": {"$in": vendor_ids}}]},
             {"_id": 0},
         ).to_list(20000)
         for vh in all_vehicles:
             vid = vh.get("vendor_id") or (vh.get("linked_contact_id") if vh.get("linked_contact_type") == "vendor" else None)
             if vid: vehicles_by_vendor.setdefault(vid, []).append(vh)
 
-        all_parts = await db.spare_parts.find({"vendor_id": {"$in": vendor_ids}, **company_scope(cu)}, {"_id": 0}).to_list(20000)
+        all_parts = await db.spare_parts.find({"vendor_id": {"$in": vendor_ids}}, {"_id": 0}).to_list(20000)
         for p in all_parts:
             parts_by_vendor.setdefault(p["vendor_id"], []).append(p)
 
-        all_payments = await db.vendor_payments.find({"vendor_id": {"$in": vendor_ids}, **company_scope(cu)}, {"_id": 0}).to_list(20000)
+        all_payments = await db.vendor_payments.find({"vendor_id": {"$in": vendor_ids}}, {"_id": 0}).to_list(20000)
         for p in all_payments:
             payments_by_vendor.setdefault(p["vendor_id"], []).append(p)
 
@@ -2256,27 +2112,26 @@ async def get_vendors(cu: dict = Depends(require("vendors", "view"))):
 async def create_vendor(vendor: VendorCreate, cu: dict = Depends(require("vendor_lookup", "create"))):
     v = vendor.model_dump()
     v["id"] = str(uuid.uuid4()); v["created_at"] = datetime.now(timezone.utc).isoformat()
-    v["company_id"] = cu.get("company_id")
     await db.vendors.insert_one(v)
     v.pop("_id", None)
     return v
 
 @api_router.put("/vendors/{vid}")
 async def update_vendor(vid: str, vendor: VendorCreate, cu: dict = Depends(require("vendors", "edit"))):
-    r = await db.vendors.update_one({"id": vid, **company_scope(cu)}, {"$set": vendor.model_dump()})
+    r = await db.vendors.update_one({"id": vid}, {"$set": vendor.model_dump()})
     if r.matched_count == 0: raise HTTPException(404, "Not found")
-    return await db.vendors.find_one({"id": vid, **company_scope(cu)}, {"_id": 0})
+    return await db.vendors.find_one({"id": vid}, {"_id": 0})
 
 @api_router.delete("/vendors/{vid}")
 async def delete_vendor(vid: str, cu: dict = Depends(require("vendors", "delete"))):
-    r = await db.vendors.delete_one({"id": vid, **company_scope(cu)})
+    r = await db.vendors.delete_one({"id": vid})
     if r.deleted_count == 0: raise HTTPException(404, "Not found")
     return {"message": "Deleted"}
 
 @api_router.get("/vendors/search")
 async def search_vendors(q: str = "", vendor_type: Optional[str] = None, cu: dict = Depends(require("vendor_lookup", "view"))):
     """Fast vendor name search for autocomplete."""
-    vendors = await db.vendors.find(company_scope(cu), {"_id": 0, "id": 1, "name": 1, "phone": 1, "vendor_type": 1}).to_list(200)
+    vendors = await db.vendors.find({}, {"_id": 0, "id": 1, "name": 1, "phone": 1, "vendor_type": 1}).to_list(200)
     if vendor_type:
         vendors = [v for v in vendors if v.get("vendor_type", "both") in (vendor_type, "both")]
     if q:
@@ -2286,9 +2141,9 @@ async def search_vendors(q: str = "", vendor_type: Optional[str] = None, cu: dic
 
 @api_router.get("/vendors/{vid}/payments")
 async def get_vendor_payments(vid: str, cu: dict = Depends(require("vendors", "view"))):
-    payments = await db.vendor_payments.find({"vendor_id": vid, **company_scope(cu)}, {"_id": 0}).sort("payment_date", -1).to_list(500)
+    payments = await db.vendor_payments.find({"vendor_id": vid}, {"_id": 0}).sort("payment_date", -1).to_list(500)
     vehicles = await db.vehicles.find(_vendor_vehicle_filter(vid), {"_id": 0}).to_list(200)
-    parts = await db.spare_parts.find({"vendor_id": vid, **company_scope(cu)}, {"_id": 0}).to_list(1000)
+    parts = await db.spare_parts.find({"vendor_id": vid}, {"_id": 0}).to_list(1000)
     vehicle_owed = sum(v.get("purchase_price", 0) for v in vehicles)
     parts_owed = sum(p.get("quantity", 0) * p.get("unit_cost", 0) for p in parts)
     total_owed = vehicle_owed + parts_owed
@@ -2306,11 +2161,10 @@ async def get_vendor_payments(vid: str, cu: dict = Depends(require("vendors", "v
 
 @api_router.post("/vendor-payments")
 async def create_vendor_payment(payment: VendorPaymentCreate, cu: dict = Depends(require("vendors", "manage_payments"))):
-    if not await db.vendors.find_one({"id": payment.vendor_id, **company_scope(cu)}, {"_id": 0, "id": 1}):
+    if not await db.vendors.find_one({"id": payment.vendor_id}, {"_id": 0, "id": 1}):
         raise HTTPException(404, "Vendor not found")
     p = payment.model_dump()
     p["id"] = str(uuid.uuid4())
-    p["company_id"] = cu.get("company_id")
     p["payment_date"] = p.get("payment_date") or datetime.now(timezone.utc).date().isoformat()
     p["recorded_by"] = cu["username"]
     p["created_at"] = datetime.now(timezone.utc).isoformat()
@@ -2320,16 +2174,16 @@ async def create_vendor_payment(payment: VendorPaymentCreate, cu: dict = Depends
 
 @api_router.delete("/vendor-payments/{pid}")
 async def delete_vendor_payment(pid: str, cu: dict = Depends(require("vendors", "manage_payments"))):
-    r = await db.vendor_payments.delete_one({"id": pid, **company_scope(cu)})
+    r = await db.vendor_payments.delete_one({"id": pid})
     if r.deleted_count == 0: raise HTTPException(404, "Not found")
     return {"message": "Deleted"}
 
 # ── EMI ───────────────────────────────────────────────────────────────
 @api_router.get("/emi")
 async def get_emi_list(cu: dict = Depends(admin_only)):
-    emis = await db.emi_records.find(company_scope(cu), {"_id": 0}).to_list(500)
+    emis = await db.emi_records.find({}, {"_id": 0}).to_list(500)
     for e in emis:
-        payments = await db.emi_payments.find({"emi_id": e["id"], **company_scope(cu)}, {"_id": 0}).to_list(200)
+        payments = await db.emi_payments.find({"emi_id": e["id"]}, {"_id": 0}).to_list(200)
         paid = sum(p["amount"] for p in payments)
         e["total_paid"] = paid
         e["remaining_balance"] = max(0, e.get("loan_amount", 0) - paid)
@@ -2341,7 +2195,6 @@ async def get_emi_list(cu: dict = Depends(admin_only)):
 async def create_emi(emi: EMICreate, cu: dict = Depends(admin_only)):
     e = emi.model_dump()
     e["id"] = str(uuid.uuid4())
-    e["company_id"] = cu.get("company_id")
     # Calculate monthly installment: EMI = P * r * (1+r)^n / ((1+r)^n - 1)
     p_val = e["loan_amount"]
     r = e["interest_rate"] / 100 / 12
@@ -2356,12 +2209,12 @@ async def create_emi(emi: EMICreate, cu: dict = Depends(admin_only)):
     e["status"] = "active"
     e["created_at"] = datetime.now(timezone.utc).isoformat()
     # Get customer info
-    customer = await db.customers.find_one({"id": emi.customer_id, **company_scope(cu)}, {"_id": 0})
+    customer = await db.customers.find_one({"id": emi.customer_id}, {"_id": 0})
     if customer:
         e["customer_name"] = customer.get("name")
         e["customer_phone"] = customer.get("contact_number")
     # Get vehicle info
-    vehicle = await db.vehicles.find_one({"id": emi.vehicle_id, **company_scope(cu)}, {"_id": 0})
+    vehicle = await db.vehicles.find_one({"id": emi.vehicle_id}, {"_id": 0})
     if vehicle:
         e["vehicle_name"] = f"{vehicle.get('brand')} {vehicle.get('model')} {vehicle.get('year')}"
     await db.emi_records.insert_one(e)
@@ -2370,11 +2223,10 @@ async def create_emi(emi: EMICreate, cu: dict = Depends(admin_only)):
 
 @api_router.post("/emi-payments")
 async def add_emi_payment(payment: EMIPaymentCreate, cu: dict = Depends(admin_only)):
-    if not await db.emi_records.find_one({"id": payment.emi_id, **company_scope(cu)}, {"_id": 0, "id": 1}):
+    if not await db.emi_records.find_one({"id": payment.emi_id}, {"_id": 0, "id": 1}):
         raise HTTPException(404, "EMI record not found")
     p = payment.model_dump()
     p["id"] = str(uuid.uuid4())
-    p["company_id"] = cu.get("company_id")
     p["payment_date"] = p.get("payment_date") or datetime.now(timezone.utc).date().isoformat()
     p["recorded_by"] = cu["username"]
     p["created_at"] = datetime.now(timezone.utc).isoformat()
@@ -2386,30 +2238,30 @@ async def add_emi_payment(payment: EMIPaymentCreate, cu: dict = Depends(admin_on
 @api_router.get("/finance/summary")
 async def finance_summary(cu: dict = Depends(admin_only)):
     # Inventory value (available vehicles)
-    avail = await db.vehicles.find({**company_scope(cu), "status": "available"}, {"_id": 0}).to_list(1000)
+    avail = await db.vehicles.find({"status": "available"}, {"_id": 0}).to_list(1000)
     inventory_value = sum((await _batch_vehicle_investment(avail)).values())
     # Revenue & COGS from Sales table (single source of truth)
-    sales_records = await db.sales.find(company_scope(cu), {"_id": 0}).to_list(1000)
+    sales_records = await db.sales.find({}, {"_id": 0}).to_list(1000)
     total_revenue = sum(_sale_revenue(s) for s in sales_records)
     # Dedupe: a vehicle sold, returned, then resold appears in two sales rows but its
     # investment (purchase price + expenses) should only count once toward COGS.
     sold_vehicle_ids = list({s["vehicle_id"] for s in sales_records})
     sold_vehicles = (
-        await db.vehicles.find({**company_scope(cu), "id": {"$in": sold_vehicle_ids}}, {"_id": 0}).to_list(5000)
+        await db.vehicles.find({"id": {"$in": sold_vehicle_ids}}, {"_id": 0}).to_list(5000)
         if sold_vehicle_ids else []
     )
     total_cogs = sum((await _batch_vehicle_investment(sold_vehicles)).values())
     gross_profit = total_revenue - total_cogs
 
     # Vendor payables
-    vendors = await db.vendors.find(company_scope(cu), {"_id": 0}).to_list(100)
+    vendors = await db.vendors.find({}, {"_id": 0}).to_list(100)
     vendor_payables = sum((await _batch_vendor_payable([v["id"] for v in vendors])).values())
 
     # EMI receivables
-    emis = await db.emi_records.find({**company_scope(cu), "status": "active"}, {"_id": 0}).to_list(200)
+    emis = await db.emi_records.find({"status": "active"}, {"_id": 0}).to_list(200)
     emi_receivables = sum((await _batch_emi_remaining(emis)).values())
 
-    partners = await db.partners.find(company_scope(cu), {"_id": 0}).to_list(100)
+    partners = await db.partners.find({}, {"_id": 0}).to_list(100)
     total_capital = sum(p.get("capital_contribution", 0) for p in partners)
 
     return {
@@ -2431,26 +2283,26 @@ async def dashboard_stats(cu: dict = Depends(admin_only)):
     # These 4 counts are independent — running them concurrently instead of one
     # await after another turns 4 round-trips into the time of the slowest one.
     total, available, reserved, in_repair = await asyncio.gather(
-        db.vehicles.count_documents(company_scope(cu)),
-        db.vehicles.count_documents({**company_scope(cu), "status": "available"}),
-        db.vehicles.count_documents({**company_scope(cu), "status": "reserved"}),
-        db.vehicles.count_documents({**company_scope(cu), "status": "in_repair"}),
+        db.vehicles.count_documents({}),
+        db.vehicles.count_documents({"status": "available"}),
+        db.vehicles.count_documents({"status": "reserved"}),
+        db.vehicles.count_documents({"status": "in_repair"}),
     )
 
-    avail_v = await db.vehicles.find({**company_scope(cu), "status": "available"}, {"_id": 0}).to_list(1000)
+    avail_v = await db.vehicles.find({"status": "available"}, {"_id": 0}).to_list(1000)
     investment_by_vehicle = await _batch_vehicle_investment(avail_v)
     locked_capital = sum(investment_by_vehicle.values())
     aging = _aging_counts(avail_v)
 
     # Use Sales table as single source of truth for sold count & profit
-    sales_records = await db.sales.find(company_scope(cu), {"_id": 0}).to_list(1000)
+    sales_records = await db.sales.find({}, {"_id": 0}).to_list(1000)
     sold = len(sales_records)
 
     # Sold vehicles' investment feeds both the profit loop below and total_cogs —
     # fetch + batch-compute once instead of once per sale/vehicle.
     sold_vehicle_ids = list({s["vehicle_id"] for s in sales_records})
     sold_vehicles = (
-        await db.vehicles.find({**company_scope(cu), "id": {"$in": sold_vehicle_ids}}, {"_id": 0}).to_list(5000)
+        await db.vehicles.find({"id": {"$in": sold_vehicle_ids}}, {"_id": 0}).to_list(5000)
         if sold_vehicle_ids else []
     )
     sold_investment_by_vehicle = await _batch_vehicle_investment(sold_vehicles)
@@ -2472,15 +2324,15 @@ async def dashboard_stats(cu: dict = Depends(admin_only)):
     # investment (purchase price + expenses) should only count once toward COGS.
     total_cogs = sum(sold_investment_by_vehicle.values())
 
-    vendors = await db.vendors.find(company_scope(cu), {"_id": 0}).to_list(100)
+    vendors = await db.vendors.find({}, {"_id": 0}).to_list(100)
     payable_by_vendor = await _batch_vendor_payable([v["id"] for v in vendors])
     total_vendor_due = sum(payable_by_vendor.values())
 
     pending_jobs, in_progress_jobs, total_customers, total_vendors = await asyncio.gather(
-        db.job_cards.count_documents({**company_scope(cu), "status": "pending"}),
-        db.job_cards.count_documents({**company_scope(cu), "status": "in_progress"}),
-        db.customers.count_documents(company_scope(cu)),
-        db.vendors.count_documents(company_scope(cu)),
+        db.job_cards.count_documents({"status": "pending"}),
+        db.job_cards.count_documents({"status": "in_progress"}),
+        db.customers.count_documents({}),
+        db.vendors.count_documents({}),
     )
 
     return {
@@ -2500,7 +2352,7 @@ async def dashboard_stats(cu: dict = Depends(admin_only)):
 
 @api_router.get("/reports/inventory")
 async def inventory_report(cu: dict = Depends(admin_only)):
-    vehicles = await db.vehicles.find(company_scope(cu), {"_id": 0}).to_list(1000)
+    vehicles = await db.vehicles.find({}, {"_id": 0}).to_list(1000)
     report = {"by_brand": {}, "by_status": {}, "by_aging": {"fresh": 0, "normal": 0, "slow": 0, "dead": 0},
               "by_source": {}, "slow_moving": [], "dead_stock": [], "by_fuel": {}}
     for v in vehicles:
@@ -2526,7 +2378,7 @@ async def inventory_report(cu: dict = Depends(admin_only)):
 
 @api_router.get("/reports/financial")
 async def financial_report(cu: dict = Depends(admin_only)):
-    sold = await db.vehicles.find({**company_scope(cu), "status": "sold"}, {"_id": 0}).to_list(1000)
+    sold = await db.vehicles.find({"status": "sold"}, {"_id": 0}).to_list(1000)
     investment_by_vehicle = await _batch_vehicle_investment(sold)
     monthly = {}
     for v in sold:
@@ -2539,7 +2391,7 @@ async def financial_report(cu: dict = Depends(admin_only)):
         monthly[month]["investment"] += inv
         monthly[month]["profit"] += sp - inv
         monthly[month]["count"] += 1
-    partners = await db.partners.find(company_scope(cu), {"_id": 0}).to_list(100)
+    partners = await db.partners.find({}, {"_id": 0}).to_list(100)
     total_profit = sum(m["profit"] for m in monthly.values())
     partner_shares = [{"name": p["name"], "stake": p["stake_percentage"],
                        "capital": p["capital_contribution"],
@@ -2553,8 +2405,8 @@ async def financial_report(cu: dict = Depends(admin_only)):
 # deliberately excluding purchase_price: that split matches the approved Excel template's
 # own definition ("not part of what the customer owes"), not the broader "investment"
 # figure (purchase price + accessories + repair cost) used for profit elsewhere.
-async def _enriched_sales_for_closing(company_id: str, start_date: Optional[str] = None, end_date: Optional[str] = None):
-    query = {"company_id": company_id}
+async def _enriched_sales_for_closing(start_date: Optional[str] = None, end_date: Optional[str] = None):
+    query = {}
     if start_date and end_date:
         query["sale_date"] = {"$gte": start_date, "$lte": end_date}
     sales = await db.sales.find(query, {"_id": 0}).sort("sale_date", 1).to_list(5000)
@@ -2562,18 +2414,18 @@ async def _enriched_sales_for_closing(company_id: str, start_date: Optional[str]
     customer_ids = list({s["customer_id"] for s in sales if s.get("customer_id")})
     vehicles_by_id, customers_by_id = {}, {}
     if vehicle_ids:
-        vs = await db.vehicles.find({"id": {"$in": vehicle_ids}, "company_id": company_id}, {"_id": 0}).to_list(len(vehicle_ids))
+        vs = await db.vehicles.find({"id": {"$in": vehicle_ids}}, {"_id": 0}).to_list(len(vehicle_ids))
         vehicles_by_id = {v["id"]: v for v in vs}
     if customer_ids:
-        cs = await db.customers.find({"id": {"$in": customer_ids}, "company_id": company_id}, {"_id": 0, "id": 1, "name": 1, "contact_number": 1}).to_list(len(customer_ids))
+        cs = await db.customers.find({"id": {"$in": customer_ids}}, {"_id": 0, "id": 1, "name": 1, "contact_number": 1}).to_list(len(customer_ids))
         customers_by_id = {c["id"]: c for c in cs}
     exps_by_vehicle: dict = {}
     jobs_by_vehicle: dict = {}
     if vehicle_ids:
-        all_exps = await db.expenses.find({"vehicle_id": {"$in": vehicle_ids}, "company_id": company_id}, {"_id": 0}).to_list(20000)
+        all_exps = await db.expenses.find({"vehicle_id": {"$in": vehicle_ids}}, {"_id": 0}).to_list(20000)
         for e in all_exps:
             exps_by_vehicle.setdefault(e["vehicle_id"], []).append(e)
-        all_jobs = await db.job_cards.find({"vehicle_id": {"$in": vehicle_ids}, "is_warranty": {"$ne": True}, "company_id": company_id}, {"_id": 0}).to_list(20000)
+        all_jobs = await db.job_cards.find({"vehicle_id": {"$in": vehicle_ids}, "is_warranty": {"$ne": True}}, {"_id": 0}).to_list(20000)
         for j in all_jobs:
             jobs_by_vehicle.setdefault(j["vehicle_id"], []).append(j)
 
@@ -2607,7 +2459,7 @@ async def _enriched_sales_for_closing(company_id: str, start_date: Optional[str]
 async def monthly_breakdown_bs(cu: dict = Depends(admin_only)):
     """All sales, enriched — the frontend buckets these into real Bikram Sambat months
     (see Finance.jsx) instead of the Gregorian-month grouping /reports/financial uses."""
-    return await _enriched_sales_for_closing(cu.get("company_id"))
+    return await _enriched_sales_for_closing()
 
 def _build_closing_report_xlsx(rows: list, month_label: str, prepared_by: str) -> bytes:
     import openpyxl
@@ -2724,7 +2576,7 @@ def _build_closing_report_xlsx(rows: list, month_label: str, prepared_by: str) -
 
 @api_router.get("/reports/monthly-closing-export")
 async def monthly_closing_export(start_date: str, end_date: str, label: str, cu: dict = Depends(admin_only)):
-    rows = await _enriched_sales_for_closing(cu.get("company_id"), start_date, end_date)
+    rows = await _enriched_sales_for_closing(start_date, end_date)
     xlsx_bytes = _build_closing_report_xlsx(rows, label, cu.get("username", ""))
     safe_label = re.sub(r"[^A-Za-z0-9]+", "_", label).strip("_")
     filename = f"GG_Auto_Closing_Report_{safe_label}.xlsx"
@@ -2867,7 +2719,7 @@ def _build_inventory_pipeline_xlsx(vehicles: list, prepared_by: str) -> bytes:
 
 @api_router.get("/reports/inventory-pipeline-export")
 async def inventory_pipeline_export(cu: dict = Depends(require("vehicles", "view"))):
-    vehicles = await db.vehicles.find({**company_scope(cu), "status": {"$ne": "scrap"}}, {"_id": 0}).to_list(5000)
+    vehicles = await db.vehicles.find({"status": {"$ne": "scrap"}}, {"_id": 0}).to_list(5000)
     order = {s: i for i, s in enumerate(_INVENTORY_PIPELINE_STATUSES)}
     vehicles.sort(key=lambda v: (order.get(v.get("status"), 99), v.get("purchase_date") or ""))
     xlsx_bytes = _build_inventory_pipeline_xlsx(vehicles, cu.get("username", ""))
@@ -2884,14 +2736,14 @@ async def accounting_summary(start_date: str, end_date: str, cu: dict = Depends(
     """Returns cost/sales/profit for vehicles purchased/sold within [start_date, end_date]."""
     # Vehicles purchased in period (total cost = purchase + expenses)
     purchased = await db.vehicles.find(
-        {**company_scope(cu), "purchase_date": {"$gte": start_date, "$lte": end_date}}, {"_id": 0}
+        {"purchase_date": {"$gte": start_date, "$lte": end_date}}, {"_id": 0}
     ).to_list(5000)
     purchase_count = len(purchased)
     total_cost = sum((await _batch_vehicle_investment(purchased)).values())
 
     # Sales in period — use Sales table as source of truth
     sales_in_period = await db.sales.find(
-        {**company_scope(cu), "sale_date": {"$gte": start_date, "$lte": end_date}}, {"_id": 0}
+        {"sale_date": {"$gte": start_date, "$lte": end_date}}, {"_id": 0}
     ).to_list(5000)
     sold_count = len(sales_in_period)
     total_sales = sum(_sale_revenue(s) for s in sales_in_period)
@@ -2904,7 +2756,7 @@ async def accounting_summary(start_date: str, end_date: str, cu: dict = Depends(
     non_returned = [s for s in sales_in_period if not s.get("returned")]
     sold_vehicle_ids = list({s["vehicle_id"] for s in non_returned})
     sold_vehicles = (
-        await db.vehicles.find({**company_scope(cu), "id": {"$in": sold_vehicle_ids}}, {"_id": 0}).to_list(5000)
+        await db.vehicles.find({"id": {"$in": sold_vehicle_ids}}, {"_id": 0}).to_list(5000)
         if sold_vehicle_ids else []
     )
     investment_by_vehicle = await _batch_vehicle_investment(sold_vehicles)
@@ -2926,116 +2778,71 @@ async def accounting_summary(start_date: str, end_date: str, cu: dict = Depends(
 # ── AUDIT LOGS ────────────────────────────────────────────────────────
 @api_router.get("/audit-logs")
 async def get_audit_logs(cu: dict = Depends(admin_only)):
-    logs = await db.audit_logs.find(company_scope(cu), {"_id": 0}).sort("timestamp", -1).to_list(200)
+    logs = await db.audit_logs.find({}, {"_id": 0}).sort("timestamp", -1).to_list(200)
     return logs
 
 # ── LEADS (storefront Sell / Exchange / Book Service submissions) ─────
 @api_router.get("/leads")
 async def get_leads(cu: dict = Depends(admin_only)):
-    return await db.leads.find(company_scope(cu), {"_id": 0}).sort("created_at", -1).to_list(1000)
+    return await db.leads.find({}, {"_id": 0}).sort("created_at", -1).to_list(1000)
 
 @api_router.put("/leads/{lid}")
 async def update_lead(lid: str, lead: LeadUpdate, cu: dict = Depends(admin_only)):
-    r = await db.leads.update_one({"id": lid, **company_scope(cu)}, {"$set": {"status": lead.status}})
+    r = await db.leads.update_one({"id": lid}, {"$set": {"status": lead.status}})
     if r.matched_count == 0: raise HTTPException(404, "Lead not found")
-    return await db.leads.find_one({"id": lid, **company_scope(cu)}, {"_id": 0})
+    return await db.leads.find_one({"id": lid}, {"_id": 0})
 
 @api_router.delete("/leads/{lid}")
 async def delete_lead(lid: str, cu: dict = Depends(admin_only)):
-    r = await db.leads.delete_one({"id": lid, **company_scope(cu)})
+    r = await db.leads.delete_one({"id": lid})
     if r.deleted_count == 0: raise HTTPException(404, "Lead not found")
     return {"message": "Deleted"}
 
 # ── SETTINGS (storefront branding/contact info) ────────────────────────
 @api_router.get("/settings")
 async def get_settings(cu: dict = Depends(admin_only)):
-    s = await db.settings.find_one({"id": cu.get("company_id")}, {"_id": 0})
+    s = await db.settings.find_one({"id": "general"}, {"_id": 0})
     return s or {}
 
 @api_router.put("/settings")
 async def update_settings(settings: SettingsUpdate, cu: dict = Depends(admin_only)):
     updates = {k: v for k, v in settings.model_dump().items() if v is not None}
-    await db.settings.update_one({"id": cu.get("company_id")}, {"$set": updates}, upsert=True)
+    await db.settings.update_one({"id": "general"}, {"$set": updates}, upsert=True)
     asyncio.create_task(_notify_storefront())
-    return await db.settings.find_one({"id": cu.get("company_id")}, {"_id": 0})
+    return await db.settings.find_one({"id": "general"}, {"_id": 0})
 
 # ── STARTUP ───────────────────────────────────────────────────────────
-# Collections that carry a company_id once multi-tenancy landed — used both to backfill
-# pre-existing (pre-multi-tenant) documents onto the default company below, and as the
-# reference list for what "tenant-scoped" means elsewhere in this file.
-TENANT_COLLECTIONS = [
-    db.users, db.vehicles, db.expenses, db.job_cards, db.customers, db.sales,
-    db.vendors, db.vendor_payments, db.spare_parts, db.part_transactions,
-    db.kit_components, db.emi_records, db.emi_payments, db.team_members,
-    db.partners, db.vehicle_photos, db.legal_documents, db.leads,
-    db.settings, db.audit_logs, db.ai_chat_sessions, db.sync_logs,
-]
-
 @app.on_event("startup")
 async def startup():
-    # Multi-tenant migration: the app was single-tenant until now, so every existing
-    # document predates company_id. On first run after this change, create one company
-    # for the original business and backfill company_id onto anything missing it — this
-    # keeps the existing account/data working unchanged, just as "company #1" now.
-    default_company = await db.companies.find_one({}, {"_id": 0})
-    if not default_company:
-        default_company = {
-            "id": str(uuid.uuid4()), "name": "Hamro G&G Auto", "code": "hamrogng",
-            "active": True, "created_at": datetime.now(timezone.utc).isoformat()
-        }
-        await db.companies.insert_one(dict(default_company))
-        logger.info("Default company created: Hamro G&G Auto (code: hamrogng)")
-        # Backfill + settings rename only ever need to happen this one time, at the exact
-        # moment the default company is created — NOT on every subsequent restart. Running
-        # this unconditionally would keep re-matching any row that's *supposed* to have a
-        # permanently-NULL company_id (namely superadmin) via the $exists/IS NULL filter,
-        # and wrongly re-stamp it onto the default company every time the app restarts.
-        for coll in TENANT_COLLECTIONS:
-            await coll.update_many({"company_id": {"$exists": False}}, {"$set": {"company_id": default_company["id"]}})
-        # The old settings singleton was keyed "id": "general" — settings are now looked up
-        # by company_id instead, so give the original company's doc that id.
-        await db.settings.update_one({"id": "general"}, {"$set": {"id": default_company["id"]}})
-    default_company_id = default_company["id"]
-
-    if not await db.users.find_one({"username": "superadmin"}):
-        await db.users.insert_one({
-            "id": str(uuid.uuid4()), "username": "superadmin",
-            "password_hash": hash_pw("superadmin123"), "name": "Platform Admin", "role": "super_admin",
-            "company_id": None, "created_at": datetime.now(timezone.utc).isoformat()
-        })
-        logger.info("Default super admin created: superadmin / superadmin123 (leave company code blank at login)")
-
-    if not await db.users.find_one({"username": "admin", "company_id": default_company_id}):
+    if not await db.users.find_one({"username": "admin"}):
         await db.users.insert_one({
             "id": str(uuid.uuid4()), "username": "admin",
             "password_hash": hash_pw("admin123"), "name": "Admin", "role": "admin",
-            "company_id": default_company_id,
             "created_at": datetime.now(timezone.utc).isoformat()
         })
         logger.info("Default admin created: admin / admin123")
     else:
         # Admin: the original account, unchanged except display name.
-        await db.users.update_one({"username": "admin", "company_id": default_company_id}, {"$set": {"name": "Admin"}})
+        await db.users.update_one({"username": "admin"}, {"$set": {"name": "Admin"}})
 
     ADDITIONAL_ACCOUNTS = [
         {"username": "frontdesk", "password": "frontdesk123", "name": "Front desk stock", "role": "stock_supervisor"},
         {"username": "parts", "password": "parts123", "name": "Parts department", "role": "parts_supervisor"},
     ]
     for acct in ADDITIONAL_ACCOUNTS:
-        if not await db.users.find_one({"username": acct["username"], "company_id": default_company_id}):
+        if not await db.users.find_one({"username": acct["username"]}):
             await db.users.insert_one({
                 "id": str(uuid.uuid4()), "username": acct["username"],
                 "password_hash": hash_pw(acct["password"]), "name": acct["name"], "role": acct["role"],
-                "company_id": default_company_id,
                 "created_at": datetime.now(timezone.utc).isoformat()
             })
             logger.info(f"Default account created: {acct['username']} / {acct['password']}")
-    if await db.partners.count_documents({"company_id": default_company_id}) == 0:
+    if await db.partners.count_documents({}) == 0:
         now = datetime.now(timezone.utc).isoformat()
         await db.partners.insert_many([
-            {"id": str(uuid.uuid4()), "company_id": default_company_id, "name": "Partner A", "capital_contribution": 500000, "stake_percentage": 33.33, "contact": "", "created_at": now},
-            {"id": str(uuid.uuid4()), "company_id": default_company_id, "name": "Partner B", "capital_contribution": 500000, "stake_percentage": 33.33, "contact": "", "created_at": now},
-            {"id": str(uuid.uuid4()), "company_id": default_company_id, "name": "You (Owner)", "capital_contribution": 500000, "stake_percentage": 33.34, "contact": "", "created_at": now},
+            {"id": str(uuid.uuid4()), "name": "Partner A", "capital_contribution": 500000, "stake_percentage": 33.33, "contact": "", "created_at": now},
+            {"id": str(uuid.uuid4()), "name": "Partner B", "capital_contribution": 500000, "stake_percentage": 33.33, "contact": "", "created_at": now},
+            {"id": str(uuid.uuid4()), "name": "You (Owner)", "capital_contribution": 500000, "stake_percentage": 33.34, "contact": "", "created_at": now},
         ])
     await db.kit_components.create_index([("kit_part_id", 1), ("component_part_id", 1)], unique=True)
     await db.kit_components.create_index("component_part_id")
@@ -3055,9 +2862,9 @@ async def startup():
     await db.customers.create_index("id")
     await db.vendor_payments.create_index("vendor_id")
     await db.job_cards.create_index("status")
-    if not await db.settings.find_one({"id": default_company_id}):
+    if not await db.settings.find_one({"id": "general"}):
         await db.settings.insert_one({
-            "id": default_company_id,
+            "id": "general",
             "logo_url": "https://images.unsplash.com/photo-1777288411485-1eb05bd4a289?q=80&w=880&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D",
             "business_name": "G&G AUTO Enterprises",
             "contact_phone": "9860087161",
@@ -3193,14 +3000,14 @@ async def _compress_oversized_photos():
 
 @api_router.get("/vehicles/{vid}/photos")
 async def get_vehicle_photos(vid: str, cu: dict = Depends(require("vehicle_media", "view"))):
-    v = await db.vehicles.find_one({"id": vid, **company_scope(cu)}, {"_id": 0, "id": 1})
+    v = await db.vehicles.find_one({"id": vid}, {"_id": 0, "id": 1})
     if not v: raise HTTPException(404, "Vehicle not found")
-    photos = await db.vehicle_photos.find({"vehicle_id": vid, **company_scope(cu)}, {"_id": 0}).sort("uploaded_at", 1).to_list(200)
+    photos = await db.vehicle_photos.find({"vehicle_id": vid}, {"_id": 0}).sort("uploaded_at", 1).to_list(200)
     return [_photo_out(p) for p in photos]
 
 @api_router.post("/vehicles/{vid}/photos")
 async def upload_vehicle_photo(vid: str, file: UploadFile = File(...), cu: dict = Depends(require("vehicle_media", "create"))):
-    v = await db.vehicles.find_one({"id": vid, **company_scope(cu)})
+    v = await db.vehicles.find_one({"id": vid})
     if not v: raise HTTPException(404, "Vehicle not found")
     if not _upload_type_ok(file, ALLOWED_IMAGE_TYPES, IMAGE_EXTENSIONS):
         raise HTTPException(400, f"File type {file.content_type} not allowed. Use JPEG/PNG/WebP/HEIC.")
@@ -3224,7 +3031,6 @@ async def upload_vehicle_photo(vid: str, file: UploadFile = File(...), cu: dict 
         "id": photo_id, "vehicle_id": vid, "filename": file.filename or f"{photo_id}.jpg",
         "content_type": content_type, "data": base64.b64encode(content).decode("ascii"),
         "uploaded_at": datetime.now(timezone.utc).isoformat(), "size": len(content),
-        "company_id": cu.get("company_id"),
     }
     await db.vehicle_photos.insert_one(photo)
     asyncio.create_task(_notify_storefront())
@@ -3232,7 +3038,7 @@ async def upload_vehicle_photo(vid: str, file: UploadFile = File(...), cu: dict 
 
 @api_router.delete("/vehicles/{vid}/photos/{photo_id}")
 async def delete_vehicle_photo(vid: str, photo_id: str, cu: dict = Depends(require("vehicle_media", "delete"))):
-    r = await db.vehicle_photos.delete_one({"id": photo_id, "vehicle_id": vid, **company_scope(cu)})
+    r = await db.vehicle_photos.delete_one({"id": photo_id, "vehicle_id": vid})
     if r.deleted_count == 0: raise HTTPException(404, "Photo not found")
     asyncio.create_task(_notify_storefront())
     return {"message": "Photo deleted"}
@@ -3319,9 +3125,9 @@ def _doc_out(d: dict) -> dict:
 
 @api_router.get("/vehicles/{vid}/legal-documents")
 async def get_legal_documents(vid: str, cu: dict = Depends(require("vehicle_media", "view"))):
-    v = await db.vehicles.find_one({"id": vid, **company_scope(cu)}, {"_id": 0, "id": 1})
+    v = await db.vehicles.find_one({"id": vid}, {"_id": 0, "id": 1})
     if not v: raise HTTPException(404, "Vehicle not found")
-    docs = await db.legal_documents.find({"vehicle_id": vid, **company_scope(cu)}, {"_id": 0}).sort("uploaded_at", 1).to_list(200)
+    docs = await db.legal_documents.find({"vehicle_id": vid}, {"_id": 0}).sort("uploaded_at", 1).to_list(200)
     return [_doc_out(d) for d in docs]
 
 async def _compress_oversized_documents():
@@ -3370,7 +3176,7 @@ async def _compress_oversized_documents():
 
 @api_router.post("/vehicles/{vid}/legal-documents")
 async def upload_legal_document(vid: str, file: UploadFile = File(...), doc_type: str = Form("other"), cu: dict = Depends(require("vehicle_media", "create"))):
-    v = await db.vehicles.find_one({"id": vid, **company_scope(cu)})
+    v = await db.vehicles.find_one({"id": vid})
     if not v: raise HTTPException(404, "Vehicle not found")
     if not _upload_type_ok(file, ALLOWED_DOC_TYPES, DOC_EXTENSIONS):
         raise HTTPException(400, "Only PDF/JPEG/PNG/HEIC allowed for documents.")
@@ -3391,17 +3197,16 @@ async def upload_legal_document(vid: str, file: UploadFile = File(...), doc_type
         "content_type": content_type, "data": base64.b64encode(content).decode("ascii"),
         "doc_type": doc_type, "original_name": file.filename,
         "uploaded_at": datetime.now(timezone.utc).isoformat(), "size": len(content),
-        "company_id": cu.get("company_id"),
     }
     await db.legal_documents.insert_one(doc)
     # Update status field
     status_field = f"{doc_type}_status" if doc_type != "other" else None
-    if status_field: await db.vehicles.update_one({"id": vid, **company_scope(cu)}, {"$set": {status_field: "ok"}})
+    if status_field: await db.vehicles.update_one({"id": vid}, {"$set": {status_field: "ok"}})
     return _doc_out(doc)
 
 @api_router.delete("/vehicles/{vid}/legal-documents/{doc_id}")
 async def delete_legal_document(vid: str, doc_id: str, cu: dict = Depends(require("vehicle_media", "delete"))):
-    r = await db.legal_documents.delete_one({"id": doc_id, "vehicle_id": vid, **company_scope(cu)})
+    r = await db.legal_documents.delete_one({"id": doc_id, "vehicle_id": vid})
     if r.deleted_count == 0: raise HTTPException(404, "Document not found")
     return {"message": "Document deleted"}
 
@@ -3411,8 +3216,8 @@ async def storage_usage(cu: dict = Depends(admin_only)):
     the only two collections holding binary file data (base64 in Mongo, not disk).
     `bytes` here is the decoded file size recorded at upload time; the base64 text
     actually stored is ~33% larger than that on top."""
-    photos = await db.vehicle_photos.find(company_scope(cu), {"_id": 0, "vehicle_id": 1, "size": 1}).to_list(100000)
-    docs = await db.legal_documents.find(company_scope(cu), {"_id": 0, "vehicle_id": 1, "size": 1}).to_list(100000)
+    photos = await db.vehicle_photos.find({}, {"_id": 0, "vehicle_id": 1, "size": 1}).to_list(100000)
+    docs = await db.legal_documents.find({}, {"_id": 0, "vehicle_id": 1, "size": 1}).to_list(100000)
     photos_bytes = sum(p.get("size", 0) or 0 for p in photos)
     docs_bytes = sum(d.get("size", 0) or 0 for d in docs)
 
@@ -3424,7 +3229,7 @@ async def storage_usage(cu: dict = Depends(admin_only)):
     top = sorted(by_vehicle.items(), key=lambda kv: kv[1], reverse=True)[:10]
     top_vehicles = []
     for vid, size in top:
-        v = await db.vehicles.find_one({"id": vid, **company_scope(cu)}, {"_id": 0, "brand": 1, "model": 1, "registration_number": 1})
+        v = await db.vehicles.find_one({"id": vid}, {"_id": 0, "brand": 1, "model": 1, "registration_number": 1})
         label = f"{v['brand']} {v['model']}" if v else "Unknown vehicle"
         if v and v.get("registration_number"): label += f" ({v['registration_number']})"
         top_vehicles.append({"vehicle_id": vid, "label": label, "bytes": size})
@@ -3499,7 +3304,7 @@ class BreakKitRequest(BaseModel):
 
 @api_router.get("/spare-parts")
 async def get_spare_parts(category: Optional[str] = None, low_stock: Optional[bool] = None, cu: dict = Depends(require("spare_parts", "view"))):
-    query = company_scope(cu)
+    query = {}
     if category: query["category"] = category
     parts = await db.spare_parts.find(query, {"_id": 0}).sort("created_at", -1).to_list(1000)
     if low_stock: parts = [p for p in parts if p.get("quantity", 0) <= p.get("min_stock_alert", 2)]
@@ -3507,7 +3312,7 @@ async def get_spare_parts(category: Optional[str] = None, low_stock: Optional[bo
     vendor_ids = {p["vendor_id"] for p in parts if p.get("vendor_id")}
     vendor_map = {}
     if vendor_ids:
-        vdocs = await db.vendors.find({"id": {"$in": list(vendor_ids)}, **company_scope(cu)}, {"_id": 0, "id": 1, "name": 1}).to_list(200)
+        vdocs = await db.vendors.find({"id": {"$in": list(vendor_ids)}}, {"_id": 0, "id": 1, "name": 1}).to_list(200)
         vendor_map = {v["id"]: v["name"] for v in vdocs}
     for p in parts:
         p["total_value"] = p.get("quantity", 0) * p.get("unit_cost", 0)
@@ -3530,7 +3335,6 @@ def _apply_vat(unit_cost: float, vat_rate: Optional[float]) -> float:
 @api_router.post("/spare-parts")
 async def create_spare_part(part: SparePartCreate, cu: dict = Depends(require("spare_parts", "create"))):
     doc = {"id": str(uuid.uuid4()), **part.dict(), "created_at": datetime.now(timezone.utc).isoformat()}
-    doc["company_id"] = cu.get("company_id")
     doc["unit_cost"] = _apply_vat(doc.get("unit_cost", 0), doc.pop("vat_rate", None))
     _check_set_component_rates(doc.get("unit_cost", 0), doc.get("set_components", []))
     if not doc.get("entry_date"): doc["entry_date"] = datetime.now(timezone.utc).date().isoformat()
@@ -3543,43 +3347,43 @@ async def update_spare_part(pid: str, part: SparePartUpdate, cu: dict = Depends(
     upd = {k: v for k, v in part.dict().items() if v is not None}
     if not upd: raise HTTPException(400, "No fields to update")
     if "set_components" in upd or "unit_cost" in upd:
-        existing = await db.spare_parts.find_one({"id": pid, **company_scope(cu)}, {"_id": 0, "unit_cost": 1, "set_components": 1})
+        existing = await db.spare_parts.find_one({"id": pid}, {"_id": 0, "unit_cost": 1, "set_components": 1})
         if not existing: raise HTTPException(404, "Not found")
         _check_set_component_rates(
             upd.get("unit_cost", existing.get("unit_cost", 0)),
             upd.get("set_components", existing.get("set_components", [])),
         )
     upd["updated_at"] = datetime.now(timezone.utc).isoformat()
-    r = await db.spare_parts.update_one({"id": pid, **company_scope(cu)}, {"$set": upd})
+    r = await db.spare_parts.update_one({"id": pid}, {"$set": upd})
     if r.matched_count == 0: raise HTTPException(404, "Not found")
-    doc = await db.spare_parts.find_one({"id": pid, **company_scope(cu)}, {"_id": 0})
+    doc = await db.spare_parts.find_one({"id": pid}, {"_id": 0})
     return doc
 
 @api_router.delete("/spare-parts/{pid}")
 async def delete_spare_part(pid: str, cu: dict = Depends(require("spare_parts", "delete"))):
-    r = await db.spare_parts.delete_one({"id": pid, **company_scope(cu)})
+    r = await db.spare_parts.delete_one({"id": pid})
     if r.deleted_count == 0: raise HTTPException(404, "Not found")
-    await db.kit_components.delete_many({"$or": [{"kit_part_id": pid}, {"component_part_id": pid}], **company_scope(cu)})
+    await db.kit_components.delete_many({"$or": [{"kit_part_id": pid}, {"component_part_id": pid}]})
     return {"message": "Deleted"}
 
 @api_router.post("/spare-parts/{pid}/adjust-stock")
 async def adjust_spare_stock(pid: str, req: dict, cu: dict = Depends(require("spare_parts", "edit"))):
     delta = req.get("delta", 0)
-    p = await db.spare_parts.find_one({"id": pid, **company_scope(cu)}, {"_id": 0, "quantity": 1})
+    p = await db.spare_parts.find_one({"id": pid}, {"_id": 0, "quantity": 1})
     if not p: raise HTTPException(404, "Not found")
     new_qty = max(0, p.get("quantity", 0) + int(delta))
-    await db.spare_parts.update_one({"id": pid, **company_scope(cu)}, {"$set": {"quantity": new_qty}})
+    await db.spare_parts.update_one({"id": pid}, {"$set": {"quantity": new_qty}})
     return {"quantity": new_qty}
 
 @api_router.post("/spare-parts/{pid}/stock-out")
 async def stock_out_part(pid: str, req: PartStockOut, cu: dict = Depends(require("spare_parts", "edit"))):
-    p = await db.spare_parts.find_one({"id": pid, **company_scope(cu)}, {"_id": 0})
+    p = await db.spare_parts.find_one({"id": pid}, {"_id": 0})
     if not p: raise HTTPException(404, "Not found")
     if req.quantity <= 0: raise HTTPException(400, "Quantity must be positive")
     # Atomic conditional decrement (see break_kit for why) instead of the old
     # find-then-set, so two simultaneous stock-outs can't both pass the check.
     updated = await db.spare_parts.find_one_and_update(
-        {"id": pid, "quantity": {"$gte": req.quantity}, **company_scope(cu)},
+        {"id": pid, "quantity": {"$gte": req.quantity}},
         {"$inc": {"quantity": -req.quantity}},
         return_document=ReturnDocument.AFTER,
     )
@@ -3592,7 +3396,6 @@ async def stock_out_part(pid: str, req: PartStockOut, cu: dict = Depends(require
         "date": req.date or datetime.now(timezone.utc).isoformat()[:10],
         "job_id": req.job_id, "notes": req.notes,
         "created_by": cu.get("username"), "created_at": datetime.now(timezone.utc).isoformat(),
-        "company_id": cu.get("company_id"),
     }
     await db.part_transactions.insert_one(txn)
     txn.pop("_id", None)
@@ -3611,13 +3414,13 @@ async def stock_out_set_component(pid: str, req: SetComponentStockOut, cu: dict 
     """Deducts from a single named item inside a Set's component checklist, independently of
     the set's own (whole-set) `quantity` — lets one sticker/item be used without touching the
     count of complete sets on hand."""
-    p = await db.spare_parts.find_one({"id": pid, **company_scope(cu)}, {"_id": 0})
+    p = await db.spare_parts.find_one({"id": pid}, {"_id": 0})
     if not p: raise HTTPException(404, "Not found")
     if req.quantity <= 0: raise HTTPException(400, "Quantity must be positive")
     comp = next((c for c in p.get("set_components", []) if c.get("name") == req.component_name), None)
     if not comp: raise HTTPException(404, f"Component '{req.component_name}' not found in this set")
     updated = await db.spare_parts.find_one_and_update(
-        {"id": pid, "set_components.name": req.component_name, "set_components.stock": {"$gte": req.quantity}, **company_scope(cu)},
+        {"id": pid, "set_components.name": req.component_name, "set_components.stock": {"$gte": req.quantity}},
         {"$inc": {"set_components.$.stock": -req.quantity}},
         return_document=ReturnDocument.AFTER,
     )
@@ -3630,7 +3433,6 @@ async def stock_out_set_component(pid: str, req: SetComponentStockOut, cu: dict 
         "date": req.date or datetime.now(timezone.utc).date().isoformat(),
         "job_id": req.job_id, "notes": req.notes,
         "created_by": cu.get("username"), "created_at": datetime.now(timezone.utc).isoformat(),
-        "company_id": cu.get("company_id"),
     }
     await db.part_transactions.insert_one(txn)
     txn.pop("_id", None)
@@ -3638,7 +3440,7 @@ async def stock_out_set_component(pid: str, req: SetComponentStockOut, cu: dict 
 
 @api_router.get("/spare-parts/summary")
 async def spare_parts_summary(cu: dict = Depends(require("spare_parts", "view"))):
-    parts = await db.spare_parts.find(company_scope(cu), {"_id": 0}).to_list(1000)
+    parts = await db.spare_parts.find({}, {"_id": 0}).to_list(1000)
     total_value = sum(p.get("quantity", 0) * p.get("unit_cost", 0) for p in parts)
     low_stock = [p for p in parts if p.get("quantity", 0) <= p.get("min_stock_alert", 2)]
     categories = list({p.get("category", "General") for p in parts})
@@ -3646,7 +3448,7 @@ async def spare_parts_summary(cu: dict = Depends(require("spare_parts", "view"))
 
 @api_router.get("/spare-parts/{pid}/transactions")
 async def get_part_transactions(pid: str, cu: dict = Depends(require("spare_parts", "view"))):
-    txns = await db.part_transactions.find({"part_id": pid, **company_scope(cu)}, {"_id": 0}).sort("created_at", -1).to_list(100)
+    txns = await db.part_transactions.find({"part_id": pid}, {"_id": 0}).sort("created_at", -1).to_list(100)
     return txns
 
 # ══════════════════════════════════════════════════════════════════════
@@ -3658,10 +3460,10 @@ async def get_part_transactions(pid: str, cu: dict = Depends(require("spare_part
 
 @api_router.get("/spare-parts/{pid}/kit-components")
 async def get_kit_components(pid: str, cu: dict = Depends(require("spare_parts", "view"))):
-    rows = await db.kit_components.find({"kit_part_id": pid, **company_scope(cu)}, {"_id": 0}).to_list(200)
+    rows = await db.kit_components.find({"kit_part_id": pid}, {"_id": 0}).to_list(200)
     if not rows: return []
     comp_ids = [r["component_part_id"] for r in rows]
-    comps = await db.spare_parts.find({"id": {"$in": comp_ids}, **company_scope(cu)}, {"_id": 0}).to_list(200)
+    comps = await db.spare_parts.find({"id": {"$in": comp_ids}}, {"_id": 0}).to_list(200)
     comp_map = {c["id"]: c for c in comps}
     out = []
     for r in rows:
@@ -3671,37 +3473,36 @@ async def get_kit_components(pid: str, cu: dict = Depends(require("spare_parts",
 
 @api_router.post("/spare-parts/{pid}/kit-components")
 async def set_kit_components(pid: str, body: KitComponentsUpdate, cu: dict = Depends(require("spare_parts", "edit"))):
-    kit = await db.spare_parts.find_one({"id": pid, **company_scope(cu)}, {"_id": 0})
+    kit = await db.spare_parts.find_one({"id": pid}, {"_id": 0})
     if not kit: raise HTTPException(404, "Kit part not found")
     comp_ids = [c.component_part_id for c in body.components]
     if pid in comp_ids: raise HTTPException(400, "A kit cannot contain itself")
     if len(comp_ids) != len(set(comp_ids)): raise HTTPException(400, "Duplicate component in kit")
     if comp_ids:
-        comps = await db.spare_parts.find({"id": {"$in": comp_ids}, **company_scope(cu)}, {"_id": 0}).to_list(200)
+        comps = await db.spare_parts.find({"id": {"$in": comp_ids}}, {"_id": 0}).to_list(200)
         comp_map = {c["id"]: c for c in comps}
         for c_id in comp_ids:
             c = comp_map.get(c_id)
             if not c: raise HTTPException(400, f"Component part {c_id} not found")
             if c.get("is_kit"): raise HTTPException(400, f"{c.get('name')} is itself a kit — nested kits aren't supported")
-    await db.kit_components.delete_many({"kit_part_id": pid, **company_scope(cu)})
+    await db.kit_components.delete_many({"kit_part_id": pid})
     if body.components:
         now = datetime.now(timezone.utc).isoformat()
         docs = [{"id": str(uuid.uuid4()), "kit_part_id": pid, "component_part_id": c.component_part_id,
-                 "qty_per_kit": c.qty_per_kit, "created_by": cu.get("username"), "created_at": now,
-                 "company_id": cu.get("company_id")}
+                 "qty_per_kit": c.qty_per_kit, "created_by": cu.get("username"), "created_at": now}
                 for c in body.components]
         await db.kit_components.insert_many(docs)
-    await db.spare_parts.update_one({"id": pid, **company_scope(cu)}, {"$set": {"is_kit": bool(body.components)}})
+    await db.spare_parts.update_one({"id": pid}, {"$set": {"is_kit": bool(body.components)}})
     return await get_kit_components(pid, cu)
 
 @api_router.get("/spare-parts/{pid}/containing-kits")
 async def get_containing_kits(pid: str, cu: dict = Depends(require("spare_parts", "view"))):
     """Reverse lookup: which kits (if any) this part is a component of, with each
     kit's current sealed-stock — used to offer 'break a kit' when loose stock runs out."""
-    rows = await db.kit_components.find({"component_part_id": pid, **company_scope(cu)}, {"_id": 0}).to_list(200)
+    rows = await db.kit_components.find({"component_part_id": pid}, {"_id": 0}).to_list(200)
     if not rows: return []
     kit_ids = list({r["kit_part_id"] for r in rows})
-    kits = await db.spare_parts.find({"id": {"$in": kit_ids}, **company_scope(cu)}, {"_id": 0}).to_list(200)
+    kits = await db.spare_parts.find({"id": {"$in": kit_ids}}, {"_id": 0}).to_list(200)
     kit_map = {k["id"]: k for k in kits}
     out = []
     for r in rows:
@@ -3713,16 +3514,16 @@ async def get_containing_kits(pid: str, cu: dict = Depends(require("spare_parts"
 @api_router.post("/spare-parts/{pid}/break-kit")
 async def break_kit(pid: str, req: BreakKitRequest, cu: dict = Depends(require("spare_parts", "edit"))):
     if req.quantity <= 0: raise HTTPException(400, "Quantity must be positive")
-    kit = await db.spare_parts.find_one({"id": pid, **company_scope(cu)}, {"_id": 0})
+    kit = await db.spare_parts.find_one({"id": pid}, {"_id": 0})
     if not kit: raise HTTPException(404, "Not found")
-    components = await db.kit_components.find({"kit_part_id": pid, **company_scope(cu)}, {"_id": 0}).to_list(200)
+    components = await db.kit_components.find({"kit_part_id": pid}, {"_id": 0}).to_list(200)
     if not components: raise HTTPException(400, "This part has no kit components defined")
 
     # Atomic conditional decrement — the $gte guard blocks the update entirely (rather
     # than clamping to 0) if concurrent breaks/sales already dropped kit stock below
     # what this request needs, closing the race window a plain find-then-update has.
     updated_kit = await db.spare_parts.find_one_and_update(
-        {"id": pid, "quantity": {"$gte": req.quantity}, **company_scope(cu)},
+        {"id": pid, "quantity": {"$gte": req.quantity}},
         {"$inc": {"quantity": -req.quantity}},
         return_document=ReturnDocument.AFTER,
     )
@@ -3736,12 +3537,11 @@ async def break_kit(pid: str, req: BreakKitRequest, cu: dict = Depends(require("
         "date": now_iso[:10], "job_id": None,
         "notes": f"Broken into {len(components)} component part(s)",
         "created_by": cu.get("username"), "created_at": now_iso,
-        "company_id": cu.get("company_id"),
     }]
     for comp in components:
         add_qty = comp["qty_per_kit"] * req.quantity
         comp_doc = await db.spare_parts.find_one_and_update(
-            {"id": comp["component_part_id"], **company_scope(cu)},
+            {"id": comp["component_part_id"]},
             {"$inc": {"quantity": add_qty}},
             return_document=ReturnDocument.AFTER,
         )
@@ -3752,7 +3552,6 @@ async def break_kit(pid: str, req: BreakKitRequest, cu: dict = Depends(require("
             "date": now_iso[:10], "job_id": None,
             "notes": f"From breaking {req.quantity}x {kit.get('name')}",
             "created_by": cu.get("username"), "created_at": now_iso,
-            "company_id": cu.get("company_id"),
         })
     await db.part_transactions.insert_many(txns)
     for t in txns: t.pop("_id", None)
@@ -3764,11 +3563,11 @@ async def break_kit(pid: str, req: BreakKitRequest, cu: dict = Depends(require("
 @api_router.get("/sync/export")
 async def export_for_website(cu: dict = Depends(admin_only)):
     """Export available inventory in hamroauto.com.np listing format."""
-    vehicles = await db.vehicles.find({**company_scope(cu), "status": "available"}, {"_id": 0}).to_list(200)
+    vehicles = await db.vehicles.find({"status": "available"}, {"_id": 0}).to_list(200)
     vehicle_ids = [v["id"] for v in vehicles]
     photos_by_vehicle: dict = {}
     if vehicle_ids:
-        all_photos = await db.vehicle_photos.find({"vehicle_id": {"$in": vehicle_ids}, **company_scope(cu)}, {"_id": 0}).sort("uploaded_at", 1).to_list(5000)
+        all_photos = await db.vehicle_photos.find({"vehicle_id": {"$in": vehicle_ids}}, {"_id": 0}).sort("uploaded_at", 1).to_list(5000)
         for p in all_photos:
             photos_by_vehicle.setdefault(p["vehicle_id"], []).append(p)
     listings = []
@@ -3796,10 +3595,10 @@ async def export_for_website(cu: dict = Depends(admin_only)):
 @api_router.post("/sync/push")
 async def push_to_website(cu: dict = Depends(admin_only)):
     """Simulate push to hamroauto.com.np — in production connect to their API."""
-    vehicles = await db.vehicles.find({**company_scope(cu), "status": "available"}, {"_id": 0}).to_list(200)
+    vehicles = await db.vehicles.find({"status": "available"}, {"_id": 0}).to_list(200)
     sync_log = {"pushed_at": datetime.now(timezone.utc).isoformat(), "count": len(vehicles),
                 "status": "exported", "message": f"Ready to sync {len(vehicles)} vehicles to hamroauto.com.np"}
-    await db.sync_logs.insert_one({**sync_log, "id": str(uuid.uuid4()), "company_id": cu.get("company_id")})
+    await db.sync_logs.insert_one({**sync_log, "id": str(uuid.uuid4())})
     sync_log.pop("_id", None)
     return sync_log
 
@@ -3833,18 +3632,7 @@ def _public_vehicle_fields(v: dict) -> dict:
         "created_at": v.get("created_at"),
     }
 
-async def _resolve_public_company(company_code: str) -> dict:
-    """Every /public/* route is unauthenticated (no `cu`), so — unlike everywhere else in
-    this file — the tenant can't be read off a JWT. Instead the storefront's URL carries the
-    company's `code` (same slug used at login) as a path segment, resolved here the same way
-    POST /auth/login resolves it. 404 (not 401) on a bad/suspended code — this is a public,
-    read-mostly surface, so "not found" is the right signal for an unknown/deactivated shop."""
-    company = await db.companies.find_one({"code": company_code.strip().lower(), "active": True}, {"_id": 0})
-    if not company:
-        raise HTTPException(404, "Storefront not found")
-    return company
-
-def _public_photo_url(request: Request, company_code: str, vid: str, photo_id: str) -> str:
+def _public_photo_url(request: Request, vid: str, photo_id: str) -> str:
     """Builds an absolute URL from the client-facing scheme/host, not request.base_url —
     that reflects whatever uvicorn itself saw, which is plain http behind an
     nginx/Caddy TLS-terminating reverse proxy (the typical VPS setup) unless
@@ -3856,21 +3644,20 @@ def _public_photo_url(request: Request, company_code: str, vid: str, photo_id: s
     security decision."""
     scheme = request.headers.get("x-forwarded-proto", request.url.scheme).split(",")[0].strip()
     host = (request.headers.get("x-forwarded-host") or request.headers.get("host") or request.url.netloc).split(",")[0].strip()
-    return f"{scheme}://{host}/api/public/{company_code}/vehicles/{vid}/photos/{photo_id}"
+    return f"{scheme}://{host}/api/public/vehicles/{vid}/photos/{photo_id}"
 
-@api_router.get("/public/{company_code}/vehicles")
-async def public_list_vehicles(company_code: str, request: Request):
+@api_router.get("/public/vehicles")
+async def public_list_vehicles(request: Request):
     """Public, unauthenticated listing of available vehicles for an external shop frontend.
     Returns one cover photo URL per vehicle (the first uploaded) to keep the payload light —
-    use /public/{company_code}/vehicles/{id} for the full photo gallery of a single vehicle."""
-    company = await _resolve_public_company(company_code)
-    vehicles = await db.vehicles.find({"status": "available", "company_id": company["id"]}, {"_id": 0}).sort("created_at", -1).to_list(200)
+    use /public/vehicles/{id} for the full photo gallery of a single vehicle."""
+    vehicles = await db.vehicles.find({"status": "available"}, {"_id": 0}).sort("created_at", -1).to_list(200)
     vehicle_ids = [v["id"] for v in vehicles]
     # One batched fetch (id/vehicle_id/uploaded_at only — never the base64 `data`) instead of
     # a per-vehicle find_one, then keep the earliest photo per vehicle as its cover.
     all_photos = (
         await db.vehicle_photos.find(
-            {"vehicle_id": {"$in": vehicle_ids}, "company_id": company["id"]}, {"_id": 0, "id": 1, "vehicle_id": 1, "uploaded_at": 1}
+            {"vehicle_id": {"$in": vehicle_ids}}, {"_id": 0, "id": 1, "vehicle_id": 1, "uploaded_at": 1}
         ).sort("uploaded_at", 1).to_list(20000)
         if vehicle_ids else []
     )
@@ -3881,20 +3668,19 @@ async def public_list_vehicles(company_code: str, request: Request):
     for v in vehicles:
         item = _public_vehicle_fields(v)
         cover = cover_by_vehicle.get(v["id"])
-        item["cover_photo"] = _public_photo_url(request, company_code, v["id"], cover["id"]) if cover else None
+        item["cover_photo"] = _public_photo_url(request, v["id"], cover["id"]) if cover else None
         item["image_urls"] = [item["cover_photo"]] if cover else []
         out.append(item)
     return {"count": len(out), "vehicles": out}
 
-@api_router.get("/public/{company_code}/vehicles/{vid}")
-async def public_get_vehicle(company_code: str, vid: str, request: Request):
+@api_router.get("/public/vehicles/{vid}")
+async def public_get_vehicle(vid: str, request: Request):
     """Public, unauthenticated single-vehicle detail with the full photo gallery."""
-    company = await _resolve_public_company(company_code)
-    v = await db.vehicles.find_one({"id": vid, "status": "available", "company_id": company["id"]}, {"_id": 0})
+    v = await db.vehicles.find_one({"id": vid, "status": "available"}, {"_id": 0})
     if not v: raise HTTPException(404, "Vehicle not found or not available")
     item = _public_vehicle_fields(v)
-    photos = await db.vehicle_photos.find({"vehicle_id": vid, "company_id": company["id"]}, {"_id": 0}).sort("uploaded_at", 1).to_list(50)
-    item["image_urls"] = [_public_photo_url(request, company_code, vid, p["id"]) for p in photos]
+    photos = await db.vehicle_photos.find({"vehicle_id": vid}, {"_id": 0}).sort("uploaded_at", 1).to_list(50)
+    item["image_urls"] = [_public_photo_url(request, vid, p["id"]) for p in photos]
     item["photos"] = item["image_urls"]  # kept for backwards compatibility with earlier consumers
     return item
 
@@ -3902,8 +3688,8 @@ _PHOTO_BYTES_CACHE: dict = {}  # photo_id -> (raw_bytes, content_type), see publ
 _PHOTO_BYTES_CACHE_SIZE = 0  # running total of cached raw bytes — the cap below is a memory budget, not a photo count
 PHOTO_CACHE_MAX_BYTES = 300 * 1024 * 1024  # ~300MB — 5000 uncapped photos could otherwise run into the GBs on a small VPS
 
-@api_router.get("/public/{company_code}/vehicles/{vid}/photos/{photo_id}")
-async def public_get_photo(company_code: str, vid: str, photo_id: str):
+@api_router.get("/public/vehicles/{vid}/photos/{photo_id}")
+async def public_get_photo(vid: str, photo_id: str):
     """Serves a single vehicle photo as a real image response (not JSON) — this gives
     hamroauto.com.np (or any consumer) a stable HTTPS URL per photo, so it can be added
     to an image-CDN allowlist (e.g. Next.js next/image remotePatterns) instead of having
@@ -3912,15 +3698,11 @@ async def public_get_photo(company_code: str, vid: str, photo_id: str):
     so an in-process cache keeps that from becoming dozens of MySQL round-trips competing
     for the connection pool on every load. Safe because a photo_id's bytes never change
     after upload (no "replace photo" endpoint, only upload-new/delete); capped so a very
-    large photo library can't grow this unbounded.
-    company_code isn't needed to key the cache (photo_id is already globally unique), but the
-    lookup below still checks company_id so one company can't fetch another's photo bytes by
-    guessing a photo_id and pairing it with any storefront's code."""
+    large photo library can't grow this unbounded."""
     global _PHOTO_BYTES_CACHE_SIZE
     cached = _PHOTO_BYTES_CACHE.get(photo_id)
     if cached is None:
-        company = await _resolve_public_company(company_code)
-        p = await db.vehicle_photos.find_one({"id": photo_id, "vehicle_id": vid, "company_id": company["id"]}, {"_id": 0})
+        p = await db.vehicle_photos.find_one({"id": photo_id, "vehicle_id": vid}, {"_id": 0})
         if not p: raise HTTPException(404, "Photo not found")
         raw = base64.b64decode(p["data"])
         cached = (raw, p["content_type"])
@@ -3933,23 +3715,20 @@ async def public_get_photo(company_code: str, vid: str, photo_id: str):
         headers={"Cache-Control": "public, max-age=31536000, immutable"},
     )
 
-@api_router.get("/public/{company_code}/settings")
-async def public_get_settings(company_code: str):
+@api_router.get("/public/settings")
+async def public_get_settings():
     """Public, unauthenticated site branding/contact info for the storefront."""
-    company = await _resolve_public_company(company_code)
-    s = await db.settings.find_one({"id": company["id"]}, {"_id": 0, "id": 0})
+    s = await db.settings.find_one({"id": "general"}, {"_id": 0, "id": 0})
     return s or {}
 
-@api_router.post("/public/{company_code}/leads")
-async def public_create_lead(company_code: str, lead: LeadCreate):
+@api_router.post("/public/leads")
+async def public_create_lead(lead: LeadCreate):
     """Public, unauthenticated — Sell / Exchange / Book Service form submissions
     from the storefront. Reviewed and managed from the admin Leads screen."""
-    company = await _resolve_public_company(company_code)
     l = lead.model_dump()
     l["id"] = str(uuid.uuid4())
     l["status"] = "new"
     l["created_at"] = datetime.now(timezone.utc).isoformat()
-    l["company_id"] = company["id"]
     await db.leads.insert_one(l)
     l.pop("_id", None)
     return l

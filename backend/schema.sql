@@ -26,46 +26,22 @@
 --     Mongo's positional `$` operator) becomes a real child table,
 --     spare_parts_set_components — the one place with a genuinely different
 --     shape, handled by a small special case inside sqldb.py.
---   * `company_id` (nullable VARCHAR(36), indexed) is on every tenant-scoped
---     table, mirroring the multi-tenant company_id field added on the Mongo
---     side — nullable and unconstrained (no FK to companies) rather than
---     NOT NULL, same reasoning as linked_contact_id above: Mongo enforces
---     nothing here either, server.py's company_scope(cu) is the actual
---     source of truth. The one child table without its own company_id is
---     spare_parts_set_components — it's scoped transitively through its
---     parent spare_parts row, same as kit_components' uniqueness needs no
---     company_id of its own since both part ids already belong to one.
 
 SET NAMES utf8mb4;
 SET FOREIGN_KEY_CHECKS = 0;
 
--- ── Companies (platform tenants) ─────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS companies (
-  id VARCHAR(36) NOT NULL PRIMARY KEY,
-  name VARCHAR(255) NOT NULL,
-  code VARCHAR(50) NOT NULL,
-  active TINYINT(1) DEFAULT 1,
-  created_at VARCHAR(40),
-  UNIQUE KEY uq_companies_code (code)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
 -- ── Users / auth ─────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS users (
-  company_id VARCHAR(36),
   id VARCHAR(36) NOT NULL PRIMARY KEY,
-  username VARCHAR(100) NOT NULL,
+  username VARCHAR(100) NOT NULL UNIQUE,
   password_hash VARCHAR(255) NOT NULL,
   name VARCHAR(255),
   role VARCHAR(50),
-  created_at VARCHAR(40),
-  UNIQUE KEY uq_users_username_company (username, company_id),
-  INDEX idx_users_company_id (company_id)
+  created_at VARCHAR(40)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- ── Vendors / customers / team ───────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS vendors (
-  company_id VARCHAR(36),
-  INDEX idx_vendors_company_id (company_id),
   id VARCHAR(36) NOT NULL PRIMARY KEY,
   name VARCHAR(255),
   phone VARCHAR(50),
@@ -76,8 +52,6 @@ CREATE TABLE IF NOT EXISTS vendors (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS customers (
-  company_id VARCHAR(36),
-  INDEX idx_customers_company_id (company_id),
   id VARCHAR(36) NOT NULL PRIMARY KEY,
   name VARCHAR(255),
   contact_number VARCHAR(50),
@@ -93,8 +67,6 @@ CREATE TABLE IF NOT EXISTS customers (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS team_members (
-  company_id VARCHAR(36),
-  INDEX idx_team_members_company_id (company_id),
   id VARCHAR(36) NOT NULL PRIMARY KEY,
   name VARCHAR(255),
   role VARCHAR(50),
@@ -108,8 +80,6 @@ CREATE TABLE IF NOT EXISTS team_members (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS partners (
-  company_id VARCHAR(36),
-  INDEX idx_partners_company_id (company_id),
   id VARCHAR(36) NOT NULL PRIMARY KEY,
   name VARCHAR(255),
   capital_contribution DOUBLE,
@@ -120,8 +90,6 @@ CREATE TABLE IF NOT EXISTS partners (
 
 -- ── Vehicles (largest / most heavily queried table) ─────────────────────
 CREATE TABLE IF NOT EXISTS vehicles (
-  company_id VARCHAR(36),
-  INDEX idx_vehicles_company_id (company_id),
   id VARCHAR(36) NOT NULL PRIMARY KEY,
   brand VARCHAR(100),
   model VARCHAR(100),
@@ -179,8 +147,6 @@ CREATE TABLE IF NOT EXISTS vehicles (
 
 -- ── Sales ─────────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS sales (
-  company_id VARCHAR(36),
-  INDEX idx_sales_company_id (company_id),
   id VARCHAR(36) NOT NULL PRIMARY KEY,
   vehicle_id VARCHAR(36),
   customer_id VARCHAR(36),
@@ -217,8 +183,6 @@ CREATE TABLE IF NOT EXISTS sales (
 
 -- ── Spare parts + set components (was an inline array) + kits ───────────
 CREATE TABLE IF NOT EXISTS spare_parts (
-  company_id VARCHAR(36),
-  INDEX idx_spare_parts_company_id (company_id),
   id VARCHAR(36) NOT NULL PRIMARY KEY,
   name VARCHAR(255),
   category VARCHAR(100),
@@ -255,8 +219,6 @@ CREATE TABLE IF NOT EXISTS spare_parts_set_components (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS kit_components (
-  company_id VARCHAR(36),
-  INDEX idx_kit_components_company_id (company_id),
   id VARCHAR(36) NOT NULL PRIMARY KEY,
   kit_part_id VARCHAR(36) NOT NULL,
   component_part_id VARCHAR(36) NOT NULL,
@@ -270,8 +232,6 @@ CREATE TABLE IF NOT EXISTS kit_components (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS part_transactions (
-  company_id VARCHAR(36),
-  INDEX idx_part_transactions_company_id (company_id),
   id VARCHAR(36) NOT NULL PRIMARY KEY,
   part_id VARCHAR(36),
   part_name VARCHAR(500),
@@ -290,8 +250,6 @@ CREATE TABLE IF NOT EXISTS part_transactions (
 
 -- ── Job cards ─────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS job_cards (
-  company_id VARCHAR(36),
-  INDEX idx_job_cards_company_id (company_id),
   id VARCHAR(36) NOT NULL PRIMARY KEY,
   vehicle_id VARCHAR(36),
   is_external TINYINT(1) DEFAULT 0,
@@ -327,8 +285,6 @@ CREATE TABLE IF NOT EXISTS job_cards (
 
 -- ── Expenses / vendor payments / EMI ─────────────────────────────────────
 CREATE TABLE IF NOT EXISTS expenses (
-  company_id VARCHAR(36),
-  INDEX idx_expenses_company_id (company_id),
   id VARCHAR(36) NOT NULL PRIMARY KEY,
   vehicle_id VARCHAR(36),
   category VARCHAR(100),
@@ -342,8 +298,6 @@ CREATE TABLE IF NOT EXISTS expenses (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS vendor_payments (
-  company_id VARCHAR(36),
-  INDEX idx_vendor_payments_company_id (company_id),
   id VARCHAR(36) NOT NULL PRIMARY KEY,
   vendor_id VARCHAR(36),
   amount DOUBLE,
@@ -359,8 +313,6 @@ CREATE TABLE IF NOT EXISTS vendor_payments (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS emi_records (
-  company_id VARCHAR(36),
-  INDEX idx_emi_records_company_id (company_id),
   id VARCHAR(36) NOT NULL PRIMARY KEY,
   customer_id VARCHAR(36),
   vehicle_id VARCHAR(36),
@@ -385,8 +337,6 @@ CREATE TABLE IF NOT EXISTS emi_records (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS emi_payments (
-  company_id VARCHAR(36),
-  INDEX idx_emi_payments_company_id (company_id),
   id VARCHAR(36) NOT NULL PRIMARY KEY,
   emi_id VARCHAR(36),
   amount DOUBLE,
@@ -400,8 +350,6 @@ CREATE TABLE IF NOT EXISTS emi_payments (
 
 -- ── Media (base64, same reason it was in Mongo: Render's disk is ephemeral) ─
 CREATE TABLE IF NOT EXISTS vehicle_photos (
-  company_id VARCHAR(36),
-  INDEX idx_vehicle_photos_company_id (company_id),
   id VARCHAR(36) NOT NULL PRIMARY KEY,
   vehicle_id VARCHAR(36),
   filename VARCHAR(500),
@@ -415,8 +363,6 @@ CREATE TABLE IF NOT EXISTS vehicle_photos (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS legal_documents (
-  company_id VARCHAR(36),
-  INDEX idx_legal_documents_company_id (company_id),
   id VARCHAR(36) NOT NULL PRIMARY KEY,
   vehicle_id VARCHAR(36),
   filename VARCHAR(500),
@@ -433,8 +379,6 @@ CREATE TABLE IF NOT EXISTS legal_documents (
 
 -- ── Storefront leads / settings / sync / audit / AI chat ────────────────
 CREATE TABLE IF NOT EXISTS leads (
-  company_id VARCHAR(36),
-  INDEX idx_leads_company_id (company_id),
   id VARCHAR(36) NOT NULL PRIMARY KEY,
   type VARCHAR(20),
   name VARCHAR(255),
@@ -450,11 +394,7 @@ CREATE TABLE IF NOT EXISTS leads (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS settings (
-  company_id VARCHAR(36),
-  INDEX idx_settings_company_id (company_id),
-  -- Was VARCHAR(20) (fit the old single-tenant literal "general"); widened to match every
-  -- other id column now that the multi-tenant migration renames it to a full company_id UUID.
-  id VARCHAR(36) NOT NULL PRIMARY KEY,
+  id VARCHAR(20) NOT NULL PRIMARY KEY,
   logo_url VARCHAR(1000),
   business_name VARCHAR(255),
   contact_phone VARCHAR(50),
@@ -465,8 +405,6 @@ CREATE TABLE IF NOT EXISTS settings (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS sync_logs (
-  company_id VARCHAR(36),
-  INDEX idx_sync_logs_company_id (company_id),
   id VARCHAR(36) NOT NULL PRIMARY KEY,
   pushed_at VARCHAR(40),
   count INT,
@@ -475,8 +413,6 @@ CREATE TABLE IF NOT EXISTS sync_logs (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS audit_logs (
-  company_id VARCHAR(36),
-  INDEX idx_audit_logs_company_id (company_id),
   id INT AUTO_INCREMENT PRIMARY KEY,
   action VARCHAR(100),
   vehicle_id VARCHAR(36),
@@ -488,8 +424,6 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS ai_chat_sessions (
-  company_id VARCHAR(36),
-  INDEX idx_ai_chat_sessions_company_id (company_id),
   id VARCHAR(36) NOT NULL PRIMARY KEY,
   messages JSON,
   updated_at VARCHAR(40)

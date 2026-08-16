@@ -29,12 +29,11 @@ const navItems = [
 ];
 
 export default function Layout() {
-  const { user, logout, isImpersonating, exitCompany } = useAuth();
+  const { user, logout } = useAuth();
   const navigate = useNavigate();
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const handleLogout = () => { logout(); navigate("/login"); };
-  const handleExitCompany = () => { exitCompany(); navigate("/super-admin"); };
   const visibleNavItems = navItems.filter(({ path }) => canAccessPath(user?.role, path));
 
   const Sidebar = ({ mobile = false }) => (
@@ -110,22 +109,6 @@ export default function Layout() {
 
       {/* Main */}
       <div className="flex-1 flex flex-col min-w-0">
-        {/* Impersonation banner — shown while a super_admin is "inside" a company's session */}
-        {isImpersonating && (
-          <div className="bg-amber-100 border-b border-amber-200 text-amber-800 px-4 lg:px-6 py-2 flex items-center justify-between gap-3 text-sm">
-            <span>
-              Viewing <span className="font-semibold">{user?.company_name}</span> as Admin
-            </span>
-            <button
-              onClick={handleExitCompany}
-              className="flex items-center gap-1 px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold rounded-lg transition-all active:scale-95 shrink-0"
-              data-testid="exit-company-button"
-            >
-              Exit to Companies
-            </button>
-          </div>
-        )}
-
         {/* Header */}
         <header className="sticky top-0 z-30 bg-white border-b border-slate-200 shadow-sm h-14 flex items-center px-4 lg:px-6 gap-4">
           <button

@@ -92,15 +92,7 @@ TABLES = {
     "sync_logs": {"columns": {"id", "pushed_at", "count", "status", "message"}},
     "audit_logs": {"columns": {"id", "action", "vehicle_id", "user", "timestamp", "details"}},
     "ai_chat_sessions": {"columns": {"id", "messages", "updated_at"}, "json_cols": {"messages"}},
-    "companies": {"columns": {"id", "name", "code", "active", "created_at"}, "bool_cols": {"active"}},
 }
-
-# Every tenant-scoped table gets a company_id column (see schema.sql) — added here rather
-# than listed in each entry above so a new table only has to be added in one place, and
-# can't drift out of sync with the schema. companies itself isn't tenant-scoped.
-for _table_name, _meta in TABLES.items():
-    if _table_name != "companies":
-        _meta["columns"].add("company_id")
 
 
 def _quote(col: str) -> str:

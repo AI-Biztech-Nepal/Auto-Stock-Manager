@@ -9,7 +9,7 @@ import { isNative, isBiometricAvailable, hasSavedCredentials, saveCredentials, v
 export default function Login() {
   const { login } = useAuth();
   const navigate = useNavigate();
-  const [form, setForm] = useState({ username: "", password: "", companyCode: "" });
+  const [form, setForm] = useState({ username: "", password: "" });
   const [loading, setLoading] = useState(false);
   const [showBiometric, setShowBiometric] = useState(false);
   const [bioLoading, setBioLoading] = useState(false);
@@ -21,13 +21,11 @@ export default function Login() {
   }, []);
 
   const doLogin = async (credentials) => {
-    const res = await api.post("/auth/login", { ...credentials, company_code: form.companyCode || undefined });
+    const res = await api.post("/auth/login", credentials);
     login({
       username: res.data.username,
       name: res.data.name,
       role: res.data.role,
-      company_id: res.data.company_id,
-      company_name: res.data.company_name,
     }, res.data.token);
     toast.success(`Welcome back, ${res.data.name}!`);
     navigate("/");
@@ -86,11 +84,6 @@ export default function Login() {
           <p className="text-slate-500 text-sm mb-6">Enter your credentials to continue</p>
 
           <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1.5">Company code</label>
-              <input data-testid="company-code-input" type="text" value={form.companyCode} onChange={(e) => setForm({ ...form, companyCode: e.target.value })} className="w-full h-10 px-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent" placeholder="e.g. acme" autoComplete="off" />
-              <p className="text-xs text-slate-400 mt-1">Leave blank for platform admin login</p>
-            </div>
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1.5">Username</label>
               <input
