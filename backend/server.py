@@ -2466,7 +2466,10 @@ def _build_closing_report_xlsx(rows: list, month_label: str, prepared_by: str) -
         return {"font": copy.copy(c.font), "fill": copy.copy(c.fill), "border": copy.copy(c.border),
                 "alignment": copy.copy(c.alignment), "number_format": c.number_format}
 
-    data_row_style = {col: cell_style(5, col) for col in range(1, 11)}
+    # Template rows alternate white/light-gray banding (row 5 white, row 6 gray, ...) —
+    # capture both so generated rows keep that banding instead of all coming out white.
+    data_row_style_odd = {col: cell_style(5, col) for col in range(1, 11)}
+    data_row_style_even = {col: cell_style(6, col) for col in range(1, 11)}
     total_row_style = {col: cell_style(36, col) for col in range(1, 11)}
     legend_header_style = cell_style(38, 1)
     legend_line_styles = [cell_style(39 + i, 1) for i in range(4)]
@@ -2512,9 +2515,10 @@ def _build_closing_report_xlsx(rows: list, month_label: str, prepared_by: str) -
             is_returned = False
             values = {1: f'=IF(C{row}="","",ROW()-{FIRST_ROW}+1)', 9: f'=IF(C{row}="","",F{row}-H{row})',
                       10: f'=IF(C{row}="","",IF(H{row}=0,"Paid","Due"))'}
+        row_style = data_row_style_odd if i % 2 == 0 else data_row_style_even
         for col in range(1, 11):
             cell = ws.cell(row=row, column=col, value=values.get(col))
-            apply_style(cell, data_row_style[col])
+            apply_style(cell, row_style[col])
             if is_returned:
                 cell.fill = RETURNED_FILL
 
