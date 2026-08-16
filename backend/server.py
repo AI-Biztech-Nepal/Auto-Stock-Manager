@@ -941,6 +941,14 @@ async def list_companies(cu: dict = Depends(super_admin_only)):
         c["vehicle_count"] = await db.vehicles.count_documents({"company_id": c["id"]})
     return companies
 
+@api_router.get("/super-admin/companies/{company_id}/team")
+async def super_admin_company_team(company_id: str, cu: dict = Depends(super_admin_only)):
+    """Read-only staff roster for a company, viewed directly from the platform console —
+    doesn't require impersonating (entering) the company just to see who's on it."""
+    if not await db.companies.find_one({"id": company_id}, {"_id": 0, "id": 1}):
+        raise HTTPException(404, "Company not found")
+    return await db.team_members.find({"company_id": company_id}, {"_id": 0}).sort("name", 1).to_list(500)
+
 @api_router.post("/super-admin/companies")
 async def create_company(req: CompanyCreate, cu: dict = Depends(super_admin_only)):
     code = req.code.strip().lower()

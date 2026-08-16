@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { Plus, Building2, Users, Bike, Ban, CheckCircle2, LogIn, Trash2 } from "lucide-react";
+import { Plus, Building2, Users, Bike, Ban, CheckCircle2, LogIn, Trash2, UsersRound } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
 import { useAuth } from "../context/AuthContext";
@@ -19,6 +19,9 @@ export default function SuperAdmin() {
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleteConfirmText, setDeleteConfirmText] = useState("");
   const [deleting, setDeleting] = useState(false);
+  const [teamTarget, setTeamTarget] = useState(null);
+  const [teamMembers, setTeamMembers] = useState(null);
+  const [teamLoading, setTeamLoading] = useState(false);
 
   const fetchCompanies = useCallback(async () => {
     try { const r = await api.get("/super-admin/companies"); setCompanies(r.data); }
@@ -70,6 +73,19 @@ export default function SuperAdmin() {
     } catch (err) {
       toast.error(err.response?.data?.detail || "Failed to delete company");
     } finally { setDeleting(false); }
+  };
+
+  const handleViewTeam = async (company) => {
+    setTeamTarget(company);
+    setTeamMembers(null);
+    setTeamLoading(true);
+    try {
+      const r = await api.get(`/super-admin/companies/${company.id}/team`);
+      setTeamMembers(r.data);
+    } catch {
+      toast.error("Failed to load team");
+      setTeamMembers([]);
+    } finally { setTeamLoading(false); }
   };
 
   const handleEnter = async (company) => {
@@ -167,6 +183,15 @@ export default function SuperAdmin() {
                       Enter
                     </button>
                     <button
+                      onClick={() => handleViewTeam(c)}
+                      data-testid="view-team-btn"
+                      className="flex items-center gap-1 px-3 py-1.5 bg-slate-100 text-slate-700 text-xs font-semibold rounded-lg hover:bg-slate-200 transition-colors"
+                      title="View staff roster"
+                    >
+                      <UsersRound size={12} />
+                      Team
+                    </button>
+                    <button
                       onClick={() => { setDeleteTarget(c); setDeleteConfirmText(""); }}
                       disabled={busyId === c.id}
                       data-testid="delete-company-btn"
@@ -245,6 +270,54 @@ export default function SuperAdmin() {
           </div>
         </div>
       )}
+      {/* Team Roster */}
+      {teamTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[80vh] flex flex-col">
+            <div className="flex items-center justify-between p-5 border-b border-slate-100 shrink-0">
+              <div>
+                <h2 className="text-lg font-bold text-slate-900">{teamTarget.name}</h2>
+                <p className="text-xs text-slate-500">Staff roster</p>
+              </div>
+              <button onClick={() => setTeamTarget(null)} className="w-9 h-9 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500">✕</button>
+            </div>
+            <div className="p-5 overflow-y-auto">
+              {teamLoading ? (
+                <div className="flex items-center justify-center h-32"><div className="animate-spin w-6 h-6 border-4 border-blue-600 border-t-transparent rounded-full" /></div>
+              ) : teamMembers.length === 0 ? (
+                <div className="text-center text-slate-500 py-8">
+                  <UsersRound size={32} className="mx-auto mb-2 text-slate-300" />
+                  <p className="text-sm">No team members added yet</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {teamMembers.map((m) => (
+                    <div key={m.id} data-testid="team-roster-row" className="flex items-start justify-between gap-3 p-3 bg-slate-50 rounded-lg">
+                      <div>
+                        <div className="font-semibold text-sm text-slate-900 flex items-center gap-2">
+                          {m.name}
+                          {m.is_active === false && (
+                            <span className="text-[10px] font-semibold uppercase tracking-wide bg-slate-200 text-slate-500 px-1.5 py-0.5 rounded">Inactive</span>
+                          )}
+                        </div>
+                        <div className="text-xs text-slate-500 capitalize mt-0.5">{m.role}{m.specialization ? ` — ${m.specialization}` : ""}</div>
+                        {m.contact && <div className="text-xs text-slate-400 mt-0.5">{m.contact}</div>}
+                      </div>
+                      {m.commission_rate != null && (
+                        <div className="text-right shrink-0">
+                          <div className="text-sm font-bold text-slate-900" style={{ fontFamily: "Manrope" }}>{m.commission_rate}%</div>
+                          <div className="text-[10px] text-slate-400">commission</div>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Delete Company Confirmation */}
       {deleteTarget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
