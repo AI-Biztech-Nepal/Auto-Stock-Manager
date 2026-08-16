@@ -396,11 +396,11 @@ export default function SaleDetail() {
             ))}
           </div>
 
-          {/* Super Admin only: margin / profit */}
+          {/* Admin only: margin / profit */}
           {isAdmin && sale.profit_margin !== undefined && (
             <div className="bg-purple-50 border border-purple-200 rounded-xl p-4">
               <div className="flex items-center gap-1.5 text-xs font-semibold text-purple-700 uppercase tracking-wide mb-3">
-                <Lock size={12} /> Super Admin Only
+                <Lock size={12} /> Admin Only
               </div>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
                 <div>

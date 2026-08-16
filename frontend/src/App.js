@@ -32,6 +32,7 @@ const SoldStock = lazy(() => import("./pages/SoldStock"));
 const SoldStockDetail = lazy(() => import("./pages/SoldStockDetail"));
 const ImportStock = lazy(() => import("./pages/ImportStock"));
 const Leads = lazy(() => import("./pages/Leads"));
+const SuperAdmin = lazy(() => import("./pages/SuperAdmin"));
 
 const RouteFallback = () => (
   <div className="flex items-center justify-center h-64">
@@ -93,6 +94,7 @@ function AppRoutes() {
           <Route path="sold-stock" element={<RoleRoute path="/sold-stock"><SoldStock /></RoleRoute>} />
           <Route path="sold-stock/:id" element={<RoleRoute path="/sold-stock/detail"><SoldStockDetail /></RoleRoute>} />
           <Route path="ai" element={<RoleRoute path="/ai"><AIAssistant /></RoleRoute>} />
+          <Route path="super-admin" element={<RoleRoute path="/super-admin"><SuperAdmin /></RoleRoute>} />
           <Route path="settings" element={<Settings />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
