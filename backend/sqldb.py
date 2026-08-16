@@ -92,7 +92,15 @@ TABLES = {
     "sync_logs": {"columns": {"id", "pushed_at", "count", "status", "message"}},
     "audit_logs": {"columns": {"id", "action", "vehicle_id", "user", "timestamp", "details"}},
     "ai_chat_sessions": {"columns": {"id", "messages", "updated_at"}, "json_cols": {"messages"}},
+    "companies": {"columns": {"id", "name", "code", "active", "created_at"}, "bool_cols": {"active"}},
 }
+
+# Every tenant-scoped table gets a company_id column (see schema.sql) — added here rather
+# than listed in each entry above so a new table only has to be added in one place, and
+# can't drift out of sync with the schema. companies itself isn't tenant-scoped.
+for _table_name, _meta in TABLES.items():
+    if _table_name != "companies":
+        _meta["columns"].add("company_id")
 
 
 def _quote(col: str) -> str:
@@ -118,7 +126,7 @@ def _unescape_anchored_literal(pattern: str) -> Optional[str]:
 def build_where(filt: dict):
     """Translates a Mongo-style filter dict into a SQL WHERE fragment + params.
     Supports exactly the operators server.py uses: equality, $gte, $lte, $ne,
-    $in, $or, and the anchored $regex/$options case described above."""
+    $in, $or, $exists, and the anchored $regex/$options case described above."""
     if not filt:
         return "1=1", []
     clauses, params = [], []
@@ -152,6 +160,13 @@ def build_where(filt: dict):
                     else:
                         clauses.append(f"{_quote(key)} IN ({','.join(['%s'] * len(items))})")
                         params.extend(items)
+                elif op == "$exists":
+                    # Mongo's $exists on a field that's never had a default in SQL means
+                    # "is this column NULL" — server.py only ever uses this for the
+                    # company_id backfill migration (update_many({"company_id": {"$exists":
+                    # False}}, ...)), never on a column that could legitimately be NULL for
+                    # another reason, so the IS (NOT) NULL translation is exact here.
+                    clauses.append(f"{_quote(key)} IS {'NOT ' if opval else ''}NULL")
                 elif op == "$regex":
                     literal = _unescape_anchored_literal(opval)
                     if literal is not None and "i" in options:
@@ -445,7 +460,38 @@ class MySQLCollection:
                         )
         return SimpleNamespace(matched_count=matched)
 
-    async def find_one_and_update(self, filt: dict, update: dict, return_document=ReturnDocument.AFTER):
+    async def update_many(self, filt: dict, update: dict):
+        """Only used for the multi-tenant company_id backfill migration in server.py's
+        startup() — a plain $set over whatever $exists/equality filter matches, no upsert
+        and no spare_parts.set_components special-casing (Mongo's update_many doesn't
+        support either here). MySQL's UPDATE with no LIMIT already affects every matching
+        row, same as update_one's own SQL above minus the single-row assumption, so this
+        is a lean version of that rather than a call to it."""
+        pool = await self._pool()
+        where, where_params = build_where(filt)
+        assignments, aparams = [], []
+        for k, v in update.get("$set", {}).items():
+            if k not in self._columns:
+                continue
+            if k in self._json_cols and v is not None:
+                v = json.dumps(v)
+            elif k in self._bool_cols:
+                v = 1 if v else 0
+            assignments.append(f"{_quote(k)} = %s"); aparams.append(v)
+        if not assignments:
+            return SimpleNamespace(matched_count=0)
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                sql = f"UPDATE {self.name} SET {', '.join(assignments)} WHERE {where}"
+                await cur.execute(sql, (*aparams, *where_params))
+                matched = cur.rowcount
+        return SimpleNamespace(matched_count=matched)
+
+    async def find_one_and_update(self, filt: dict, update: dict, return_document=ReturnDocument.AFTER,
+                                   projection: Optional[dict] = None):
+        # projection is accepted for signature parity with motor but otherwise unused here —
+        # every caller only ever passes {"_id": 0}, which is already a no-op for MySQL rows
+        # (there's no _id column to strip in the first place).
         if self._is_set_component_op(filt, update):
             return await self._find_one_and_update_set_component(filt, update)
         assert "id" in filt, "find_one_and_update requires an 'id' filter in this adapter"
