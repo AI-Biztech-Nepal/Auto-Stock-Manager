@@ -9,7 +9,7 @@ from passlib.context import CryptContext
 from typing import Optional, List
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
-import os, logging, jwt, uuid, json, base64, io, asyncio, re
+import os, logging, jwt, uuid, json, base64, io, asyncio, re, copy
 from pydantic import BaseModel, Field
 from PIL import Image, ImageOps
 import pillow_heif
@@ -2389,6 +2389,176 @@ async def financial_report(cu: dict = Depends(admin_only)):
                        "capital": p["capital_contribution"],
                        "profit_share": round(total_profit * p["stake_percentage"] / 100, 2)} for p in partners]
     return {"monthly_breakdown": monthly, "total_profit": total_profit, "partner_shares": partner_shares}
+
+# Sale rows enriched with everything the Finance tab's Monthly Breakdown (grouped into
+# real BS months client-side, since all BS/AD conversion already lives in the frontend —
+# see nepali-date.js) and its per-month closing-report export need. "extra_expense" here
+# means repair/prep cost only (vehicle_photos... no — db.expenses + non-warranty job cards),
+# deliberately excluding purchase_price: that split matches the approved Excel template's
+# own definition ("not part of what the customer owes"), not the broader "investment"
+# figure (purchase price + accessories + repair cost) used for profit elsewhere.
+async def _enriched_sales_for_closing(start_date: Optional[str] = None, end_date: Optional[str] = None):
+    query = {}
+    if start_date and end_date:
+        query["sale_date"] = {"$gte": start_date, "$lte": end_date}
+    sales = await db.sales.find(query, {"_id": 0}).sort("sale_date", 1).to_list(5000)
+    vehicle_ids = list({s["vehicle_id"] for s in sales if s.get("vehicle_id")})
+    customer_ids = list({s["customer_id"] for s in sales if s.get("customer_id")})
+    vehicles_by_id, customers_by_id = {}, {}
+    if vehicle_ids:
+        vs = await db.vehicles.find({"id": {"$in": vehicle_ids}}, {"_id": 0}).to_list(len(vehicle_ids))
+        vehicles_by_id = {v["id"]: v for v in vs}
+    if customer_ids:
+        cs = await db.customers.find({"id": {"$in": customer_ids}}, {"_id": 0, "id": 1, "name": 1, "contact_number": 1}).to_list(len(customer_ids))
+        customers_by_id = {c["id"]: c for c in cs}
+    exps_by_vehicle: dict = {}
+    jobs_by_vehicle: dict = {}
+    if vehicle_ids:
+        all_exps = await db.expenses.find({"vehicle_id": {"$in": vehicle_ids}}, {"_id": 0}).to_list(20000)
+        for e in all_exps:
+            exps_by_vehicle.setdefault(e["vehicle_id"], []).append(e)
+        all_jobs = await db.job_cards.find({"vehicle_id": {"$in": vehicle_ids}, "is_warranty": {"$ne": True}}, {"_id": 0}).to_list(20000)
+        for j in all_jobs:
+            jobs_by_vehicle.setdefault(j["vehicle_id"], []).append(j)
+
+    out = []
+    for s in sales:
+        v = vehicles_by_id.get(s.get("vehicle_id"))
+        c = customers_by_id.get(s.get("customer_id"))
+        repair_cost = (sum(e.get("amount", 0) for e in exps_by_vehicle.get(s.get("vehicle_id"), []))
+                       + sum(_job_card_cost(j) for j in jobs_by_vehicle.get(s.get("vehicle_id"), [])))
+        investment = (v.get("purchase_price", 0) + v.get("accessories_cost", 0) + repair_cost) if v else 0
+        vehicle_label = "Vehicle removed"
+        if v:
+            parts = [v["brand"], v["model"]]
+            if v.get("year"): parts.append(str(v["year"]))
+            vehicle_label = " ".join(parts) + (f" ({v['registration_number']})" if v.get("registration_number") else "")
+        out.append({
+            "id": s["id"], "sale_date": s.get("sale_date"),
+            "sale_price": s.get("sale_price", 0) or 0,
+            "due_amount": s.get("due_amount", 0) or 0,
+            "returned": bool(s.get("returned")),
+            "retained_amount": s.get("retained_amount"),
+            "vehicle_label": vehicle_label,
+            "customer_name": c["name"] if c else "Walk-in",
+            "customer_contact": c.get("contact_number") if c else None,
+            "extra_expense": round(repair_cost, 2),
+            "investment": round(investment, 2),
+        })
+    return out
+
+@api_router.get("/reports/monthly-breakdown-bs")
+async def monthly_breakdown_bs(cu: dict = Depends(admin_only)):
+    """All sales, enriched — the frontend buckets these into real Bikram Sambat months
+    (see Finance.jsx) instead of the Gregorian-month grouping /reports/financial uses."""
+    return await _enriched_sales_for_closing()
+
+def _build_closing_report_xlsx(rows: list, month_label: str, prepared_by: str) -> bytes:
+    import openpyxl
+    from openpyxl.styles import PatternFill
+
+    template_path = ROOT_DIR / "report_templates" / "sales_closing_template.xlsx"
+    wb = openpyxl.load_workbook(template_path)
+    ws = wb["Sales Closing"]
+
+    def cell_style(row, col):
+        c = ws.cell(row=row, column=col)
+        return {"font": copy.copy(c.font), "fill": copy.copy(c.fill), "border": copy.copy(c.border),
+                "alignment": copy.copy(c.alignment), "number_format": c.number_format}
+
+    data_row_style = {col: cell_style(5, col) for col in range(1, 11)}
+    total_row_style = {col: cell_style(36, col) for col in range(1, 11)}
+    legend_header_style = cell_style(38, 1)
+    legend_line_styles = [cell_style(39 + i, 1) for i in range(4)]
+    legend_texts = [ws.cell(row=39 + i, column=1).value for i in range(4)]
+    total_label = ws.cell(row=36, column=1).value
+
+    def apply_style(cell, style):
+        cell.font = style["font"]; cell.fill = style["fill"]; cell.border = style["border"]
+        cell.alignment = style["alignment"]; cell.number_format = style["number_format"]
+
+    for rng in list(ws.merged_cells.ranges):
+        if rng.min_row >= 5:
+            ws.unmerge_cells(str(rng))
+    for row in ws.iter_rows(min_row=5, max_row=42, max_col=10):
+        for c in row:
+            c.value = None
+
+    ws["A1"] = f"G&G Auto – Closing Report for the Month of {month_label}"
+    today = datetime.now(timezone.utc).date().isoformat()
+    ws["A2"] = f"Report Month:  {month_label}        Prepared By:  {prepared_by or '________'}        Date Prepared:  {today}"
+
+    RETURNED_FILL = PatternFill(start_color="FFF2CC", end_color="FFF2CC", fill_type="solid")
+    FIRST_ROW = 5
+    n = max(len(rows), 1)
+    last_row = FIRST_ROW + n - 1
+    total_row = last_row + 1
+
+    for i in range(n):
+        row = FIRST_ROW + i
+        s = rows[i] if i < len(rows) else None
+        if s:
+            is_returned = s["returned"]
+            selling_price = float(s["retained_amount"] or 0) if is_returned else float(s["sale_price"] or 0)
+            due = 0.0 if is_returned else float(s["due_amount"] or 0)
+            values = {
+                1: f'=IF(C{row}="","",ROW()-{FIRST_ROW}+1)', 2: s["sale_date"], 3: s["vehicle_label"],
+                4: s["customer_name"] or "Walk-in", 5: s["customer_contact"] or "",
+                6: selling_price, 7: s["extra_expense"], 8: due,
+                9: f'=IF(C{row}="","",F{row}-H{row})',
+                10: "Returned" if is_returned else f'=IF(C{row}="","",IF(H{row}=0,"Paid","Due"))',
+            }
+        else:
+            is_returned = False
+            values = {1: f'=IF(C{row}="","",ROW()-{FIRST_ROW}+1)', 9: f'=IF(C{row}="","",F{row}-H{row})',
+                      10: f'=IF(C{row}="","",IF(H{row}=0,"Paid","Due"))'}
+        for col in range(1, 11):
+            cell = ws.cell(row=row, column=col, value=values.get(col))
+            apply_style(cell, data_row_style[col])
+            if is_returned:
+                cell.fill = RETURNED_FILL
+
+    ws.cell(row=total_row, column=1, value=total_label)
+    ws.merge_cells(start_row=total_row, start_column=1, end_row=total_row, end_column=5)
+    ws.cell(row=total_row, column=6, value=f"=SUM(F{FIRST_ROW}:F{last_row})")
+    ws.cell(row=total_row, column=7, value=f"=SUM(G{FIRST_ROW}:G{last_row})")
+    ws.cell(row=total_row, column=8, value=f"=SUM(H{FIRST_ROW}:H{last_row})")
+    ws.cell(row=total_row, column=9, value=f"=SUM(I{FIRST_ROW}:I{last_row})")
+    ws.cell(row=total_row, column=10, value=f'=COUNTIF(C{FIRST_ROW}:C{last_row},"?*")&" bikes"')
+    for col in range(1, 11):
+        apply_style(ws.cell(row=total_row, column=col), total_row_style[col])
+
+    lr = total_row + 2
+    ws.cell(row=lr, column=1, value="Legend:")
+    apply_style(ws.cell(row=lr, column=1), legend_header_style)
+    ws.merge_cells(start_row=lr, start_column=1, end_row=lr, end_column=10)
+    for i, text in enumerate(legend_texts):
+        r = lr + 1 + i
+        ws.cell(row=r, column=1, value=text)
+        apply_style(ws.cell(row=r, column=1), legend_line_styles[i])
+        ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=10)
+    note_row = lr + 1 + len(legend_texts)
+    ws.cell(row=note_row, column=1,
+            value="• Rows highlighted in yellow are sales that were later returned/refunded — Selling Price shown is the amount actually retained, not the original sale price.")
+    apply_style(ws.cell(row=note_row, column=1), legend_line_styles[-1])
+    ws.cell(row=note_row, column=1).fill = RETURNED_FILL
+    ws.merge_cells(start_row=note_row, start_column=1, end_row=note_row, end_column=10)
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+@api_router.get("/reports/monthly-closing-export")
+async def monthly_closing_export(start_date: str, end_date: str, label: str, cu: dict = Depends(admin_only)):
+    rows = await _enriched_sales_for_closing(start_date, end_date)
+    xlsx_bytes = _build_closing_report_xlsx(rows, label, cu.get("username", ""))
+    safe_label = re.sub(r"[^A-Za-z0-9]+", "_", label).strip("_")
+    filename = f"GG_Auto_Closing_Report_{safe_label}.xlsx"
+    return StreamingResponse(
+        io.BytesIO(xlsx_bytes),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 # ── ACCOUNTING SUMMARY ────────────────────────────────────────────────
 @api_router.get("/reports/accounting-summary")

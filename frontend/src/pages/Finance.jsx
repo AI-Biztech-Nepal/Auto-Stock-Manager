@@ -1,12 +1,13 @@
 import { useEffect, useState, useMemo } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend } from "recharts";
-import { DollarSign, AlertTriangle, CreditCard, Users, ShoppingCart, Wallet, UserPlus, ArrowDownCircle, ArrowUpCircle, PlusSquare, FileText, BookOpen, Printer } from "lucide-react";
+import { DollarSign, AlertTriangle, CreditCard, Users, ShoppingCart, Wallet, UserPlus, ArrowDownCircle, ArrowUpCircle, PlusSquare, FileText, BookOpen, Printer, Download } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
 import { formatNPR } from "../utils/helpers";
 import LedgerTable from "../components/LedgerTable";
 import BillPrintModal from "../components/BillPrintModal";
+import { adToBsDate, BS_MONTHS, getBSMonthRange } from "../utils/nepali-date";
 
 const KCard = ({ title, value, sub, color, icon: Icon }) => (
   <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 hover:shadow-md transition-shadow">
@@ -37,14 +38,17 @@ export default function Finance() {
   const [ledgerData, setLedgerData] = useState(null);
   const [ledgerLoading, setLedgerLoading] = useState(false);
   const [printBill, setPrintBill] = useState(null);
+  const [bsSales, setBsSales] = useState([]);
+  const [downloadingMonth, setDownloadingMonth] = useState(null);
 
   useEffect(() => {
     Promise.all([
       api.get("/finance/summary"),
       api.get("/reports/financial"),
       api.get("/partners"),
-    ]).then(([s, f, p]) => {
-      setSummary(s.data); setFinancial(f.data); setPartners(p.data);
+      api.get("/reports/monthly-breakdown-bs"),
+    ]).then(([s, f, p, bs]) => {
+      setSummary(s.data); setFinancial(f.data); setPartners(p.data); setBsSales(bs.data);
     }).catch(console.error).finally(() => setLoading(false));
   }, []);
 
@@ -83,13 +87,48 @@ export default function Finance() {
 
   const selectedVendor = useMemo(() => vendors.find(v => String(v.id) === String(selectedVendorId)), [vendors, selectedVendorId]);
 
+  // Grouped into real Bikram Sambat months (not Gregorian) — a calendar month here
+  // straddles two BS months, so relabeling the old AD-keyed buckets wouldn't line up
+  // with what a downloaded per-month report actually contains. Sourced from actual
+  // sale records (see /reports/monthly-breakdown-bs) so each row's numbers match
+  // exactly what its download button generates.
   const monthlyData = useMemo(() => {
-    if (!financial) return [];
-    return Object.entries(financial.monthly_breakdown)
-      .filter(([k]) => k !== "unknown")
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([month, d]) => ({ month, ...d }));
-  }, [financial]);
+    const buckets = {};
+    for (const s of bsSales) {
+      const bs = adToBsDate(s.sale_date);
+      if (!bs) continue;
+      const key = `${bs.year}-${String(bs.month).padStart(2, "0")}`;
+      if (!buckets[key]) {
+        buckets[key] = { key, bsYear: bs.year, bsMonth: bs.month, label: `${BS_MONTHS[bs.month - 1]} ${bs.year}`, count: 0, returnedCount: 0, revenue: 0, investment: 0, profit: 0 };
+      }
+      const b = buckets[key];
+      const revenue = s.returned ? (s.retained_amount || 0) : s.sale_price;
+      b.revenue += revenue;
+      b.investment += s.investment;
+      b.profit += revenue - s.investment;
+      if (s.returned) b.returnedCount += 1; else b.count += 1;
+    }
+    return Object.values(buckets).sort((a, b) => b.key.localeCompare(a.key));
+  }, [bsSales]);
+
+  const downloadMonthlyReport = async (m) => {
+    const range = getBSMonthRange(m.bsYear, m.bsMonth);
+    if (!range) { toast.error("Could not compute date range for this month"); return; }
+    setDownloadingMonth(m.key);
+    try {
+      const label = `${BS_MONTHS[m.bsMonth - 1]}, ${m.bsYear} BS`;
+      const res = await api.get("/reports/monthly-closing-export", {
+        params: { start_date: range.start, end_date: range.end, label },
+        responseType: "blob",
+      });
+      const blob = new Blob([res.data], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = `GG_Auto_Closing_Report_${BS_MONTHS[m.bsMonth - 1]}_${m.bsYear}.xlsx`; a.click();
+      URL.revokeObjectURL(url);
+    } catch { toast.error("Failed to generate report"); }
+    finally { setDownloadingMonth(null); }
+  };
 
   const totalCapital = useMemo(() => partners.reduce((s, p) => s + p.capital_contribution, 0), [partners]);
   const totalProfit = useMemo(() => financial?.total_profit || 0, [financial]);
@@ -183,7 +222,7 @@ export default function Finance() {
                 <h2 className="text-base font-bold text-slate-900 mb-4">Monthly P&L Report</h2>
                 <ResponsiveContainer width="100%" height={280}>
                   <BarChart data={monthlyData}>
-                    <XAxis dataKey="month" tick={{ fontSize: 11 }} />
+                    <XAxis dataKey="label" tick={{ fontSize: 11 }} />
                     <YAxis tick={{ fontSize: 10 }} tickFormatter={v => `${(v/1000).toFixed(0)}K`} />
                     <Tooltip formatter={v => formatNPR(v)} contentStyle={{ fontSize: 12, borderRadius: 8 }} />
                     <Legend wrapperStyle={{ fontSize: 12 }} />
@@ -197,12 +236,12 @@ export default function Finance() {
                 <div className="p-4 border-b border-slate-100"><h2 className="font-bold text-slate-900">Monthly Breakdown</h2></div>
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
-                    <thead><tr className="border-b border-slate-100">{["Month","Vehicles Sold","Revenue","Investment","Profit","Margin"].map(h => <th key={h} className="text-left text-xs font-semibold uppercase tracking-wider text-slate-500 px-4 py-3">{h}</th>)}</tr></thead>
+                    <thead><tr className="border-b border-slate-100">{["Month","Vehicles Sold","Revenue","Investment","Profit","Margin",""].map(h => <th key={h} className="text-left text-xs font-semibold uppercase tracking-wider text-slate-500 px-4 py-3">{h}</th>)}</tr></thead>
                     <tbody className="divide-y divide-slate-50">
-                      {monthlyData.sort((a,b) => b.month.localeCompare(a.month)).map(m => (
-                        <tr key={m.month} className="table-row-hover">
-                          <td className="px-4 py-3 font-medium text-slate-900">{m.month}</td>
-                          <td className="px-4 py-3 text-slate-600">{m.count}</td>
+                      {monthlyData.map(m => (
+                        <tr key={m.key} className="table-row-hover">
+                          <td className="px-4 py-3 font-medium text-slate-900">{m.label}</td>
+                          <td className="px-4 py-3 text-slate-600">{m.count}{m.returnedCount > 0 && <span className="text-xs text-amber-600 ml-1">(+{m.returnedCount} returned)</span>}</td>
                           <td className="px-4 py-3 text-blue-700 font-medium">{formatNPR(m.revenue)}</td>
                           <td className="px-4 py-3 text-slate-600">{formatNPR(m.investment)}</td>
                           <td className={`px-4 py-3 font-semibold ${m.profit >= 0 ? "text-green-600" : "text-red-600"}`}>{formatNPR(m.profit)}</td>
@@ -210,6 +249,22 @@ export default function Finance() {
                             <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${m.revenue > 0 && ((m.profit/m.revenue)*100) >= 8 ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}`}>
                               {m.revenue > 0 ? `${((m.profit/m.revenue)*100).toFixed(1)}%` : "—"}
                             </span>
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            <button
+                              onClick={() => downloadMonthlyReport(m)}
+                              disabled={downloadingMonth === m.key}
+                              className="inline-flex items-center gap-1.5 text-xs font-medium text-blue-600 hover:text-blue-800 disabled:opacity-50 disabled:cursor-wait"
+                              title="Download closing report for this month"
+                              data-testid="download-monthly-report-btn"
+                            >
+                              {downloadingMonth === m.key ? (
+                                <div className="animate-spin w-3.5 h-3.5 border-2 border-blue-600 border-t-transparent rounded-full" />
+                              ) : (
+                                <Download size={14} />
+                              )}
+                              Download
+                            </button>
                           </td>
                         </tr>
                       ))}
