@@ -2641,7 +2641,10 @@ async def _compress_oversized_photos():
             continue
         raw = base64.b64decode(p["data"])
         try:
-            compressed, new_content_type = _compress_photo(raw)
+            # to_thread, not a plain call: this is the actual CPU-bound work (LANCZOS
+            # resize + JPEG encode), and running it inline would freeze every other
+            # request on this single-worker server for the duration of each photo.
+            compressed, new_content_type = await asyncio.to_thread(_compress_photo, raw)
         except Exception:
             logger.warning(f"Failed to compress vehicle photo {photo_id}", exc_info=True)
             continue
@@ -2653,7 +2656,6 @@ async def _compress_oversized_photos():
                       "content_type": new_content_type, "size": len(compressed)}},
         )
         succeeded += 1
-        await asyncio.sleep(0)  # yield to the event loop between photos
     logger.info(f"Photo compression sweep done: {succeeded}/{len(oversized_ids)} shrunk.")
 
 @api_router.get("/vehicles/{vid}/photos")
@@ -2674,7 +2676,10 @@ async def upload_vehicle_photo(vid: str, file: UploadFile = File(...), cu: dict 
         raise HTTPException(400, "File too large. Max 25MB.")
     content_type = _resolved_content_type(file)
     try:
-        content, content_type = _compress_photo(content)
+        # Off the event loop — same reasoning as hash_pw_async: this server has one
+        # worker, so a synchronous LANCZOS resize + JPEG encode here would stall every
+        # other in-flight request (including other users' photo loads) until it finishes.
+        content, content_type = await asyncio.to_thread(_compress_photo, content)
     except Exception:
         logger.warning(f"Photo compression failed for upload to vehicle {vid}, storing original", exc_info=True)
     if len(content) > PHOTO_MAX_BYTES:
@@ -2792,7 +2797,8 @@ async def _compress_oversized_documents():
     _compress_pdf) so old uploads and anything from before this cap existed
     get shrunk down too, not just new ones (which are already capped at
     upload time). Awaits between documents so this never blocks the event
-    loop for other requests, and is safe to run every startup — anything
+    loop for other requests (the actual compression work runs via asyncio.to_thread,
+    not just an inter-item sleep(0)), and is safe to run every startup — anything
     already under the cap, or where compressing wouldn't actually shrink it,
     is skipped, so a repeat run does almost nothing."""
     docs = await db.legal_documents.find({}, {"_id": 0, "id": 1, "size": 1}).to_list(100000)
@@ -2809,9 +2815,9 @@ async def _compress_oversized_documents():
         content_type = d.get("content_type", "")
         try:
             if content_type.startswith("image/"):
-                compressed, new_content_type = _compress_document_image(raw)
+                compressed, new_content_type = await asyncio.to_thread(_compress_document_image, raw)
             elif content_type == "application/pdf":
-                compressed, new_content_type = _compress_pdf(raw), content_type
+                compressed, new_content_type = await asyncio.to_thread(_compress_pdf, raw), content_type
             else:
                 continue
         except Exception:
@@ -2840,11 +2846,11 @@ async def upload_legal_document(vid: str, file: UploadFile = File(...), doc_type
     content_type = _resolved_content_type(file)
     if content_type.startswith("image/"):
         try:
-            content, content_type = _compress_document_image(content)
+            content, content_type = await asyncio.to_thread(_compress_document_image, content)
         except Exception:
             logger.warning(f"Document image compression failed for upload to vehicle {vid}, storing original", exc_info=True)
     elif content_type == "application/pdf":
-        content = _compress_pdf(content)
+        content = await asyncio.to_thread(_compress_pdf, content)
     doc_id = str(uuid.uuid4())
     doc = {
         "id": doc_id, "vehicle_id": vid, "filename": file.filename or f"{doc_id}.pdf",
@@ -3287,7 +3293,18 @@ def _public_vehicle_fields(v: dict) -> dict:
     }
 
 def _public_photo_url(request: Request, vid: str, photo_id: str) -> str:
-    return f"{request.base_url}api/public/vehicles/{vid}/photos/{photo_id}"
+    """Builds an absolute URL from the client-facing scheme/host, not request.base_url —
+    that reflects whatever uvicorn itself saw, which is plain http behind an
+    nginx/Caddy TLS-terminating reverse proxy (the typical VPS setup) unless
+    X-Forwarded-Proto is both sent by the proxy and trusted by uvicorn's
+    --forwarded-allow-ips. Get that wrong and every photo URL silently becomes
+    http:// on an https:// site, which browsers and next/image's remotePatterns
+    block outright. Reading the headers directly sidesteps needing that trust
+    config to be right — safe here since this only affects a display URL, not a
+    security decision."""
+    scheme = request.headers.get("x-forwarded-proto", request.url.scheme).split(",")[0].strip()
+    host = (request.headers.get("x-forwarded-host") or request.headers.get("host") or request.url.netloc).split(",")[0].strip()
+    return f"{scheme}://{host}/api/public/vehicles/{vid}/photos/{photo_id}"
 
 @api_router.get("/public/vehicles")
 async def public_list_vehicles(request: Request):
@@ -3328,6 +3345,8 @@ async def public_get_vehicle(vid: str, request: Request):
     return item
 
 _PHOTO_BYTES_CACHE: dict = {}  # photo_id -> (raw_bytes, content_type), see public_get_photo
+_PHOTO_BYTES_CACHE_SIZE = 0  # running total of cached raw bytes — the cap below is a memory budget, not a photo count
+PHOTO_CACHE_MAX_BYTES = 300 * 1024 * 1024  # ~300MB — 5000 uncapped photos could otherwise run into the GBs on a small VPS
 
 @api_router.get("/public/vehicles/{vid}/photos/{photo_id}")
 async def public_get_photo(vid: str, photo_id: str):
@@ -3340,13 +3359,16 @@ async def public_get_photo(vid: str, photo_id: str):
     for the connection pool on every load. Safe because a photo_id's bytes never change
     after upload (no "replace photo" endpoint, only upload-new/delete); capped so a very
     large photo library can't grow this unbounded."""
+    global _PHOTO_BYTES_CACHE_SIZE
     cached = _PHOTO_BYTES_CACHE.get(photo_id)
     if cached is None:
         p = await db.vehicle_photos.find_one({"id": photo_id, "vehicle_id": vid}, {"_id": 0})
         if not p: raise HTTPException(404, "Photo not found")
-        cached = (base64.b64decode(p["data"]), p["content_type"])
-        if len(_PHOTO_BYTES_CACHE) < 5000:
+        raw = base64.b64decode(p["data"])
+        cached = (raw, p["content_type"])
+        if _PHOTO_BYTES_CACHE_SIZE + len(raw) <= PHOTO_CACHE_MAX_BYTES:
             _PHOTO_BYTES_CACHE[photo_id] = cached
+            _PHOTO_BYTES_CACHE_SIZE += len(raw)
     content, content_type = cached
     return Response(
         content=content, media_type=content_type,
