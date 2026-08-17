@@ -11,6 +11,7 @@ import Layout from "./components/Layout";
 // screen (even the login page) could render. Lazy-loading means only the
 // current route's chunk is fetched.
 const Login = lazy(() => import("./pages/Login"));
+const SignUp = lazy(() => import("./pages/SignUp"));
 const Dashboard = lazy(() => import("./pages/Dashboard"));
 const Inventory = lazy(() => import("./pages/Inventory"));
 const VehicleDetail = lazy(() => import("./pages/VehicleDetail"));
@@ -72,6 +73,7 @@ function AppRoutes() {
     <Suspense fallback={<RouteFallback />}>
       <Routes>
         <Route path="/login" element={<PublicRoute><Login /></PublicRoute>} />
+        <Route path="/signup" element={<PublicRoute><SignUp /></PublicRoute>} />
         <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
           <Route index element={<HomeRoute />} />
           <Route path="inventory" element={<RoleRoute path="/inventory"><Inventory /></RoleRoute>} />
