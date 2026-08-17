@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
-import { Fingerprint, UserPlus, Shield } from "lucide-react";
+import { Fingerprint, UserPlus, Shield, Edit, Trash2 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import api from "../utils/api";
 import { isNative, isBiometricAvailable, hasSavedCredentials, saveCredentials, deleteCredentials, verifyIdentity } from "../utils/biometric";
@@ -39,6 +39,9 @@ export default function Settings() {
   const [showAddUserModal, setShowAddUserModal] = useState(false);
   const [newUserForm, setNewUserForm] = useState({ name: "", username: "", password: "", role: "stock_supervisor" });
   const [savingUser, setSavingUser] = useState(false);
+  const [editUserItem, setEditUserItem] = useState(null);
+  const [editUserForm, setEditUserForm] = useState({ name: "", role: "stock_supervisor", password: "" });
+  const [savingEditUser, setSavingEditUser] = useState(false);
 
   const fetchCompanyUsers = () => {
     api.get("/auth/users").then(r => setCompanyUsers(r.data)).catch(() => toast.error("Failed to load accounts"));
@@ -130,6 +133,39 @@ export default function Settings() {
     } finally { setSavingUser(false); }
   };
 
+  const openEditUser = (u) => {
+    setEditUserItem(u);
+    setEditUserForm({ name: u.name, role: u.role, password: "" });
+  };
+
+  const handleEditUser = async (e) => {
+    e.preventDefault();
+    if (!editUserForm.name || !editUserForm.role) { toast.error("Fill all fields"); return; }
+    if (editUserForm.password && editUserForm.password.length < 8) { toast.error("Password must be at least 8 characters"); return; }
+    setSavingEditUser(true);
+    try {
+      const payload = { name: editUserForm.name, role: editUserForm.role };
+      if (editUserForm.password) payload.password = editUserForm.password;
+      await api.put(`/auth/users/${editUserItem.id}`, payload);
+      toast.success("Account updated!");
+      setEditUserItem(null);
+      fetchCompanyUsers();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "Failed to update account");
+    } finally { setSavingEditUser(false); }
+  };
+
+  const handleDeleteUser = async (u) => {
+    if (!window.confirm(`Remove ${u.name}'s account? This cannot be undone.`)) return;
+    try {
+      await api.delete(`/auth/users/${u.id}`);
+      toast.success("Account deleted");
+      fetchCompanyUsers();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "Failed to delete account");
+    }
+  };
+
   const ROLE_LABELS = { admin: "Admin", stock_supervisor: "Front Desk", parts_supervisor: "Parts Department" };
 
   const inp = "w-full h-10 px-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500";
@@ -183,7 +219,13 @@ export default function Settings() {
                       <div className="text-xs text-slate-500">@{u.username}</div>
                     </div>
                   </div>
-                  <span className="text-[10px] font-semibold uppercase tracking-wide bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded">{ROLE_LABELS[u.role] || u.role}</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-semibold uppercase tracking-wide bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded">{ROLE_LABELS[u.role] || u.role}</span>
+                    <button onClick={() => openEditUser(u)} data-testid="edit-account-btn" className="w-8 h-8 flex items-center justify-center hover:bg-slate-200 rounded-lg transition-colors"><Edit size={13} className="text-slate-500" /></button>
+                    {u.username !== user?.username && (
+                      <button onClick={() => handleDeleteUser(u)} data-testid="delete-account-btn" className="w-8 h-8 flex items-center justify-center hover:bg-red-50 rounded-lg transition-colors"><Trash2 size={13} className="text-red-400" /></button>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>
@@ -379,6 +421,43 @@ export default function Settings() {
               </div>
               <button type="submit" disabled={savingUser} data-testid="save-new-user-btn" className="w-full h-10 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-semibold disabled:opacity-60 transition-all active:scale-95">
                 {savingUser ? "Creating..." : "Create Account"}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Account Modal */}
+      {editUserItem && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm">
+            <div className="flex items-center justify-between p-5 border-b border-slate-100">
+              <h2 className="text-lg font-bold text-slate-900">Edit Account</h2>
+              <button onClick={() => setEditUserItem(null)} className="w-9 h-9 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500">✕</button>
+            </div>
+            <form onSubmit={handleEditUser} className="p-5 space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1.5">Name</label>
+                <input value={editUserForm.name} onChange={e => setEditUserForm({ ...editUserForm, name: e.target.value })} className={inp} data-testid="edit-user-name" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1.5">Username</label>
+                <input value={editUserItem.username} disabled className={`${inp} bg-slate-50 text-slate-400`} />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1.5">New Password</label>
+                <input type="password" value={editUserForm.password} onChange={e => setEditUserForm({ ...editUserForm, password: e.target.value })} placeholder="Leave blank to keep current password" className={inp} data-testid="edit-user-password" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1.5">Role</label>
+                <select value={editUserForm.role} onChange={e => setEditUserForm({ ...editUserForm, role: e.target.value })} className={inp} data-testid="edit-user-role">
+                  <option value="stock_supervisor">Front Desk</option>
+                  <option value="parts_supervisor">Parts Department</option>
+                  <option value="admin">Admin</option>
+                </select>
+              </div>
+              <button type="submit" disabled={savingEditUser} data-testid="save-edit-user-btn" className="w-full h-10 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-semibold disabled:opacity-60 transition-all active:scale-95">
+                {savingEditUser ? "Saving..." : "Save Changes"}
               </button>
             </form>
           </div>

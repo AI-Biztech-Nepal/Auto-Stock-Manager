@@ -662,6 +662,10 @@ class RegisterRequest(BaseModel):
 class ChangePasswordRequest(BaseModel):
     current_password: str; new_password: str = Field(min_length=8)
 
+class UserUpdate(BaseModel):
+    name: str; role: str
+    password: Optional[str] = Field(default=None, min_length=8)
+
 class VehicleCreate(BaseModel):
     brand: str; model: str
     variant: Optional[str] = None
@@ -890,6 +894,35 @@ async def register(req: RegisterRequest, cu: dict = Depends(get_current_user)):
     await db.users.insert_one(user)
     user.pop("_id", None); user.pop("password_hash", None)
     return user
+
+@api_router.put("/auth/users/{uid}")
+async def update_user(uid: str, req: UserUpdate, cu: dict = Depends(admin_only)):
+    target = await db.users.find_one({"id": uid})
+    if not target:
+        raise HTTPException(404, "Account not found")
+    if target.get("role") == "admin" and req.role != "admin":
+        remaining_admins = await db.users.count_documents({"role": "admin", "id": {"$ne": uid}})
+        if remaining_admins == 0:
+            raise HTTPException(400, "Cannot change role: at least one Admin account must remain")
+    update = {"name": req.name, "role": req.role}
+    if req.password:
+        update["password_hash"] = await hash_pw_async(req.password)
+    await db.users.update_one({"id": uid}, {"$set": update})
+    return await db.users.find_one({"id": uid}, {"_id": 0, "password_hash": 0})
+
+@api_router.delete("/auth/users/{uid}")
+async def delete_user(uid: str, cu: dict = Depends(admin_only)):
+    if uid == cu.get("user_id"):
+        raise HTTPException(400, "You cannot delete your own account")
+    target = await db.users.find_one({"id": uid})
+    if not target:
+        raise HTTPException(404, "Account not found")
+    if target.get("role") == "admin":
+        remaining_admins = await db.users.count_documents({"role": "admin", "id": {"$ne": uid}})
+        if remaining_admins == 0:
+            raise HTTPException(400, "Cannot delete the only remaining Admin account")
+    await db.users.delete_one({"id": uid})
+    return {"message": "Account deleted"}
 
 # ── VEHICLES ──────────────────────────────────────────────────────────
 @api_router.get("/vehicles")
