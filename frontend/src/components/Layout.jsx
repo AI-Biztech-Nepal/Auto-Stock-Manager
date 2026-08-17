@@ -5,11 +5,12 @@ import { canAccessPath } from "../utils/permissions";
 import {
   LayoutDashboard, Bike, Wrench, Users, UsersRound,
   BarChart3, Handshake, Sparkles, Settings, LogOut, Menu, X, Bell,
-  Store, Wallet, Megaphone, CreditCard, Boxes, ShoppingBag, Inbox, Archive
+  Store, Wallet, Megaphone, CreditCard, Boxes, ShoppingBag, Inbox, Archive, Building2
 } from "lucide-react";
 
 const navItems = [
   { path: "/",             label: "Dashboard",    icon: LayoutDashboard },
+  { path: "/platform",     label: "Companies",    icon: Building2 },
   { path: "/inventory",    label: "Inventory",    icon: Bike },
   { path: "/sales",        label: "Sales",        icon: ShoppingBag },
   { path: "/sold-stock",   label: "Sold Stock",   icon: Archive },

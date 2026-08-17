@@ -265,6 +265,18 @@ async def admin_only(cu: dict = Depends(get_current_user)):
         raise HTTPException(403, "This section is restricted to Admin accounts")
     return cu
 
+# Not signup-able and not the old Super Admin console -- a role that only ever gets granted
+# by hand (UPDATE users SET role='platform_owner' ...) to one specific, already-existing
+# account. Logs in through the exact same plain username/password form as everyone else, no
+# separate flow -- the previous multi-tenant attempt's "company code" login field is exactly
+# what confused people, so this deliberately doesn't reintroduce anything like it. A
+# platform_owner's own token has no company_id (see /platform/* routes below, which take an
+# explicit company_id instead of relying on the automatic per-request scoping).
+async def platform_owner_only(cu: dict = Depends(get_current_user)):
+    if cu.get("role") != "platform_owner":
+        raise HTTPException(403, "This section is restricted to the platform owner")
+    return cu
+
 def stock_aging(purchase_date_str: str) -> dict:
     try:
         s = str(purchase_date_str)
@@ -1054,6 +1066,27 @@ async def delete_user(uid: str, cu: dict = Depends(admin_only)):
             raise HTTPException(400, "Cannot delete the only remaining Admin account")
     await db.users.delete_one({"id": uid, **company_scope(cu)})
     return {"message": "Account deleted"}
+
+# ── PLATFORM (platform_owner only) ──────────────────────────────────────
+# Read-only visibility across every company that's signed up -- not a management console,
+# just what used to require going into phpMyAdmin by hand.
+@api_router.get("/platform/companies")
+async def platform_list_companies(cu: dict = Depends(platform_owner_only)):
+    companies = await db.companies.find({}, {"_id": 0}).sort("created_at", 1).to_list(1000)
+    out = []
+    for c in companies:
+        out.append({
+            **c,
+            "vehicle_count": await db.vehicles.count_documents({"company_id": c["id"]}),
+            "user_count": await db.users.count_documents({"company_id": c["id"]}),
+        })
+    return out
+
+@api_router.get("/platform/companies/{company_id}/users")
+async def platform_list_company_users(company_id: str, cu: dict = Depends(platform_owner_only)):
+    if not await db.companies.find_one({"id": company_id}, {"_id": 0, "id": 1}):
+        raise HTTPException(404, "Company not found")
+    return await db.users.find({"company_id": company_id}, {"_id": 0, "password_hash": 0}).sort("username", 1).to_list(500)
 
 # ── VEHICLES ──────────────────────────────────────────────────────────
 @api_router.get("/vehicles")
