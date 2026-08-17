@@ -10,6 +10,8 @@ from typing import Optional, List
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 import os, logging, jwt, uuid, json, base64, io, asyncio, re, copy
+from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures.process import BrokenProcessPool
 from pydantic import BaseModel, Field
 from PIL import Image, ImageOps
 import pillow_heif
@@ -2957,6 +2959,27 @@ def _resolved_content_type(file: UploadFile) -> str:
     ext = os.path.splitext(file.filename or "")[1].lower()
     return _EXT_CONTENT_TYPES.get(ext, file.content_type or "application/octet-stream")
 
+# Photo/document compression decodes untrusted phone-camera files (HEIC in particular,
+# via pillow-heif's native libheif binding) — a malformed or unusual file can segfault
+# the decoder. asyncio.to_thread alone doesn't protect against that: a thread shares the
+# same process memory, so a native crash there takes the entire server down with it (this
+# is what was behind the intermittent 502s / PM2 restart-loop on photo uploads). Running
+# this work in a real OS subprocess means a crash there only kills that one subprocess —
+# concurrent.futures raises BrokenProcessPool in the awaiting request instead of the whole
+# server dying, and _run_isolated below replaces the pool so the next upload gets a fresh one.
+_compress_pool = ProcessPoolExecutor(max_workers=2)
+
+async def _run_isolated(func, *args):
+    global _compress_pool
+    loop = asyncio.get_running_loop()
+    try:
+        return await loop.run_in_executor(_compress_pool, func, *args)
+    except BrokenProcessPool:
+        logger.error(f"{func.__name__} crashed its worker process — recreating the pool", exc_info=True)
+        _compress_pool.shutdown(wait=False, cancel_futures=True)
+        _compress_pool = ProcessPoolExecutor(max_workers=2)
+        raise
+
 RAW_UPLOAD_MAX = 25 * 1024 * 1024  # 25 MB cap on the original file straight off a phone camera
 PHOTO_MAX_DIMENSION = 1600  # px, longest side
 PHOTO_JPEG_QUALITY = 80
@@ -3014,10 +3037,11 @@ async def _compress_oversized_photos():
             continue
         raw = base64.b64decode(p["data"])
         try:
-            # to_thread, not a plain call: this is the actual CPU-bound work (LANCZOS
-            # resize + JPEG encode), and running it inline would freeze every other
-            # request on this single-worker server for the duration of each photo.
-            compressed, new_content_type = await asyncio.to_thread(_compress_photo, raw)
+            # Isolated subprocess, not a thread: this is the actual CPU-bound work (LANCZOS
+            # resize + JPEG encode) and must not run inline (would freeze every other request
+            # on this single-worker server), and a crash in it must not take the whole
+            # process down with it — see _run_isolated.
+            compressed, new_content_type = await _run_isolated(_compress_photo, raw)
         except Exception:
             logger.warning(f"Failed to compress vehicle photo {photo_id}", exc_info=True)
             continue
@@ -3049,10 +3073,10 @@ async def upload_vehicle_photo(vid: str, file: UploadFile = File(...), cu: dict 
         raise HTTPException(400, "File too large. Max 25MB.")
     content_type = _resolved_content_type(file)
     try:
-        # Off the event loop — same reasoning as hash_pw_async: this server has one
-        # worker, so a synchronous LANCZOS resize + JPEG encode here would stall every
-        # other in-flight request (including other users' photo loads) until it finishes.
-        content, content_type = await asyncio.to_thread(_compress_photo, content)
+        # Isolated subprocess — same reasoning as hash_pw_async re: not blocking the single
+        # worker's event loop, plus crash containment: a native decoder crash on a bad phone
+        # photo must not take the whole server down (see _run_isolated).
+        content, content_type = await _run_isolated(_compress_photo, content)
     except Exception:
         logger.warning(f"Photo compression failed for upload to vehicle {vid}, storing original", exc_info=True)
     if len(content) > PHOTO_MAX_BYTES:
@@ -3188,9 +3212,9 @@ async def _compress_oversized_documents():
         content_type = d.get("content_type", "")
         try:
             if content_type.startswith("image/"):
-                compressed, new_content_type = await asyncio.to_thread(_compress_document_image, raw)
+                compressed, new_content_type = await _run_isolated(_compress_document_image, raw)
             elif content_type == "application/pdf":
-                compressed, new_content_type = await asyncio.to_thread(_compress_pdf, raw), content_type
+                compressed, new_content_type = await _run_isolated(_compress_pdf, raw), content_type
             else:
                 continue
         except Exception:
@@ -3219,11 +3243,14 @@ async def upload_legal_document(vid: str, file: UploadFile = File(...), doc_type
     content_type = _resolved_content_type(file)
     if content_type.startswith("image/"):
         try:
-            content, content_type = await asyncio.to_thread(_compress_document_image, content)
+            content, content_type = await _run_isolated(_compress_document_image, content)
         except Exception:
             logger.warning(f"Document image compression failed for upload to vehicle {vid}, storing original", exc_info=True)
     elif content_type == "application/pdf":
-        content = await asyncio.to_thread(_compress_pdf, content)
+        try:
+            content = await _run_isolated(_compress_pdf, content)
+        except Exception:
+            logger.warning(f"PDF compression failed for upload to vehicle {vid}, storing original", exc_info=True)
     doc_id = str(uuid.uuid4())
     doc = {
         "id": doc_id, "vehicle_id": vid, "filename": file.filename or f"{doc_id}.pdf",
@@ -3767,6 +3794,8 @@ async def public_create_lead(lead: LeadCreate):
     return l
 
 @app.on_event("shutdown")
-async def shutdown(): client.close()
+async def shutdown():
+    client.close()
+    _compress_pool.shutdown(wait=False, cancel_futures=True)
 
 app.include_router(api_router)
