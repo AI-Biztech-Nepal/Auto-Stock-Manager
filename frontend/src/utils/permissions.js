@@ -5,19 +5,14 @@ export const ROLE_NAV_PATHS = {
   // Parts department gets read-only inventory browsing plus the ability to flip a vehicle's
   // pipeline status (Available <-> In Repair, or Scrap) — see PARTS_ALLOWED_STATUSES in server.py.
   parts_supervisor: ["/spare-parts", "/vendors", "/jobs", "/inventory", "/team", "/settings"],
-  // Platform super_admin only ever sees the companies console — never a company's own data tabs.
-  super_admin: ["/super-admin"],
 };
 
 export const ROLE_DEFAULT_PATH = {
   stock_supervisor: "/inventory",
   parts_supervisor: "/spare-parts",
-  super_admin: "/super-admin",
 };
 
 export function canAccessPath(role, path) {
-  // "admin" (a company's own admin) gets full access to that company's data. super_admin
-  // is NOT included here — it must fall through to ROLE_NAV_PATHS like any other limited role.
   if (!role || role === "admin") return true;
   const allowed = ROLE_NAV_PATHS[role] || [];
   return allowed.some((p) => path === p || path.startsWith(p + "/"));
