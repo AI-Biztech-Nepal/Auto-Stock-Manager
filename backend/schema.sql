@@ -30,9 +30,21 @@
 SET NAMES utf8mb4;
 SET FOREIGN_KEY_CHECKS = 0;
 
+-- ── Companies (multi-tenant) ─────────────────────────────────────────────
+-- One row per business that's signed up via POST /auth/signup. Every other table's
+-- company_id column scopes its rows to one of these -- enforced at the app's db-access
+-- layer (see _ScopedCollection in server.py), not by a FOREIGN KEY here.
+CREATE TABLE IF NOT EXISTS companies (
+  id VARCHAR(36) NOT NULL PRIMARY KEY,
+  name VARCHAR(255) NOT NULL,
+  created_at VARCHAR(40)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 -- ── Users / auth ─────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS users (
   id VARCHAR(36) NOT NULL PRIMARY KEY,
+  company_id VARCHAR(36),
+  INDEX idx_users_company_id (company_id),
   username VARCHAR(100) NOT NULL UNIQUE,
   password_hash VARCHAR(255) NOT NULL,
   name VARCHAR(255),
@@ -43,6 +55,8 @@ CREATE TABLE IF NOT EXISTS users (
 -- ── Vendors / customers / team ───────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS vendors (
   id VARCHAR(36) NOT NULL PRIMARY KEY,
+  company_id VARCHAR(36),
+  INDEX idx_vendors_company_id (company_id),
   name VARCHAR(255),
   phone VARCHAR(50),
   address VARCHAR(500),
@@ -53,6 +67,8 @@ CREATE TABLE IF NOT EXISTS vendors (
 
 CREATE TABLE IF NOT EXISTS customers (
   id VARCHAR(36) NOT NULL PRIMARY KEY,
+  company_id VARCHAR(36),
+  INDEX idx_customers_company_id (company_id),
   name VARCHAR(255),
   contact_number VARCHAR(50),
   address VARCHAR(500),
@@ -68,6 +84,8 @@ CREATE TABLE IF NOT EXISTS customers (
 
 CREATE TABLE IF NOT EXISTS team_members (
   id VARCHAR(36) NOT NULL PRIMARY KEY,
+  company_id VARCHAR(36),
+  INDEX idx_team_members_company_id (company_id),
   name VARCHAR(255),
   role VARCHAR(50),
   contact VARCHAR(50),
@@ -81,6 +99,8 @@ CREATE TABLE IF NOT EXISTS team_members (
 
 CREATE TABLE IF NOT EXISTS partners (
   id VARCHAR(36) NOT NULL PRIMARY KEY,
+  company_id VARCHAR(36),
+  INDEX idx_partners_company_id (company_id),
   name VARCHAR(255),
   capital_contribution DOUBLE,
   stake_percentage DOUBLE,
@@ -91,6 +111,8 @@ CREATE TABLE IF NOT EXISTS partners (
 -- ── Vehicles (largest / most heavily queried table) ─────────────────────
 CREATE TABLE IF NOT EXISTS vehicles (
   id VARCHAR(36) NOT NULL PRIMARY KEY,
+  company_id VARCHAR(36),
+  INDEX idx_vehicles_company_id (company_id),
   brand VARCHAR(100),
   model VARCHAR(100),
   variant VARCHAR(100),
@@ -148,6 +170,8 @@ CREATE TABLE IF NOT EXISTS vehicles (
 -- ── Sales ─────────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS sales (
   id VARCHAR(36) NOT NULL PRIMARY KEY,
+  company_id VARCHAR(36),
+  INDEX idx_sales_company_id (company_id),
   vehicle_id VARCHAR(36),
   customer_id VARCHAR(36),
   sale_price DOUBLE,
@@ -184,6 +208,8 @@ CREATE TABLE IF NOT EXISTS sales (
 -- ── Spare parts + set components (was an inline array) + kits ───────────
 CREATE TABLE IF NOT EXISTS spare_parts (
   id VARCHAR(36) NOT NULL PRIMARY KEY,
+  company_id VARCHAR(36),
+  INDEX idx_spare_parts_company_id (company_id),
   name VARCHAR(255),
   category VARCHAR(100),
   brand_compatibility VARCHAR(255),
@@ -220,6 +246,8 @@ CREATE TABLE IF NOT EXISTS spare_parts_set_components (
 
 CREATE TABLE IF NOT EXISTS kit_components (
   id VARCHAR(36) NOT NULL PRIMARY KEY,
+  company_id VARCHAR(36),
+  INDEX idx_kit_components_company_id (company_id),
   kit_part_id VARCHAR(36) NOT NULL,
   component_part_id VARCHAR(36) NOT NULL,
   qty_per_kit INT,
@@ -233,6 +261,8 @@ CREATE TABLE IF NOT EXISTS kit_components (
 
 CREATE TABLE IF NOT EXISTS part_transactions (
   id VARCHAR(36) NOT NULL PRIMARY KEY,
+  company_id VARCHAR(36),
+  INDEX idx_part_transactions_company_id (company_id),
   part_id VARCHAR(36),
   part_name VARCHAR(500),
   type VARCHAR(10),
@@ -251,6 +281,8 @@ CREATE TABLE IF NOT EXISTS part_transactions (
 -- ── Job cards ─────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS job_cards (
   id VARCHAR(36) NOT NULL PRIMARY KEY,
+  company_id VARCHAR(36),
+  INDEX idx_job_cards_company_id (company_id),
   vehicle_id VARCHAR(36),
   is_external TINYINT(1) DEFAULT 0,
   vehicle_brand VARCHAR(100),
@@ -286,6 +318,8 @@ CREATE TABLE IF NOT EXISTS job_cards (
 -- ── Expenses / vendor payments / EMI ─────────────────────────────────────
 CREATE TABLE IF NOT EXISTS expenses (
   id VARCHAR(36) NOT NULL PRIMARY KEY,
+  company_id VARCHAR(36),
+  INDEX idx_expenses_company_id (company_id),
   vehicle_id VARCHAR(36),
   category VARCHAR(100),
   amount DOUBLE,
@@ -299,6 +333,8 @@ CREATE TABLE IF NOT EXISTS expenses (
 
 CREATE TABLE IF NOT EXISTS vendor_payments (
   id VARCHAR(36) NOT NULL PRIMARY KEY,
+  company_id VARCHAR(36),
+  INDEX idx_vendor_payments_company_id (company_id),
   vendor_id VARCHAR(36),
   amount DOUBLE,
   vehicle_id VARCHAR(36),
@@ -314,6 +350,8 @@ CREATE TABLE IF NOT EXISTS vendor_payments (
 
 CREATE TABLE IF NOT EXISTS emi_records (
   id VARCHAR(36) NOT NULL PRIMARY KEY,
+  company_id VARCHAR(36),
+  INDEX idx_emi_records_company_id (company_id),
   customer_id VARCHAR(36),
   vehicle_id VARCHAR(36),
   loan_amount DOUBLE,
@@ -338,6 +376,8 @@ CREATE TABLE IF NOT EXISTS emi_records (
 
 CREATE TABLE IF NOT EXISTS emi_payments (
   id VARCHAR(36) NOT NULL PRIMARY KEY,
+  company_id VARCHAR(36),
+  INDEX idx_emi_payments_company_id (company_id),
   emi_id VARCHAR(36),
   amount DOUBLE,
   payment_date VARCHAR(20),
@@ -351,6 +391,8 @@ CREATE TABLE IF NOT EXISTS emi_payments (
 -- ── Media (base64, same reason it was in Mongo: Render's disk is ephemeral) ─
 CREATE TABLE IF NOT EXISTS vehicle_photos (
   id VARCHAR(36) NOT NULL PRIMARY KEY,
+  company_id VARCHAR(36),
+  INDEX idx_vehicle_photos_company_id (company_id),
   vehicle_id VARCHAR(36),
   filename VARCHAR(500),
   content_type VARCHAR(100),
@@ -364,6 +406,8 @@ CREATE TABLE IF NOT EXISTS vehicle_photos (
 
 CREATE TABLE IF NOT EXISTS legal_documents (
   id VARCHAR(36) NOT NULL PRIMARY KEY,
+  company_id VARCHAR(36),
+  INDEX idx_legal_documents_company_id (company_id),
   vehicle_id VARCHAR(36),
   filename VARCHAR(500),
   content_type VARCHAR(100),
@@ -380,6 +424,8 @@ CREATE TABLE IF NOT EXISTS legal_documents (
 -- ── Storefront leads / settings / sync / audit / AI chat ────────────────
 CREATE TABLE IF NOT EXISTS leads (
   id VARCHAR(36) NOT NULL PRIMARY KEY,
+  company_id VARCHAR(36),
+  INDEX idx_leads_company_id (company_id),
   type VARCHAR(20),
   name VARCHAR(255),
   phone VARCHAR(50),
@@ -395,6 +441,8 @@ CREATE TABLE IF NOT EXISTS leads (
 
 CREATE TABLE IF NOT EXISTS settings (
   id VARCHAR(20) NOT NULL PRIMARY KEY,
+  company_id VARCHAR(36),
+  INDEX idx_settings_company_id (company_id),
   logo_url VARCHAR(1000),
   business_name VARCHAR(255),
   contact_phone VARCHAR(50),
@@ -406,6 +454,8 @@ CREATE TABLE IF NOT EXISTS settings (
 
 CREATE TABLE IF NOT EXISTS sync_logs (
   id VARCHAR(36) NOT NULL PRIMARY KEY,
+  company_id VARCHAR(36),
+  INDEX idx_sync_logs_company_id (company_id),
   pushed_at VARCHAR(40),
   count INT,
   status VARCHAR(20),
@@ -414,6 +464,8 @@ CREATE TABLE IF NOT EXISTS sync_logs (
 
 CREATE TABLE IF NOT EXISTS audit_logs (
   id INT AUTO_INCREMENT PRIMARY KEY,
+  company_id VARCHAR(36),
+  INDEX idx_audit_logs_company_id (company_id),
   action VARCHAR(100),
   vehicle_id VARCHAR(36),
   user VARCHAR(100),
@@ -425,6 +477,8 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 
 CREATE TABLE IF NOT EXISTS ai_chat_sessions (
   id VARCHAR(36) NOT NULL PRIMARY KEY,
+  company_id VARCHAR(36),
+  INDEX idx_ai_chat_sessions_company_id (company_id),
   messages JSON,
   updated_at VARCHAR(40)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

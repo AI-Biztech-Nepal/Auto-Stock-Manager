@@ -9,7 +9,7 @@ from passlib.context import CryptContext
 from typing import Optional, List
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
-import os, logging, jwt, uuid, json, base64, io, asyncio, re, copy
+import os, logging, jwt, uuid, json, base64, io, asyncio, re, copy, contextvars
 from concurrent.futures import ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 from pydantic import BaseModel, Field
@@ -51,6 +51,99 @@ else:
         server_api=ServerApi('1')
     ) if _is_atlas else AsyncIOMotorClient(mongo_url)
     db = client[os.environ['DB_NAME']]
+
+# ── Multi-tenant data isolation ─────────────────────────────────────────
+# Every business that signs up (see /auth/signup) gets its own company_id. The previous
+# attempt at this scoped each endpoint by hand (merging company_id into every filter/insert
+# across ~100 call sites) -- one missed call site was exactly how company_id corruption and
+# cross-tenant data leaks happened before. Instead, scoping is enforced once, here, at the DB
+# access layer: get_current_user sets current_company_id from the caller's JWT for the
+# duration of the request, and _ScopedCollection transparently merges/stamps company_id onto
+# every query and write for tenant collections -- an endpoint would have to go out of its way
+# to bypass this, rather than having to remember to apply it.
+current_company_id: contextvars.ContextVar = contextvars.ContextVar("current_company_id", default=None)
+
+# Every collection that holds one business's own data. Deliberately excludes:
+#  - "users": login accounts need both company-scoped queries (list/edit/delete my company's
+#    accounts) AND global ones (login-by-username, uniqueness check) -- see the handful of
+#    /auth/* routes below, which apply company_scope() by hand instead.
+#  - "companies": the tenant registry itself, never scoped to a tenant.
+TENANT_COLLECTIONS = {
+    "customers", "emi_payments", "emi_records", "expenses", "job_cards", "kit_components",
+    "leads", "legal_documents", "part_transactions", "partners", "sales", "spare_parts",
+    "sync_logs", "team_members", "vehicle_photos", "vehicles", "vendor_payments", "vendors",
+    "audit_logs", "ai_chat_sessions", "settings",
+}
+
+def company_scope(cu: dict) -> dict:
+    """For the handful of "users" queries that need explicit company scoping (that
+    collection is deliberately excluded from the automatic wrapper -- see above)."""
+    return {"company_id": cu.get("company_id")}
+
+class _ScopedCollection:
+    def __init__(self, coll):
+        self._coll = coll
+
+    def _scoped(self, filt):
+        filt = dict(filt or {})
+        cid = current_company_id.get()
+        if cid is not None:
+            filt["company_id"] = cid
+        return filt
+
+    def _stamped(self, doc):
+        cid = current_company_id.get()
+        if cid is not None and "company_id" not in doc:
+            doc = {**doc, "company_id": cid}
+        return doc
+
+    async def find_one(self, filt=None, *a, **k):
+        return await self._coll.find_one(self._scoped(filt), *a, **k)
+
+    def find(self, filt=None, *a, **k):
+        return self._coll.find(self._scoped(filt), *a, **k)
+
+    async def count_documents(self, filt=None, *a, **k):
+        return await self._coll.count_documents(self._scoped(filt), *a, **k)
+
+    def distinct(self, field, filt=None, *a, **k):
+        return self._coll.distinct(field, self._scoped(filt), *a, **k)
+
+    async def insert_one(self, doc, *a, **k):
+        return await self._coll.insert_one(self._stamped(doc), *a, **k)
+
+    async def insert_many(self, docs, *a, **k):
+        return await self._coll.insert_many([self._stamped(d) for d in docs], *a, **k)
+
+    async def update_one(self, filt, update, *a, **k):
+        return await self._coll.update_one(self._scoped(filt), update, *a, **k)
+
+    async def update_many(self, filt, update, *a, **k):
+        return await self._coll.update_many(self._scoped(filt), update, *a, **k)
+
+    async def delete_one(self, filt, *a, **k):
+        return await self._coll.delete_one(self._scoped(filt), *a, **k)
+
+    async def delete_many(self, filt, *a, **k):
+        return await self._coll.delete_many(self._scoped(filt), *a, **k)
+
+    async def find_one_and_update(self, filt, update, *a, **k):
+        return await self._coll.find_one_and_update(self._scoped(filt), update, *a, **k)
+
+    def create_index(self, *a, **k):
+        return self._coll.create_index(*a, **k)
+
+class _ScopedDB:
+    """Drop-in wrapper: db.vehicles.find(...) etc. all still work unchanged. Only
+    collections in TENANT_COLLECTIONS get company_id auto-merged/stamped."""
+    def __init__(self, real_db):
+        self._real_db = real_db
+
+    def __getattr__(self, name):
+        coll = getattr(self._real_db, name)
+        return _ScopedCollection(coll) if name in TENANT_COLLECTIONS else coll
+
+db = _ScopedDB(db)  # db.users / db.companies pass through unscoped automatically (not in TENANT_COLLECTIONS)
 
 JWT_SECRET = os.environ.get('JWT_SECRET', 'hamro-gng-2024')
 
@@ -97,20 +190,24 @@ def verify_pw(pw: str, hashed: str) -> bool: return pwd_context.verify(pw, hashe
 async def hash_pw_async(pw: str) -> str: return await asyncio.to_thread(hash_pw, pw)
 async def verify_pw_async(pw: str, hashed: str) -> bool: return await asyncio.to_thread(verify_pw, pw, hashed)
 
-def create_token(user_id: str, username: str, role: str = "admin") -> str:
+def create_token(user_id: str, username: str, role: str = "admin", company_id: Optional[str] = None) -> str:
     return jwt.encode(
-        {"user_id": user_id, "username": username, "role": role,
+        {"user_id": user_id, "username": username, "role": role, "company_id": company_id,
          "exp": datetime.now(timezone.utc) + timedelta(days=7)},
         JWT_SECRET, algorithm="HS256"
     )
 
 async def get_current_user(creds: HTTPAuthorizationCredentials = Depends(security)):
     try:
-        return jwt.decode(creds.credentials, JWT_SECRET, algorithms=["HS256"])
+        payload = jwt.decode(creds.credentials, JWT_SECRET, algorithms=["HS256"])
     except jwt.ExpiredSignatureError:
         raise HTTPException(401, "Token expired")
     except jwt.InvalidTokenError:
         raise HTTPException(401, "Invalid token")
+    # Every tenant-scoped db.<collection> call for the rest of this request now
+    # automatically filters/stamps by this company_id -- see _ScopedCollection above.
+    current_company_id.set(payload.get("company_id"))
+    return payload
 
 # ── Role-based access control ─────────────────────────────────────────
 # "admin" (Admin) always has full access. Other roles only get what's
@@ -550,7 +647,7 @@ async def ai_chatbot(req: AIChatRequest, cu: dict = Depends(admin_only)):
     session = await db.ai_chat_sessions.find_one({"id": session_id}, {"_id": 0})
     history = session["messages"] if session else []  # stored as [{"role": "user"|"assistant", "text": "..."}]
 
-    settings = await db.settings.find_one({"id": "general"}, {"_id": 0}) or {}
+    settings = await db.settings.find_one({}, {"_id": 0}) or {}
     business_snapshot = await _build_ai_business_snapshot()
 
     system = (
@@ -660,6 +757,10 @@ class LoginRequest(BaseModel):
 class RegisterRequest(BaseModel):
     username: str; password: str = Field(min_length=8); name: str
     role: str = "sales_staff"
+
+class SignUpRequest(BaseModel):
+    name: str; company_name: str
+    username: str; password: str = Field(min_length=8)
 
 class ChangePasswordRequest(BaseModel):
     current_password: str; new_password: str = Field(min_length=8)
@@ -855,12 +956,40 @@ class SettingsUpdate(BaseModel):
     service_image_url: Optional[str] = None
 
 # ── AUTH ──────────────────────────────────────────────────────────────
+@api_router.post("/auth/signup")
+async def signup(req: SignUpRequest):
+    """Public, unauthenticated — anyone can create their own company here. They become
+    that company's sole Admin; everything they create from here on (vehicles, customers,
+    employee accounts, ...) is automatically isolated to this company_id, enforced at the
+    db access layer (see _ScopedCollection) rather than per-endpoint. Usernames are
+    deliberately kept GLOBALLY unique (not per-company) -- the previous multi-tenant
+    attempt required a separate "company code" field on login to disambiguate duplicate
+    usernames across companies, which is exactly the UX that confused people before. One
+    signup = one globally-unique username, so plain username/password login keeps working
+    unchanged."""
+    existing = await db.users.find_one({"username": req.username})
+    if existing:
+        raise HTTPException(400, "Username already exists")
+    company_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc).isoformat()
+    await db.companies.insert_one({"id": company_id, "name": req.company_name, "created_at": now})
+    user = {"id": str(uuid.uuid4()), "username": req.username,
+            "password_hash": await hash_pw_async(req.password), "name": req.name, "role": "admin",
+            "company_id": company_id, "created_at": now}
+    await db.users.insert_one(user)
+    # A settings row is looked up purely by company_id (see get_settings/update_settings) --
+    # "id" here is just an arbitrary row id, not a lookup key.
+    await db.settings.insert_one({"id": str(uuid.uuid4()), "company_id": company_id,
+                                   "business_name": req.company_name})
+    token = create_token(user["id"], user["username"], "admin", company_id)
+    return {"token": token, "username": user["username"], "name": user["name"], "role": "admin"}
+
 @api_router.post("/auth/login")
 async def login(req: LoginRequest):
     user = await db.users.find_one({"username": req.username})
     if not user or not await verify_pw_async(req.password, user["password_hash"]):
         raise HTTPException(401, "Invalid credentials")
-    token = create_token(user.get("id", ""), user["username"], user.get("role", "admin"))
+    token = create_token(user.get("id", ""), user["username"], user.get("role", "admin"), user.get("company_id"))
     return {"token": token, "username": user["username"], "name": user.get("name", user["username"]),
             "role": user.get("role", "admin")}
 
@@ -880,50 +1009,50 @@ async def change_password(req: ChangePasswordRequest, cu: dict = Depends(get_cur
 
 @api_router.get("/auth/users")
 async def list_users(cu: dict = Depends(get_current_user)):
-    users = await db.users.find({}, {"_id": 0, "password_hash": 0}).to_list(100)
+    users = await db.users.find(company_scope(cu), {"_id": 0, "password_hash": 0}).to_list(100)
     return users
 
 @api_router.post("/auth/register")
 async def register(req: RegisterRequest, cu: dict = Depends(get_current_user)):
     if cu.get("role") != "admin":
         raise HTTPException(403, "Only admin can register users")
-    existing = await db.users.find_one({"username": req.username})
+    existing = await db.users.find_one({"username": req.username})  # globally unique, see /auth/signup
     if existing:
         raise HTTPException(400, "Username already exists")
     user = {"id": str(uuid.uuid4()), "username": req.username,
             "password_hash": await hash_pw_async(req.password), "name": req.name, "role": req.role,
-            "created_at": datetime.now(timezone.utc).isoformat()}
+            "company_id": cu.get("company_id"), "created_at": datetime.now(timezone.utc).isoformat()}
     await db.users.insert_one(user)
     user.pop("_id", None); user.pop("password_hash", None)
     return user
 
 @api_router.put("/auth/users/{uid}")
 async def update_user(uid: str, req: UserUpdate, cu: dict = Depends(admin_only)):
-    target = await db.users.find_one({"id": uid})
+    target = await db.users.find_one({"id": uid, **company_scope(cu)})
     if not target:
         raise HTTPException(404, "Account not found")
     if target.get("role") == "admin" and req.role != "admin":
-        remaining_admins = await db.users.count_documents({"role": "admin", "id": {"$ne": uid}})
+        remaining_admins = await db.users.count_documents({"role": "admin", "id": {"$ne": uid}, **company_scope(cu)})
         if remaining_admins == 0:
             raise HTTPException(400, "Cannot change role: at least one Admin account must remain")
     update = {"name": req.name, "role": req.role}
     if req.password:
         update["password_hash"] = await hash_pw_async(req.password)
-    await db.users.update_one({"id": uid}, {"$set": update})
-    return await db.users.find_one({"id": uid}, {"_id": 0, "password_hash": 0})
+    await db.users.update_one({"id": uid, **company_scope(cu)}, {"$set": update})
+    return await db.users.find_one({"id": uid, **company_scope(cu)}, {"_id": 0, "password_hash": 0})
 
 @api_router.delete("/auth/users/{uid}")
 async def delete_user(uid: str, cu: dict = Depends(admin_only)):
     if uid == cu.get("user_id"):
         raise HTTPException(400, "You cannot delete your own account")
-    target = await db.users.find_one({"id": uid})
+    target = await db.users.find_one({"id": uid, **company_scope(cu)})
     if not target:
         raise HTTPException(404, "Account not found")
     if target.get("role") == "admin":
-        remaining_admins = await db.users.count_documents({"role": "admin", "id": {"$ne": uid}})
+        remaining_admins = await db.users.count_documents({"role": "admin", "id": {"$ne": uid}, **company_scope(cu)})
         if remaining_admins == 0:
             raise HTTPException(400, "Cannot delete the only remaining Admin account")
-    await db.users.delete_one({"id": uid})
+    await db.users.delete_one({"id": uid, **company_scope(cu)})
     return {"message": "Account deleted"}
 
 # ── VEHICLES ──────────────────────────────────────────────────────────
@@ -2836,15 +2965,17 @@ async def delete_lead(lid: str, cu: dict = Depends(admin_only)):
 # ── SETTINGS (storefront branding/contact info) ────────────────────────
 @api_router.get("/settings")
 async def get_settings(cu: dict = Depends(admin_only)):
-    s = await db.settings.find_one({"id": "general"}, {"_id": 0})
+    # No "id" filter: settings is looked up purely by the company_id the wrapper scopes
+    # this query to -- one row per company, "id" is just an arbitrary row identifier.
+    s = await db.settings.find_one({}, {"_id": 0})
     return s or {}
 
 @api_router.put("/settings")
 async def update_settings(settings: SettingsUpdate, cu: dict = Depends(admin_only)):
     updates = {k: v for k, v in settings.model_dump().items() if v is not None}
-    await db.settings.update_one({"id": "general"}, {"$set": updates}, upsert=True)
+    await db.settings.update_one({}, {"$set": updates}, upsert=True)
     asyncio.create_task(_notify_storefront())
-    return await db.settings.find_one({"id": "general"}, {"_id": 0})
+    return await db.settings.find_one({}, {"_id": 0})
 
 # ── STARTUP ───────────────────────────────────────────────────────────
 @app.on_event("startup")
@@ -3706,7 +3837,23 @@ def _public_photo_url(request: Request, vid: str, photo_id: str) -> str:
     host = (request.headers.get("x-forwarded-host") or request.headers.get("host") or request.url.netloc).split(",")[0].strip()
     return f"{scheme}://{host}/api/public/vehicles/{vid}/photos/{photo_id}"
 
-@api_router.get("/public/vehicles")
+_default_company_id_cache: Optional[str] = None
+
+async def _scope_to_default_company():
+    """FastAPI dependency for the /public/* routes below. They're unauthenticated (no
+    get_current_user, so current_company_id never gets set by a JWT) but the storefront
+    (hamroauto.com.np) is one specific business's public site -- without this, every
+    company that ever signs up via /auth/signup would have its inventory mixed into that
+    one public storefront. Scopes to whichever company was created first (the original,
+    pre-multi-tenant business) rather than building a whole public-storefront-per-company
+    routing scheme, which nothing has asked for yet."""
+    global _default_company_id_cache
+    if _default_company_id_cache is None:
+        c = await db.companies.find_one({}, {"_id": 0, "id": 1}, sort=[("created_at", 1)])
+        _default_company_id_cache = c["id"] if c else None
+    current_company_id.set(_default_company_id_cache)
+
+@api_router.get("/public/vehicles", dependencies=[Depends(_scope_to_default_company)])
 async def public_list_vehicles(request: Request):
     """Public, unauthenticated listing of available vehicles for an external shop frontend.
     Returns one cover photo URL per vehicle (the first uploaded) to keep the payload light —
@@ -3733,7 +3880,7 @@ async def public_list_vehicles(request: Request):
         out.append(item)
     return {"count": len(out), "vehicles": out}
 
-@api_router.get("/public/vehicles/{vid}")
+@api_router.get("/public/vehicles/{vid}", dependencies=[Depends(_scope_to_default_company)])
 async def public_get_vehicle(vid: str, request: Request):
     """Public, unauthenticated single-vehicle detail with the full photo gallery."""
     v = await db.vehicles.find_one({"id": vid, "status": "available"}, {"_id": 0})
@@ -3748,7 +3895,7 @@ _PHOTO_BYTES_CACHE: dict = {}  # photo_id -> (raw_bytes, content_type), see publ
 _PHOTO_BYTES_CACHE_SIZE = 0  # running total of cached raw bytes — the cap below is a memory budget, not a photo count
 PHOTO_CACHE_MAX_BYTES = 300 * 1024 * 1024  # ~300MB — 5000 uncapped photos could otherwise run into the GBs on a small VPS
 
-@api_router.get("/public/vehicles/{vid}/photos/{photo_id}")
+@api_router.get("/public/vehicles/{vid}/photos/{photo_id}", dependencies=[Depends(_scope_to_default_company)])
 async def public_get_photo(vid: str, photo_id: str):
     """Serves a single vehicle photo as a real image response (not JSON) — this gives
     hamroauto.com.np (or any consumer) a stable HTTPS URL per photo, so it can be added
@@ -3775,13 +3922,13 @@ async def public_get_photo(vid: str, photo_id: str):
         headers={"Cache-Control": "public, max-age=31536000, immutable"},
     )
 
-@api_router.get("/public/settings")
+@api_router.get("/public/settings", dependencies=[Depends(_scope_to_default_company)])
 async def public_get_settings():
     """Public, unauthenticated site branding/contact info for the storefront."""
-    s = await db.settings.find_one({"id": "general"}, {"_id": 0, "id": 0})
+    s = await db.settings.find_one({}, {"_id": 0, "id": 0})
     return s or {}
 
-@api_router.post("/public/leads")
+@api_router.post("/public/leads", dependencies=[Depends(_scope_to_default_company)])
 async def public_create_lead(lead: LeadCreate):
     """Public, unauthenticated — Sell / Exchange / Book Service form submissions
     from the storefront. Reviewed and managed from the admin Leads screen."""

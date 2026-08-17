@@ -1,8 +1,11 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
+import { useAuth } from "../context/AuthContext";
+import api from "../utils/api";
 
 export default function SignUp() {
+  const { login } = useAuth();
   const navigate = useNavigate();
   const [form, setForm] = useState({ name: "", company_name: "", username: "", password: "", confirm: "" });
   const [loading, setLoading] = useState(false);
@@ -23,8 +26,15 @@ export default function SignUp() {
     }
     setLoading(true);
     try {
-      // TODO: wire up to a real signup endpoint once per-company data isolation is implemented.
-      toast.error("Account creation isn't live yet — coming soon");
+      const res = await api.post("/auth/signup", {
+        name: form.name, company_name: form.company_name,
+        username: form.username, password: form.password,
+      });
+      login({ username: res.data.username, name: res.data.name, role: res.data.role }, res.data.token);
+      toast.success(`Welcome, ${res.data.name}! Your workspace is ready.`);
+      navigate("/");
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "Failed to create account");
     } finally {
       setLoading(false);
     }
