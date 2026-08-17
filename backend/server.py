@@ -12,7 +12,7 @@ from pathlib import Path
 import os, logging, jwt, uuid, json, base64, io, asyncio, re, copy, contextvars
 from concurrent.futures import ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, EmailStr
 from PIL import Image, ImageOps
 import pillow_heif
 pillow_heif.register_heif_opener()  # lets Image.open() decode HEIC/HEIF from iPhone cameras
@@ -771,8 +771,12 @@ class RegisterRequest(BaseModel):
     role: str = "sales_staff"
 
 class SignUpRequest(BaseModel):
+    # Email, not a free-text username: email is naturally globally unique (unlike everyone
+    # wanting "admin"), and is what a real password-reset flow needs to send a link to.
+    # Stored in the same `username` column existing accounts already use (plain usernames
+    # like "admin" keep logging in unchanged) -- this only changes what NEW signups collect.
     name: str; company_name: str
-    username: str; password: str = Field(min_length=8)
+    email: EmailStr; password: str = Field(min_length=8)
 
 class ChangePasswordRequest(BaseModel):
     current_password: str; new_password: str = Field(min_length=8)
@@ -973,19 +977,20 @@ async def signup(req: SignUpRequest):
     """Public, unauthenticated — anyone can create their own company here. They become
     that company's sole Admin; everything they create from here on (vehicles, customers,
     employee accounts, ...) is automatically isolated to this company_id, enforced at the
-    db access layer (see _ScopedCollection) rather than per-endpoint. Usernames are
-    deliberately kept GLOBALLY unique (not per-company) -- the previous multi-tenant
-    attempt required a separate "company code" field on login to disambiguate duplicate
-    usernames across companies, which is exactly the UX that confused people before. One
-    signup = one globally-unique username, so plain username/password login keeps working
-    unchanged."""
-    existing = await db.users.find_one({"username": req.username})
+    db access layer (see _ScopedCollection) rather than per-endpoint. Login identifiers are
+    deliberately kept GLOBALLY unique (not per-company) -- the previous multi-tenant attempt
+    required a separate "company code" field on login to disambiguate duplicates across
+    companies, which is exactly the UX that confused people before. Using email rather than
+    a free-text username sidesteps the "everyone wants to type admin" collision on top of
+    that, and is what a future password-reset-by-email flow will need."""
+    email = req.email.lower()
+    existing = await db.users.find_one({"username": email})
     if existing:
-        raise HTTPException(400, "Username already exists")
+        raise HTTPException(400, "An account with this email already exists")
     company_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
     await db.companies.insert_one({"id": company_id, "name": req.company_name, "created_at": now})
-    user = {"id": str(uuid.uuid4()), "username": req.username,
+    user = {"id": str(uuid.uuid4()), "username": email,
             "password_hash": await hash_pw_async(req.password), "name": req.name, "role": "admin",
             "company_id": company_id, "created_at": now}
     await db.users.insert_one(user)

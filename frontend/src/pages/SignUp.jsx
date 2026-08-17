@@ -7,12 +7,12 @@ import api from "../utils/api";
 export default function SignUp() {
   const { login } = useAuth();
   const navigate = useNavigate();
-  const [form, setForm] = useState({ name: "", company_name: "", username: "", password: "", confirm: "" });
+  const [form, setForm] = useState({ name: "", company_name: "", email: "", password: "", confirm: "" });
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!form.name || !form.company_name || !form.username || !form.password) {
+    if (!form.name || !form.company_name || !form.email || !form.password) {
       toast.error("Please fill in all fields");
       return;
     }
@@ -28,7 +28,7 @@ export default function SignUp() {
     try {
       const res = await api.post("/auth/signup", {
         name: form.name, company_name: form.company_name,
-        username: form.username, password: form.password,
+        email: form.email, password: form.password,
       });
       login({ username: res.data.username, name: res.data.name, role: res.data.role }, res.data.token);
       toast.success(`Welcome, ${res.data.name}! Your workspace is ready.`);
@@ -87,15 +87,15 @@ export default function SignUp() {
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1.5">Username</label>
+              <label className="block text-sm font-medium text-slate-700 mb-1.5">Email</label>
               <input
-                data-testid="signup-username-input"
-                type="text"
-                value={form.username}
-                onChange={(e) => setForm({ ...form, username: e.target.value })}
+                data-testid="signup-email-input"
+                type="email"
+                value={form.email}
+                onChange={(e) => setForm({ ...form, email: e.target.value })}
                 className="w-full h-10 px-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="Choose a username"
-                autoComplete="username"
+                placeholder="you@yourbusiness.com"
+                autoComplete="email"
               />
             </div>
             <div>
