@@ -108,7 +108,10 @@ function AppRoutes() {
 function App() {
   return (
     <AuthProvider>
-      <BrowserRouter>
+      {/* basename: empty/"/" for the normal root-hosted deployments (Vercel, the sslip.io
+          subdomain) -- CRA only sets PUBLIC_URL when a build is explicitly given one (e.g.
+          the raw-IP /auto-stock/ path build), so this is a no-op everywhere else. */}
+      <BrowserRouter basename={process.env.PUBLIC_URL}>
         <AppRoutes />
         <Toaster richColors position="top-right" />
       </BrowserRouter>
