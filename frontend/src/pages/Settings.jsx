@@ -37,7 +37,7 @@ export default function Settings() {
   const [bioBusy, setBioBusy] = useState(false);
   const [companyUsers, setCompanyUsers] = useState(null);
   const [showAddUserModal, setShowAddUserModal] = useState(false);
-  const [newUserForm, setNewUserForm] = useState({ name: "", username: "", password: "", role: "stock_supervisor" });
+  const [newUserForm, setNewUserForm] = useState({ name: "", email: "", password: "", role: "stock_supervisor" });
   const [savingUser, setSavingUser] = useState(false);
   const [editUserItem, setEditUserItem] = useState(null);
   const [editUserForm, setEditUserForm] = useState({ name: "", role: "stock_supervisor", password: "" });
@@ -114,13 +114,13 @@ export default function Settings() {
   };
 
   const openAddUser = () => {
-    setNewUserForm({ name: "", username: "", password: "", role: "stock_supervisor" });
+    setNewUserForm({ name: "", email: "", password: "", role: "stock_supervisor" });
     setShowAddUserModal(true);
   };
 
   const handleAddUser = async (e) => {
     e.preventDefault();
-    if (!newUserForm.name || !newUserForm.username || !newUserForm.password) { toast.error("Fill all fields"); return; }
+    if (!newUserForm.name || !newUserForm.email || !newUserForm.password) { toast.error("Fill all fields"); return; }
     if (newUserForm.password.length < 8) { toast.error("Password must be at least 8 characters"); return; }
     setSavingUser(true);
     try {
@@ -404,8 +404,8 @@ export default function Settings() {
                 <input value={newUserForm.name} onChange={e => setNewUserForm({ ...newUserForm, name: e.target.value })} className={inp} data-testid="new-user-name" />
               </div>
               <div>
-                <label className="block text-xs font-medium text-slate-600 mb-1.5">Username</label>
-                <input value={newUserForm.username} onChange={e => setNewUserForm({ ...newUserForm, username: e.target.value })} className={inp} data-testid="new-user-username" />
+                <label className="block text-xs font-medium text-slate-600 mb-1.5">Email</label>
+                <input type="email" value={newUserForm.email} onChange={e => setNewUserForm({ ...newUserForm, email: e.target.value })} placeholder="employee@yourbusiness.com" className={inp} data-testid="new-user-email" />
               </div>
               <div>
                 <label className="block text-xs font-medium text-slate-600 mb-1.5">Password</label>

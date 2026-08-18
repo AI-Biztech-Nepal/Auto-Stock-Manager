@@ -767,7 +767,9 @@ class LoginRequest(BaseModel):
     username: str; password: str
 
 class RegisterRequest(BaseModel):
-    username: str; password: str = Field(min_length=8); name: str
+    # Same reasoning as SignUpRequest.email: stored in the `username` column, so this only
+    # affects newly-created accounts -- existing plain-username staff accounts are unaffected.
+    email: EmailStr; password: str = Field(min_length=8); name: str
     role: str = "sales_staff"
 
 class SignUpRequest(BaseModel):
@@ -1033,10 +1035,11 @@ async def list_users(cu: dict = Depends(get_current_user)):
 async def register(req: RegisterRequest, cu: dict = Depends(get_current_user)):
     if cu.get("role") != "admin":
         raise HTTPException(403, "Only admin can register users")
-    existing = await db.users.find_one({"username": req.username})  # globally unique, see /auth/signup
+    email = req.email.lower()
+    existing = await db.users.find_one({"username": email})  # globally unique, see /auth/signup
     if existing:
-        raise HTTPException(400, "Username already exists")
-    user = {"id": str(uuid.uuid4()), "username": req.username,
+        raise HTTPException(400, "An account with this email already exists")
+    user = {"id": str(uuid.uuid4()), "username": email,
             "password_hash": await hash_pw_async(req.password), "name": req.name, "role": req.role,
             "company_id": cu.get("company_id"), "created_at": datetime.now(timezone.utc).isoformat()}
     await db.users.insert_one(user)
