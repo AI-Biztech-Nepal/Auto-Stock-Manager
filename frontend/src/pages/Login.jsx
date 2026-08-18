@@ -26,6 +26,7 @@ export default function Login() {
       username: res.data.username,
       name: res.data.name,
       role: res.data.role,
+      company_name: res.data.company_name,
     }, res.data.token);
     toast.success(`Welcome back, ${res.data.name}!`);
     navigate("/");

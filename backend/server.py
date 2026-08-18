@@ -1001,7 +1001,7 @@ async def signup(req: SignUpRequest):
     await db.settings.insert_one({"id": str(uuid.uuid4()), "company_id": company_id,
                                    "business_name": req.company_name})
     token = create_token(user["id"], user["username"], "admin", company_id)
-    return {"token": token, "username": user["username"], "name": user["name"], "role": "admin"}
+    return {"token": token, "username": user["username"], "name": user["name"], "role": "admin", "company_name": req.company_name}
 
 @api_router.post("/auth/login")
 async def login(req: LoginRequest):
@@ -1009,8 +1009,9 @@ async def login(req: LoginRequest):
     if not user or not await verify_pw_async(req.password, user["password_hash"]):
         raise HTTPException(401, "Invalid credentials")
     token = create_token(user.get("id", ""), user["username"], user.get("role", "admin"), user.get("company_id"))
+    company = await db.companies.find_one({"id": user.get("company_id")}, {"_id": 0, "name": 1}) if user.get("company_id") else None
     return {"token": token, "username": user["username"], "name": user.get("name", user["username"]),
-            "role": user.get("role", "admin")}
+            "role": user.get("role", "admin"), "company_name": company["name"] if company else None}
 
 @api_router.get("/auth/me")
 async def me(cu: dict = Depends(get_current_user)):

@@ -371,24 +371,26 @@ export default function Settings() {
         </div>
       )}
 
-      {/* App Info */}
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
-        <h2 className="text-base font-bold text-slate-900 mb-4" style={{ fontFamily: "Manrope" }}>System Information</h2>
-        <div className="space-y-3 text-sm">
-          {[
-            ["Business", "Hamro G&G Auto"],
-            ["Version", "1.0.0"],
-            ["Currency", "NPR (Nepalese Rupee)"],
-            ["AI Engine", "Google Gemini"],
-            ["Database", "MySQL (Hostinger)"],
-          ].map(([k, v]) => (
-            <div key={k} className="flex justify-between py-2 border-b border-slate-50 last:border-0">
-              <span className="text-slate-500">{k}</span>
-              <span className="font-medium text-slate-900">{v}</span>
-            </div>
-          ))}
+      {/* App Info — not shown for platform_owner, which has no company of its own */}
+      {user?.role !== "platform_owner" && (
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
+          <h2 className="text-base font-bold text-slate-900 mb-4" style={{ fontFamily: "Manrope" }}>System Information</h2>
+          <div className="space-y-3 text-sm">
+            {[
+              ["Business", user?.company_name || "—"],
+              ["Version", "1.0.0"],
+              ["Currency", "NPR (Nepalese Rupee)"],
+              ["AI Engine", "Google Gemini"],
+              ["Database", "MySQL (Hostinger)"],
+            ].map(([k, v]) => (
+              <div key={k} className="flex justify-between py-2 border-b border-slate-50 last:border-0">
+                <span className="text-slate-500">{k}</span>
+                <span className="font-medium text-slate-900">{v}</span>
+              </div>
+            ))}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Add Account Modal */}
       {showAddUserModal && (

@@ -30,7 +30,7 @@ export default function SignUp() {
         name: form.name, company_name: form.company_name,
         email: form.email, password: form.password,
       });
-      login({ username: res.data.username, name: res.data.name, role: res.data.role }, res.data.token);
+      login({ username: res.data.username, name: res.data.name, role: res.data.role, company_name: res.data.company_name }, res.data.token);
       toast.success(`Welcome, ${res.data.name}! Your workspace is ready.`);
       navigate("/");
     } catch (err) {
