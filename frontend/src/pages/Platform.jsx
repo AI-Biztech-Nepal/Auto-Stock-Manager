@@ -1,7 +1,15 @@
 import { useState, useEffect, useCallback } from "react";
-import { Building2, Users, Bike, Shield, Trash2 } from "lucide-react";
+import { Building2, Users, Bike, Shield, Trash2, UserRound, HardDrive } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
+
+const formatBytes = (bytes) => {
+  if (!bytes) return "0 B";
+  const units = ["B", "KB", "MB", "GB"];
+  let i = 0, n = bytes;
+  while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
+  return `${n.toFixed(i === 0 ? 0 : 2)} ${units[i]}`;
+};
 
 export default function Platform() {
   const [companies, setCompanies] = useState(null);
@@ -80,8 +88,10 @@ export default function Platform() {
                   </div>
                 </div>
                 <div className="flex items-center gap-4 text-xs text-slate-500">
-                  <span className="flex items-center gap-1"><Bike size={13} /> {c.vehicle_count}</span>
-                  <span className="flex items-center gap-1"><Users size={13} /> {c.user_count}</span>
+                  <span className="flex items-center gap-1" title="Vehicles"><Bike size={13} /> {c.vehicle_count}</span>
+                  <span className="flex items-center gap-1" title="Customers"><UserRound size={13} /> {c.customer_count}</span>
+                  <span className="flex items-center gap-1" title="Login accounts"><Users size={13} /> {c.user_count}</span>
+                  <span className="flex items-center gap-1" title="Storage used (photos + documents)"><HardDrive size={13} /> {formatBytes(c.storage_bytes)}</span>
                   <button
                     onClick={(e) => { e.stopPropagation(); setDeleteTarget(c); setDeleteConfirmText(""); }}
                     data-testid="delete-company-btn"
@@ -126,8 +136,9 @@ export default function Platform() {
               <h2 className="text-lg font-bold text-slate-900">Delete {deleteTarget.name}?</h2>
               <p className="text-sm text-slate-500 mt-1">
                 This permanently deletes this company and <strong>all</strong> of its data —
-                {" "}{deleteTarget.vehicle_count} vehicle(s), {deleteTarget.user_count} account(s), and everything else
-                tied to it. This cannot be undone.
+                {" "}{deleteTarget.vehicle_count} vehicle(s), {deleteTarget.customer_count} customer(s),
+                {" "}{deleteTarget.user_count} account(s), and {formatBytes(deleteTarget.storage_bytes)} of
+                photos/documents. This cannot be undone.
               </p>
             </div>
             <div className="p-5 space-y-3">

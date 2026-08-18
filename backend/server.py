@@ -1083,10 +1083,19 @@ async def platform_list_companies(cu: dict = Depends(platform_owner_only)):
     companies = await db.companies.find({}, {"_id": 0}).sort("created_at", 1).to_list(1000)
     out = []
     for c in companies:
+        cid = c["id"]
+        # Storage: same reasoning as /admin/storage-usage -- vehicle_photos and
+        # legal_documents are the only two collections holding binary file data
+        # (base64, not disk); `size` is the decoded byte size recorded at upload time.
+        photos = await db.vehicle_photos.find({"company_id": cid}, {"_id": 0, "size": 1}).to_list(100000)
+        docs = await db.legal_documents.find({"company_id": cid}, {"_id": 0, "size": 1}).to_list(100000)
+        storage_bytes = sum((p.get("size") or 0) for p in photos) + sum((d.get("size") or 0) for d in docs)
         out.append({
             **c,
-            "vehicle_count": await db.vehicles.count_documents({"company_id": c["id"]}),
-            "user_count": await db.users.count_documents({"company_id": c["id"]}),
+            "vehicle_count": await db.vehicles.count_documents({"company_id": cid}),
+            "customer_count": await db.customers.count_documents({"company_id": cid}),
+            "user_count": await db.users.count_documents({"company_id": cid}),
+            "storage_bytes": storage_bytes,
         })
     return out
 
