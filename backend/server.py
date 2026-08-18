@@ -1096,6 +1096,21 @@ async def platform_list_company_users(company_id: str, cu: dict = Depends(platfo
         raise HTTPException(404, "Company not found")
     return await db.users.find({"company_id": company_id}, {"_id": 0, "password_hash": 0}).sort("username", 1).to_list(500)
 
+@api_router.delete("/platform/companies/{company_id}")
+async def platform_delete_company(company_id: str, cu: dict = Depends(platform_owner_only)):
+    """Hard delete -- irreversible. Cascades across every tenant-scoped collection (same
+    list _ScopedDB uses for automatic scoping) plus that company's users, not just the
+    company row itself, so nothing is left orphaned under a company_id that no longer
+    resolves to anything."""
+    company = await db.companies.find_one({"id": company_id}, {"_id": 0})
+    if not company:
+        raise HTTPException(404, "Company not found")
+    for name in TENANT_COLLECTIONS:
+        await getattr(db, name).delete_many({"company_id": company_id})
+    await db.users.delete_many({"company_id": company_id})
+    await db.companies.delete_one({"id": company_id})
+    return {"message": f"{company['name']} and all its data have been permanently deleted"}
+
 # ── VEHICLES ──────────────────────────────────────────────────────────
 @api_router.get("/vehicles")
 async def get_vehicles(status: Optional[str] = None, brand: Optional[str] = None, cu: dict = Depends(require("vehicles", "view"))):

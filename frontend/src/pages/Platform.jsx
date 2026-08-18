@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { Building2, Users, Bike, Shield } from "lucide-react";
+import { Building2, Users, Bike, Shield, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
 
@@ -8,12 +8,31 @@ export default function Platform() {
   const [expanded, setExpanded] = useState(null);
   const [companyUsers, setCompanyUsers] = useState({});
   const [loadingUsers, setLoadingUsers] = useState(null);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [deleteConfirmText, setDeleteConfirmText] = useState("");
+  const [deleting, setDeleting] = useState(false);
 
   const fetchCompanies = useCallback(() => {
     api.get("/platform/companies").then(r => setCompanies(r.data)).catch(() => toast.error("Failed to load companies"));
   }, []);
 
   useEffect(() => { fetchCompanies(); }, [fetchCompanies]);
+
+  const handleDelete = async () => {
+    if (deleteConfirmText !== deleteTarget.name) return;
+    setDeleting(true);
+    try {
+      await api.delete(`/platform/companies/${deleteTarget.id}`);
+      toast.success(`${deleteTarget.name} and all its data have been deleted`);
+      setDeleteTarget(null);
+      setDeleteConfirmText("");
+      fetchCompanies();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "Failed to delete company");
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   const toggleExpand = async (company) => {
     if (expanded === company.id) { setExpanded(null); return; }
@@ -46,10 +65,10 @@ export default function Platform() {
         <div className="space-y-3 max-w-3xl">
           {companies.map((c) => (
             <div key={c.id} className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-              <button
+              <div
                 onClick={() => toggleExpand(c)}
                 data-testid="company-row"
-                className="w-full flex items-center justify-between gap-3 p-4 hover:bg-slate-50 transition-colors text-left"
+                className="w-full flex items-center justify-between gap-3 p-4 hover:bg-slate-50 transition-colors text-left cursor-pointer"
               >
                 <div className="flex items-center gap-3">
                   <div className="w-9 h-9 rounded-lg bg-blue-600 flex items-center justify-center text-white">
@@ -63,8 +82,15 @@ export default function Platform() {
                 <div className="flex items-center gap-4 text-xs text-slate-500">
                   <span className="flex items-center gap-1"><Bike size={13} /> {c.vehicle_count}</span>
                   <span className="flex items-center gap-1"><Users size={13} /> {c.user_count}</span>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setDeleteTarget(c); setDeleteConfirmText(""); }}
+                    data-testid="delete-company-btn"
+                    className="w-8 h-8 flex items-center justify-center hover:bg-red-50 rounded-lg transition-colors"
+                  >
+                    <Trash2 size={14} className="text-red-400" />
+                  </button>
                 </div>
-              </button>
+              </div>
 
               {expanded === c.id && (
                 <div className="border-t border-slate-100 p-4 bg-slate-50">
@@ -90,6 +116,49 @@ export default function Platform() {
               )}
             </div>
           ))}
+        </div>
+      )}
+
+      {deleteTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm">
+            <div className="p-5 border-b border-slate-100">
+              <h2 className="text-lg font-bold text-slate-900">Delete {deleteTarget.name}?</h2>
+              <p className="text-sm text-slate-500 mt-1">
+                This permanently deletes this company and <strong>all</strong> of its data —
+                {" "}{deleteTarget.vehicle_count} vehicle(s), {deleteTarget.user_count} account(s), and everything else
+                tied to it. This cannot be undone.
+              </p>
+            </div>
+            <div className="p-5 space-y-3">
+              <label className="block text-xs font-medium text-slate-600">
+                Type <strong>{deleteTarget.name}</strong> to confirm
+              </label>
+              <input
+                value={deleteConfirmText}
+                onChange={(e) => setDeleteConfirmText(e.target.value)}
+                className="w-full h-10 px-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
+                data-testid="delete-company-confirm-input"
+                autoFocus
+              />
+              <div className="flex gap-2 pt-1">
+                <button
+                  onClick={() => { setDeleteTarget(null); setDeleteConfirmText(""); }}
+                  className="flex-1 h-10 border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-lg text-sm font-semibold transition-all active:scale-95"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleDelete}
+                  disabled={deleteConfirmText !== deleteTarget.name || deleting}
+                  data-testid="delete-company-confirm-btn"
+                  className="flex-1 h-10 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-semibold disabled:opacity-40 disabled:cursor-not-allowed transition-all active:scale-95"
+                >
+                  {deleting ? "Deleting..." : "Delete Permanently"}
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>

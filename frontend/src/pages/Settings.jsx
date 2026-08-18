@@ -401,15 +401,15 @@ export default function Settings() {
             <form onSubmit={handleAddUser} className="p-5 space-y-4">
               <div>
                 <label className="block text-xs font-medium text-slate-600 mb-1.5">Name</label>
-                <input value={newUserForm.name} onChange={e => setNewUserForm({ ...newUserForm, name: e.target.value })} className={inp} data-testid="new-user-name" />
+                <input value={newUserForm.name} onChange={e => setNewUserForm({ ...newUserForm, name: e.target.value })} className={inp} data-testid="new-user-name" autoComplete="off" />
               </div>
               <div>
                 <label className="block text-xs font-medium text-slate-600 mb-1.5">Email</label>
-                <input type="email" value={newUserForm.email} onChange={e => setNewUserForm({ ...newUserForm, email: e.target.value })} placeholder="employee@yourbusiness.com" className={inp} data-testid="new-user-email" />
+                <input type="email" value={newUserForm.email} onChange={e => setNewUserForm({ ...newUserForm, email: e.target.value })} placeholder="employee@yourbusiness.com" className={inp} data-testid="new-user-email" autoComplete="off" />
               </div>
               <div>
                 <label className="block text-xs font-medium text-slate-600 mb-1.5">Password</label>
-                <input type="password" value={newUserForm.password} onChange={e => setNewUserForm({ ...newUserForm, password: e.target.value })} placeholder="Min 8 characters" className={inp} data-testid="new-user-password" />
+                <input type="password" value={newUserForm.password} onChange={e => setNewUserForm({ ...newUserForm, password: e.target.value })} placeholder="Min 8 characters" className={inp} data-testid="new-user-password" autoComplete="new-password" />
               </div>
               <div>
                 <label className="block text-xs font-medium text-slate-600 mb-1.5">Role</label>
@@ -438,7 +438,7 @@ export default function Settings() {
             <form onSubmit={handleEditUser} className="p-5 space-y-4">
               <div>
                 <label className="block text-xs font-medium text-slate-600 mb-1.5">Name</label>
-                <input value={editUserForm.name} onChange={e => setEditUserForm({ ...editUserForm, name: e.target.value })} className={inp} data-testid="edit-user-name" />
+                <input value={editUserForm.name} onChange={e => setEditUserForm({ ...editUserForm, name: e.target.value })} className={inp} data-testid="edit-user-name" autoComplete="off" />
               </div>
               <div>
                 <label className="block text-xs font-medium text-slate-600 mb-1.5">Username</label>
@@ -446,7 +446,7 @@ export default function Settings() {
               </div>
               <div>
                 <label className="block text-xs font-medium text-slate-600 mb-1.5">New Password</label>
-                <input type="password" value={editUserForm.password} onChange={e => setEditUserForm({ ...editUserForm, password: e.target.value })} placeholder="Leave blank to keep current password" className={inp} data-testid="edit-user-password" />
+                <input type="password" value={editUserForm.password} onChange={e => setEditUserForm({ ...editUserForm, password: e.target.value })} placeholder="Leave blank to keep current password" className={inp} data-testid="edit-user-password" autoComplete="new-password" />
               </div>
               <div>
                 <label className="block text-xs font-medium text-slate-600 mb-1.5">Role</label>
