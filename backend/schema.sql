@@ -26,14 +26,24 @@
 --     Mongo's positional `$` operator) becomes a real child table,
 --     spare_parts_set_components — the one place with a genuinely different
 --     shape, handled by a small special case inside sqldb.py.
+--   * Every tenant table's `company_id` is NOT NULL with a FOREIGN KEY to
+--     companies(id) — see migration_harden_company_id.sql for why: app-layer
+--     scoping alone (_ScopedCollection in server.py) let a stale/bugged session
+--     silently write untagged rows on 2026-08-18/19, invisible to every scoped
+--     read afterward with no error anywhere. This constraint makes that class of
+--     bug impossible at the database level, not just caught by app code. The one
+--     exception is `users.company_id`, which stays NULLable — platform_owner
+--     legitimately has none — backed instead by a CHECK that only platform_owner
+--     may have a NULL company_id.
 
 SET NAMES utf8mb4;
 SET FOREIGN_KEY_CHECKS = 0;
 
 -- ── Companies (multi-tenant) ─────────────────────────────────────────────
 -- One row per business that's signed up via POST /auth/signup. Every other table's
--- company_id column scopes its rows to one of these -- enforced at the app's db-access
--- layer (see _ScopedCollection in server.py), not by a FOREIGN KEY here.
+-- company_id column scopes its rows to one of these, enforced both at the app's
+-- db-access layer (see _ScopedCollection in server.py) AND at the database level via
+-- NOT NULL + FOREIGN KEY on every tenant table below.
 CREATE TABLE IF NOT EXISTS companies (
   id VARCHAR(36) NOT NULL PRIMARY KEY,
   name VARCHAR(255) NOT NULL,
@@ -41,6 +51,9 @@ CREATE TABLE IF NOT EXISTS companies (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- ── Users / auth ─────────────────────────────────────────────────────────
+-- company_id stays NULLable — platform_owner is the one role with no company — but the
+-- CHECK below makes every other role require one at the database level, matching the
+-- auth-time guard in get_current_user (server.py).
 CREATE TABLE IF NOT EXISTS users (
   id VARCHAR(36) NOT NULL PRIMARY KEY,
   company_id VARCHAR(36),
@@ -49,25 +62,28 @@ CREATE TABLE IF NOT EXISTS users (
   password_hash VARCHAR(255) NOT NULL,
   name VARCHAR(255),
   role VARCHAR(50),
-  created_at VARCHAR(40)
+  created_at VARCHAR(40),
+  CONSTRAINT fk_users_company FOREIGN KEY (company_id) REFERENCES companies(id),
+  CONSTRAINT chk_users_company_or_platform_owner CHECK (role = 'platform_owner' OR company_id IS NOT NULL)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- ── Vendors / customers / team ───────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS vendors (
   id VARCHAR(36) NOT NULL PRIMARY KEY,
-  company_id VARCHAR(36),
+  company_id VARCHAR(36) NOT NULL,
   INDEX idx_vendors_company_id (company_id),
   name VARCHAR(255),
   phone VARCHAR(50),
   address VARCHAR(500),
   notes TEXT,
   vendor_type VARCHAR(20) DEFAULT 'both',
-  created_at VARCHAR(40)
+  created_at VARCHAR(40),
+  CONSTRAINT fk_vendors_company FOREIGN KEY (company_id) REFERENCES companies(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS customers (
   id VARCHAR(36) NOT NULL PRIMARY KEY,
-  company_id VARCHAR(36),
+  company_id VARCHAR(36) NOT NULL,
   INDEX idx_customers_company_id (company_id),
   name VARCHAR(255),
   contact_number VARCHAR(50),
@@ -79,12 +95,13 @@ CREATE TABLE IF NOT EXISTS customers (
   notes TEXT,
   created_at VARCHAR(40),
   last_purchase_date VARCHAR(20),
-  INDEX idx_customers_created_at (created_at)
+  INDEX idx_customers_created_at (created_at),
+  CONSTRAINT fk_customers_company FOREIGN KEY (company_id) REFERENCES companies(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS team_members (
   id VARCHAR(36) NOT NULL PRIMARY KEY,
-  company_id VARCHAR(36),
+  company_id VARCHAR(36) NOT NULL,
   INDEX idx_team_members_company_id (company_id),
   name VARCHAR(255),
   role VARCHAR(50),
@@ -94,24 +111,26 @@ CREATE TABLE IF NOT EXISTS team_members (
   joining_date VARCHAR(20),
   is_active TINYINT(1) DEFAULT 1,
   created_at VARCHAR(40),
-  INDEX idx_team_members_role (role)
+  INDEX idx_team_members_role (role),
+  CONSTRAINT fk_team_members_company FOREIGN KEY (company_id) REFERENCES companies(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS partners (
   id VARCHAR(36) NOT NULL PRIMARY KEY,
-  company_id VARCHAR(36),
+  company_id VARCHAR(36) NOT NULL,
   INDEX idx_partners_company_id (company_id),
   name VARCHAR(255),
   capital_contribution DOUBLE,
   stake_percentage DOUBLE,
   contact VARCHAR(100),
-  created_at VARCHAR(40)
+  created_at VARCHAR(40),
+  CONSTRAINT fk_partners_company FOREIGN KEY (company_id) REFERENCES companies(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- ── Vehicles (largest / most heavily queried table) ─────────────────────
 CREATE TABLE IF NOT EXISTS vehicles (
   id VARCHAR(36) NOT NULL PRIMARY KEY,
-  company_id VARCHAR(36),
+  company_id VARCHAR(36) NOT NULL,
   INDEX idx_vehicles_company_id (company_id),
   brand VARCHAR(100),
   model VARCHAR(100),
@@ -164,13 +183,14 @@ CREATE TABLE IF NOT EXISTS vehicles (
   INDEX idx_vehicles_linked_contact (linked_contact_type, linked_contact_id),
   CONSTRAINT fk_vehicles_vendor FOREIGN KEY (vendor_id) REFERENCES vendors(id) ON DELETE SET NULL,
   CONSTRAINT fk_vehicles_customer FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE SET NULL,
-  CONSTRAINT fk_vehicles_salesperson FOREIGN KEY (salesperson_id) REFERENCES team_members(id) ON DELETE SET NULL
+  CONSTRAINT fk_vehicles_salesperson FOREIGN KEY (salesperson_id) REFERENCES team_members(id) ON DELETE SET NULL,
+  CONSTRAINT fk_vehicles_company FOREIGN KEY (company_id) REFERENCES companies(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- ── Sales ─────────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS sales (
   id VARCHAR(36) NOT NULL PRIMARY KEY,
-  company_id VARCHAR(36),
+  company_id VARCHAR(36) NOT NULL,
   INDEX idx_sales_company_id (company_id),
   vehicle_id VARCHAR(36),
   customer_id VARCHAR(36),
@@ -202,13 +222,14 @@ CREATE TABLE IF NOT EXISTS sales (
   INDEX idx_sales_sale_date (sale_date),
   INDEX idx_sales_created_at (created_at),
   CONSTRAINT fk_sales_vehicle FOREIGN KEY (vehicle_id) REFERENCES vehicles(id) ON DELETE CASCADE,
-  CONSTRAINT fk_sales_customer FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE SET NULL
+  CONSTRAINT fk_sales_customer FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE SET NULL,
+  CONSTRAINT fk_sales_company FOREIGN KEY (company_id) REFERENCES companies(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- ── Spare parts + set components (was an inline array) + kits ───────────
 CREATE TABLE IF NOT EXISTS spare_parts (
   id VARCHAR(36) NOT NULL PRIMARY KEY,
-  company_id VARCHAR(36),
+  company_id VARCHAR(36) NOT NULL,
   INDEX idx_spare_parts_company_id (company_id),
   name VARCHAR(255),
   category VARCHAR(100),
@@ -231,7 +252,8 @@ CREATE TABLE IF NOT EXISTS spare_parts (
   INDEX idx_spare_parts_category (category),
   INDEX idx_spare_parts_vendor_id (vendor_id),
   INDEX idx_spare_parts_created_at (created_at),
-  CONSTRAINT fk_spare_parts_vendor FOREIGN KEY (vendor_id) REFERENCES vendors(id) ON DELETE SET NULL
+  CONSTRAINT fk_spare_parts_vendor FOREIGN KEY (vendor_id) REFERENCES vendors(id) ON DELETE SET NULL,
+  CONSTRAINT fk_spare_parts_company FOREIGN KEY (company_id) REFERENCES companies(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS spare_parts_set_components (
@@ -246,7 +268,7 @@ CREATE TABLE IF NOT EXISTS spare_parts_set_components (
 
 CREATE TABLE IF NOT EXISTS kit_components (
   id VARCHAR(36) NOT NULL PRIMARY KEY,
-  company_id VARCHAR(36),
+  company_id VARCHAR(36) NOT NULL,
   INDEX idx_kit_components_company_id (company_id),
   kit_part_id VARCHAR(36) NOT NULL,
   component_part_id VARCHAR(36) NOT NULL,
@@ -256,12 +278,13 @@ CREATE TABLE IF NOT EXISTS kit_components (
   UNIQUE KEY uq_kit_components (kit_part_id, component_part_id),
   INDEX idx_kit_components_component (component_part_id),
   CONSTRAINT fk_kit_components_kit FOREIGN KEY (kit_part_id) REFERENCES spare_parts(id) ON DELETE CASCADE,
-  CONSTRAINT fk_kit_components_component FOREIGN KEY (component_part_id) REFERENCES spare_parts(id) ON DELETE CASCADE
+  CONSTRAINT fk_kit_components_component FOREIGN KEY (component_part_id) REFERENCES spare_parts(id) ON DELETE CASCADE,
+  CONSTRAINT fk_kit_components_company FOREIGN KEY (company_id) REFERENCES companies(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS part_transactions (
   id VARCHAR(36) NOT NULL PRIMARY KEY,
-  company_id VARCHAR(36),
+  company_id VARCHAR(36) NOT NULL,
   INDEX idx_part_transactions_company_id (company_id),
   part_id VARCHAR(36),
   part_name VARCHAR(500),
@@ -275,13 +298,14 @@ CREATE TABLE IF NOT EXISTS part_transactions (
   created_at VARCHAR(40),
   INDEX idx_part_transactions_part_id (part_id),
   INDEX idx_part_transactions_created_at (created_at),
-  CONSTRAINT fk_part_transactions_part FOREIGN KEY (part_id) REFERENCES spare_parts(id) ON DELETE SET NULL
+  CONSTRAINT fk_part_transactions_part FOREIGN KEY (part_id) REFERENCES spare_parts(id) ON DELETE SET NULL,
+  CONSTRAINT fk_part_transactions_company FOREIGN KEY (company_id) REFERENCES companies(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- ── Job cards ─────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS job_cards (
   id VARCHAR(36) NOT NULL PRIMARY KEY,
-  company_id VARCHAR(36),
+  company_id VARCHAR(36) NOT NULL,
   INDEX idx_job_cards_company_id (company_id),
   vehicle_id VARCHAR(36),
   is_external TINYINT(1) DEFAULT 0,
@@ -312,13 +336,14 @@ CREATE TABLE IF NOT EXISTS job_cards (
   INDEX idx_job_cards_mechanic_id (mechanic_id),
   INDEX idx_job_cards_created_at (created_at),
   CONSTRAINT fk_job_cards_vehicle FOREIGN KEY (vehicle_id) REFERENCES vehicles(id) ON DELETE CASCADE,
-  CONSTRAINT fk_job_cards_mechanic FOREIGN KEY (mechanic_id) REFERENCES team_members(id) ON DELETE SET NULL
+  CONSTRAINT fk_job_cards_mechanic FOREIGN KEY (mechanic_id) REFERENCES team_members(id) ON DELETE SET NULL,
+  CONSTRAINT fk_job_cards_company FOREIGN KEY (company_id) REFERENCES companies(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- ── Expenses / vendor payments / EMI ─────────────────────────────────────
 CREATE TABLE IF NOT EXISTS expenses (
   id VARCHAR(36) NOT NULL PRIMARY KEY,
-  company_id VARCHAR(36),
+  company_id VARCHAR(36) NOT NULL,
   INDEX idx_expenses_company_id (company_id),
   vehicle_id VARCHAR(36),
   category VARCHAR(100),
@@ -328,12 +353,13 @@ CREATE TABLE IF NOT EXISTS expenses (
   added_by VARCHAR(100),
   created_at VARCHAR(40),
   INDEX idx_expenses_vehicle_id (vehicle_id),
-  CONSTRAINT fk_expenses_vehicle FOREIGN KEY (vehicle_id) REFERENCES vehicles(id) ON DELETE CASCADE
+  CONSTRAINT fk_expenses_vehicle FOREIGN KEY (vehicle_id) REFERENCES vehicles(id) ON DELETE CASCADE,
+  CONSTRAINT fk_expenses_company FOREIGN KEY (company_id) REFERENCES companies(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS vendor_payments (
   id VARCHAR(36) NOT NULL PRIMARY KEY,
-  company_id VARCHAR(36),
+  company_id VARCHAR(36) NOT NULL,
   INDEX idx_vendor_payments_company_id (company_id),
   vendor_id VARCHAR(36),
   amount DOUBLE,
@@ -345,12 +371,13 @@ CREATE TABLE IF NOT EXISTS vendor_payments (
   INDEX idx_vendor_payments_vendor_id (vendor_id),
   INDEX idx_vendor_payments_payment_date (payment_date),
   CONSTRAINT fk_vendor_payments_vendor FOREIGN KEY (vendor_id) REFERENCES vendors(id) ON DELETE CASCADE,
-  CONSTRAINT fk_vendor_payments_vehicle FOREIGN KEY (vehicle_id) REFERENCES vehicles(id) ON DELETE SET NULL
+  CONSTRAINT fk_vendor_payments_vehicle FOREIGN KEY (vehicle_id) REFERENCES vehicles(id) ON DELETE SET NULL,
+  CONSTRAINT fk_vendor_payments_company FOREIGN KEY (company_id) REFERENCES companies(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS emi_records (
   id VARCHAR(36) NOT NULL PRIMARY KEY,
-  company_id VARCHAR(36),
+  company_id VARCHAR(36) NOT NULL,
   INDEX idx_emi_records_company_id (company_id),
   customer_id VARCHAR(36),
   vehicle_id VARCHAR(36),
@@ -371,12 +398,13 @@ CREATE TABLE IF NOT EXISTS emi_records (
   vehicle_name VARCHAR(255),
   INDEX idx_emi_records_status (status),
   CONSTRAINT fk_emi_records_customer FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE SET NULL,
-  CONSTRAINT fk_emi_records_vehicle FOREIGN KEY (vehicle_id) REFERENCES vehicles(id) ON DELETE SET NULL
+  CONSTRAINT fk_emi_records_vehicle FOREIGN KEY (vehicle_id) REFERENCES vehicles(id) ON DELETE SET NULL,
+  CONSTRAINT fk_emi_records_company FOREIGN KEY (company_id) REFERENCES companies(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS emi_payments (
   id VARCHAR(36) NOT NULL PRIMARY KEY,
-  company_id VARCHAR(36),
+  company_id VARCHAR(36) NOT NULL,
   INDEX idx_emi_payments_company_id (company_id),
   emi_id VARCHAR(36),
   amount DOUBLE,
@@ -385,13 +413,14 @@ CREATE TABLE IF NOT EXISTS emi_payments (
   recorded_by VARCHAR(100),
   created_at VARCHAR(40),
   INDEX idx_emi_payments_emi_id (emi_id),
-  CONSTRAINT fk_emi_payments_emi FOREIGN KEY (emi_id) REFERENCES emi_records(id) ON DELETE CASCADE
+  CONSTRAINT fk_emi_payments_emi FOREIGN KEY (emi_id) REFERENCES emi_records(id) ON DELETE CASCADE,
+  CONSTRAINT fk_emi_payments_company FOREIGN KEY (company_id) REFERENCES companies(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- ── Media (base64, same reason it was in Mongo: Render's disk is ephemeral) ─
 CREATE TABLE IF NOT EXISTS vehicle_photos (
   id VARCHAR(36) NOT NULL PRIMARY KEY,
-  company_id VARCHAR(36),
+  company_id VARCHAR(36) NOT NULL,
   INDEX idx_vehicle_photos_company_id (company_id),
   vehicle_id VARCHAR(36),
   filename VARCHAR(500),
@@ -401,12 +430,13 @@ CREATE TABLE IF NOT EXISTS vehicle_photos (
   size INT,
   INDEX idx_vehicle_photos_vehicle_id (vehicle_id),
   INDEX idx_vehicle_photos_uploaded_at (uploaded_at),
-  CONSTRAINT fk_vehicle_photos_vehicle FOREIGN KEY (vehicle_id) REFERENCES vehicles(id) ON DELETE CASCADE
+  CONSTRAINT fk_vehicle_photos_vehicle FOREIGN KEY (vehicle_id) REFERENCES vehicles(id) ON DELETE CASCADE,
+  CONSTRAINT fk_vehicle_photos_company FOREIGN KEY (company_id) REFERENCES companies(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS legal_documents (
   id VARCHAR(36) NOT NULL PRIMARY KEY,
-  company_id VARCHAR(36),
+  company_id VARCHAR(36) NOT NULL,
   INDEX idx_legal_documents_company_id (company_id),
   vehicle_id VARCHAR(36),
   filename VARCHAR(500),
@@ -418,13 +448,14 @@ CREATE TABLE IF NOT EXISTS legal_documents (
   size INT,
   INDEX idx_legal_documents_vehicle_id (vehicle_id),
   INDEX idx_legal_documents_uploaded_at (uploaded_at),
-  CONSTRAINT fk_legal_documents_vehicle FOREIGN KEY (vehicle_id) REFERENCES vehicles(id) ON DELETE CASCADE
+  CONSTRAINT fk_legal_documents_vehicle FOREIGN KEY (vehicle_id) REFERENCES vehicles(id) ON DELETE CASCADE,
+  CONSTRAINT fk_legal_documents_company FOREIGN KEY (company_id) REFERENCES companies(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- ── Storefront leads / settings / sync / audit / AI chat ────────────────
 CREATE TABLE IF NOT EXISTS leads (
   id VARCHAR(36) NOT NULL PRIMARY KEY,
-  company_id VARCHAR(36),
+  company_id VARCHAR(36) NOT NULL,
   INDEX idx_leads_company_id (company_id),
   type VARCHAR(20),
   name VARCHAR(255),
@@ -436,12 +467,18 @@ CREATE TABLE IF NOT EXISTS leads (
   preferred_date VARCHAR(20),
   status VARCHAR(20) DEFAULT 'new',
   created_at VARCHAR(40),
-  INDEX idx_leads_created_at (created_at)
+  INDEX idx_leads_created_at (created_at),
+  CONSTRAINT fk_leads_company FOREIGN KEY (company_id) REFERENCES companies(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- id is VARCHAR(36), not VARCHAR(20) — server.py's signup path inserts a full uuid4() as
+-- the id (see POST /auth/signup), and a shorter column silently truncates it instead of
+-- erroring. Nothing looks settings up by id (every read/write scopes by company_id via the
+-- empty-filter + _ScopedCollection pattern), but a truncated primary key is still corrupt
+-- data waiting to bite the first code that ever does look it up directly.
 CREATE TABLE IF NOT EXISTS settings (
-  id VARCHAR(20) NOT NULL PRIMARY KEY,
-  company_id VARCHAR(36),
+  id VARCHAR(36) NOT NULL PRIMARY KEY,
+  company_id VARCHAR(36) NOT NULL,
   INDEX idx_settings_company_id (company_id),
   logo_url VARCHAR(1000),
   business_name VARCHAR(255),
@@ -449,22 +486,24 @@ CREATE TABLE IF NOT EXISTS settings (
   contact_email VARCHAR(255),
   address VARCHAR(500),
   hero_image_url VARCHAR(1000),
-  service_image_url VARCHAR(1000)
+  service_image_url VARCHAR(1000),
+  CONSTRAINT fk_settings_company FOREIGN KEY (company_id) REFERENCES companies(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS sync_logs (
   id VARCHAR(36) NOT NULL PRIMARY KEY,
-  company_id VARCHAR(36),
+  company_id VARCHAR(36) NOT NULL,
   INDEX idx_sync_logs_company_id (company_id),
   pushed_at VARCHAR(40),
   count INT,
   status VARCHAR(20),
-  message VARCHAR(500)
+  message VARCHAR(500),
+  CONSTRAINT fk_sync_logs_company FOREIGN KEY (company_id) REFERENCES companies(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS audit_logs (
   id INT AUTO_INCREMENT PRIMARY KEY,
-  company_id VARCHAR(36),
+  company_id VARCHAR(36) NOT NULL,
   INDEX idx_audit_logs_company_id (company_id),
   action VARCHAR(100),
   vehicle_id VARCHAR(36),
@@ -472,15 +511,17 @@ CREATE TABLE IF NOT EXISTS audit_logs (
   timestamp VARCHAR(40),
   details TEXT,
   INDEX idx_audit_logs_timestamp (timestamp),
-  INDEX idx_audit_logs_vehicle_id (vehicle_id)
+  INDEX idx_audit_logs_vehicle_id (vehicle_id),
+  CONSTRAINT fk_audit_logs_company FOREIGN KEY (company_id) REFERENCES companies(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS ai_chat_sessions (
   id VARCHAR(36) NOT NULL PRIMARY KEY,
-  company_id VARCHAR(36),
+  company_id VARCHAR(36) NOT NULL,
   INDEX idx_ai_chat_sessions_company_id (company_id),
   messages JSON,
-  updated_at VARCHAR(40)
+  updated_at VARCHAR(40),
+  CONSTRAINT fk_ai_chat_sessions_company FOREIGN KEY (company_id) REFERENCES companies(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 SET FOREIGN_KEY_CHECKS = 1;

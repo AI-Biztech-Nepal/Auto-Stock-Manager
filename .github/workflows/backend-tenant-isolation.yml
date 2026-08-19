@@ -1,0 +1,73 @@
+name: Backend tenant-isolation regression
+
+# Guards against a repeat of the 2026-08-18/19 incident: a session with no company_id
+# silently wrote/read completely unscoped data (see backend/tests/test_tenant_isolation.py
+# and backend/migration_harden_company_id.sql for the full story). Runs a real MariaDB
+# instance loaded from the actual schema.sql and the real backend app, so both the
+# database-level constraint and the app-level auth guard are exercised end to end.
+on:
+  push:
+    paths:
+      - "backend/**"
+  pull_request:
+    paths:
+      - "backend/**"
+
+jobs:
+  tenant-isolation:
+    runs-on: ubuntu-latest
+    services:
+      mariadb:
+        image: mariadb:11
+        env:
+          MARIADB_ROOT_PASSWORD: ci_test_root_pw
+          MARIADB_DATABASE: auto_stock_ci
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -uroot -pci_test_root_pw"
+          --health-interval=5s --health-timeout=5s --health-retries=15
+
+    env:
+      DB_BACKEND: mysql
+      MYSQL_HOST: 127.0.0.1
+      MYSQL_PORT: 3306
+      MYSQL_USER: root
+      MYSQL_PASSWORD: ci_test_root_pw
+      MYSQL_DB: auto_stock_ci
+      JWT_SECRET: ci-test-secret-do-not-use-in-production
+      REACT_APP_BACKEND_URL: http://127.0.0.1:8001
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install backend + test dependencies
+        run: |
+          pip install -r backend/requirements.txt
+          pip install pytest requests
+
+      - name: Load schema (includes the NOT NULL + FK hardening)
+        run: |
+          mysql -h127.0.0.1 -uroot -pci_test_root_pw auto_stock_ci < backend/schema.sql
+
+      - name: Start backend
+        run: |
+          cd backend
+          nohup python -m uvicorn server:app --host 127.0.0.1 --port 8001 > /tmp/backend.log 2>&1 &
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:8001/api/health && break
+            sleep 1
+          done
+        env:
+          PYTHONUNBUFFERED: "1"
+
+      - name: Run tenant-isolation regression tests
+        run: cd backend && python -m pytest tests/test_tenant_isolation.py -v
+
+      - name: Backend log on failure
+        if: failure()
+        run: cat /tmp/backend.log || true

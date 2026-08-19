@@ -3063,9 +3063,24 @@ async def update_settings(settings: SettingsUpdate, cu: dict = Depends(admin_onl
 # ── STARTUP ───────────────────────────────────────────────────────────
 @app.on_event("startup")
 async def startup():
+    # Every real deployment already has a company (created via /auth/signup, or via the
+    # one-time migration_add_company_id.sql backfill run when multi-tenancy was introduced).
+    # A fresh install / CI database has neither, so this bootstraps one -- the
+    # admin/frontdesk/parts accounts, seed partners, and default settings row below all need
+    # SOME company_id to satisfy the NOT NULL + FOREIGN KEY hardening on those tables (see
+    # migration_harden_company_id.sql). Runs every startup but only inserts once: idempotent
+    # on the "does any company exist yet" check, same pattern as the accounts below it.
+    default_company = await db.companies.find_one({}, {"_id": 0, "id": 1}, sort=[("created_at", 1)])
+    if not default_company:
+        default_company = {"id": str(uuid.uuid4()), "name": "Default Company",
+                            "created_at": datetime.now(timezone.utc).isoformat()}
+        await db.companies.insert_one(dict(default_company))
+        logger.info("Default company created (fresh install): %s", default_company["id"])
+    default_company_id = default_company["id"]
+
     if not await db.users.find_one({"username": "admin"}):
         await db.users.insert_one({
-            "id": str(uuid.uuid4()), "username": "admin",
+            "id": str(uuid.uuid4()), "username": "admin", "company_id": default_company_id,
             "password_hash": hash_pw("admin123"), "name": "Admin", "role": "admin",
             "created_at": datetime.now(timezone.utc).isoformat()
         })
@@ -3081,7 +3096,7 @@ async def startup():
     for acct in ADDITIONAL_ACCOUNTS:
         if not await db.users.find_one({"username": acct["username"]}):
             await db.users.insert_one({
-                "id": str(uuid.uuid4()), "username": acct["username"],
+                "id": str(uuid.uuid4()), "username": acct["username"], "company_id": default_company_id,
                 "password_hash": hash_pw(acct["password"]), "name": acct["name"], "role": acct["role"],
                 "created_at": datetime.now(timezone.utc).isoformat()
             })
@@ -3089,9 +3104,9 @@ async def startup():
     if await db.partners.count_documents({}) == 0:
         now = datetime.now(timezone.utc).isoformat()
         await db.partners.insert_many([
-            {"id": str(uuid.uuid4()), "name": "Partner A", "capital_contribution": 500000, "stake_percentage": 33.33, "contact": "", "created_at": now},
-            {"id": str(uuid.uuid4()), "name": "Partner B", "capital_contribution": 500000, "stake_percentage": 33.33, "contact": "", "created_at": now},
-            {"id": str(uuid.uuid4()), "name": "You (Owner)", "capital_contribution": 500000, "stake_percentage": 33.34, "contact": "", "created_at": now},
+            {"id": str(uuid.uuid4()), "company_id": default_company_id, "name": "Partner A", "capital_contribution": 500000, "stake_percentage": 33.33, "contact": "", "created_at": now},
+            {"id": str(uuid.uuid4()), "company_id": default_company_id, "name": "Partner B", "capital_contribution": 500000, "stake_percentage": 33.33, "contact": "", "created_at": now},
+            {"id": str(uuid.uuid4()), "company_id": default_company_id, "name": "You (Owner)", "capital_contribution": 500000, "stake_percentage": 33.34, "contact": "", "created_at": now},
         ])
     await db.kit_components.create_index([("kit_part_id", 1), ("component_part_id", 1)], unique=True)
     await db.kit_components.create_index("component_part_id")
@@ -3113,7 +3128,7 @@ async def startup():
     await db.job_cards.create_index("status")
     if not await db.settings.find_one({"id": "general"}):
         await db.settings.insert_one({
-            "id": "general",
+            "id": "general", "company_id": default_company_id,
             "logo_url": "https://images.unsplash.com/photo-1777288411485-1eb05bd4a289?q=80&w=880&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D",
             "business_name": "G&G AUTO Enterprises",
             "contact_phone": "9860087161",
