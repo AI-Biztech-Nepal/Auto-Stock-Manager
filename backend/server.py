@@ -93,7 +93,14 @@ class _ScopedCollection:
 
     def _stamped(self, doc):
         cid = current_company_id.get()
-        if cid is not None and "company_id" not in doc:
+        if "company_id" not in doc:
+            if cid is None:
+                # A session with no company_id (e.g. a token minted before this account
+                # had one assigned) must never silently write untagged data -- that data
+                # becomes invisible to every company-scoped read afterward with no error
+                # raised anywhere, which is exactly how 3 real sales went missing on
+                # 2026-08-18. Fail loudly instead so the user knows to log out/in again.
+                raise HTTPException(401, "Your session is missing company info -- please log out and log back in, then retry.")
             doc = {**doc, "company_id": cid}
         return doc
 
