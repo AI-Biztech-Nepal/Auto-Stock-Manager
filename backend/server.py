@@ -211,6 +211,16 @@ async def get_current_user(creds: HTTPAuthorizationCredentials = Depends(securit
         raise HTTPException(401, "Token expired")
     except jwt.InvalidTokenError:
         raise HTTPException(401, "Invalid token")
+    # platform_owner is the one role that legitimately has no company_id -- its endpoints
+    # pass explicit company_id filters per call instead of relying on auto-scoping. Any
+    # other role showing up here with no company_id means its token was minted while the
+    # account had none set (e.g. a stale token from before this account was assigned to a
+    # company) -- letting that through would make _ScopedCollection silently stop scoping
+    # this session's reads/writes at all (see _scoped/_stamped above), which is exactly
+    # how 3 real sales went untagged and invisible on 2026-08-18. Reject it here, at the
+    # first possible point, instead of letting a broken session touch any data.
+    if payload.get("role") != "platform_owner" and not payload.get("company_id"):
+        raise HTTPException(401, "Your session is missing company info -- please log out and log back in.")
     # Every tenant-scoped db.<collection> call for the rest of this request now
     # automatically filters/stamps by this company_id -- see _ScopedCollection above.
     current_company_id.set(payload.get("company_id"))
