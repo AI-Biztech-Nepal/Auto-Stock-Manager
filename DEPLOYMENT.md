@@ -56,6 +56,51 @@ taking over the project, or after not touching it for a while).
 
 ---
 
+## Auto-deploy on push to main
+
+A GitHub webhook hits this app's own VPS listener on every push to `main`, which pulls,
+reinstalls Python deps if `requirements.txt` changed, and restarts the backend under PM2
+— no manual SSH step needed for routine deploys. Set up once as follows (it's already
+running in production as of 2026-08-20; this section is for recreating it if the VPS is
+ever rebuilt):
+
+1. On the VPS, in `~/auto-stock-manager/deploy/`:
+   ```bash
+   cp webhook.ecosystem.config.js.example webhook.ecosystem.config.js
+   ```
+   Edit the copy and replace `WEBHOOK_SECRET` with a real random value, e.g.:
+   ```bash
+   node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+   ```
+   (This file is gitignored — it must never be committed.)
+2. Start it:
+   ```bash
+   pm2 start webhook.ecosystem.config.js && pm2 save
+   ```
+3. Add the nginx location block from `deploy/nginx-deploy-webhook-snippet.conf` to
+   `/etc/nginx/sites-available/auto-stock-backend` (the live config for this app's own
+   subdomain — not `deploy/admin-web.nginx.conf` in this same directory, which is a
+   different, unrelated app's reference copy). Then:
+   ```bash
+   sudo nginx -t && sudo systemctl reload nginx
+   ```
+4. On GitHub: repo Settings → Webhooks → Add webhook, pointing at
+   `https://autostock.203-134-250-70.sslip.io/deploy-webhook`, content type
+   `application/json`, secret matching step 1, events: just `push`.
+
+This app deliberately runs its **own** webhook listener/process/port, isolated from a
+similar (older, unrelated) setup on the same VPS for a different app — see the comments
+in `deploy/webhook-listener.js` for why. Deploy logs land at
+`~/auto-stock-manager/deploy/last-deploy.log` on the VPS after each run.
+
+**If auto-deploy ever seems to silently stop working**: check `pm2 show
+auto-stock-deploy-webhook` is `online`, check GitHub's repo → Settings → Webhooks →
+(this webhook) → Recent Deliveries for failed deliveries, and remember this deploy
+mechanism is separate from the DB/env-var concerns in the Security Checklist above — a
+failed deploy here doesn't touch `JWT_SECRET`, `CORS_ORIGINS`, etc.
+
+---
+
 ## MongoDB Atlas (Database) — optional
 
 Only needed if running with `DB_BACKEND=mongo` instead of your own MySQL.
