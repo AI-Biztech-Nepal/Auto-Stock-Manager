@@ -21,6 +21,9 @@ from google import genai
 from google.genai import types as genai_types
 from google.genai import errors as genai_errors
 import httpx
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -152,7 +155,19 @@ class _ScopedDB:
 
 db = _ScopedDB(db)  # db.users / db.companies pass through unscoped automatically (not in TENANT_COLLECTIONS)
 
-JWT_SECRET = os.environ.get('JWT_SECRET', 'hamro-gng-2024')
+# Fails startup rather than silently signing tokens with a known, public default --
+# 'hamro-gng-2024' was the code fallback for years and is effectively a published secret
+# (it's right here in git history), so any deployment still relying on it can have its
+# tokens forged by anyone who's read this file. Set a real random JWT_SECRET in the
+# environment before deploying; see DEPLOYMENT.md.
+JWT_SECRET = os.environ.get('JWT_SECRET')
+if not JWT_SECRET or JWT_SECRET == 'hamro-gng-2024':
+    raise RuntimeError(
+        "JWT_SECRET is not set (or is still the old insecure default 'hamro-gng-2024'). "
+        "Set it to a long random value in the environment before starting the app -- "
+        "e.g. `python -c \"import secrets; print(secrets.token_hex(32))\"` -- "
+        "see DEPLOYMENT.md's Security Checklist."
+    )
 
 # ── AI Assistant (Google Gemini) ────────────────────────────────────────
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
@@ -163,6 +178,19 @@ app = FastAPI(title="Hamro G&G Auto OS", version="1.0.0")
 api_router = APIRouter(prefix="/api")
 security = HTTPBearer()
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto", bcrypt__rounds=10)
+
+# ── Rate limiting (brute-force login / signup-spam guard) ──────────────
+# Keyed by client IP, in-memory -- fine for this app's single-process deployment (see
+# ecosystem.config.js: one PM2/uvicorn process, no horizontal scaling). Reads
+# X-Forwarded-For first, same as _public_photo_url below, since the VPS puts nginx in
+# front of this app; falls back to the direct connection IP for local/dev use.
+def _client_ip(request: Request) -> str:
+    xff = request.headers.get("x-forwarded-for")
+    return xff.split(",")[0].strip() if xff else get_remote_address(request)
+
+limiter = Limiter(key_func=_client_ip)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -992,7 +1020,8 @@ class SettingsUpdate(BaseModel):
 
 # ── AUTH ──────────────────────────────────────────────────────────────
 @api_router.post("/auth/signup")
-async def signup(req: SignUpRequest):
+@limiter.limit("3/hour")
+async def signup(request: Request, req: SignUpRequest):
     """Public, unauthenticated — anyone can create their own company here. They become
     that company's sole Admin; everything they create from here on (vehicles, customers,
     employee accounts, ...) is automatically isolated to this company_id, enforced at the
@@ -1021,7 +1050,8 @@ async def signup(req: SignUpRequest):
     return {"token": token, "username": user["username"], "name": user["name"], "role": "admin", "company_name": req.company_name}
 
 @api_router.post("/auth/login")
-async def login(req: LoginRequest):
+@limiter.limit("5/minute")
+async def login(request: Request, req: LoginRequest):
     user = await db.users.find_one({"username": req.username})
     if not user or not await verify_pw_async(req.password, user["password_hash"]):
         raise HTTPException(401, "Invalid credentials")
@@ -3145,8 +3175,15 @@ async def startup():
     asyncio.create_task(_compress_oversized_photos())
     asyncio.create_task(_compress_oversized_documents())
 
+_cors_origins_raw = os.environ.get('CORS_ORIGINS')
+if not _cors_origins_raw:
+    logger.warning(
+        "CORS_ORIGINS is not set -- defaulting to '*' (any origin). This is fine for local "
+        "dev but should never be left unset in production: set it to the frontend's exact "
+        "URL(s), comma-separated, in the environment. See DEPLOYMENT.md."
+    )
 app.add_middleware(CORSMiddleware, allow_credentials=True,
-                   allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
+                   allow_origins=(_cors_origins_raw or '*').split(','),
                    allow_methods=["*"], allow_headers=["*"])
 # Compresses JSON responses over 1KB (list endpoints especially) before they hit the
 # network — no API/behavior change, just a smaller wire payload.

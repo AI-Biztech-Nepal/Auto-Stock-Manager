@@ -17,6 +17,45 @@ you ever spin up a fresh environment without your own DB server.
 
 ---
 
+## Security Checklist
+
+Run through this whenever you're not sure what state production is actually in (e.g.
+taking over the project, or after not touching it for a while).
+
+1. **`JWT_SECRET` is a real random value.** The backend now refuses to start if this is
+   unset or still the old code default (`hamro-gng-2024`) — anyone who's read the source
+   knows that value, so a deployment still using it lets tokens be forged. Check the
+   backend's running environment (PM2: `pm2 env <id>`, or read the `.env` the process
+   loads) and confirm it's a long random string, e.g. generate one with:
+   ```bash
+   python -c "import secrets; print(secrets.token_hex(32))"
+   ```
+   If you rotate it, every existing login session is invalidated (everyone has to log in
+   again) — that's expected, not a bug.
+2. **`CORS_ORIGINS` is set explicitly**, not left to default to `*`. The backend logs a
+   warning on startup if it's unset — check the PM2 logs (`pm2 logs`) for it.
+3. **The tenant-isolation DB hardening migration has actually run.** `backend/schema.sql`
+   defines `company_id` as `NOT NULL` with a `FOREIGN KEY` on every tenant table, but a
+   database created before `backend/migration_harden_company_id.sql` existed won't have
+   those constraints unless that migration was run against it by hand. Confirm with:
+   ```sql
+   SELECT TABLE_NAME, CONSTRAINT_NAME, CONSTRAINT_TYPE FROM information_schema.TABLE_CONSTRAINTS
+     WHERE TABLE_SCHEMA = DATABASE() AND (CONSTRAINT_NAME LIKE 'fk_%_company' OR CONSTRAINT_NAME LIKE 'chk_%');
+   ```
+   You should see one `fk_..._company` row per tenant table (customers, vehicles, sales,
+   etc. — the full list is in the migration file) plus `fk_users_company` and
+   `chk_users_company_or_platform_owner`. If the list is short or empty, read
+   `backend/migration_harden_company_id.sql` top-to-bottom before running it — it has a
+   pre-check query to run first and explains why (the 2026-08-18/19 incident).
+4. **Rate limits are now in effect**: `/api/auth/login` allows 5 attempts/minute and
+   `/api/auth/signup` allows 3/hour, per source IP (see `server.py`'s `limiter`). Repeated
+   429 responses in logs during legitimate use usually means many staff share one outbound
+   IP (e.g. behind the same office NAT) hitting login around the same time — not an attack.
+5. **Default login changed.** If `admin` / `admin123` still works on production, change it
+   immediately (Settings → Change Password after logging in).
+
+---
+
 ## MongoDB Atlas (Database) — optional
 
 Only needed if running with `DB_BACKEND=mongo` instead of your own MySQL.
