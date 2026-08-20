@@ -1,4 +1,4 @@
--- Hamro G&G Auto OS — MySQL schema (Hostinger), replacing MongoDB Atlas.
+-- Auto Stock Manager — MySQL schema (Hostinger), replacing MongoDB Atlas.
 --
 -- Conventions (deliberate, to keep backend/sqldb.py's shim simple and behavior-preserving):
 --   * Every table's primary key column is named `id` (VARCHAR(36) UUID, except

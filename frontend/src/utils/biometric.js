@@ -37,6 +37,6 @@ export async function verifyIdentity(reason = "Confirm your identity") {
 }
 
 export async function verifyAndGetCredentials() {
-  await verifyIdentity("Log in to Hamro G&G Auto");
+  await verifyIdentity("Log in to Auto Stock Manager");
   return NativeBiometric.getCredentials({ server: SERVER });
 }

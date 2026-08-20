@@ -58,9 +58,9 @@ export default function SignUp() {
       <div className="relative z-10 w-full max-w-sm mx-4 animate-fade-in">
         <div className="bg-white rounded-2xl shadow-2xl p-8">
           <div className="flex items-center gap-3 mb-8">
-            <div className="w-11 h-11 rounded-xl bg-blue-600 flex items-center justify-center font-bold text-white text-lg">GG</div>
+            <div className="w-11 h-11 rounded-xl bg-blue-600 flex items-center justify-center font-bold text-white text-lg">AS</div>
             <div>
-              <div className="font-bold text-slate-900 text-lg leading-tight" style={{ fontFamily: "Manrope, sans-serif" }}>Hamro G&G Auto</div>
+              <div className="font-bold text-slate-900 text-lg leading-tight" style={{ fontFamily: "Manrope, sans-serif" }}>Auto Stock Manager</div>
               <div className="text-xs text-slate-500">Inventory Manager</div>
             </div>
           </div>

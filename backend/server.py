@@ -174,7 +174,7 @@ GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
 AI_MODEL = "gemini-3.5-flash"
 ai_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 
-app = FastAPI(title="Hamro G&G Auto OS", version="1.0.0")
+app = FastAPI(title="Auto Stock Manager", version="1.0.0")
 api_router = APIRouter(prefix="/api")
 security = HTTPBearer()
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto", bcrypt__rounds=10)
@@ -219,7 +219,7 @@ async def _notify_storefront():
 # raising, so this is safe to deploy before a Resend account/domain is set up -- signup
 # and login just won't be able to email anyone until it's configured. See DEPLOYMENT.md.
 RESEND_API_KEY = os.environ.get("RESEND_API_KEY")
-RESEND_FROM = os.environ.get("RESEND_FROM", "Hamro G&G Auto OS <onboarding@resend.dev>")
+RESEND_FROM = os.environ.get("RESEND_FROM", "Auto Stock Manager <onboarding@resend.dev>")
 # Used to build the links inside verification/reset emails (they open in the browser,
 # not the API) -- must be the frontend's real URL in production. Defaults to local dev.
 FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:3000")
@@ -271,7 +271,7 @@ async def _consume_auth_token(raw_token: str, purpose: str) -> Optional[dict]:
     return rec
 
 @app.get("/api/health")
-async def health(): return {"status": "ok", "service": "Hamro G&G Auto OS"}
+async def health(): return {"status": "ok", "service": "Auto Stock Manager"}
 
 # ── Auth Helpers ──────────────────────────────────────────────────────
 def hash_pw(pw: str) -> str: return pwd_context.hash(pw)
@@ -765,7 +765,7 @@ async def ai_chatbot(req: AIChatRequest, cu: dict = Depends(admin_only)):
     business_snapshot = await _build_ai_business_snapshot()
 
     system = (
-        f"You are the AI assistant for {settings.get('business_name', 'Hamro G&G Auto')}, "
+        f"You are the AI assistant for {settings.get('business_name', 'this dealership')}, "
         "a used motorbike/scooter dealership in Nepal. You're used both internally by dealership staff "
         "(who can ask about anything in the live data below — inventory, photos, prices, sales, dues, "
         "customers, vendors, parts stock, EMI) and to answer prospective-customer questions about "
@@ -1118,7 +1118,7 @@ async def signup(request: Request, req: SignUpRequest):
                                    "business_name": req.company_name})
     verify_token = await _create_auth_token(user["id"], "verify_email", ttl_minutes=24 * 60)
     link = f"{FRONTEND_URL}/verify-email?token={verify_token}"
-    await _send_email(email, "Verify your email — Hamro G&G Auto OS",
+    await _send_email(email, "Verify your email — Auto Stock Manager",
                        f"<p>Hi {req.name},</p>"
                        f"<p>Click below to verify your email and activate <b>{req.company_name}</b>'s workspace:</p>"
                        f"<p><a href='{link}'>{link}</a></p>"
@@ -1157,7 +1157,7 @@ async def resend_verification(request: Request, req: ResendVerificationRequest):
     if user and not user.get("email_verified_at"):
         verify_token = await _create_auth_token(user["id"], "verify_email", ttl_minutes=24 * 60)
         link = f"{FRONTEND_URL}/verify-email?token={verify_token}"
-        await _send_email(user["username"], "Verify your email — Hamro G&G Auto OS",
+        await _send_email(user["username"], "Verify your email — Auto Stock Manager",
                            f"<p>Click below to verify your email:</p><p><a href='{link}'>{link}</a></p>"
                            f"<p>This link expires in 24 hours.</p>")
     return {"message": "If that email has a pending account, a new verification link has been sent."}
@@ -1169,7 +1169,7 @@ async def forgot_password(request: Request, req: ForgotPasswordRequest):
     if user:
         reset_token = await _create_auth_token(user["id"], "reset_password", ttl_minutes=60)
         link = f"{FRONTEND_URL}/reset-password?token={reset_token}"
-        await _send_email(user["username"], "Reset your password — Hamro G&G Auto OS",
+        await _send_email(user["username"], "Reset your password — Auto Stock Manager",
                            f"<p>Click below to choose a new password:</p><p><a href='{link}'>{link}</a></p>"
                            f"<p>This link expires in 1 hour. If you didn't request this, you can ignore this email.</p>")
     return {"message": "If that email exists, a password reset link has been sent."}
@@ -1842,8 +1842,17 @@ async def delete_vehicle(vid: str, cu: dict = Depends(admin_only)):
 
 @api_router.get("/vehicles/{vid}/qr-data")
 async def get_vehicle_qr(vid: str):
+    # Unauthenticated -- current_company_id is never set here, so db.vehicles.find_one runs
+    # unscoped (see _ScopedCollection._scoped: it only adds a company_id filter when one is
+    # set). The "contact" field below must therefore look up THIS vehicle's own company
+    # explicitly by id, not rely on request-scoping -- otherwise every tenant's QR code
+    # would show whichever company happened to be scoped in some other unrelated request.
     v = await db.vehicles.find_one({"id": vid}, {"_id": 0})
     if not v: raise HTTPException(404, "Not found")
+    settings = await db.settings.find_one({"company_id": v.get("company_id")}, {"_id": 0}) or {}
+    contact = settings.get("business_name") or "Auto Stock Manager"
+    if settings.get("contact_phone"):
+        contact += f" · {settings['contact_phone']}"
     return {"id": v["id"], "brand": v.get("brand"), "model": v.get("model"),
             "variant": v.get("variant"), "year": v.get("year"),
             "engine_cc": v.get("engine_cc"), "fuel_type": v.get("fuel_type"),
@@ -1851,7 +1860,7 @@ async def get_vehicle_qr(vid: str):
             "kilometer_run": v.get("kilometer_run"), "condition": v.get("condition"),
             "selling_price": v.get("selling_price"), "minimum_selling_price": v.get("minimum_selling_price"),
             "registration_number": v.get("registration_number"), "status": v.get("status"),
-            "contact": "Hamro G&G Auto Enterprises"}
+            "contact": contact}
 
 # ── EXPENSES ──────────────────────────────────────────────────────────
 @api_router.get("/vehicles/{vid}/expenses")
@@ -2865,7 +2874,7 @@ async def monthly_breakdown_bs(cu: dict = Depends(admin_only)):
     (see Finance.jsx) instead of the Gregorian-month grouping /reports/financial uses."""
     return await _enriched_sales_for_closing()
 
-def _build_closing_report_xlsx(rows: list, month_label: str, prepared_by: str) -> bytes:
+def _build_closing_report_xlsx(rows: list, month_label: str, prepared_by: str, business_name: str = "Auto Stock Manager") -> bytes:
     import openpyxl
     from openpyxl.styles import PatternFill
 
@@ -2899,7 +2908,7 @@ def _build_closing_report_xlsx(rows: list, month_label: str, prepared_by: str) -
         for c in row:
             c.value = None
 
-    ws["A1"] = f"G&G Auto – Closing Report for the Month of {month_label}"
+    ws["A1"] = f"{business_name} – Closing Report for the Month of {month_label}"
     today = datetime.now(timezone.utc).date().isoformat()
     ws["A2"] = f"Report Month:  {month_label}        Prepared By:  {prepared_by or '________'}        Date Prepared:  {today}"
 
@@ -2981,9 +2990,11 @@ def _build_closing_report_xlsx(rows: list, month_label: str, prepared_by: str) -
 @api_router.get("/reports/monthly-closing-export")
 async def monthly_closing_export(start_date: str, end_date: str, label: str, cu: dict = Depends(admin_only)):
     rows = await _enriched_sales_for_closing(start_date, end_date)
-    xlsx_bytes = _build_closing_report_xlsx(rows, label, cu.get("username", ""))
+    settings = await db.settings.find_one({}, {"_id": 0}) or {}
+    business_name = settings.get("business_name") or "Auto Stock Manager"
+    xlsx_bytes = _build_closing_report_xlsx(rows, label, cu.get("username", ""), business_name)
     safe_label = re.sub(r"[^A-Za-z0-9]+", "_", label).strip("_")
-    filename = f"GG_Auto_Closing_Report_{safe_label}.xlsx"
+    filename = f"Closing_Report_{safe_label}.xlsx"
     return StreamingResponse(
         io.BytesIO(xlsx_bytes),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -2996,7 +3007,7 @@ _INVENTORY_PIPELINE_STATUSES = ["unlisted", "in_repair", "available", "reserved"
 _INVENTORY_STATUS_LABELS = {"unlisted": "Unlisted", "in_repair": "In Repair", "available": "Available",
                             "reserved": "Reserved", "sold": "Sold"}
 
-def _build_inventory_pipeline_xlsx(vehicles: list, prepared_by: str) -> bytes:
+def _build_inventory_pipeline_xlsx(vehicles: list, prepared_by: str, business_name: str = "Auto Stock Manager") -> bytes:
     import openpyxl
     template_path = ROOT_DIR / "report_templates" / "inventory_pipeline_template.xlsx"
     wb = openpyxl.load_workbook(template_path)
@@ -3039,7 +3050,7 @@ def _build_inventory_pipeline_xlsx(vehicles: list, prepared_by: str) -> bytes:
         for c in row:
             c.value = None
 
-    ws["A1"] = "G&G Auto – Vehicle Inventory Pipeline"
+    ws["A1"] = f"{business_name} – Vehicle Inventory Pipeline"
     today = datetime.now(timezone.utc).date().isoformat()
     ws["A2"] = f"As of:  {today}        Prepared By:  {prepared_by or '________'}"
 
@@ -3126,12 +3137,14 @@ async def inventory_pipeline_export(cu: dict = Depends(require("vehicles", "view
     vehicles = await db.vehicles.find({"status": {"$ne": "scrap"}}, {"_id": 0}).to_list(5000)
     order = {s: i for i, s in enumerate(_INVENTORY_PIPELINE_STATUSES)}
     vehicles.sort(key=lambda v: (order.get(v.get("status"), 99), v.get("purchase_date") or ""))
-    xlsx_bytes = _build_inventory_pipeline_xlsx(vehicles, cu.get("username", ""))
+    settings = await db.settings.find_one({}, {"_id": 0}) or {}
+    business_name = settings.get("business_name") or "Auto Stock Manager"
+    xlsx_bytes = _build_inventory_pipeline_xlsx(vehicles, cu.get("username", ""), business_name)
     today = datetime.now(timezone.utc).date().isoformat()
     return StreamingResponse(
         io.BytesIO(xlsx_bytes),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f'attachment; filename="GG_Auto_Inventory_Pipeline_{today}.xlsx"'},
+        headers={"Content-Disposition": f'attachment; filename="Inventory_Pipeline_{today}.xlsx"'},
     )
 
 # ── ACCOUNTING SUMMARY ────────────────────────────────────────────────
@@ -3305,10 +3318,10 @@ async def startup():
         await db.settings.insert_one({
             "id": "general", "company_id": default_company_id,
             "logo_url": "https://images.unsplash.com/photo-1777288411485-1eb05bd4a289?q=80&w=880&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D",
-            "business_name": "G&G AUTO Enterprises",
-            "contact_phone": "9860087161",
-            "contact_email": "info@ggautonp.com",
-            "address": "Nayabasti, Boudha",
+            "business_name": "My Auto Dealership",
+            "contact_phone": "98XXXXXXXX",
+            "contact_email": "info@example.com",
+            "address": "",
             "hero_image_url": "https://images.unsplash.com/photo-1622185135505-2d795003994a?q=80&w=1470&auto=format&fit=crop",
             "service_image_url": "",
         })
@@ -4033,7 +4046,15 @@ async def break_kit(pid: str, req: BreakKitRequest, cu: dict = Depends(require("
 # ══════════════════════════════════════════════════════════════════════
 @api_router.get("/sync/export")
 async def export_for_website(cu: dict = Depends(admin_only)):
-    """Export available inventory in hamroauto.com.np listing format."""
+    """Export available inventory in a listing format an external storefront can consume
+    (originally built for hamroauto.com.np's site, but the shape/fields aren't specific to
+    any one tenant -- "contact"/"source" below reflect whichever company is calling this,
+    not a hardcoded business)."""
+    settings = await db.settings.find_one({}, {"_id": 0}) or {}
+    business_name = settings.get("business_name") or "Auto Stock Manager"
+    contact_parts = [p for p in [business_name, settings.get("address"), settings.get("contact_phone")] if p]
+    contact = " · ".join(contact_parts)
+    source = re.sub(r"[^a-z0-9]+", "_", business_name.lower()).strip("_") or "auto_stock_manager"
     vehicles = await db.vehicles.find({"status": "available"}, {"_id": 0}).to_list(200)
     vehicle_ids = [v["id"] for v in vehicles]
     photos_by_vehicle: dict = {}
@@ -4057,8 +4078,8 @@ async def export_for_website(cu: dict = Depends(admin_only)):
                 "tax": v.get("tax_clearance_status"), "transfer": v.get("transfer_status"),
             },
             "photos": [f"data:{p['content_type']};base64,{p['data']}" for p in photos],
-            "contact": "Hamro G&G Auto · Kathmandu · 98XXXXXXXX",
-            "source": "hamro_gng_auto",
+            "contact": contact,
+            "source": source,
             "exported_at": datetime.now(timezone.utc).isoformat(),
         })
     return {"count": len(listings), "listings": listings, "exported_at": datetime.now(timezone.utc).isoformat()}

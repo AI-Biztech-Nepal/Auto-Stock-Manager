@@ -1,4 +1,4 @@
-# Hamro G&G Auto OS — Deployment Guide
+# Auto Stock Manager — Deployment Guide
 ## Vercel (Frontend) + Self-Hosted VPS (Backend)
 
 ---
@@ -71,7 +71,7 @@ app doesn't error, it just silently never emails anyone (check the backend logs 
 3. **For real users to actually receive email** (not just your own Resend account's
    address), verify a sending domain: Resend dashboard → Domains → Add Domain, add the
    DNS records it gives you, wait for verification, then set `RESEND_FROM` to an
-   address on that domain, e.g. `Hamro G&G Auto OS <no-reply@yourdomain.com>`. Until
+   address on that domain, e.g. `Auto Stock Manager <no-reply@yourdomain.com>`. Until
    this is done, `RESEND_FROM` defaults to Resend's sandbox sender, which only
    delivers to the Resend account owner's own address — fine for testing, not for
    production signups.
@@ -199,7 +199,7 @@ the table definitions.
 | `GEMINI_API_KEY` | ✅ | For AI features (Pricing, Chatbot, Festival) — get one at [aistudio.google.com/apikey](https://aistudio.google.com/apikey) |
 | `CORS_ORIGINS` | ✅ | Your Vercel frontend URL |
 | `RESEND_API_KEY` | ❌ (but see below) | Sends email-verification and password-reset emails. Without it, signup/reset still work but no email is ever sent — accounts get stuck unverified. |
-| `RESEND_FROM` | ❌ | Sender address, e.g. `Hamro G&G Auto OS <no-reply@yourdomain.com>`. Defaults to Resend's sandbox address, which can only email your own Resend account — real users won't receive anything until you verify a domain and set this. |
+| `RESEND_FROM` | ❌ | Sender address, e.g. `Auto Stock Manager <no-reply@yourdomain.com>`. Defaults to Resend's sandbox address, which can only email your own Resend account — real users won't receive anything until you verify a domain and set this. |
 | `FRONTEND_URL` | ✅ if `RESEND_API_KEY` set | Your deployed frontend's URL (no trailing slash) — used to build the links inside verification/reset emails. Defaults to `http://localhost:3000`, which is wrong for production. |
 
 ### Vercel (Frontend)

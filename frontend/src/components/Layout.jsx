@@ -41,9 +41,12 @@ export default function Layout() {
     <aside className={`${mobile ? "fixed inset-0 z-50 flex" : "hidden lg:flex"} flex-col bg-slate-900 text-white ${mobile ? "w-64" : "w-64"} h-screen`}>
       {/* Logo */}
       <div className="flex items-center gap-3 px-6 py-5 border-b border-slate-700">
-        <div className="w-9 h-9 rounded-lg bg-blue-600 flex items-center justify-center font-bold text-white text-sm">GG</div>
+        <div className="w-9 h-9 rounded-lg bg-blue-600 flex items-center justify-center font-bold text-white text-sm">AS</div>
         <div>
-          <div className="font-bold text-sm leading-tight" style={{ fontFamily: "Manrope, sans-serif" }}>Hamro G&G Auto</div>
+          {/* user.company_name comes back from login/signup (see AuthContext) -- this is
+              the signed-in tenant's own business, not the platform's own identity, which
+              only appears pre-login (see Login/SignUp's matching logo block). */}
+          <div className="font-bold text-sm leading-tight" style={{ fontFamily: "Manrope, sans-serif" }}>{user?.company_name || "Auto Stock Manager"}</div>
           <div className="text-xs text-slate-400">Inventory Manager</div>
         </div>
         {mobile && (
