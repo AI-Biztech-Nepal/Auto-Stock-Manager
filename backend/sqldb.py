@@ -39,7 +39,8 @@ class ReturnDocument:
 # json_cols: columns stored as MySQL JSON that must round-trip as list/dict
 TABLES = {
     "companies": {"columns": {"id", "name", "created_at"}},
-    "users": {"columns": {"id", "company_id", "username", "password_hash", "name", "role", "created_at"}},
+    "users": {"columns": {"id", "company_id", "username", "password_hash", "name", "role", "email_verified_at", "created_at"}},
+    "auth_tokens": {"columns": {"id", "user_id", "purpose", "token_hash", "expires_at", "used_at", "created_at"}},
     "vendors": {"columns": {"id", "company_id", "name", "phone", "address", "notes", "vendor_type", "created_at"}},
     "customers": {"columns": {"id", "company_id", "name", "contact_number", "address", "occupation", "budget_min",
                                "budget_max", "interested_brands", "notes", "created_at", "last_purchase_date"}},

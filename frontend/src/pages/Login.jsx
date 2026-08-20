@@ -13,6 +13,7 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const [showBiometric, setShowBiometric] = useState(false);
   const [bioLoading, setBioLoading] = useState(false);
+  const [unverifiedEmail, setUnverifiedEmail] = useState(null);
 
   useEffect(() => {
     (async () => {
@@ -37,6 +38,7 @@ export default function Login() {
     e.preventDefault();
     if (!form.username || !form.password) { toast.error("Please enter username and password"); return; }
     setLoading(true);
+    setUnverifiedEmail(null);
     try {
       await doLogin(form);
       if (isNative() && await isBiometricAvailable() && !(await hasSavedCredentials())) {
@@ -46,8 +48,25 @@ export default function Login() {
         } catch { /* user can enable later from Settings */ }
       }
     } catch (err) {
-      toast.error(err.response?.data?.detail || "Login failed");
+      // 403 here specifically means "credentials were correct, but the email isn't
+      // verified yet" (see backend /auth/login) -- distinct from 401 invalid credentials,
+      // so this can offer a resend action instead of just "login failed".
+      if (err.response?.status === 403) {
+        setUnverifiedEmail(form.username);
+        toast.error(err.response.data?.detail || "Please verify your email before signing in");
+      } else {
+        toast.error(err.response?.data?.detail || "Login failed");
+      }
     } finally { setLoading(false); }
+  };
+
+  const handleResendVerification = async () => {
+    try {
+      await api.post("/auth/resend-verification", { email: unverifiedEmail });
+      toast.success("Verification email sent — check your inbox.");
+    } catch {
+      toast.error("Couldn't resend right now — try again shortly.");
+    }
   };
 
   const handleBiometricLogin = async () => {
@@ -109,6 +128,9 @@ export default function Login() {
                 autoComplete="current-password"
               />
             </div>
+            <div className="text-right">
+              <Link to="/forgot-password" className="text-xs text-blue-600 hover:underline">Forgot password?</Link>
+            </div>
             <button
               data-testid="login-submit-button"
               type="submit"
@@ -118,6 +140,16 @@ export default function Login() {
               {loading ? "Signing in..." : "Sign In"}
             </button>
           </form>
+
+          {unverifiedEmail && (
+            <button
+              type="button"
+              onClick={handleResendVerification}
+              className="w-full h-10 mt-3 border border-slate-200 hover:bg-slate-50 text-slate-700 font-semibold rounded-lg transition-all active:scale-95"
+            >
+              Resend verification email
+            </button>
+          )}
 
           {showBiometric && (
             <>

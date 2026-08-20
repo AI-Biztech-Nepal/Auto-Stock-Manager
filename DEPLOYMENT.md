@@ -56,6 +56,29 @@ taking over the project, or after not touching it for a while).
 
 ---
 
+## Email verification & password reset (Resend)
+
+Self-signup (`/signup`) creates an account that can't log in until it clicks a
+verification link (staff accounts an admin creates via Team Accounts are exempt —
+see `server.py`'s `/auth/register`). Both that and `/forgot-password` need
+[Resend](https://resend.com) configured to actually send anything — without it, the
+app doesn't error, it just silently never emails anyone (check the backend logs for
+`RESEND_API_KEY not set` warnings if verification emails aren't arriving).
+
+1. Sign up at resend.com, create an API key, set `RESEND_API_KEY` on the backend.
+2. Set `FRONTEND_URL` to your real deployed frontend URL (e.g. your Vercel URL) — this
+   is what verification/reset links point at.
+3. **For real users to actually receive email** (not just your own Resend account's
+   address), verify a sending domain: Resend dashboard → Domains → Add Domain, add the
+   DNS records it gives you, wait for verification, then set `RESEND_FROM` to an
+   address on that domain, e.g. `Hamro G&G Auto OS <no-reply@yourdomain.com>`. Until
+   this is done, `RESEND_FROM` defaults to Resend's sandbox sender, which only
+   delivers to the Resend account owner's own address — fine for testing, not for
+   production signups.
+4. Restart the backend after setting these.
+
+---
+
 ## Auto-deploy on push to main
 
 A GitHub webhook hits this app's own VPS listener on every push to `main`, which pulls,
@@ -175,6 +198,9 @@ the table definitions.
 | `JWT_SECRET` | ✅ | Random secret for auth tokens |
 | `GEMINI_API_KEY` | ✅ | For AI features (Pricing, Chatbot, Festival) — get one at [aistudio.google.com/apikey](https://aistudio.google.com/apikey) |
 | `CORS_ORIGINS` | ✅ | Your Vercel frontend URL |
+| `RESEND_API_KEY` | ❌ (but see below) | Sends email-verification and password-reset emails. Without it, signup/reset still work but no email is ever sent — accounts get stuck unverified. |
+| `RESEND_FROM` | ❌ | Sender address, e.g. `Hamro G&G Auto OS <no-reply@yourdomain.com>`. Defaults to Resend's sandbox address, which can only email your own Resend account — real users won't receive anything until you verify a domain and set this. |
+| `FRONTEND_URL` | ✅ if `RESEND_API_KEY` set | Your deployed frontend's URL (no trailing slash) — used to build the links inside verification/reset emails. Defaults to `http://localhost:3000`, which is wrong for production. |
 
 ### Vercel (Frontend)
 | Variable | Required | Description |
