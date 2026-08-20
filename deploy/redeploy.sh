@@ -9,3 +9,5 @@ cd ~/auto-stock-manager/backend
 git pull origin main
 venv/bin/pip install -r requirements.txt
 pm2 restart auto-stock-backend
+
+# Auto-deploy pipeline verified working end-to-end 2026-08-20.
