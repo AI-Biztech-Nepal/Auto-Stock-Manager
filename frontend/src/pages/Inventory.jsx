@@ -356,20 +356,22 @@ export default function Inventory() {
           <p className="text-sm text-slate-500">{filtered.length} vehicles found</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          <button
-            onClick={exportStock}
-            disabled={exportingStock}
-            data-testid="export-stock-button"
-            className="flex items-center gap-2 border border-slate-200 text-slate-700 text-sm font-medium px-4 py-3 rounded-lg hover:bg-slate-50 transition-all active:scale-95 disabled:opacity-60"
-          >
-            {exportingStock ? (
-              <div className="animate-spin w-4 h-4 border-2 border-slate-400 border-t-transparent rounded-full" />
-            ) : (
-              <Download size={16} />
-            )}
-            Export Stock
-          </button>
-          {canManageStock && (
+          {!isFrontDesk && (
+            <button
+              onClick={exportStock}
+              disabled={exportingStock}
+              data-testid="export-stock-button"
+              className="flex items-center gap-2 border border-slate-200 text-slate-700 text-sm font-medium px-4 py-3 rounded-lg hover:bg-slate-50 transition-all active:scale-95 disabled:opacity-60"
+            >
+              {exportingStock ? (
+                <div className="animate-spin w-4 h-4 border-2 border-slate-400 border-t-transparent rounded-full" />
+              ) : (
+                <Download size={16} />
+              )}
+              Export Stock
+            </button>
+          )}
+          {canManageStock && !isFrontDesk && (
             <button
               onClick={() => navigate("/sold-stock")}
               data-testid="sold-stock-link"
@@ -378,7 +380,7 @@ export default function Inventory() {
               <Archive size={16} /> Sold Stock
             </button>
           )}
-          {canManageStock && unpricedVisible.length > 0 && (
+          {canManageStock && !isFrontDesk && unpricedVisible.length > 0 && (
             <button
               onClick={hideUnpriced}
               disabled={hidingUnpriced}
@@ -388,7 +390,7 @@ export default function Inventory() {
               <EyeOff size={16} /> {hidingUnpriced ? "Moving..." : `Move ${unpricedVisible.length} With No Price To Unlisted`}
             </button>
           )}
-          {canManageStock && (
+          {canManageStock && !isFrontDesk && (
             <button
               onClick={() => { setForm(EMPTY); setShowModal(true); }}
               data-testid="add-vehicle-button"
@@ -600,7 +602,7 @@ export default function Inventory() {
       </div>
 
       {/* Summary */}
-      {!loading && (
+      {!loading && !isFrontDesk && (
         <div className="grid grid-cols-2 lg:grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-4">
           {[
             { label: "Total Vehicles", value: filtered.length, icon: Package, color: "bg-blue-500" },
@@ -622,7 +624,7 @@ export default function Inventory() {
       )}
 
       {/* Recently Added Highlight */}
-      {!loading && statusFilter === "all" && recentlyAdded.length > 0 && (
+      {!loading && !isFrontDesk && statusFilter === "all" && recentlyAdded.length > 0 && (
         <div className="bg-amber-50 rounded-xl border border-amber-200 shadow-sm p-4" data-testid="recently-added-section">
           <div className="flex items-center gap-2 mb-3">
             <Sparkles size={16} className="text-amber-600" />

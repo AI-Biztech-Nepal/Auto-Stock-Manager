@@ -1,7 +1,9 @@
 // Mirrors the backend's ROLE_PERMISSIONS in server.py. "admin" (Admin)
 // always has full access; other roles only see what's listed here.
 export const ROLE_NAV_PATHS = {
-  stock_supervisor: ["/inventory", "/sales", "/sold-stock", "/jobs", "/customers", "/team", "/settings"],
+  // Sales, Sold Stock, Job Cards, and Customers were pulled from Front Desk -- they only get
+  // Inventory (view/edit, no create) plus Team and Settings now.
+  stock_supervisor: ["/inventory", "/team", "/settings"],
   // Parts department gets read-only inventory browsing plus the ability to flip a vehicle's
   // pipeline status (Available <-> In Repair, or Scrap) — see PARTS_ALLOWED_STATUSES in server.py.
   parts_supervisor: ["/spare-parts", "/vendors", "/jobs", "/inventory", "/team", "/settings"],
@@ -39,6 +41,8 @@ export function canDeleteJobs(role) {
 // Mirrors PARTS_ALLOWED_STATUSES in server.py — keep in sync.
 export const PARTS_ALLOWED_VEHICLE_STATUSES = ["available", "in_repair", "scrap"];
 
+// Front Desk (stock_supervisor) is showroom-floor staff -- view only, no vehicle edits of any
+// kind (not even status changes), so only admin gets full vehicle access.
 export function hasFullVehicleAccess(role) {
-  return !role || role === "admin" || role === "stock_supervisor";
+  return !role || role === "admin";
 }

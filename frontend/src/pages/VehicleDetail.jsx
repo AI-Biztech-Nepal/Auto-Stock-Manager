@@ -314,17 +314,17 @@ export function VehicleDetailModal({ id, onClose }) {
               <select
                 value={vehicle.status}
                 onChange={e => updateStatus(e.target.value)}
-                disabled={!canManageStock && !PARTS_ALLOWED_VEHICLE_STATUSES.includes(vehicle.status)}
+                disabled={!canManageStock && !(isPartsOnly && PARTS_ALLOWED_VEHICLE_STATUSES.includes(vehicle.status))}
                 className={`appearance-none cursor-pointer px-2.5 py-1 pr-6 rounded-full text-xs font-semibold uppercase tracking-wide border-none focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-70 ${st.bg} ${st.text}`}
                 style={{ backgroundImage: "none" }}
                 data-testid="vehicle-status-select"
-                title={canManageStock ? "Change vehicle status" : "Parts department can move a vehicle between Available, In Repair, and Scrap"}
+                title={canManageStock ? "Change vehicle status" : isPartsOnly ? "Parts department can move a vehicle between Available, In Repair, and Scrap" : "View only — you don't have permission to change vehicle status"}
               >
                 {/* Always include the vehicle's actual current status as an option, even if it falls
                    outside what this role can pick — otherwise a filtered <select> with no matching
                    <option> silently mis-renders (browsers show a blank/wrong label). The select is
                    disabled in that case anyway, so this can't be used to bypass the restriction. */}
-                {(canManageStock ? VEHICLE_STATUS_OPTIONS : VEHICLE_STATUS_OPTIONS.filter(o => PARTS_ALLOWED_VEHICLE_STATUSES.includes(o.value) || o.value === vehicle.status)).map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                {(canManageStock ? VEHICLE_STATUS_OPTIONS : VEHICLE_STATUS_OPTIONS.filter(o => (isPartsOnly && PARTS_ALLOWED_VEHICLE_STATUSES.includes(o.value)) || o.value === vehicle.status)).map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
               </select>
             )}
             <div className="flex-1" />

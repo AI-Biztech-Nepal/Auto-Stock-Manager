@@ -230,13 +230,13 @@ async def get_current_user(creds: HTTPAuthorizationCredentials = Depends(securit
 # "admin" (Admin) always has full access. Other roles only get what's
 # listed here as {resource: {allowed actions}}; anything not listed is denied.
 ROLE_PERMISSIONS = {
-    "stock_supervisor": {  # Front desk stock
-        "vehicles": {"view", "create", "edit"},
-        "vehicle_media": {"view", "create", "delete"},
-        "expenses": {"view", "create", "delete"},
-        "jobs": {"view"},
-        "customers": {"view", "create", "edit", "delete"},
-        "sales": {"view", "create"},
+    "stock_supervisor": {  # Front desk stock -- showroom floor staff, view-only on vehicles
+        # No "create" or "edit" on vehicles (view only, no status changes either -- see
+        # require_any("vehicles", {"edit", "edit_status"}) on update_vehicle_status), and no
+        # jobs/customers/sales at all -- those pages were pulled from their nav to match.
+        "vehicles": {"view"},
+        "vehicle_media": {"view"},  # read-only, so opening a vehicle's detail page doesn't 403 loading photos/documents
+        "expenses": {"view"},
         "team": {"view", "create", "edit", "delete"},
         "vendor_lookup": {"view", "create"},  # vendor picker + inline "add new vendor" when picking a vehicle's purchase source
     },
