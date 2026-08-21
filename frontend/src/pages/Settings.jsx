@@ -371,8 +371,8 @@ export default function Settings() {
         </div>
       )}
 
-      {/* App Info — not shown for platform_owner, which has no company of its own */}
-      {user?.role !== "platform_owner" && (
+      {/* App Info — not shown for platform_owner (no company of its own) or Front Desk (showroom staff don't need system/infra details) */}
+      {user?.role !== "platform_owner" && user?.role !== "stock_supervisor" && (
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
           <h2 className="text-base font-bold text-slate-900 mb-4" style={{ fontFamily: "Manrope" }}>System Information</h2>
           <div className="space-y-3 text-sm">
