@@ -1,7 +1,9 @@
 import { Printer } from "lucide-react";
 import { formatNPR } from "../utils/helpers";
+import { useAuth } from "../context/AuthContext";
 
 export default function BillPrintModal({ bill, vendor, onClose }) {
+  const { user } = useAuth();
   if (!bill) return null;
   const items = bill.items || [];
   const total = bill.total ?? items.reduce((s, it) => s + (it.quantity * it.unit_cost || 0), 0);
@@ -22,8 +24,7 @@ export default function BillPrintModal({ bill, vendor, onClose }) {
         <div className="print-area overflow-y-auto p-8">
           <div className="flex items-start justify-between border-b-2 border-slate-800 pb-4 mb-6">
             <div>
-              <div className="text-xl font-bold text-slate-900" style={{ fontFamily: "Manrope" }}>Hamro G&G Auto Enterprises</div>
-              <div className="text-sm text-slate-500">Kathmandu, Nepal</div>
+              <div className="text-xl font-bold text-slate-900" style={{ fontFamily: "Manrope" }}>{user?.company_name || "Auto Stock Manager"}</div>
             </div>
             <div className="text-right">
               <div className="text-lg font-bold uppercase tracking-wide text-slate-700">Purchase Bill</div>

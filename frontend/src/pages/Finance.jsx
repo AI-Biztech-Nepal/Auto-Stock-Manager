@@ -8,6 +8,7 @@ import { formatNPR } from "../utils/helpers";
 import LedgerTable from "../components/LedgerTable";
 import BillPrintModal from "../components/BillPrintModal";
 import { adToBsDate, BS_MONTHS, getBSMonthRange } from "../utils/nepali-date";
+import { useAuth } from "../context/AuthContext";
 
 const KCard = ({ title, value, sub, color, icon: Icon }) => (
   <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 hover:shadow-md transition-shadow">
@@ -25,6 +26,7 @@ const KCard = ({ title, value, sub, color, icon: Icon }) => (
 );
 
 export default function Finance() {
+  const { user } = useAuth();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [summary, setSummary] = useState(null);
@@ -139,7 +141,7 @@ export default function Finance() {
     <div className="space-y-5 animate-fade-in">
       <div>
         <h1 className="text-2xl font-bold text-slate-900">Finance & Accounting</h1>
-        <p className="text-sm text-slate-500">Complete financial overview · Hamro G&G Auto Enterprises</p>
+        <p className="text-sm text-slate-500">Complete financial overview{user?.company_name ? ` · ${user.company_name}` : ""}</p>
       </div>
 
       <div className="flex border-b border-slate-200 gap-1">

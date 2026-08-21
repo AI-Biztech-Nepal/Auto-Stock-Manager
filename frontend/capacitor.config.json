@@ -1,6 +1,6 @@
 {
   "appId": "com.hamrognandg.autostockmanager",
-  "appName": "Hamro G&G Auto",
+  "appName": "Auto Stock Manager",
   "webDir": "build",
   "server": {
     "androidScheme": "https",

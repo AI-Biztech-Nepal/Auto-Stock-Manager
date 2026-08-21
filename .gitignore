@@ -84,9 +84,16 @@ android-sdk/ frontend/node_modules/.cache/default-development/2.pack
 credentials.json
 *.key
 .credentials
+
+# Real deploy-webhook secret -- only the .example template is committed, see
+# deploy/webhook.ecosystem.config.js.example
+deploy/webhook.ecosystem.config.js
 frontend/node_modules/.cache/default-development/1.pack
 frontend/node_modules/.cache/default-development/2.pack
 frontend/node_modules/.cache/default-development/4.pack
 frontend/node_modules/.cache/default-development/10.pack
 frontend/node_modules/.cache/default-development/7.pack
 frontend/node_modules/.cache/default-development/5.pack
+
+.vercel
+.env*

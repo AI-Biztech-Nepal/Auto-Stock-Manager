@@ -1,0 +1,20 @@
+// Copy this file to webhook.ecosystem.config.js on the VPS (same directory) and fill in
+// a real WEBHOOK_SECRET -- e.g. `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`.
+// The real file is gitignored and must never be committed (same reasoning as
+// backend/.env and the JWT_SECRET incident this app already had once -- see
+// DEPLOYMENT.md's Security Checklist).
+//
+// Start it with: pm2 start webhook.ecosystem.config.js && pm2 save
+module.exports = {
+  apps: [
+    {
+      name: 'auto-stock-deploy-webhook',
+      cwd: __dirname,
+      script: 'webhook-listener.js',
+      env: {
+        WEBHOOK_SECRET: 'REPLACE_ME_WITH_A_REAL_RANDOM_SECRET',
+        WEBHOOK_PORT: '9002',
+      },
+    },
+  ],
+};

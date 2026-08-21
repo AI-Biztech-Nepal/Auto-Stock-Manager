@@ -1,4 +1,4 @@
--- Hamro G&G Auto OS — MySQL schema (Hostinger), replacing MongoDB Atlas.
+-- Auto Stock Manager — MySQL schema (Hostinger), replacing MongoDB Atlas.
 --
 -- Conventions (deliberate, to keep backend/sqldb.py's shim simple and behavior-preserving):
 --   * Every table's primary key column is named `id` (VARCHAR(36) UUID, except
@@ -62,9 +62,33 @@ CREATE TABLE IF NOT EXISTS users (
   password_hash VARCHAR(255) NOT NULL,
   name VARCHAR(255),
   role VARCHAR(50),
+  -- NULL = not yet verified. Backfilled to created_at for every pre-existing user at
+  -- startup (see server.py's startup()) so this only ever blocks brand-new signups,
+  -- never an account that already worked before email verification existed.
+  email_verified_at VARCHAR(40),
   created_at VARCHAR(40),
   CONSTRAINT fk_users_company FOREIGN KEY (company_id) REFERENCES companies(id),
   CONSTRAINT chk_users_company_or_platform_owner CHECK (role = 'platform_owner' OR company_id IS NOT NULL)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ── Email-verification / password-reset tokens ──────────────────────────
+-- Not company-scoped (like users/companies) -- looked up by token_hash alone, before
+-- any tenant context exists. Only the SHA-256 hash of the raw token is ever stored, same
+-- reasoning as password_hash: a DB leak alone can't be used to claim a still-valid link.
+CREATE TABLE IF NOT EXISTS auth_tokens (
+  id VARCHAR(36) NOT NULL PRIMARY KEY,
+  user_id VARCHAR(36) NOT NULL,
+  purpose VARCHAR(20) NOT NULL, -- 'verify_email' | 'reset_password'
+  token_hash VARCHAR(64) NOT NULL,
+  INDEX idx_auth_tokens_hash (token_hash),
+  INDEX idx_auth_tokens_user (user_id),
+  expires_at VARCHAR(40) NOT NULL,
+  used_at VARCHAR(40),
+  created_at VARCHAR(40),
+  -- CASCADE (unlike the tenant tables' deliberate RESTRICT, see
+  -- migration_harden_company_id.sql): these rows are ephemeral and meaningless once the
+  -- user is gone, and delete_user() must not be blocked by a leftover used/expired token.
+  CONSTRAINT fk_auth_tokens_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- ── Vendors / customers / team ───────────────────────────────────────────

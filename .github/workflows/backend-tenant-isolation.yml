@@ -65,8 +65,14 @@ jobs:
         env:
           PYTHONUNBUFFERED: "1"
 
-      - name: Run tenant-isolation regression tests
-        run: cd backend && python -m pytest tests/test_tenant_isolation.py -v
+      - name: Run tenant-isolation, email-verification, and auth-hardening regression tests
+        # Order matters: test_auth_hardening.py deliberately exhausts the /auth/login and
+        # /auth/signup rate limits against this same live process, so anything else that
+        # calls those endpoints (test_email_verification.py) must run before it, or its own
+        # assertions about intermediate status codes would be broken by an already-tripped
+        # limiter. test_tenant_isolation.py crafts JWTs directly and never touches either
+        # endpoint, so its position doesn't matter.
+        run: cd backend && python -m pytest tests/test_tenant_isolation.py tests/test_email_verification.py tests/test_auth_hardening.py -v
 
       - name: Backend log on failure
         if: failure()

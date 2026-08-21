@@ -147,7 +147,7 @@ export function QRLabelModal({ onClose, qrData }) {
           <div className="text-center space-y-1">
             {qrData.registration_number && <div className="text-sm font-mono font-bold text-slate-800">Reg: {qrData.registration_number}</div>}
             {qrData.selling_price && <div className="text-sm font-bold text-green-700">Price: {formatNPR(qrData.selling_price)}</div>}
-            <div className="text-xs text-slate-400">Hamro G&G Auto Enterprises · Kathmandu</div>
+            {qrData.contact && <div className="text-xs text-slate-400">{qrData.contact}</div>}
           </div>
           <button
             onClick={() => window.print()}

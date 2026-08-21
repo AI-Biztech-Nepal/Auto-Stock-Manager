@@ -3,23 +3,29 @@ import { Phone, Trash2, ImageIcon, MessageCircle } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
 import { formatDateDual, getWhatsAppLink } from "../utils/helpers";
+import { useAuth } from "../context/AuthContext";
 
 const TYPE_LABELS = { sell: "Sell", exchange: "Exchange", service: "Book Service" };
 const STATUS_OPTIONS = ["new", "contacted", "closed"];
-const BUSINESS_NAME = "G&G Auto Enterprise and Recondition House";
-const WORKSHOP_ADDRESS = "Nayabasti, Boudha";
 
-const buildWhatsAppMessage = (l) => {
+// businessName comes from the signed-in tenant (user.company_name via AuthContext) --
+// this used to be a hardcoded single business's name/address, which would have been
+// wrong for every other company using the platform. Dropped the physical workshop
+// address entirely rather than guess at one per tenant; Settings has the real address if
+// this ever needs it.
+const buildWhatsAppMessage = (l, businessName) => {
   if (l.type === "service") {
     const service = l.requested_service || "your requested service";
     const vehicle = l.vehicle_type || "your vehicle";
     const date = l.preferred_date ? formatDateDual(l.preferred_date) : "your preferred date";
-    return `We at ${BUSINESS_NAME} have received your request for ${service} of your vehicle ${vehicle}. You have booked the service at ${date}. Please contact this number or visit our workshop at ${WORKSHOP_ADDRESS} for any further queries. Thank you.`;
+    return `We at ${businessName} have received your request for ${service} of your vehicle ${vehicle}. You have booked the service at ${date}. Please contact this number for any further queries. Thank you.`;
   }
-  return `Hi ${l.name}, thank you for reaching out to ${BUSINESS_NAME} regarding your ${TYPE_LABELS[l.type] || l.type} inquiry. Please contact this number or visit our workshop at ${WORKSHOP_ADDRESS} for any further queries. Thank you.`;
+  return `Hi ${l.name}, thank you for reaching out to ${businessName} regarding your ${TYPE_LABELS[l.type] || l.type} inquiry. Please contact this number for any further queries. Thank you.`;
 };
 
 export default function Leads() {
+  const { user } = useAuth();
+  const businessName = user?.company_name || "Auto Stock Manager";
   const [leads, setLeads] = useState([]);
   const [loading, setLoading] = useState(true);
   const [typeFilter, setTypeFilter] = useState("all");
@@ -109,7 +115,7 @@ export default function Leads() {
                       {STATUS_OPTIONS.map(s => <option key={s} value={s}>{s[0].toUpperCase() + s.slice(1)}</option>)}
                     </select>
                     <a
-                      href={getWhatsAppLink(l.phone, buildWhatsAppMessage(l))}
+                      href={getWhatsAppLink(l.phone, buildWhatsAppMessage(l, businessName))}
                       target="_blank"
                       rel="noopener noreferrer"
                       title="Contact on WhatsApp"

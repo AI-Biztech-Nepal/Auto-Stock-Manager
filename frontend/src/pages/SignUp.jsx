@@ -1,14 +1,14 @@
 import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { toast } from "sonner";
-import { useAuth } from "../context/AuthContext";
 import api from "../utils/api";
 
 export default function SignUp() {
-  const { login } = useAuth();
-  const navigate = useNavigate();
   const [form, setForm] = useState({ name: "", company_name: "", email: "", password: "", confirm: "" });
   const [loading, setLoading] = useState(false);
+  // Set after a successful signup -- account exists but needs email verification before
+  // it can log in, so there's no token to log in with yet (see backend /auth/signup).
+  const [createdEmail, setCreatedEmail] = useState(null);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -30,13 +30,20 @@ export default function SignUp() {
         name: form.name, company_name: form.company_name,
         email: form.email, password: form.password,
       });
-      login({ username: res.data.username, name: res.data.name, role: res.data.role, company_name: res.data.company_name }, res.data.token);
-      toast.success(`Welcome, ${res.data.name}! Your workspace is ready.`);
-      navigate("/");
+      setCreatedEmail(res.data.email);
     } catch (err) {
       toast.error(err.response?.data?.detail || "Failed to create account");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleResend = async () => {
+    try {
+      await api.post("/auth/resend-verification", { email: createdEmail });
+      toast.success("Verification email sent again — check your inbox.");
+    } catch {
+      toast.error("Couldn't resend right now — try again shortly.");
     }
   };
 
@@ -51,13 +58,33 @@ export default function SignUp() {
       <div className="relative z-10 w-full max-w-sm mx-4 animate-fade-in">
         <div className="bg-white rounded-2xl shadow-2xl p-8">
           <div className="flex items-center gap-3 mb-8">
-            <div className="w-11 h-11 rounded-xl bg-blue-600 flex items-center justify-center font-bold text-white text-lg">GG</div>
+            <div className="w-11 h-11 rounded-xl bg-blue-600 flex items-center justify-center font-bold text-white text-lg">AS</div>
             <div>
-              <div className="font-bold text-slate-900 text-lg leading-tight" style={{ fontFamily: "Manrope, sans-serif" }}>Hamro G&G Auto</div>
+              <div className="font-bold text-slate-900 text-lg leading-tight" style={{ fontFamily: "Manrope, sans-serif" }}>Auto Stock Manager</div>
               <div className="text-xs text-slate-500">Inventory Manager</div>
             </div>
           </div>
 
+          {createdEmail ? (
+            <div data-testid="signup-check-email-panel">
+              <h1 className="text-2xl font-bold text-slate-900 mb-1" style={{ fontFamily: "Manrope, sans-serif" }}>Check your email</h1>
+              <p className="text-slate-500 text-sm mb-6">
+                We sent a verification link to <span className="font-medium text-slate-700">{createdEmail}</span>.
+                Click it to activate your workspace, then sign in.
+              </p>
+              <button
+                type="button"
+                onClick={handleResend}
+                className="w-full h-10 border border-slate-200 hover:bg-slate-50 text-slate-700 font-semibold rounded-lg transition-all active:scale-95"
+              >
+                Resend email
+              </button>
+              <p className="text-center text-sm text-slate-500 mt-6">
+                <Link to="/login" className="text-blue-600 font-semibold hover:underline">Back to sign in</Link>
+              </p>
+            </div>
+          ) : (
+          <>
           <h1 className="text-2xl font-bold text-slate-900 mb-1" style={{ fontFamily: "Manrope, sans-serif" }}>Create Account</h1>
           <p className="text-slate-500 text-sm mb-6">Set up a new workspace — you'll be its Admin, and can add employees once you're in.</p>
 
@@ -135,6 +162,8 @@ export default function SignUp() {
           <p className="text-center text-sm text-slate-500 mt-6">
             Already have an account? <Link to="/login" className="text-blue-600 font-semibold hover:underline">Sign in</Link>
           </p>
+          </>
+          )}
         </div>
       </div>
     </div>

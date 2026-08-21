@@ -9,7 +9,7 @@ from passlib.context import CryptContext
 from typing import Optional, List
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
-import os, logging, jwt, uuid, json, base64, io, asyncio, re, copy, contextvars
+import os, logging, jwt, uuid, json, base64, io, asyncio, re, copy, contextvars, secrets, hashlib
 from concurrent.futures import ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 from pydantic import BaseModel, Field, EmailStr
@@ -21,6 +21,9 @@ from google import genai
 from google.genai import types as genai_types
 from google.genai import errors as genai_errors
 import httpx
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -152,17 +155,42 @@ class _ScopedDB:
 
 db = _ScopedDB(db)  # db.users / db.companies pass through unscoped automatically (not in TENANT_COLLECTIONS)
 
-JWT_SECRET = os.environ.get('JWT_SECRET', 'hamro-gng-2024')
+# Fails startup rather than silently signing tokens with a known, public default --
+# 'hamro-gng-2024' was the code fallback for years and is effectively a published secret
+# (it's right here in git history), so any deployment still relying on it can have its
+# tokens forged by anyone who's read this file. Set a real random JWT_SECRET in the
+# environment before deploying; see DEPLOYMENT.md.
+JWT_SECRET = os.environ.get('JWT_SECRET')
+if not JWT_SECRET or JWT_SECRET == 'hamro-gng-2024':
+    raise RuntimeError(
+        "JWT_SECRET is not set (or is still the old insecure default 'hamro-gng-2024'). "
+        "Set it to a long random value in the environment before starting the app -- "
+        "e.g. `python -c \"import secrets; print(secrets.token_hex(32))\"` -- "
+        "see DEPLOYMENT.md's Security Checklist."
+    )
 
 # ── AI Assistant (Google Gemini) ────────────────────────────────────────
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
 AI_MODEL = "gemini-3.5-flash"
 ai_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 
-app = FastAPI(title="Hamro G&G Auto OS", version="1.0.0")
+app = FastAPI(title="Auto Stock Manager", version="1.0.0")
 api_router = APIRouter(prefix="/api")
 security = HTTPBearer()
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto", bcrypt__rounds=10)
+
+# ── Rate limiting (brute-force login / signup-spam guard) ──────────────
+# Keyed by client IP, in-memory -- fine for this app's single-process deployment (see
+# ecosystem.config.js: one PM2/uvicorn process, no horizontal scaling). Reads
+# X-Forwarded-For first, same as _public_photo_url below, since the VPS puts nginx in
+# front of this app; falls back to the direct connection IP for local/dev use.
+def _client_ip(request: Request) -> str:
+    xff = request.headers.get("x-forwarded-for")
+    return xff.split(",")[0].strip() if xff else get_remote_address(request)
+
+limiter = Limiter(key_func=_client_ip)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -185,8 +213,65 @@ async def _notify_storefront():
     except Exception:
         logger.warning("Storefront revalidation ping failed", exc_info=True)
 
+# ── Transactional email (Resend) ─────────────────────────────────────────
+# Powers email verification and password reset below. Optional like the storefront ping
+# above: with RESEND_API_KEY unset, sending silently no-ops (just logs) instead of
+# raising, so this is safe to deploy before a Resend account/domain is set up -- signup
+# and login just won't be able to email anyone until it's configured. See DEPLOYMENT.md.
+RESEND_API_KEY = os.environ.get("RESEND_API_KEY")
+RESEND_FROM = os.environ.get("RESEND_FROM", "Auto Stock Manager <onboarding@resend.dev>")
+# Used to build the links inside verification/reset emails (they open in the browser,
+# not the API) -- must be the frontend's real URL in production. Defaults to local dev.
+FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:3000")
+
+async def _send_email(to: str, subject: str, html: str):
+    if not RESEND_API_KEY:
+        logger.warning(f"RESEND_API_KEY not set — skipped sending {subject!r} to {to}")
+        return
+    try:
+        async with httpx.AsyncClient(timeout=10) as http:
+            resp = await http.post(
+                "https://api.resend.com/emails",
+                headers={"Authorization": f"Bearer {RESEND_API_KEY}"},
+                json={"from": RESEND_FROM, "to": [to], "subject": subject, "html": html},
+            )
+            if resp.status_code >= 400:
+                logger.warning(f"Resend API error sending to {to}: {resp.status_code} {resp.text}")
+    except Exception:
+        logger.warning(f"Failed to send email to {to}", exc_info=True)
+
+# ── Email-verification / password-reset tokens ──────────────────────────
+# See schema.sql's auth_tokens table. Only the raw token's SHA-256 hash is ever stored --
+# same reasoning as password hashing: a DB leak alone can't be used to claim a still-valid
+# link. Not company-scoped (excluded from TENANT_COLLECTIONS, same as users/companies) --
+# looked up by hash alone, before any tenant context is known.
+async def _create_auth_token(user_id: str, purpose: str, ttl_minutes: int) -> str:
+    raw = secrets.token_urlsafe(32)
+    now = datetime.now(timezone.utc)
+    await db.auth_tokens.insert_one({
+        "id": str(uuid.uuid4()), "user_id": user_id, "purpose": purpose,
+        "token_hash": hashlib.sha256(raw.encode()).hexdigest(),
+        "expires_at": (now + timedelta(minutes=ttl_minutes)).isoformat(),
+        "used_at": None, "created_at": now.isoformat(),
+    })
+    return raw
+
+async def _consume_auth_token(raw_token: str, purpose: str) -> Optional[dict]:
+    """Validates and single-use-marks a token in one step. Returns None (rather than
+    raising) for any invalid/expired/already-used/wrong-purpose token -- callers can't
+    tell those apart, which is deliberate: distinguishing them would let an attacker probe
+    which failure mode a guessed token hit."""
+    token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
+    rec = await db.auth_tokens.find_one({"token_hash": token_hash, "purpose": purpose})
+    if not rec or rec.get("used_at"):
+        return None
+    if datetime.now(timezone.utc) > datetime.fromisoformat(rec["expires_at"]):
+        return None
+    await db.auth_tokens.update_one({"id": rec["id"]}, {"$set": {"used_at": datetime.now(timezone.utc).isoformat()}})
+    return rec
+
 @app.get("/api/health")
-async def health(): return {"status": "ok", "service": "Hamro G&G Auto OS"}
+async def health(): return {"status": "ok", "service": "Auto Stock Manager"}
 
 # ── Auth Helpers ──────────────────────────────────────────────────────
 def hash_pw(pw: str) -> str: return pwd_context.hash(pw)
@@ -680,7 +765,7 @@ async def ai_chatbot(req: AIChatRequest, cu: dict = Depends(admin_only)):
     business_snapshot = await _build_ai_business_snapshot()
 
     system = (
-        f"You are the AI assistant for {settings.get('business_name', 'Hamro G&G Auto')}, "
+        f"You are the AI assistant for {settings.get('business_name', 'this dealership')}, "
         "a used motorbike/scooter dealership in Nepal. You're used both internally by dealership staff "
         "(who can ask about anything in the live data below — inventory, photos, prices, sales, dues, "
         "customers, vendors, parts stock, EMI) and to answer prospective-customer questions about "
@@ -799,6 +884,15 @@ class SignUpRequest(BaseModel):
 
 class ChangePasswordRequest(BaseModel):
     current_password: str; new_password: str = Field(min_length=8)
+
+class ResendVerificationRequest(BaseModel):
+    email: EmailStr
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+class ResetPasswordRequest(BaseModel):
+    token: str; new_password: str = Field(min_length=8)
 
 class UserUpdate(BaseModel):
     name: str; role: str
@@ -992,7 +1086,8 @@ class SettingsUpdate(BaseModel):
 
 # ── AUTH ──────────────────────────────────────────────────────────────
 @api_router.post("/auth/signup")
-async def signup(req: SignUpRequest):
+@limiter.limit("3/hour")
+async def signup(request: Request, req: SignUpRequest):
     """Public, unauthenticated — anyone can create their own company here. They become
     that company's sole Admin; everything they create from here on (vehicles, customers,
     employee accounts, ...) is automatically isolated to this company_id, enforced at the
@@ -1001,7 +1096,11 @@ async def signup(req: SignUpRequest):
     required a separate "company code" field on login to disambiguate duplicates across
     companies, which is exactly the UX that confused people before. Using email rather than
     a free-text username sidesteps the "everyone wants to type admin" collision on top of
-    that, and is what a future password-reset-by-email flow will need."""
+    that, and is what a real password-reset-by-email flow needs -- see /auth/forgot-password
+    below. New signups must also verify their email before they can log in (see
+    /auth/verify-email) -- staff accounts an admin creates via /auth/register are exempt
+    (that admin is already vouching for the email); only anonymous self-signup is gated,
+    since that's the actual abuse case (throwaway/fake emails claiming a company)."""
     email = req.email.lower()
     existing = await db.users.find_one({"username": email})
     if existing:
@@ -1011,24 +1110,78 @@ async def signup(req: SignUpRequest):
     await db.companies.insert_one({"id": company_id, "name": req.company_name, "created_at": now})
     user = {"id": str(uuid.uuid4()), "username": email,
             "password_hash": await hash_pw_async(req.password), "name": req.name, "role": "admin",
-            "company_id": company_id, "created_at": now}
+            "company_id": company_id, "email_verified_at": None, "created_at": now}
     await db.users.insert_one(user)
     # A settings row is looked up purely by company_id (see get_settings/update_settings) --
     # "id" here is just an arbitrary row id, not a lookup key.
     await db.settings.insert_one({"id": str(uuid.uuid4()), "company_id": company_id,
                                    "business_name": req.company_name})
-    token = create_token(user["id"], user["username"], "admin", company_id)
-    return {"token": token, "username": user["username"], "name": user["name"], "role": "admin", "company_name": req.company_name}
+    verify_token = await _create_auth_token(user["id"], "verify_email", ttl_minutes=24 * 60)
+    link = f"{FRONTEND_URL}/verify-email?token={verify_token}"
+    await _send_email(email, "Verify your email — Auto Stock Manager",
+                       f"<p>Hi {req.name},</p>"
+                       f"<p>Click below to verify your email and activate <b>{req.company_name}</b>'s workspace:</p>"
+                       f"<p><a href='{link}'>{link}</a></p>"
+                       f"<p>This link expires in 24 hours.</p>")
+    return {"message": "Account created — check your email to verify it before signing in.", "email": email}
 
 @api_router.post("/auth/login")
-async def login(req: LoginRequest):
+@limiter.limit("5/minute")
+async def login(request: Request, req: LoginRequest):
     user = await db.users.find_one({"username": req.username})
     if not user or not await verify_pw_async(req.password, user["password_hash"]):
         raise HTTPException(401, "Invalid credentials")
+    if not user.get("email_verified_at"):
+        raise HTTPException(403, "Please verify your email before signing in — check your inbox, or request a new link.")
     token = create_token(user.get("id", ""), user["username"], user.get("role", "admin"), user.get("company_id"))
     company = await db.companies.find_one({"id": user.get("company_id")}, {"_id": 0, "name": 1}) if user.get("company_id") else None
     return {"token": token, "username": user["username"], "name": user.get("name", user["username"]),
             "role": user.get("role", "admin"), "company_name": company["name"] if company else None}
+
+@api_router.get("/auth/verify-email")
+@limiter.limit("10/minute")
+async def verify_email(request: Request, token: str):
+    rec = await _consume_auth_token(token, "verify_email")
+    if not rec:
+        raise HTTPException(400, "This verification link is invalid or has expired — request a new one.")
+    await db.users.update_one({"id": rec["user_id"]}, {"$set": {"email_verified_at": datetime.now(timezone.utc).isoformat()}})
+    return {"message": "Email verified — you can now sign in."}
+
+@api_router.post("/auth/resend-verification")
+@limiter.limit("3/hour")
+async def resend_verification(request: Request, req: ResendVerificationRequest):
+    # Always returns the same generic message regardless of whether the account exists or
+    # is already verified -- otherwise this endpoint could be used to enumerate registered
+    # emails (try an address, see if the response differs).
+    user = await db.users.find_one({"username": req.email.lower()})
+    if user and not user.get("email_verified_at"):
+        verify_token = await _create_auth_token(user["id"], "verify_email", ttl_minutes=24 * 60)
+        link = f"{FRONTEND_URL}/verify-email?token={verify_token}"
+        await _send_email(user["username"], "Verify your email — Auto Stock Manager",
+                           f"<p>Click below to verify your email:</p><p><a href='{link}'>{link}</a></p>"
+                           f"<p>This link expires in 24 hours.</p>")
+    return {"message": "If that email has a pending account, a new verification link has been sent."}
+
+@api_router.post("/auth/forgot-password")
+@limiter.limit("3/hour")
+async def forgot_password(request: Request, req: ForgotPasswordRequest):
+    user = await db.users.find_one({"username": req.email.lower()})  # same enumeration reasoning as resend_verification
+    if user:
+        reset_token = await _create_auth_token(user["id"], "reset_password", ttl_minutes=60)
+        link = f"{FRONTEND_URL}/reset-password?token={reset_token}"
+        await _send_email(user["username"], "Reset your password — Auto Stock Manager",
+                           f"<p>Click below to choose a new password:</p><p><a href='{link}'>{link}</a></p>"
+                           f"<p>This link expires in 1 hour. If you didn't request this, you can ignore this email.</p>")
+    return {"message": "If that email exists, a password reset link has been sent."}
+
+@api_router.post("/auth/reset-password")
+@limiter.limit("5/hour")
+async def reset_password(request: Request, req: ResetPasswordRequest):
+    rec = await _consume_auth_token(req.token, "reset_password")
+    if not rec:
+        raise HTTPException(400, "This reset link is invalid or has expired — request a new one.")
+    await db.users.update_one({"id": rec["user_id"]}, {"$set": {"password_hash": await hash_pw_async(req.new_password)}})
+    return {"message": "Password reset — you can now sign in with your new password."}
 
 @api_router.get("/auth/me")
 async def me(cu: dict = Depends(get_current_user)):
@@ -1057,9 +1210,13 @@ async def register(req: RegisterRequest, cu: dict = Depends(get_current_user)):
     existing = await db.users.find_one({"username": email})  # globally unique, see /auth/signup
     if existing:
         raise HTTPException(400, "An account with this email already exists")
+    now = datetime.now(timezone.utc).isoformat()
     user = {"id": str(uuid.uuid4()), "username": email,
             "password_hash": await hash_pw_async(req.password), "name": req.name, "role": req.role,
-            "company_id": cu.get("company_id"), "created_at": datetime.now(timezone.utc).isoformat()}
+            "company_id": cu.get("company_id"),
+            # Pre-verified: an already-authenticated admin is vouching for this email by
+            # creating the account, unlike anonymous /auth/signup -- see its docstring.
+            "email_verified_at": now, "created_at": now}
     await db.users.insert_one(user)
     user.pop("_id", None); user.pop("password_hash", None)
     return user
@@ -1685,8 +1842,17 @@ async def delete_vehicle(vid: str, cu: dict = Depends(admin_only)):
 
 @api_router.get("/vehicles/{vid}/qr-data")
 async def get_vehicle_qr(vid: str):
+    # Unauthenticated -- current_company_id is never set here, so db.vehicles.find_one runs
+    # unscoped (see _ScopedCollection._scoped: it only adds a company_id filter when one is
+    # set). The "contact" field below must therefore look up THIS vehicle's own company
+    # explicitly by id, not rely on request-scoping -- otherwise every tenant's QR code
+    # would show whichever company happened to be scoped in some other unrelated request.
     v = await db.vehicles.find_one({"id": vid}, {"_id": 0})
     if not v: raise HTTPException(404, "Not found")
+    settings = await db.settings.find_one({"company_id": v.get("company_id")}, {"_id": 0}) or {}
+    contact = settings.get("business_name") or "Auto Stock Manager"
+    if settings.get("contact_phone"):
+        contact += f" · {settings['contact_phone']}"
     return {"id": v["id"], "brand": v.get("brand"), "model": v.get("model"),
             "variant": v.get("variant"), "year": v.get("year"),
             "engine_cc": v.get("engine_cc"), "fuel_type": v.get("fuel_type"),
@@ -1694,7 +1860,7 @@ async def get_vehicle_qr(vid: str):
             "kilometer_run": v.get("kilometer_run"), "condition": v.get("condition"),
             "selling_price": v.get("selling_price"), "minimum_selling_price": v.get("minimum_selling_price"),
             "registration_number": v.get("registration_number"), "status": v.get("status"),
-            "contact": "Hamro G&G Auto Enterprises"}
+            "contact": contact}
 
 # ── EXPENSES ──────────────────────────────────────────────────────────
 @api_router.get("/vehicles/{vid}/expenses")
@@ -2708,7 +2874,7 @@ async def monthly_breakdown_bs(cu: dict = Depends(admin_only)):
     (see Finance.jsx) instead of the Gregorian-month grouping /reports/financial uses."""
     return await _enriched_sales_for_closing()
 
-def _build_closing_report_xlsx(rows: list, month_label: str, prepared_by: str) -> bytes:
+def _build_closing_report_xlsx(rows: list, month_label: str, prepared_by: str, business_name: str = "Auto Stock Manager") -> bytes:
     import openpyxl
     from openpyxl.styles import PatternFill
 
@@ -2742,7 +2908,7 @@ def _build_closing_report_xlsx(rows: list, month_label: str, prepared_by: str) -
         for c in row:
             c.value = None
 
-    ws["A1"] = f"G&G Auto – Closing Report for the Month of {month_label}"
+    ws["A1"] = f"{business_name} – Closing Report for the Month of {month_label}"
     today = datetime.now(timezone.utc).date().isoformat()
     ws["A2"] = f"Report Month:  {month_label}        Prepared By:  {prepared_by or '________'}        Date Prepared:  {today}"
 
@@ -2824,9 +2990,11 @@ def _build_closing_report_xlsx(rows: list, month_label: str, prepared_by: str) -
 @api_router.get("/reports/monthly-closing-export")
 async def monthly_closing_export(start_date: str, end_date: str, label: str, cu: dict = Depends(admin_only)):
     rows = await _enriched_sales_for_closing(start_date, end_date)
-    xlsx_bytes = _build_closing_report_xlsx(rows, label, cu.get("username", ""))
+    settings = await db.settings.find_one({}, {"_id": 0}) or {}
+    business_name = settings.get("business_name") or "Auto Stock Manager"
+    xlsx_bytes = _build_closing_report_xlsx(rows, label, cu.get("username", ""), business_name)
     safe_label = re.sub(r"[^A-Za-z0-9]+", "_", label).strip("_")
-    filename = f"GG_Auto_Closing_Report_{safe_label}.xlsx"
+    filename = f"Closing_Report_{safe_label}.xlsx"
     return StreamingResponse(
         io.BytesIO(xlsx_bytes),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -2839,7 +3007,7 @@ _INVENTORY_PIPELINE_STATUSES = ["unlisted", "in_repair", "available", "reserved"
 _INVENTORY_STATUS_LABELS = {"unlisted": "Unlisted", "in_repair": "In Repair", "available": "Available",
                             "reserved": "Reserved", "sold": "Sold"}
 
-def _build_inventory_pipeline_xlsx(vehicles: list, prepared_by: str) -> bytes:
+def _build_inventory_pipeline_xlsx(vehicles: list, prepared_by: str, business_name: str = "Auto Stock Manager") -> bytes:
     import openpyxl
     template_path = ROOT_DIR / "report_templates" / "inventory_pipeline_template.xlsx"
     wb = openpyxl.load_workbook(template_path)
@@ -2882,7 +3050,7 @@ def _build_inventory_pipeline_xlsx(vehicles: list, prepared_by: str) -> bytes:
         for c in row:
             c.value = None
 
-    ws["A1"] = "G&G Auto – Vehicle Inventory Pipeline"
+    ws["A1"] = f"{business_name} – Vehicle Inventory Pipeline"
     today = datetime.now(timezone.utc).date().isoformat()
     ws["A2"] = f"As of:  {today}        Prepared By:  {prepared_by or '________'}"
 
@@ -2969,12 +3137,14 @@ async def inventory_pipeline_export(cu: dict = Depends(require("vehicles", "view
     vehicles = await db.vehicles.find({"status": {"$ne": "scrap"}}, {"_id": 0}).to_list(5000)
     order = {s: i for i, s in enumerate(_INVENTORY_PIPELINE_STATUSES)}
     vehicles.sort(key=lambda v: (order.get(v.get("status"), 99), v.get("purchase_date") or ""))
-    xlsx_bytes = _build_inventory_pipeline_xlsx(vehicles, cu.get("username", ""))
+    settings = await db.settings.find_one({}, {"_id": 0}) or {}
+    business_name = settings.get("business_name") or "Auto Stock Manager"
+    xlsx_bytes = _build_inventory_pipeline_xlsx(vehicles, cu.get("username", ""), business_name)
     today = datetime.now(timezone.utc).date().isoformat()
     return StreamingResponse(
         io.BytesIO(xlsx_bytes),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f'attachment; filename="GG_Auto_Inventory_Pipeline_{today}.xlsx"'},
+        headers={"Content-Disposition": f'attachment; filename="Inventory_Pipeline_{today}.xlsx"'},
     )
 
 # ── ACCOUNTING SUMMARY ────────────────────────────────────────────────
@@ -3082,6 +3252,7 @@ async def startup():
         await db.users.insert_one({
             "id": str(uuid.uuid4()), "username": "admin", "company_id": default_company_id,
             "password_hash": hash_pw("admin123"), "name": "Admin", "role": "admin",
+            "email_verified_at": datetime.now(timezone.utc).isoformat(),
             "created_at": datetime.now(timezone.utc).isoformat()
         })
         logger.info("Default admin created: admin / admin123")
@@ -3098,9 +3269,26 @@ async def startup():
             await db.users.insert_one({
                 "id": str(uuid.uuid4()), "username": acct["username"], "company_id": default_company_id,
                 "password_hash": hash_pw(acct["password"]), "name": acct["name"], "role": acct["role"],
+                "email_verified_at": datetime.now(timezone.utc).isoformat(),
                 "created_at": datetime.now(timezone.utc).isoformat()
             })
             logger.info(f"Default account created: {acct['username']} / {acct['password']}")
+
+    # Email verification (shipped 2026-08-20) only applies to brand-new self-signups going
+    # forward -- every account that existed before this feature must never be retroactively
+    # locked out of login. Filtered on created_at, not just "$exists: False", because on
+    # the MySQL backend a real signup's intentional email_verified_at=NULL (still pending
+    # verification) is indistinguishable from "column never set" -- sqldb.py's $exists
+    # translates to a plain IS NULL there, so without the created_at bound this would
+    # silently re-verify every not-yet-confirmed signup on every server restart. Mongo's
+    # $exists doesn't have that ambiguity, but the same filter is correct on both.
+    EMAIL_VERIFICATION_CUTOFF = "2026-08-21T00:00:00+00:00"  # feature ship date, end-of-day UTC
+    backfilled = await db.users.update_many(
+        {"email_verified_at": {"$exists": False}, "created_at": {"$lte": EMAIL_VERIFICATION_CUTOFF}},
+        {"$set": {"email_verified_at": datetime.now(timezone.utc).isoformat()}}
+    )
+    if backfilled.matched_count:
+        logger.info(f"Backfilled email_verified_at for {backfilled.matched_count} pre-existing user(s)")
     if await db.partners.count_documents({}) == 0:
         now = datetime.now(timezone.utc).isoformat()
         await db.partners.insert_many([
@@ -3130,10 +3318,10 @@ async def startup():
         await db.settings.insert_one({
             "id": "general", "company_id": default_company_id,
             "logo_url": "https://images.unsplash.com/photo-1777288411485-1eb05bd4a289?q=80&w=880&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D",
-            "business_name": "G&G AUTO Enterprises",
-            "contact_phone": "9860087161",
-            "contact_email": "info@ggautonp.com",
-            "address": "Nayabasti, Boudha",
+            "business_name": "My Auto Dealership",
+            "contact_phone": "98XXXXXXXX",
+            "contact_email": "info@example.com",
+            "address": "",
             "hero_image_url": "https://images.unsplash.com/photo-1622185135505-2d795003994a?q=80&w=1470&auto=format&fit=crop",
             "service_image_url": "",
         })
@@ -3145,8 +3333,15 @@ async def startup():
     asyncio.create_task(_compress_oversized_photos())
     asyncio.create_task(_compress_oversized_documents())
 
+_cors_origins_raw = os.environ.get('CORS_ORIGINS')
+if not _cors_origins_raw:
+    logger.warning(
+        "CORS_ORIGINS is not set -- defaulting to '*' (any origin). This is fine for local "
+        "dev but should never be left unset in production: set it to the frontend's exact "
+        "URL(s), comma-separated, in the environment. See DEPLOYMENT.md."
+    )
 app.add_middleware(CORSMiddleware, allow_credentials=True,
-                   allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
+                   allow_origins=(_cors_origins_raw or '*').split(','),
                    allow_methods=["*"], allow_headers=["*"])
 # Compresses JSON responses over 1KB (list endpoints especially) before they hit the
 # network — no API/behavior change, just a smaller wire payload.
@@ -3851,7 +4046,15 @@ async def break_kit(pid: str, req: BreakKitRequest, cu: dict = Depends(require("
 # ══════════════════════════════════════════════════════════════════════
 @api_router.get("/sync/export")
 async def export_for_website(cu: dict = Depends(admin_only)):
-    """Export available inventory in hamroauto.com.np listing format."""
+    """Export available inventory in a listing format an external storefront can consume
+    (originally built for hamroauto.com.np's site, but the shape/fields aren't specific to
+    any one tenant -- "contact"/"source" below reflect whichever company is calling this,
+    not a hardcoded business)."""
+    settings = await db.settings.find_one({}, {"_id": 0}) or {}
+    business_name = settings.get("business_name") or "Auto Stock Manager"
+    contact_parts = [p for p in [business_name, settings.get("address"), settings.get("contact_phone")] if p]
+    contact = " · ".join(contact_parts)
+    source = re.sub(r"[^a-z0-9]+", "_", business_name.lower()).strip("_") or "auto_stock_manager"
     vehicles = await db.vehicles.find({"status": "available"}, {"_id": 0}).to_list(200)
     vehicle_ids = [v["id"] for v in vehicles]
     photos_by_vehicle: dict = {}
@@ -3875,8 +4078,8 @@ async def export_for_website(cu: dict = Depends(admin_only)):
                 "tax": v.get("tax_clearance_status"), "transfer": v.get("transfer_status"),
             },
             "photos": [f"data:{p['content_type']};base64,{p['data']}" for p in photos],
-            "contact": "Hamro G&G Auto · Kathmandu · 98XXXXXXXX",
-            "source": "hamro_gng_auto",
+            "contact": contact,
+            "source": source,
             "exported_at": datetime.now(timezone.utc).isoformat(),
         })
     return {"count": len(listings), "listings": listings, "exported_at": datetime.now(timezone.utc).isoformat()}
