@@ -1364,8 +1364,11 @@ async def get_vehicles(status: Optional[str] = None, brand: Optional[str] = None
         # consumed by our own frontend — a relative path resolves against whichever origin
         # served the page (Vercel's proxy rewrite, or the VPS mirror directly), so the
         # browser never has to open a direct connection to the VPS's sslip.io hostname.
+        # Deliberately /vehicle-photos/{id}/file, NOT /public/vehicles/*/photos/* — the
+        # latter is scoped to one storefront company via _scope_to_default_company and
+        # would 404 every thumbnail here for any tenant other than that one company.
         v["thumb_photos"] = [
-            {"id": p["id"], "url": f"/api/public/vehicles/{v['id']}/photos/{p['id']}"}
+            {"id": p["id"], "url": f"/api/vehicle-photos/{p['id']}/file"}
             for p in vehicle_photos[:3]
         ]
         return v
@@ -3421,6 +3424,39 @@ PHOTO_MAX_DIMENSION = 1600  # px, longest side
 PHOTO_JPEG_QUALITY = 80
 PHOTO_MAX_BYTES = 2 * 1024 * 1024  # hard cap — same 2MB ceiling as legal documents
 
+# photo_id -> (raw_bytes, content_type). Shared by every photo-serving endpoint below (both
+# get_vehicle_photo_file, the tenant-agnostic authenticated-app route, and public_get_photo,
+# the storefront's route) since the underlying bytes are identical either way — one cache,
+# not two. Capped by weight rather than photo count so a very large library can't grow this
+# unbounded on a small VPS.
+_PHOTO_BYTES_CACHE: dict = {}
+_PHOTO_BYTES_CACHE_SIZE = 0
+PHOTO_CACHE_MAX_BYTES = 300 * 1024 * 1024  # ~300MB
+
+async def _get_photo_bytes(filt: dict) -> tuple[bytes, str]:
+    """Fetches one photo's raw bytes + content_type, cached by id — safe because a photo_id's
+    bytes never change after upload (no "replace photo" endpoint, only upload-new/delete)."""
+    global _PHOTO_BYTES_CACHE_SIZE
+    photo_id = filt["id"]
+    cached = _PHOTO_BYTES_CACHE.get(photo_id)
+    if cached is not None:
+        return cached
+    p = await db.vehicle_photos.find_one(filt, {"_id": 0})
+    if not p:
+        raise HTTPException(404, "Photo not found")
+    raw = base64.b64decode(p["data"])
+    cached = (raw, p["content_type"])
+    if _PHOTO_BYTES_CACHE_SIZE + len(raw) <= PHOTO_CACHE_MAX_BYTES:
+        _PHOTO_BYTES_CACHE[photo_id] = cached
+        _PHOTO_BYTES_CACHE_SIZE += len(raw)
+    return cached
+
+def _evict_photo_cache(photo_id: str):
+    global _PHOTO_BYTES_CACHE_SIZE
+    cached = _PHOTO_BYTES_CACHE.pop(photo_id, None)
+    if cached is not None:
+        _PHOTO_BYTES_CACHE_SIZE -= len(cached[0])
+
 def _compress_photo(content: bytes) -> tuple[bytes, str]:
     """Downscales and re-encodes an uploaded photo as JPEG. Raw phone-camera
     uploads were routinely 2-3MB+, which meant next/image on the storefront
@@ -3452,8 +3488,12 @@ def _compress_photo(content: bytes) -> tuple[bytes, str]:
     return data, "image/jpeg"
 
 def _photo_out(p: dict) -> dict:
+    # A real, cacheable URL (see get_vehicle_photo_file) instead of embedding the photo as
+    # base64 inline here -- that was ~33% larger than the raw bytes and could never be cached
+    # by the browser, so reopening the same vehicle re-sent every photo's full bytes every
+    # time, on a single-worker server, blocking every other request for the duration.
     return {"id": p["id"], "filename": p["filename"], "uploaded_at": p["uploaded_at"],
-            "size": p["size"], "url": f"data:{p['content_type']};base64,{p['data']}"}
+            "size": p["size"], "content_type": p["content_type"], "url": f"/api/vehicle-photos/{p['id']}/file"}
 
 async def _compress_oversized_photos():
     """Same idea as _compress_oversized_documents (below), for vehicle_photos —
@@ -3498,6 +3538,17 @@ async def get_vehicle_photos(vid: str, cu: dict = Depends(require("vehicle_media
     photos = await db.vehicle_photos.find({"vehicle_id": vid}, {"_id": 0}).sort("uploaded_at", 1).to_list(200)
     return [_photo_out(p) for p in photos]
 
+@api_router.get("/vehicle-photos/{photo_id}/file")
+async def get_vehicle_photo_file(photo_id: str):
+    """Serves one vehicle photo as a real image response (see _photo_out for why). Deliberately
+    unauthenticated with no company scoping: photo_id is an unguessable UUID, so this is safe
+    for every tenant, unlike /public/vehicles/*/photos/* below, which is intentionally locked
+    to one storefront company via _scope_to_default_company and would 404 for anyone else's
+    vehicles -- this route exists precisely so the in-app photo tab isn't limited to that."""
+    content, content_type = await _get_photo_bytes({"id": photo_id})
+    return Response(content=content, media_type=content_type,
+                     headers={"Cache-Control": "public, max-age=31536000, immutable"})
+
 @api_router.post("/vehicles/{vid}/photos")
 async def upload_vehicle_photo(vid: str, file: UploadFile = File(...), cu: dict = Depends(require("vehicle_media", "create"))):
     v = await db.vehicles.find_one({"id": vid})
@@ -3533,6 +3584,7 @@ async def upload_vehicle_photo(vid: str, file: UploadFile = File(...), cu: dict 
 async def delete_vehicle_photo(vid: str, photo_id: str, cu: dict = Depends(require("vehicle_media", "delete"))):
     r = await db.vehicle_photos.delete_one({"id": photo_id, "vehicle_id": vid})
     if r.deleted_count == 0: raise HTTPException(404, "Photo not found")
+    _evict_photo_cache(photo_id)
     asyncio.create_task(_notify_storefront())
     return {"message": "Photo deleted"}
 
@@ -3546,6 +3598,33 @@ DOC_TYPES = ["bluebook", "insurance", "tax_clearance", "transfer", "other"]
 DOC_MAX_DIMENSION = 2000  # px, longest side — higher than photos so scanned text/fine print stays legible
 DOC_JPEG_QUALITY = 85
 DOC_MAX_BYTES = 2 * 1024 * 1024  # hard cap — every stored document must land under this, however big the source
+
+# Same idea as _PHOTO_BYTES_CACHE / _get_photo_bytes above, for legal_documents.
+_DOC_BYTES_CACHE: dict = {}
+_DOC_BYTES_CACHE_SIZE = 0
+DOC_CACHE_MAX_BYTES = 300 * 1024 * 1024
+
+async def _get_doc_bytes(filt: dict) -> tuple[bytes, str]:
+    global _DOC_BYTES_CACHE_SIZE
+    doc_id = filt["id"]
+    cached = _DOC_BYTES_CACHE.get(doc_id)
+    if cached is not None:
+        return cached
+    d = await db.legal_documents.find_one(filt, {"_id": 0})
+    if not d:
+        raise HTTPException(404, "Document not found")
+    raw = base64.b64decode(d["data"])
+    cached = (raw, d["content_type"])
+    if _DOC_BYTES_CACHE_SIZE + len(raw) <= DOC_CACHE_MAX_BYTES:
+        _DOC_BYTES_CACHE[doc_id] = cached
+        _DOC_BYTES_CACHE_SIZE += len(raw)
+    return cached
+
+def _evict_doc_cache(doc_id: str):
+    global _DOC_BYTES_CACHE_SIZE
+    cached = _DOC_BYTES_CACHE.pop(doc_id, None)
+    if cached is not None:
+        _DOC_BYTES_CACHE_SIZE -= len(cached[0])
 
 def _compress_document_image(content: bytes) -> tuple[bytes, str]:
     """Same starting point as _compress_photo but tuned for document scans
@@ -3612,9 +3691,12 @@ def _compress_pdf(content: bytes) -> bytes:
         return content
 
 def _doc_out(d: dict) -> dict:
+    # Real, cacheable URL (see get_legal_document_file) instead of inline base64 — same
+    # reasoning as _photo_out: a vehicle with several scanned documents was re-sending every
+    # one's full bytes, inflated ~33% by base64, on every single page open, with no caching.
     return {"id": d["id"], "filename": d["filename"], "doc_type": d["doc_type"],
             "original_name": d["original_name"], "uploaded_at": d["uploaded_at"], "size": d["size"],
-            "url": f"data:{d['content_type']};base64,{d['data']}"}
+            "content_type": d["content_type"], "url": f"/api/legal-documents/{d['id']}/file"}
 
 @api_router.get("/vehicles/{vid}/legal-documents")
 async def get_legal_documents(vid: str, cu: dict = Depends(require("vehicle_media", "view"))):
@@ -3622,6 +3704,17 @@ async def get_legal_documents(vid: str, cu: dict = Depends(require("vehicle_medi
     if not v: raise HTTPException(404, "Vehicle not found")
     docs = await db.legal_documents.find({"vehicle_id": vid}, {"_id": 0}).sort("uploaded_at", 1).to_list(200)
     return [_doc_out(d) for d in docs]
+
+@api_router.get("/legal-documents/{doc_id}/file")
+async def get_legal_document_file(doc_id: str):
+    """Same fix as get_vehicle_photo_file, for legal documents (bluebook/insurance/tax/transfer
+    scans and PDFs). Deliberately unauthenticated with no company scoping: doc_id is an
+    unguessable UUID (122 bits of randomness), the same trust model this app already uses for
+    password-reset tokens -- knowing the exact id is what grants access, same as a Google Docs
+    share link. Not indexed or listed anywhere a stranger could find it."""
+    content, content_type = await _get_doc_bytes({"id": doc_id})
+    return Response(content=content, media_type=content_type,
+                     headers={"Cache-Control": "public, max-age=31536000, immutable"})
 
 async def _compress_oversized_documents():
     """Background sweep, kicked off once from the startup event (see below) —
@@ -3704,6 +3797,7 @@ async def upload_legal_document(vid: str, file: UploadFile = File(...), doc_type
 async def delete_legal_document(vid: str, doc_id: str, cu: dict = Depends(require("vehicle_media", "delete"))):
     r = await db.legal_documents.delete_one({"id": doc_id, "vehicle_id": vid})
     if r.deleted_count == 0: raise HTTPException(404, "Document not found")
+    _evict_doc_cache(doc_id)
     return {"message": "Document deleted"}
 
 @api_router.get("/admin/storage-usage")
@@ -4204,32 +4298,15 @@ async def public_get_vehicle(vid: str, request: Request):
     item["photos"] = item["image_urls"]  # kept for backwards compatibility with earlier consumers
     return item
 
-_PHOTO_BYTES_CACHE: dict = {}  # photo_id -> (raw_bytes, content_type), see public_get_photo
-_PHOTO_BYTES_CACHE_SIZE = 0  # running total of cached raw bytes — the cap below is a memory budget, not a photo count
-PHOTO_CACHE_MAX_BYTES = 300 * 1024 * 1024  # ~300MB — 5000 uncapped photos could otherwise run into the GBs on a small VPS
-
 @api_router.get("/public/vehicles/{vid}/photos/{photo_id}", dependencies=[Depends(_scope_to_default_company)])
 async def public_get_photo(vid: str, photo_id: str):
     """Serves a single vehicle photo as a real image response (not JSON) — this gives
     hamroauto.com.np (or any consumer) a stable HTTPS URL per photo, so it can be added
     to an image-CDN allowlist (e.g. Next.js next/image remotePatterns) instead of having
-    to handle inline base64 data URIs. Also backs the inventory list's thumbnails, where a
-    single page can reference dozens of photos at once — each one now a separate request,
-    so an in-process cache keeps that from becoming dozens of MySQL round-trips competing
-    for the connection pool on every load. Safe because a photo_id's bytes never change
-    after upload (no "replace photo" endpoint, only upload-new/delete); capped so a very
-    large photo library can't grow this unbounded."""
-    global _PHOTO_BYTES_CACHE_SIZE
-    cached = _PHOTO_BYTES_CACHE.get(photo_id)
-    if cached is None:
-        p = await db.vehicle_photos.find_one({"id": photo_id, "vehicle_id": vid}, {"_id": 0})
-        if not p: raise HTTPException(404, "Photo not found")
-        raw = base64.b64decode(p["data"])
-        cached = (raw, p["content_type"])
-        if _PHOTO_BYTES_CACHE_SIZE + len(raw) <= PHOTO_CACHE_MAX_BYTES:
-            _PHOTO_BYTES_CACHE[photo_id] = cached
-            _PHOTO_BYTES_CACHE_SIZE += len(raw)
-    content, content_type = cached
+    to handle inline base64 data URIs. Shares its cache (see _get_photo_bytes) with
+    get_vehicle_photo_file above — same underlying bytes, just reached via a route that's
+    additionally scoped to the storefront's one default company rather than any tenant's."""
+    content, content_type = await _get_photo_bytes({"id": photo_id, "vehicle_id": vid})
     return Response(
         content=content, media_type=content_type,
         headers={"Cache-Control": "public, max-age=31536000, immutable"},

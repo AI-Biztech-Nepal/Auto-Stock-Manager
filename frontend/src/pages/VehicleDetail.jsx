@@ -669,7 +669,7 @@ export function VehicleDetailModal({ id, onClose }) {
                         {docs.map(doc => (
                           <div key={doc.id} className="relative rounded-md overflow-hidden aspect-square bg-slate-100" data-testid="uploaded-doc">
                             <button type="button" onClick={() => setPreviewDoc(doc)} className="block w-full h-full" title={doc.original_name}>
-                              {doc.url.startsWith("data:image") ? (
+                              {doc.content_type?.startsWith("image/") ? (
                                 <img src={doc.url} alt={doc.original_name} className="w-full h-full object-cover" />
                               ) : (
                                 <div className="w-full h-full flex items-center justify-center">
@@ -703,7 +703,7 @@ export function VehicleDetailModal({ id, onClose }) {
                   {legalDocs.filter(d => d.doc_type === "other").map(doc => (
                     <div key={doc.id} className="relative rounded-md overflow-hidden aspect-square bg-slate-100" data-testid="uploaded-doc-other">
                       <button type="button" onClick={() => setPreviewDoc(doc)} className="block w-full h-full" title={doc.original_name}>
-                        {doc.url.startsWith("data:image") ? (
+                        {doc.content_type?.startsWith("image/") ? (
                           <img src={doc.url} alt={doc.original_name} className="w-full h-full object-cover" />
                         ) : (
                           <div className="w-full h-full flex items-center justify-center">
@@ -772,7 +772,7 @@ export function VehicleDetailModal({ id, onClose }) {
             <a href={previewDoc.url} download={previewDoc.original_name} onClick={e => e.stopPropagation()} className="w-11 h-11 flex items-center justify-center rounded-lg bg-white/10 hover:bg-white/20 text-white" title="Download"><Download size={18} /></a>
             <button onClick={() => setPreviewDoc(null)} className="w-11 h-11 flex items-center justify-center rounded-lg bg-white/10 hover:bg-white/20 text-white">✕</button>
           </div>
-          {previewDoc.url.startsWith("data:application/pdf") ? (
+          {previewDoc.content_type === "application/pdf" ? (
             <iframe src={previewDoc.url} title={previewDoc.original_name} className="w-full h-full max-w-4xl bg-white rounded-lg" onClick={e => e.stopPropagation()} />
           ) : (
             <img src={previewDoc.url} alt={previewDoc.original_name} className="max-w-full max-h-full object-contain rounded-lg" onClick={e => e.stopPropagation()} />
