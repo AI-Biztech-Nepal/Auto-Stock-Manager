@@ -271,7 +271,19 @@ async def _consume_auth_token(raw_token: str, purpose: str) -> Optional[dict]:
     return rec
 
 @app.get("/api/health")
-async def health(): return {"status": "ok", "service": "Auto Stock Manager"}
+async def health():
+    # A cheap, backend-agnostic round trip (works against both Mongo and MySQL via the
+    # same db.<collection> interface) so this actually proves the DB is reachable, not
+    # just that the process is up. 5s cap so a hung DB doesn't hang this check itself.
+    # No exception detail in the response (public, unauthenticated endpoint) -- the full
+    # error still goes to the server log for whoever's debugging.
+    try:
+        await asyncio.wait_for(db.companies.count_documents({}), timeout=5)
+        db_status = "ok"
+    except Exception:
+        logger.error("Health check: database unreachable", exc_info=True)
+        db_status = "unreachable"
+    return {"status": "ok", "service": "Auto Stock Manager", "db_backend": DB_BACKEND, "database": db_status}
 
 # ── Auth Helpers ──────────────────────────────────────────────────────
 def hash_pw(pw: str) -> str: return pwd_context.hash(pw)
