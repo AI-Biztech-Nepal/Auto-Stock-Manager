@@ -486,7 +486,7 @@ export function VehicleDetailModal({ id, onClose }) {
                   <div className="border-t border-slate-100 pt-4">
                     <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Document Status</p>
                     <div className="grid grid-cols-2 gap-3">
-                      {[["bluebook_status", "Bluebook"], ["insurance_status", "Insurance"], ["tax_clearance_status", "Tax Clearance"], ["transfer_status", "Transfer"]].map(([key, label]) => (
+                      {[["bluebook_status", "Bluebook"], ["insurance_status", "Insurance"], ["tax_clearance_status", "Tax Clearance"], ["transfer_status", "Transfer"], ["ownership_termination_status", "Ownership Termination Proof"]].map(([key, label]) => (
                         <Field key={key} label={label}>
                           <select value={editForm[key] || "pending"} onChange={e => setEditForm({ ...editForm, [key]: e.target.value })} className={sel}>
                             <option value="pending">Pending</option>
@@ -652,7 +652,7 @@ export function VehicleDetailModal({ id, onClose }) {
           <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
             <h2 className="text-sm font-bold text-slate-900 mb-3" style={{ fontFamily: "Manrope" }}>Legal Documents</h2>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
-              {[["bluebook", "Bluebook"], ["transfer", "Transfer"], ["tax_clearance", "Tax Clearance"], ["insurance", "Insurance"]].map(([key, label]) => {
+              {[["bluebook", "Bluebook"], ["transfer", "Transfer"], ["tax_clearance", "Tax Clearance"], ["insurance", "Insurance"], ["ownership_termination", "Ownership Termination Proof"]].map(([key, label]) => {
                 const status = vehicle[`${key}_status`];
                 const docs = legalDocs.filter(d => d.doc_type === key);
                 return (

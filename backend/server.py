@@ -944,6 +944,7 @@ class VehicleCreate(BaseModel):
     insurance_status: str = "pending"
     tax_clearance_status: str = "pending"
     transfer_status: str = "pending"
+    ownership_termination_status: str = "pending"
 
 class VehicleUpdate(BaseModel):
     brand: Optional[str] = None; model: Optional[str] = None
@@ -967,6 +968,7 @@ class VehicleUpdate(BaseModel):
     discount: Optional[float] = None
     bluebook_status: Optional[str] = None; insurance_status: Optional[str] = None
     tax_clearance_status: Optional[str] = None; transfer_status: Optional[str] = None
+    ownership_termination_status: Optional[str] = None
 
 class VehicleStatusUpdate(BaseModel):
     status: str
@@ -1517,6 +1519,7 @@ def _parse_vehicle_import_rows(content: bytes, filename: str, created_by: str):
                 "status": status_val,
                 "bluebook_status": "pending", "insurance_status": "pending",
                 "tax_clearance_status": "pending", "transfer_status": "pending",
+                "ownership_termination_status": "pending",
                 "sold_date": None, "customer_id": None,
                 "salesperson_id": None, "salesperson_name": None, "discount": 0,
                 "created_at": datetime.now(timezone.utc).isoformat(),
@@ -3594,7 +3597,7 @@ async def delete_vehicle_photo(vid: str, photo_id: str, cu: dict = Depends(requi
 # ══════════════════════════════════════════════════════════════════════
 ALLOWED_DOC_TYPES = {"application/pdf", "image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"}
 DOC_EXTENSIONS = IMAGE_EXTENSIONS | {".pdf"}
-DOC_TYPES = ["bluebook", "insurance", "tax_clearance", "transfer", "other"]
+DOC_TYPES = ["bluebook", "insurance", "tax_clearance", "transfer", "ownership_termination", "other"]
 DOC_MAX_DIMENSION = 2000  # px, longest side — higher than photos so scanned text/fine print stays legible
 DOC_JPEG_QUALITY = 85
 DOC_MAX_BYTES = 2 * 1024 * 1024  # hard cap — every stored document must land under this, however big the source
@@ -3764,6 +3767,7 @@ async def _compress_oversized_documents():
 async def upload_legal_document(vid: str, file: UploadFile = File(...), doc_type: str = Form("other"), cu: dict = Depends(require("vehicle_media", "create"))):
     v = await db.vehicles.find_one({"id": vid})
     if not v: raise HTTPException(404, "Vehicle not found")
+    if doc_type not in DOC_TYPES: doc_type = "other"
     if not _upload_type_ok(file, ALLOWED_DOC_TYPES, DOC_EXTENSIONS):
         raise HTTPException(400, "Only PDF/JPEG/PNG/HEIC allowed for documents.")
     content = await file.read()
