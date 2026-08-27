@@ -8,7 +8,7 @@ import VehicleComboBox from "../components/VehicleComboBox";
 import BSDatePicker from "../components/BSDatePicker";
 import HoverADDate from "../components/HoverADDate";
 import { useAuth } from "../context/AuthContext";
-import { canEditJobs, canDeleteJobs } from "../utils/permissions";
+import { canEditJobs, canDeleteJobs, PARTS_ALLOWED_VEHICLE_STATUSES } from "../utils/permissions";
 
 const STATUSES = ["all", "pending", "in_progress", "completed"];
 // Vehicle pipeline-status filter — "external" covers job cards with no linked inventory vehicle.
@@ -57,6 +57,11 @@ export default function JobCards() {
   const [mechanics, setMechanics] = useState([]);
   const [saving, setSaving] = useState(false);
   const [updating, setUpdating] = useState(null);
+  // Set when a completed job card leaves a vehicle in Repair with no recorded prior status —
+  // the user is prompted to choose where it goes next (anything but back to Repair).
+  const [statusChoice, setStatusChoice] = useState(null);
+  const [choiceStatus, setChoiceStatus] = useState("available");
+  const [choiceSaving, setChoiceSaving] = useState(false);
 
   // Parts linked to the new job
   const [jobParts, setJobParts] = useState([]);
@@ -287,10 +292,31 @@ export default function JobCards() {
     try {
       const upd = { status: newStatus };
       if (actualCost !== null) upd.actual_cost = Number(actualCost);
-      await api.put(`/jobs/${jobId}`, upd);
-      toast.success("Status updated");
+      const res = await api.put(`/jobs/${jobId}`, upd);
+      const vsc = res.data?.vehicle_status_change;
+      if (vsc?.flipped_to) {
+        toast.success(`Job completed — vehicle moved back to ${getStatusStyle(vsc.flipped_to).label}`);
+      } else if (vsc?.needs_choice) {
+        toast.success("Job completed");
+        setChoiceStatus("available");
+        setStatusChoice({ vehicleId: vsc.vehicle_id });
+      } else {
+        toast.success("Status updated");
+      }
       fetchJobs();
     } catch (err) { toast.error(getErrMsg(err)); } finally { setUpdating(null); }
+  };
+
+  const applyStatusChoice = async () => {
+    if (!statusChoice) return;
+    setChoiceSaving(true);
+    try {
+      await api.patch(`/vehicles/${statusChoice.vehicleId}/status`, { status: choiceStatus });
+      toast.success(`Vehicle moved to ${getStatusStyle(choiceStatus).label}`);
+      setStatusChoice(null);
+      fetchJobs();
+    } catch (err) { toast.error(getErrMsg(err)); }
+    finally { setChoiceSaving(false); }
   };
 
   const deleteJob = async (jobId) => {
@@ -459,6 +485,11 @@ export default function JobCards() {
                     </button>
                   )}
                   {job.status === "completed" && <span className="text-xs text-green-600 font-medium">Completed {job.completed_at?.slice(0, 10)}</span>}
+                  {canEdit && job.status === "completed" && job.vehicle_id && job.vehicle_status === "in_repair" && (
+                    <button onClick={() => { setChoiceStatus("available"); setStatusChoice({ vehicleId: job.vehicle_id }); }} className="px-2.5 py-1.5 bg-purple-100 text-purple-700 text-xs font-medium rounded-lg hover:bg-purple-200 transition-colors">
+                      Move vehicle out of repair
+                    </button>
+                  )}
                   <div className="ml-auto flex items-center gap-2">
                     {canEdit && (
                       <button onClick={() => openEditModal(job)} data-testid="edit-job-button" className="flex items-center gap-1 px-2.5 py-1.5 bg-slate-100 text-slate-700 text-xs font-medium rounded-lg hover:bg-slate-200 transition-colors">
@@ -755,6 +786,35 @@ export default function JobCards() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {statusChoice && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" data-testid="job-status-choice-modal">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-5">
+            <h3 className="text-base font-bold text-slate-900 mb-1" style={{ fontFamily: "Manrope, sans-serif" }}>Move vehicle out of Repair</h3>
+            <p className="text-xs text-slate-500 mb-4">
+              This vehicle was entered directly into the Repair stage, so there's no earlier status to return it to.
+              All of its job cards are complete — choose where it should go now.
+            </p>
+            <label className="block text-xs font-medium text-slate-600 mb-1">New status</label>
+            <select value={choiceStatus} onChange={e => setChoiceStatus(e.target.value)} className={sel} data-testid="job-status-choice-select">
+              {VEHICLE_STATUS_OPTIONS
+                .filter(o => o.value !== "in_repair")
+                .filter(o => user?.role !== "parts_supervisor" || PARTS_ALLOWED_VEHICLE_STATUSES.includes(o.value))
+                .map(o => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
+            </select>
+            <div className="flex gap-3 mt-5">
+              <button type="button" onClick={() => setStatusChoice(null)} className="flex-1 h-10 border border-slate-200 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50">
+                Keep In Repair
+              </button>
+              <button type="button" onClick={applyStatusChoice} disabled={choiceSaving} data-testid="job-status-choice-confirm" className="flex-1 h-10 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-semibold disabled:opacity-60">
+                {choiceSaving ? "Moving..." : "Move Vehicle"}
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -1664,6 +1664,14 @@ async def update_vehicle(vid: str, vehicle: VehicleUpdate, cu: dict = Depends(re
         if dup:
             raise HTTPException(400, f"Registration number '{upd['registration_number']}' is already in stock")
     upd["updated_at"] = datetime.now(timezone.utc).isoformat()
+    # Same pre_repair_status bookkeeping as PATCH /vehicles/{vid}/status — keep the edit form
+    # and the quick status control in sync so a completed job card knows where to send the
+    # vehicle back to (see update_job).
+    _new_status = upd.get("status", existing.get("status"))
+    if _new_status == "in_repair" and existing.get("status") != "in_repair":
+        upd["pre_repair_status"] = existing.get("status")
+    elif _new_status != "in_repair" and existing.get("status") == "in_repair":
+        upd["pre_repair_status"] = None
     if upd.get("status") == "sold" and "sold_date" not in upd:
         # Preserve the original sale date if this vehicle was sold before — otherwise
         # re-marking Sold (e.g. after a warranty repair stint) resets the sale date
@@ -1742,6 +1750,12 @@ async def update_vehicle_status(vid: str, body: VehicleStatusUpdate, cu: dict = 
             raise HTTPException(403, "You do not have permission to set this vehicle status")
 
     upd = {"status": body.status, "updated_at": datetime.now(timezone.utc).isoformat()}
+    # Remember where the vehicle came from when it enters Repair, so a completed job card can
+    # send it back there (see update_job); clear it once it leaves Repair by any route.
+    if body.status == "in_repair" and existing.get("status") != "in_repair":
+        upd["pre_repair_status"] = existing.get("status")
+    elif body.status != "in_repair" and existing.get("status") == "in_repair":
+        upd["pre_repair_status"] = None
     if body.status == "sold":
         # Preserve the original sale date if this vehicle was sold before (e.g. it was
         # flipped to In Repair for a warranty return and is now being flipped back) —
@@ -1976,10 +1990,13 @@ async def create_job(job: JobCardCreate, cu: dict = Depends(require("jobs", "cre
     jc.pop("_id", None)
     # Opening a job card moves the vehicle into the Repair stage automatically. Skipped for
     # warranty jobs (the vehicle stays Sold) and external vehicles (no inventory record).
+    # pre_repair_status records where it came from so it can be flipped back once every job
+    # card on it is completed (see update_job).
     if jc.get("vehicle_id") and not jc.get("is_warranty") and v.get("status") == "available":
         await db.vehicles.update_one(
             {"id": jc["vehicle_id"]},
-            {"$set": {"status": "in_repair", "updated_at": datetime.now(timezone.utc).isoformat()}},
+            {"$set": {"status": "in_repair", "pre_repair_status": "available",
+                      "updated_at": datetime.now(timezone.utc).isoformat()}},
         )
         await db.audit_logs.insert_one({"action": "vehicle_status_updated", "vehicle_id": jc["vehicle_id"],
             "user": cu["username"], "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -2066,7 +2083,40 @@ async def update_job(jid: str, job: JobCardUpdate, cu: dict = Depends(require("j
 
     r = await db.job_cards.update_one({"id": jid}, {"$set": upd})
     if r.matched_count == 0: raise HTTPException(404, "Job not found")
-    return await db.job_cards.find_one({"id": jid}, {"_id": 0})
+    result = await db.job_cards.find_one({"id": jid}, {"_id": 0})
+
+    # Completing the last open job card on a vehicle takes it back out of the Repair stage.
+    # If pre_repair_status is on record (it was moved into repair from another stage), flip
+    # straight back to that. If it isn't (the vehicle was entered directly as In Repair),
+    # leave it put and tell the client to prompt the user for where it should go.
+    became_completed = upd.get("status") == "completed" and existing.get("status") != "completed"
+    if became_completed and existing.get("vehicle_id") and not existing.get("is_warranty"):
+        veh = await db.vehicles.find_one({"id": existing["vehicle_id"]}, {"_id": 0})
+        if veh and veh.get("status") == "in_repair":
+            other_open = await db.job_cards.count_documents({
+                "vehicle_id": existing["vehicle_id"],
+                "id": {"$ne": jid},
+                "status": {"$in": ["pending", "in_progress"]},
+            })
+            if other_open == 0:
+                prev = veh.get("pre_repair_status")
+                # "sold" goes through the prompt too — re-selling needs a human (and a sale
+                # record), it should never happen as a silent side effect of closing a job.
+                if prev and prev not in ("in_repair", "sold"):
+                    await db.vehicles.update_one(
+                        {"id": existing["vehicle_id"]},
+                        {"$set": {"status": prev, "pre_repair_status": None,
+                                  "updated_at": datetime.now(timezone.utc).isoformat()}},
+                    )
+                    await db.audit_logs.insert_one({"action": "vehicle_status_updated", "vehicle_id": existing["vehicle_id"],
+                        "user": cu["username"], "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "details": f"Status changed from in_repair to {prev} (job card {existing.get('job_number')} completed)"})
+                    asyncio.create_task(_notify_storefront())
+                    result["vehicle_status_change"] = {"flipped_to": prev, "vehicle_id": existing["vehicle_id"]}
+                else:
+                    result["vehicle_status_change"] = {"needs_choice": True, "vehicle_id": existing["vehicle_id"]}
+
+    return result
 
 @api_router.delete("/jobs/{jid}")
 async def delete_job(jid: str, cu: dict = Depends(require("jobs", "delete"))):
