@@ -84,11 +84,11 @@ export default function JobCards() {
   useEffect(() => {
     fetchJobs();
     Promise.all([
-      api.get("/vehicles?status=in_repair"),
+      api.get("/vehicles?status=in_repair,available"),
       api.get("/vehicles?status=sold"),
-    ]).then(([repair, sold]) => {
+    ]).then(([active, sold]) => {
       const underWarranty = sold.data.filter(v => isWithinWarranty(v.sold_date));
-      setVehicles([...repair.data, ...underWarranty]);
+      setVehicles([...active.data, ...underWarranty]);
     }).catch(() => {});
     api.get("/spare-parts").then(r => setSpareParts(r.data)).catch(() => {});
     api.get("/team").then(r => setMechanics(r.data.filter(m => m.role === "mechanic"))).catch(() => {});

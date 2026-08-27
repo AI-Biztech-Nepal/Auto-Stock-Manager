@@ -1968,12 +1968,23 @@ async def create_job(job: JobCardCreate, cu: dict = Depends(require("jobs", "cre
             if not _within_warranty(v):
                 raise HTTPException(400, "This vehicle's 6-month warranty period has expired")
             jc["is_warranty"] = True
-        elif v.get("status") != "in_repair":
-            raise HTTPException(400, "Job cards can only be created for vehicles in the Repair stage, or sold vehicles still under warranty")
+        elif v.get("status") not in ("available", "in_repair"):
+            raise HTTPException(400, "Job cards can only be created for Available or In Repair vehicles, or sold vehicles still under warranty")
         jc["vehicle_brand"] = v.get("brand"); jc["vehicle_model"] = v.get("model")
         jc["vehicle_year"] = v.get("year"); jc["registration_number"] = v.get("registration_number")
     await db.job_cards.insert_one(jc)
     jc.pop("_id", None)
+    # Opening a job card moves the vehicle into the Repair stage automatically. Skipped for
+    # warranty jobs (the vehicle stays Sold) and external vehicles (no inventory record).
+    if jc.get("vehicle_id") and not jc.get("is_warranty") and v.get("status") == "available":
+        await db.vehicles.update_one(
+            {"id": jc["vehicle_id"]},
+            {"$set": {"status": "in_repair", "updated_at": datetime.now(timezone.utc).isoformat()}},
+        )
+        await db.audit_logs.insert_one({"action": "vehicle_status_updated", "vehicle_id": jc["vehicle_id"],
+            "user": cu["username"], "timestamp": datetime.now(timezone.utc).isoformat(),
+            "details": f"Status changed from available to in_repair (job card {jc['job_number']} opened)"})
+        asyncio.create_task(_notify_storefront())
     # Deduct parts (or, for a Set, one specific component within it) from spare parts inventory and log transactions
     for part in jc.get("parts", []):
         part_id = part.get("part_id")
