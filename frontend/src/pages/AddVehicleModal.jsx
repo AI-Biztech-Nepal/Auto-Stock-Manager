@@ -223,7 +223,7 @@ export function AddVehicleModal({ form, setForm, onClose, onSubmit, saving, phot
           <div className="border-t border-slate-100 pt-4">
             <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Document Status</p>
             <div className="grid grid-cols-2 gap-3">
-              {[["bluebook_status", "Bluebook"], ["insurance_status", "Insurance"], ["tax_clearance_status", "Tax Clearance"], ["transfer_status", "Transfer"], ["ownership_termination_status", "Ownership Termination Proof"]].map(([key, label]) => (
+              {[["bluebook_status", "Bluebook"], ["tax_clearance_status", "Tax Clearance"], ["transfer_status", "Transfer"], ["ownership_termination_status", "Ownership Termination Proof"]].map(([key, label]) => (
                 <Field key={key} label={label}>
                   <select value={form[key]} onChange={e => setForm({ ...form, [key]: e.target.value })} className={sel}>
                     <option value="pending">Pending</option>
