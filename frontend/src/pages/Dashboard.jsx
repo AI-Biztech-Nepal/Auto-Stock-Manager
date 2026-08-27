@@ -7,7 +7,7 @@ import { formatNPR } from "../utils/helpers";
 import HoverADDate from "../components/HoverADDate";
 import { useAuth } from "../context/AuthContext";
 import {
-  getCurrentBSDate, getCurrentWeekRange,
+  getCurrentBSDate, getCurrentBSMonthRange,
   getTodayAD, BS_MONTHS,
 } from "../utils/nepali-date";
 
@@ -82,7 +82,7 @@ const AccountingKPI = ({ label, value, color, icon: Icon, sub }) => (
 // ── Accounting Summary Block ───────────────────────────────────────────
 const PERIODS = [
   { key: "daily", label: "Today" },
-  { key: "weekly", label: "This Week" },
+  { key: "monthly", label: "This Month" },
 ];
 
 function AccountingSummary() {
@@ -93,14 +93,15 @@ function AccountingSummary() {
   const [recentSales, setRecentSales] = useState([]);
 
   // Mirrors the same period tabs as the accounting KPIs above — "Today" shows
-  // only sales dated today, "This Week" shows the whole Sunday–Saturday range.
+  // only sales dated today, "This Month" shows the whole current BS month.
   useEffect(() => {
     const today = getTodayAD();
     let start, end;
     if (activePeriod === "daily") {
       start = today; end = today;
     } else {
-      const range = getCurrentWeekRange();
+      const range = getCurrentBSMonthRange();
+      if (!range) return;
       start = range.start; end = range.end;
     }
     // Filtered server-side now (start_date/end_date) instead of fetching the
@@ -124,10 +125,9 @@ function AccountingSummary() {
         const bs = getCurrentBSDate();
         label = bs ? `${BS_MONTHS[bs.month - 1]} ${bs.day}, ${bs.year} BS` : today;
       } else {
-        const range = getCurrentWeekRange();
-        start = range.start; end = range.end;
-        const fmt = (d) => new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric" });
-        label = `${fmt(range.start)} – ${fmt(range.end)}`;
+        const range = getCurrentBSMonthRange();
+        start = range?.start ?? today; end = range?.end ?? today;
+        label = range ? `${BS_MONTHS[range.bsMonth - 1]} ${range.bsYear} BS` : today;
       }
       const res = await api.get(`/reports/accounting-summary?start_date=${start}&end_date=${end}`);
       setData({ ...res.data, periodLabel: label });
@@ -210,10 +210,10 @@ function AccountingSummary() {
         >
           <Sparkles size={16} className="text-green-600" />
           <h2 className="text-sm font-bold text-green-900 group-hover:underline">
-            {activePeriod === "daily" ? "Today's Sale" : "Sale over a week"}
+            {activePeriod === "daily" ? "Today's Sale" : "Sale this month"}
           </h2>
           <span className="text-xs font-medium text-green-700 bg-green-100 px-2 py-0.5 rounded-full">
-            {recentSales.length} {activePeriod === "daily" ? "today" : "this week"}
+            {recentSales.length} {activePeriod === "daily" ? "today" : "this month"}
           </span>
         </div>
         {recentSales.length > 0 ? (
@@ -236,7 +236,7 @@ function AccountingSummary() {
           </div>
         ) : (
           <p className="text-sm text-green-700/80 text-center py-3" data-testid="recent-sales-empty">
-            {activePeriod === "daily" ? "No sales for today as of now!" : "No sales this week as of now!"}
+            {activePeriod === "daily" ? "No sales for today as of now!" : "No sales this month as of now!"}
           </p>
         )}
       </div>
