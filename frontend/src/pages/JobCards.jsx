@@ -801,8 +801,7 @@ export default function JobCards() {
             <label className="block text-xs font-medium text-slate-600 mb-1">New status</label>
             <select value={choiceStatus} onChange={e => setChoiceStatus(e.target.value)} className={sel} data-testid="job-status-choice-select">
               {VEHICLE_STATUS_OPTIONS
-                .filter(o => o.value !== "in_repair")
-                .filter(o => user?.role !== "parts_supervisor" || PARTS_ALLOWED_VEHICLE_STATUSES.includes(o.value))
+                .filter(o => o.value !== "in_repair" && (user?.role !== "parts_supervisor" || PARTS_ALLOWED_VEHICLE_STATUSES.includes(o.value)))
                 .map(o => (
                   <option key={o.value} value={o.value}>{o.label}</option>
                 ))}

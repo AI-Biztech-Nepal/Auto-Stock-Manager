@@ -2100,8 +2100,7 @@ async def update_job(jid: str, job: JobCardUpdate, cu: dict = Depends(require("j
             })
             if other_open == 0:
                 prev = veh.get("pre_repair_status")
-                # "sold" goes through the prompt too — re-selling needs a human (and a sale
-                # record), it should never happen as a silent side effect of closing a job.
+                # "sold" goes through the prompt too — re-selling needs a human (and a sale record).
                 if prev and prev not in ("in_repair", "sold"):
                     await db.vehicles.update_one(
                         {"id": existing["vehicle_id"]},
