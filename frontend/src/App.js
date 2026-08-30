@@ -1,9 +1,10 @@
 import "@/App.css";
-import { Suspense, lazy } from "react";
+import { Suspense, lazy, useEffect } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { Toaster } from "sonner";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import { canAccessPath, ROLE_DEFAULT_PATH } from "./utils/permissions";
+import { startUpdateChecker } from "./utils/updateChecker";
 import Layout from "./components/Layout";
 
 // Route-level code splitting: previously every page was imported eagerly here,
@@ -112,6 +113,13 @@ function AppRoutes() {
 }
 
 function App() {
+  // Poll for a newer deployed build every 5 min and reload onto it — keeps long-open
+  // tabs and the Android WebView wrapper from getting stuck on a stale bundle.
+  useEffect(() => {
+    const id = startUpdateChecker();
+    return () => clearInterval(id);
+  }, []);
+
   return (
     <AuthProvider>
       {/* basename: empty/"/" for the normal root-hosted deployments (Vercel, the sslip.io
