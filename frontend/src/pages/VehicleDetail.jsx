@@ -110,6 +110,26 @@ export function VehicleDetailModal({ id, onClose }) {
     } catch (err) { toast.error(err.response?.data?.detail || "Failed"); }
   };
 
+  // Ownership termination is handled entirely by the government office, so we never
+  // hold the paperwork — it's tracked as a Yes/No/Pending flag that stays editable
+  // straight from the overview, without entering the full edit mode.
+  const [savingTermination, setSavingTermination] = useState(false);
+  const updateOwnershipTermination = async (val) => {
+    const prev = vehicle?.ownership_termination_status;
+    if (val === prev) return;
+    setVehicle(v => ({ ...v, ownership_termination_status: val }));
+    setEditForm(f => ({ ...f, ownership_termination_status: val }));
+    setSavingTermination(true);
+    try {
+      await api.put(`/vehicles/${id}`, { ownership_termination_status: val });
+      toast.success("Ownership termination updated");
+    } catch {
+      setVehicle(v => ({ ...v, ownership_termination_status: prev }));
+      setEditForm(f => ({ ...f, ownership_termination_status: prev }));
+      toast.error("Failed to update ownership termination");
+    } finally { setSavingTermination(false); }
+  };
+
   const openReturnModal = async () => {
     try {
       const r = await api.get(`/vehicles/${id}/active-sale`);
@@ -443,6 +463,13 @@ export function VehicleDetailModal({ id, onClose }) {
                         {VEHICLE_STATUS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
                       </select>
                     </Field>
+                    <Field label="Ownership Termination">
+                      <select value={editForm.ownership_termination_status || "pending"} onChange={e => setEditForm({ ...editForm, ownership_termination_status: e.target.value })} className={sel}>
+                        <option value="pending">Pending</option>
+                        <option value="yes">Yes</option>
+                        <option value="no">No</option>
+                      </select>
+                    </Field>
                     <Field label="Purchase Date (BS)" required full>
                       <BSDatePicker value={editForm.purchase_date || ""} onChange={val => setEditForm({ ...editForm, purchase_date: val })} required />
                     </Field>
@@ -486,7 +513,7 @@ export function VehicleDetailModal({ id, onClose }) {
                   <div className="border-t border-slate-100 pt-4">
                     <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Document Status</p>
                     <div className="grid grid-cols-2 gap-3">
-                      {[["bluebook_status", "Bluebook"], ["tax_clearance_status", "Tax Clearance"], ["transfer_status", "Transfer"], ["ownership_termination_status", "Ownership Termination Proof"]].map(([key, label]) => (
+                      {[["bluebook_status", "Bluebook"], ["tax_clearance_status", "Tax Clearance"], ["transfer_status", "Transfer"]].map(([key, label]) => (
                         <Field key={key} label={label}>
                           <select value={editForm[key] || "pending"} onChange={e => setEditForm({ ...editForm, [key]: e.target.value })} className={sel}>
                             <option value="pending">Pending</option>
@@ -513,6 +540,23 @@ export function VehicleDetailModal({ id, onClose }) {
                     ) : <span className="text-sm font-medium text-slate-900 sm:text-right">—</span>}
                   </Row>
                   <Row label="Ownership"><span className="text-sm font-medium text-slate-900 sm:text-right">{formatOwnership(vehicle.ownership_number)}</span></Row>
+                  <Row label="Ownership Termination">
+                    {canManageStock ? (
+                      <select
+                        data-testid="ownership-termination-select"
+                        value={vehicle.ownership_termination_status || "pending"}
+                        onChange={e => updateOwnershipTermination(e.target.value)}
+                        disabled={savingTermination}
+                        className="text-sm font-medium text-slate-900 sm:text-right border border-slate-200 rounded-lg px-2 py-1 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-60"
+                      >
+                        <option value="pending">Pending</option>
+                        <option value="yes">Yes</option>
+                        <option value="no">No</option>
+                      </select>
+                    ) : (
+                      <span className="text-sm font-medium text-slate-900 sm:text-right capitalize">{vehicle.ownership_termination_status || "pending"}</span>
+                    )}
+                  </Row>
                   <Row label="Purchase Date"><span className="text-sm font-medium text-slate-900 sm:text-right"><HoverADDate date={vehicle.purchase_date} /></span></Row>
                   {!hideFinancials && <Row label="Purchase Price"><span className="text-sm font-medium text-slate-900 sm:text-right">{formatNPR(vehicle.purchase_price)}</span></Row>}
                   {!isPartsOnly && <Row label="Selling Price"><span className="text-sm font-medium text-slate-900 sm:text-right">{vehicle.selling_price ? formatNPR(vehicle.selling_price) : "Not set"}</span></Row>}
@@ -651,8 +695,8 @@ export function VehicleDetailModal({ id, onClose }) {
           {/* Document Status + Upload */}
           <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
             <h2 className="text-sm font-bold text-slate-900 mb-3" style={{ fontFamily: "Manrope" }}>Legal Documents</h2>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
-              {[["bluebook", "Bluebook"], ["transfer", "Transfer"], ["tax_clearance", "Tax Clearance"], ["ownership_termination", "Ownership Termination Proof"]].map(([key, label]) => {
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-4">
+              {[["bluebook", "Bluebook"], ["transfer", "Transfer"], ["tax_clearance", "Tax Clearance"]].map(([key, label]) => {
                 const status = vehicle[`${key}_status`];
                 const docs = legalDocs.filter(d => d.doc_type === key);
                 return (

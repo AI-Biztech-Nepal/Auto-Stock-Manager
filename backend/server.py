@@ -3392,6 +3392,14 @@ async def startup():
     await db.customers.create_index("id")
     await db.vendor_payments.create_index("vendor_id")
     await db.job_cards.create_index("status")
+
+    # ownership_termination_status changed from the doc-tracking vocabulary
+    # (pending/ok/missing) to a plain Yes/No/Pending answer when the upload card was
+    # replaced by an inline dropdown — the office keeps the paperwork, we just record
+    # whether termination is done. Remap the legacy values so old vehicles show a valid
+    # option. Idempotent: only rows still holding "ok"/"missing" match.
+    await db.vehicles.update_many({"ownership_termination_status": "ok"}, {"$set": {"ownership_termination_status": "yes"}})
+    await db.vehicles.update_many({"ownership_termination_status": "missing"}, {"$set": {"ownership_termination_status": "no"}})
     if not await db.settings.find_one({"id": "general"}):
         await db.settings.insert_one({
             "id": "general", "company_id": default_company_id,
@@ -3657,7 +3665,9 @@ async def delete_vehicle_photo(vid: str, photo_id: str, cu: dict = Depends(requi
 # ══════════════════════════════════════════════════════════════════════
 ALLOWED_DOC_TYPES = {"application/pdf", "image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"}
 DOC_EXTENSIONS = IMAGE_EXTENSIONS | {".pdf"}
-DOC_TYPES = ["bluebook", "insurance", "tax_clearance", "transfer", "ownership_termination", "other"]
+# ownership_termination is no longer an uploadable document — the paperwork stays with
+# the government office. It survives only as a Yes/No/Pending flag (ownership_termination_status).
+DOC_TYPES = ["bluebook", "insurance", "tax_clearance", "transfer", "other"]
 DOC_MAX_DIMENSION = 2000  # px, longest side — higher than photos so scanned text/fine print stays legible
 DOC_JPEG_QUALITY = 85
 DOC_MAX_BYTES = 2 * 1024 * 1024  # hard cap — every stored document must land under this, however big the source
