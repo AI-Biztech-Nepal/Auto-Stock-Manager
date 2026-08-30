@@ -66,6 +66,36 @@ const LiveClock = () => {
   );
 };
 
+// Live headcount of people from this company currently in the app. The other half of this
+// is the presence heartbeat every session sends from Layout.jsx; here we poll the count
+// every 15s. Sits beside the date bubble in the dashboard header.
+const OnlineUsers = () => {
+  const [data, setData] = useState({ count: 0, users: [] });
+  useEffect(() => {
+    let alive = true;
+    const load = () => api.get("/presence/online")
+      .then(r => { if (alive) setData(r.data); })
+      .catch(() => {});
+    load();
+    const id = setInterval(load, 15000);
+    return () => { alive = false; clearInterval(id); };
+  }, []);
+  return (
+    <div
+      className="flex items-center gap-2 bg-green-50 border border-green-100 px-3 py-1.5 rounded-lg"
+      data-testid="online-users-display"
+      title={data.users?.length ? `Online now: ${data.users.join(", ")}` : "Online now"}
+    >
+      <span className="relative flex h-2 w-2">
+        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
+        <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500" />
+      </span>
+      <Users size={14} className="text-green-600" />
+      <span className="text-xs font-semibold text-green-700 tabular-nums">{data.count} online</span>
+    </div>
+  );
+};
+
 const AccountingKPI = ({ label, value, color, icon: Icon, sub }) => (
   <div className={`rounded-xl p-4 ${color} flex items-center gap-4`}>
     <div className="w-10 h-10 rounded-lg bg-white/30 flex items-center justify-center">
@@ -284,15 +314,18 @@ export default function Dashboard() {
           <h1 className="text-2xl font-bold text-slate-900">Dashboard</h1>
           <p className="text-sm text-slate-500 mt-0.5">Overview of {user?.company_name || "your"} operations</p>
         </div>
-        {bsDateStr && (
-          <div className="hidden sm:flex flex-col items-end gap-1.5">
-            <div className="flex items-center gap-2 bg-blue-50 border border-blue-100 px-3 py-1.5 rounded-lg" data-testid="bs-today-display">
-              <CalendarDays size={14} className="text-blue-600" />
-              <span className="text-xs font-semibold text-blue-700">{bsDateStr}</span>
+        <div className="hidden sm:flex items-start" style={{ gap: "30px" }}>
+          <OnlineUsers />
+          {bsDateStr && (
+            <div className="flex flex-col items-end gap-1.5">
+              <div className="flex items-center gap-2 bg-blue-50 border border-blue-100 px-3 py-1.5 rounded-lg" data-testid="bs-today-display">
+                <CalendarDays size={14} className="text-blue-600" />
+                <span className="text-xs font-semibold text-blue-700">{bsDateStr}</span>
+              </div>
+              <LiveClock />
             </div>
-            <LiveClock />
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
       {/* Accounting Summary (BS-based) */}

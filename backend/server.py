@@ -1202,6 +1202,43 @@ async def me(cu: dict = Depends(get_current_user)):
     user = await db.users.find_one({"username": cu["username"]}, {"_id": 0, "password_hash": 0})
     return user
 
+# ── Live presence ────────────────────────────────────────────────────
+# Ephemeral "who's online" for the dashboard. The frontend pings /presence/heartbeat on
+# a timer while someone has the app open; /presence/online reports how many distinct
+# users in the caller's own company pinged within PRESENCE_WINDOW. Kept in process memory
+# rather than the DB on purpose: this is a single-worker server (see hash_pw_async note
+# above), presence is inherently short-lived, it works identically on both the Mongo and
+# MySQL backends with no schema change, and a restart just means everyone re-registers on
+# their next ping a few seconds later. Keyed by user_id and filtered by company_id so one
+# tenant never sees another's headcount.
+PRESENCE_WINDOW = timedelta(seconds=90)
+_presence: dict = {}  # user_id -> {"company_id": str, "username": str, "last_seen": datetime}
+
+def _prune_presence():
+    cutoff = datetime.now(timezone.utc) - PRESENCE_WINDOW
+    for uid in [u for u, p in _presence.items() if p["last_seen"] < cutoff]:
+        _presence.pop(uid, None)
+
+@api_router.post("/presence/heartbeat")
+async def presence_heartbeat(cu: dict = Depends(get_current_user)):
+    uid = cu.get("user_id")
+    if uid:
+        _presence[uid] = {
+            "company_id": cu.get("company_id"),
+            "username": cu.get("username"),
+            "last_seen": datetime.now(timezone.utc),
+        }
+    _prune_presence()
+    return {"ok": True}
+
+@api_router.get("/presence/online")
+async def presence_online(cu: dict = Depends(get_current_user)):
+    _prune_presence()
+    cid = cu.get("company_id")
+    people = sorted({p["username"] for p in _presence.values()
+                     if p.get("company_id") == cid and p.get("username")})
+    return {"count": len(people), "users": people}
+
 @api_router.post("/auth/change-password")
 async def change_password(req: ChangePasswordRequest, cu: dict = Depends(get_current_user)):
     lookup = {"username": cu["username"]}

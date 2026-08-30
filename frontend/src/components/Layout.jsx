@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Outlet, NavLink, useNavigate } from "react-router-dom";
+import api from "../utils/api";
 import { useAuth } from "../context/AuthContext";
 import { canAccessPath } from "../utils/permissions";
 import {
@@ -36,6 +37,20 @@ export default function Layout() {
 
   const handleLogout = () => { logout(); navigate("/login"); };
   const visibleNavItems = navItems.filter(({ path }) => canAccessPath(user?.role, path));
+
+  // Live presence: while the app is open, tell the backend this user is online every 30s
+  // (and immediately on mount / when the tab is refocused). The dashboard's "online now"
+  // counter reads the other side of this — see OnlineUsers in Dashboard.jsx. Fire-and-forget:
+  // a failed ping just means this user drops out of the count until the next one lands.
+  useEffect(() => {
+    if (!user) return;
+    const ping = () => { api.post("/presence/heartbeat").catch(() => {}); };
+    ping();
+    const id = setInterval(ping, 30000);
+    const onVisible = () => { if (document.visibilityState === "visible") ping(); };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => { clearInterval(id); document.removeEventListener("visibilitychange", onVisible); };
+  }, [user]);
 
   const Sidebar = ({ mobile = false }) => (
     <aside className={`${mobile ? "fixed inset-0 z-50 flex" : "hidden lg:flex"} flex-col bg-slate-900 text-white ${mobile ? "w-64" : "w-64"} h-screen`}>
