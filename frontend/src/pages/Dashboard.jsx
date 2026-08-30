@@ -66,9 +66,10 @@ const LiveClock = () => {
   );
 };
 
-// Live headcount of people from this company currently in the app. The other half of this
-// is the presence heartbeat every session sends from Layout.jsx; here we poll the count
-// every 15s. Sits beside the date bubble in the dashboard header.
+// Live headcount of people from this company currently in the app (Layout.jsx sends a
+// heartbeat from every session). This component registers its own device first, then
+// polls the count every 15s — so whoever has the dashboard open always shows up, even if
+// the Layout heartbeat hasn't landed yet. Sits beside the date bubble in the header.
 const OnlineUsers = () => {
   const [data, setData] = useState({ count: 0, users: [] });
   useEffect(() => {
@@ -76,8 +77,9 @@ const OnlineUsers = () => {
     const load = () => api.get("/presence/online")
       .then(r => { if (alive) setData(r.data); })
       .catch(() => {});
-    load();
-    const id = setInterval(load, 15000);
+    const tick = () => api.post("/presence/heartbeat").catch(() => {}).then(load);
+    tick();
+    const id = setInterval(tick, 15000);
     return () => { alive = false; clearInterval(id); };
   }, []);
   return (
