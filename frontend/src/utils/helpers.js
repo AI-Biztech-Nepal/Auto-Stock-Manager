@@ -74,6 +74,17 @@ export const getDocStyle = (status) => {
   return map[status] || map.pending;
 };
 
+// ownership_termination_status is a plain Yes/No/Pending answer (the paperwork stays
+// with the government office) — surfaced as a bullet on the inventory card.
+export const getTerminationStyle = (status) => {
+  const map = {
+    yes:     { bg: "bg-green-100",  text: "text-green-800",  label: "Termination: Yes" },
+    no:      { bg: "bg-red-100",    text: "text-red-800",    label: "Termination: No" },
+    pending: { bg: "bg-yellow-100", text: "text-yellow-800", label: "Termination: Pending" },
+  };
+  return map[status] || map.pending;
+};
+
 export const BRANDS = ["Honda", "Yamaha", "TVS", "Bajaj", "Suzuki", "Hero", "KTM", "Royal Enfield", "Lifan", "Other"];
 export const SOURCES = ["Direct Owner", "Auction", "Exchange", "Dealer", "Other"];
 export const CONDITIONS = ["Excellent", "Good", "Fair", "Poor"];

@@ -4,7 +4,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { Plus, Search, Eye, Trash2, Filter, X, UploadCloud, Download, EyeOff, Package, Wallet, DollarSign, Lock, Moon, Archive, Sparkles, Store, User, Wrench, Clock, CheckCircle2, AlertTriangle, ImageOff, ChevronDown } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
-import { formatNPR, getAgingStyle, getStatusStyle, BRANDS, VEHICLE_STATUS_OPTIONS, formatOwnership } from "../utils/helpers";
+import { formatNPR, getAgingStyle, getStatusStyle, getTerminationStyle, BRANDS, VEHICLE_STATUS_OPTIONS, formatOwnership } from "../utils/helpers";
 import { AddVehicleModal } from "./AddVehicleModal";
 import { VehicleDetailModal } from "./VehicleDetail";
 import HoverADDate from "../components/HoverADDate";
@@ -703,6 +703,7 @@ export default function Inventory() {
           {filtered.map(v => {
             const ag = getAgingStyle(v.aging?.category);
             const st = getStatusStyle(v.status);
+            const tm = getTerminationStyle(v.ownership_termination_status);
             const showFinRow = !hideFinancials || !isPartsOnly;
             const isDND = v.status === "scrap";
             return (
@@ -724,10 +725,15 @@ export default function Inventory() {
                   </span>
                 </div>
 
-                <div className="flex items-center justify-between text-xs text-slate-500 mb-3">
+                <div className="flex items-center justify-between flex-wrap gap-y-1 text-xs text-slate-500 mb-3">
                   <span className="truncate">Source: <span className="font-medium text-slate-700">{v.purchase_source || "—"}</span></span>
-                  <span className={`shrink-0 ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wide ${ag.bg} ${ag.text}`}>
-                    {v.aging?.days}d · {ag.label}
+                  <span className="shrink-0 ml-2 flex items-center gap-1.5 flex-wrap justify-end">
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wide ${tm.bg} ${tm.text}`} data-testid="vehicle-card-termination">
+                      {tm.label}
+                    </span>
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wide ${ag.bg} ${ag.text}`}>
+                      {v.aging?.days}d · {ag.label}
+                    </span>
                   </span>
                 </div>
                 <div className="text-xs text-slate-500 mb-1">Purchased: <span className="font-medium text-slate-700"><HoverADDate date={v.purchase_date} /></span></div>
