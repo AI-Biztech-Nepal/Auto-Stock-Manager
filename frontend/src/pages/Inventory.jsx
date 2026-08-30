@@ -719,15 +719,11 @@ export default function Inventory() {
                     <div className="text-xs text-slate-500 mt-0.5">{v.year} · {v.engine_cc}cc · {v.fuel_type} · {formatOwnership(v.ownership_number)}</div>
                     {v.registration_number && <div className="text-xs font-mono text-slate-500 mt-0.5">{v.registration_number}</div>}
                   </div>
-                  <span className={`shrink-0 flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wide ${st.bg} ${st.text}`}>
-                    {isDND && <Moon size={11} title="Do Not Disturb — snoozed" />}
-                    {st.label}
-                  </span>
-                </div>
-
-                <div className="flex items-center justify-between flex-wrap gap-y-1 text-xs text-slate-500 mb-3">
-                  <span className="truncate">Source: <span className="font-medium text-slate-700">{v.purchase_source || "—"}</span></span>
-                  <span className="shrink-0 ml-2 flex items-center gap-1.5 flex-wrap justify-end">
+                  <span className="shrink-0 flex items-center gap-1.5 flex-wrap justify-end">
+                    <span className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wide ${st.bg} ${st.text}`}>
+                      {isDND && <Moon size={11} title="Do Not Disturb — snoozed" />}
+                      {st.label}
+                    </span>
                     <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wide ${tm.bg} ${tm.text}`} data-testid="vehicle-card-termination">
                       {tm.label}
                     </span>
@@ -735,6 +731,10 @@ export default function Inventory() {
                       {v.aging?.days}d · {ag.label}
                     </span>
                   </span>
+                </div>
+
+                <div className="text-xs text-slate-500 mb-3">
+                  Source: <span className="font-medium text-slate-700">{v.purchase_source || "—"}</span>
                 </div>
                 <div className="text-xs text-slate-500 mb-1">Purchased: <span className="font-medium text-slate-700"><HoverADDate date={v.purchase_date} /></span></div>
                 {(v.linked_contact_name || v.purchase_from) && (
