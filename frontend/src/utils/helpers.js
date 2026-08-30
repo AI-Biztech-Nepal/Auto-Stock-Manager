@@ -78,9 +78,9 @@ export const getDocStyle = (status) => {
 // with the government office) — surfaced as a bullet on the inventory card.
 export const getTerminationStyle = (status) => {
   const map = {
-    yes:     { bg: "bg-green-100",  text: "text-green-800",  label: "Termination: Yes" },
-    no:      { bg: "bg-red-100",    text: "text-red-800",    label: "Termination: No" },
-    pending: { bg: "bg-yellow-100", text: "text-yellow-800", label: "Termination: Pending" },
+    yes:     { bg: "bg-green-100",  text: "text-green-800",  label: "Sanaakhat: Yes" },
+    no:      { bg: "bg-red-100",    text: "text-red-800",    label: "Sanaakhat: No" },
+    pending: { bg: "bg-yellow-100", text: "text-yellow-800", label: "Sanaakhat: Pending" },
   };
   return map[status] || map.pending;
 };
