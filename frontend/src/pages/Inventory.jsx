@@ -719,7 +719,7 @@ export default function Inventory() {
                     <div className="text-xs text-slate-500 mt-0.5">{v.year} · {v.engine_cc}cc · {v.fuel_type} · {formatOwnership(v.ownership_number)}</div>
                     {v.registration_number && <div className="text-xs font-mono text-slate-500 mt-0.5">{v.registration_number}</div>}
                   </div>
-                  <span className="shrink-0 flex items-center gap-1.5 flex-wrap justify-end">
+                  <span className="shrink-0 flex flex-col items-end gap-1.5">
                     <span className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wide ${st.bg} ${st.text}`}>
                       {isDND && <Moon size={11} title="Do Not Disturb — snoozed" />}
                       {st.label}
