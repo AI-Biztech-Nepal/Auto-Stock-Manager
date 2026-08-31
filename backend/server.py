@@ -3348,6 +3348,27 @@ async def update_settings(settings: SettingsUpdate, cu: dict = Depends(admin_onl
 # ── STARTUP ───────────────────────────────────────────────────────────
 @app.on_event("startup")
 async def startup():
+    # A database that's unreachable at boot — Hostinger remote-access allowlist drift, a
+    # network blip, the DB server still coming up — must NEVER crash-loop the whole backend
+    # (which is exactly what took the site fully down on 2026-08-31). Every task below is
+    # idempotent bootstrap/maintenance and none of it is required to serve requests, so run
+    # it off the request path and keep retrying until the DB answers. The app is already
+    # live in the meantime and /api/health reports the real DB state.
+    asyncio.create_task(_startup_with_retry())
+
+async def _startup_with_retry():
+    delay = 5
+    while True:
+        try:
+            await _run_startup_tasks()
+            logger.info("Startup tasks completed")
+            return
+        except Exception:
+            logger.error("Startup tasks failed (database not ready?) — retrying in %ss", delay, exc_info=True)
+            await asyncio.sleep(delay)
+            delay = min(delay * 2, 120)
+
+async def _run_startup_tasks():
     # Every real deployment already has a company (created via /auth/signup, or via the
     # one-time migration_add_company_id.sql backfill run when multi-tenancy was introduced).
     # A fresh install / CI database has neither, so this bootstraps one -- the

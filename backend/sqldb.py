@@ -198,6 +198,15 @@ class MySQLDatabase:
                     self._pool = await aiomysql.create_pool(
                         host=self.host, port=self.port, user=self.user, password=self.password,
                         db=self.db_name, autocommit=True, minsize=1, maxsize=5, charset="utf8mb4",
+                        # Recycle any pooled connection older than this before handing it out.
+                        # MySQL (especially shared hosting) closes idle connections server-side
+                        # after its wait_timeout; without recycling the pool serves a dead
+                        # socket and the request fails with "MySQL server has gone away" /
+                        # "Lost connection" until a fresh connection happens to be made. 180s
+                        # sits safely under any realistic wait_timeout.
+                        pool_recycle=int(os.environ.get("MYSQL_POOL_RECYCLE", "180")),
+                        # Don't let a network/DNS problem hang a request forever on connect.
+                        connect_timeout=10,
                         # matched_count (below) must reflect matched rows, not changed rows —
                         # without this flag MySQL reports 0 for a matching no-op update, which
                         # server.py reads as "not found" and would wrongly 404.
