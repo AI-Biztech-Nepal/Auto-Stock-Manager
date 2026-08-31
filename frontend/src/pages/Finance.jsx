@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend } from "recharts";
-import { DollarSign, AlertTriangle, CreditCard, Users, ShoppingCart, Wallet, UserPlus, ArrowDownCircle, ArrowUpCircle, PlusSquare, FileText, BookOpen, Printer, Download } from "lucide-react";
+import { DollarSign, AlertTriangle, CreditCard, Users, ShoppingCart, Wallet, UserPlus, ArrowDownCircle, ArrowUpCircle, PlusSquare, FileText, BookOpen, Printer, Download, TrendingUp, Package } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
 import { formatNPR } from "../utils/helpers";
@@ -32,6 +32,7 @@ export default function Finance() {
   const [summary, setSummary] = useState(null);
   const [financial, setFinancial] = useState(null);
   const [partners, setPartners] = useState([]);
+  const [dash, setDash] = useState(null); // lifetime totals, moved here from the dashboard
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState(searchParams.get("tab") || "overview");
 
@@ -49,8 +50,9 @@ export default function Finance() {
       api.get("/reports/financial"),
       api.get("/partners"),
       api.get("/reports/monthly-breakdown-bs"),
-    ]).then(([s, f, p, bs]) => {
-      setSummary(s.data); setFinancial(f.data); setPartners(p.data); setBsSales(bs.data);
+      api.get("/reports/dashboard"),
+    ]).then(([s, f, p, bs, d]) => {
+      setSummary(s.data); setFinancial(f.data); setPartners(p.data); setBsSales(bs.data); setDash(d.data);
     }).catch(console.error).finally(() => setLoading(false));
   }, []);
 
@@ -161,6 +163,21 @@ export default function Finance() {
             <KCard title="Partner Capital" value={formatNPR(summary.total_partner_capital)} icon={Wallet} color="bg-purple-500" />
             <KCard title="EMI Receivables" value={formatNPR(summary.emi_receivables)} icon={Users} color="bg-teal-500" />
           </div>
+
+          {/* Lifetime totals — moved off the dashboard, which is now period-scoped */}
+          {dash && (
+            <div>
+              <h2 className="text-base font-bold text-slate-900 mb-3" style={{ fontFamily: "Manrope, sans-serif" }}>Lifetime Totals</h2>
+              <div className="grid grid-cols-2 lg:grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-4">
+                <KCard title="Total Revenue" value={formatNPR(dash.total_revenue)} icon={TrendingUp} color="bg-blue-500" />
+                <KCard title="Cost of Goods" value={formatNPR(dash.total_cogs)} icon={AlertTriangle} color="bg-orange-500" />
+                <KCard title="Realized Profit" value={formatNPR(dash.total_realized_profit)} sub="From sold vehicles" icon={DollarSign} color="bg-emerald-500" />
+                <KCard title="Vehicles Sold" value={dash.sold} sub="All time" icon={ShoppingCart} color="bg-green-500" />
+                <KCard title="Total Vehicles" value={dash.total_vehicles} sub="All time" icon={Package} color="bg-slate-500" />
+                <KCard title="Customers" value={dash.total_customers} sub="All time" icon={Users} color="bg-teal-600" />
+              </div>
+            </div>
+          )}
 
           {/* Quick Actions */}
           <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">

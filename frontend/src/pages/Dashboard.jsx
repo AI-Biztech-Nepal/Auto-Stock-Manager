@@ -115,25 +115,47 @@ const AccountingKPI = ({ label, value, color, icon: Icon, sub }) => (
   </div>
 );
 
-// ── Accounting Summary Block ───────────────────────────────────────────
+// ── Period toggle ─────────────────────────────────────────────────────
+// One control in the dashboard header that scopes every period-capable figure
+// on the page — "Today" is just records dated today, "This Month" the whole
+// current BS month. Current-state cards (available stock, pending jobs, alerts)
+// have no period meaning and deliberately ignore it.
 const PERIODS = [
   { key: "daily", label: "Today" },
   { key: "monthly", label: "This Month" },
 ];
 
-function AccountingSummary() {
+const PeriodToggle = ({ period, onChange }) => (
+  <div className="flex gap-1 bg-slate-100 rounded-lg p-1" data-testid="dashboard-period-toggle">
+    {PERIODS.map(p => (
+      <button
+        key={p.key}
+        data-testid={`period-tab-${p.key}`}
+        onClick={() => onChange(p.key)}
+        className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-all ${
+          period === p.key
+            ? "bg-white shadow text-blue-700"
+            : "text-slate-500 hover:text-slate-700"
+        }`}
+      >
+        {p.label}
+      </button>
+    ))}
+  </div>
+);
+
+// ── Accounting Summary Block ───────────────────────────────────────────
+// Follows the dashboard's global period (passed in as a prop).
+function AccountingSummary({ period }) {
   const navigate = useNavigate();
-  const [activePeriod, setActivePeriod] = useState("daily");
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [recentSales, setRecentSales] = useState([]);
 
-  // Mirrors the same period tabs as the accounting KPIs above — "Today" shows
-  // only sales dated today, "This Month" shows the whole current BS month.
   useEffect(() => {
     const today = getTodayAD();
     let start, end;
-    if (activePeriod === "daily") {
+    if (period === "daily") {
       start = today; end = today;
     } else {
       const range = getCurrentBSMonthRange();
@@ -149,9 +171,9 @@ function AccountingSummary() {
         setRecentSales(sorted);
       })
       .catch(() => {});
-  }, [activePeriod]);
+  }, [period]);
 
-  const fetchSummary = useCallback(async (period) => {
+  const fetchSummary = useCallback(async () => {
     setLoading(true); setData(null);
     try {
       let start, end, label;
@@ -170,37 +192,23 @@ function AccountingSummary() {
     } catch (e) {
       console.error(e);
     } finally { setLoading(false); }
-  }, []);
+  }, [period]);
 
-  useEffect(() => { fetchSummary(activePeriod); }, [activePeriod, fetchSummary]);
+  useEffect(() => { fetchSummary(); }, [fetchSummary]);
 
   const isProfitPositive = data && data.net_profit >= 0;
 
   return (
     <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5" data-testid="accounting-summary">
-      {/* Header + Tabs */}
+      {/* Header */}
       <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
         <div>
           <h2 className="text-base font-bold text-slate-900" style={{ fontFamily: "Manrope, sans-serif" }}>
             Accounting Summary
           </h2>
-          {data && <p className="text-xs text-slate-500 mt-0.5">{data.periodLabel}</p>}
-        </div>
-        <div className="flex gap-1 bg-slate-100 rounded-lg p-1">
-          {PERIODS.map(p => (
-            <button
-              key={p.key}
-              data-testid={`period-tab-${p.key}`}
-              onClick={() => setActivePeriod(p.key)}
-              className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-all ${
-                activePeriod === p.key
-                  ? "bg-white shadow text-blue-700"
-                  : "text-slate-500 hover:text-slate-700"
-              }`}
-            >
-              {p.label}
-            </button>
-          ))}
+          <p className="text-xs text-slate-500 mt-0.5">
+            {data ? data.periodLabel : (period === "daily" ? "Today" : "This month")}
+          </p>
         </div>
       </div>
 
@@ -246,10 +254,10 @@ function AccountingSummary() {
         >
           <Sparkles size={16} className="text-green-600" />
           <h2 className="text-sm font-bold text-green-900 group-hover:underline">
-            {activePeriod === "daily" ? "Today's Sale" : "Sale this month"}
+            {period === "daily" ? "Today's Sale" : "Sale this month"}
           </h2>
           <span className="text-xs font-medium text-green-700 bg-green-100 px-2 py-0.5 rounded-full">
-            {recentSales.length} {activePeriod === "daily" ? "today" : "this month"}
+            {recentSales.length} {period === "daily" ? "today" : "this month"}
           </span>
         </div>
         {recentSales.length > 0 ? (
@@ -272,7 +280,7 @@ function AccountingSummary() {
           </div>
         ) : (
           <p className="text-sm text-green-700/80 text-center py-3" data-testid="recent-sales-empty">
-            {activePeriod === "daily" ? "No sales for today as of now!" : "No sales this month as of now!"}
+            {period === "daily" ? "No sales for today as of now!" : "No sales this month as of now!"}
           </p>
         )}
       </div>
@@ -281,11 +289,23 @@ function AccountingSummary() {
 }
 
 // ── Main Dashboard ─────────────────────────────────────────────────────
+const PERIOD_STORAGE_KEY = "dashboard_period";
+
 export default function Dashboard() {
   const { user } = useAuth();
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
+  // Global period for every period-scoped figure on the page. Persisted so the
+  // choice survives navigation and reloads; defaults to "Today".
+  const [period, setPeriod] = useState(() => {
+    try { return localStorage.getItem(PERIOD_STORAGE_KEY) || "daily"; } catch { return "daily"; }
+  });
   const navigate = useNavigate();
+
+  const changePeriod = (p) => {
+    setPeriod(p);
+    try { localStorage.setItem(PERIOD_STORAGE_KEY, p); } catch { /* private mode — fine */ }
+  };
 
   useEffect(() => {
     api.get("/reports/dashboard")
@@ -315,48 +335,36 @@ export default function Dashboard() {
   return (
     <div className="space-y-6 animate-fade-in">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Dashboard</h1>
           <p className="text-sm text-slate-500 mt-0.5">Overview of {user?.company_name || "your"} operations</p>
         </div>
-        <div className="hidden sm:flex items-start" style={{ gap: "30px" }}>
-          <OnlineUsers />
-          {bsDateStr && (
-            <div className="flex flex-col items-end gap-1.5">
-              <div className="flex items-center gap-2 bg-blue-50 border border-blue-100 px-3 py-1.5 rounded-lg" data-testid="bs-today-display">
-                <CalendarDays size={14} className="text-blue-600" />
-                <span className="text-xs font-semibold text-blue-700">{bsDateStr}</span>
+        <div className="flex items-center gap-3 flex-wrap">
+          <PeriodToggle period={period} onChange={changePeriod} />
+          <div className="hidden sm:flex items-start" style={{ gap: "30px" }}>
+            <OnlineUsers />
+            {bsDateStr && (
+              <div className="flex flex-col items-end gap-1.5">
+                <div className="flex items-center gap-2 bg-blue-50 border border-blue-100 px-3 py-1.5 rounded-lg" data-testid="bs-today-display">
+                  <CalendarDays size={14} className="text-blue-600" />
+                  <span className="text-xs font-semibold text-blue-700">{bsDateStr}</span>
+                </div>
+                <LiveClock />
               </div>
-              <LiveClock />
-            </div>
-          )}
+            )}
+          </div>
         </div>
       </div>
 
-      {/* Accounting Summary (BS-based) */}
-      <AccountingSummary />
+      {/* Period-scoped: follows the toggle above. Lifetime totals now live on the Finance tab. */}
+      <AccountingSummary period={period} />
 
-      {/* Financial Overview (moved from Finance tab) */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-4">
-        <KPICard title="Total Revenue" value={formatNPR(stats.total_revenue)} icon={TrendingUp} color="bg-blue-500" testid="kpi-total-revenue" onClick={() => navigate("/finance")} />
-        <KPICard title="Inventory Value" value={formatNPR(stats.inventory_value)} icon={Package} color="bg-indigo-500" testid="kpi-inventory-value" subtitle={`${stats.available} vehicles`} onClick={() => navigate("/inventory")} />
-        <KPICard title="Vehicles Sold" value={stats.sold} icon={ShoppingCart} color="bg-green-500" testid="kpi-sold" onClick={() => navigate("/sold-stock")} />
-        <KPICard title="Cost of Goods" value={formatNPR(stats.total_cogs)} icon={AlertTriangle} color="bg-orange-500" testid="kpi-cogs" onClick={() => navigate("/finance")} />
-      </div>
-
-      {/* KPI Row 1 */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-4">
+      {/* Current stock & workload — a live "right now" snapshot, not affected by the period toggle */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <KPICard title="Available Vehicles" value={stats.available} icon={Package} color="bg-blue-500" testid="kpi-available" onClick={() => navigate("/inventory")} />
         <KPICard title="Locked Capital" value={formatNPR(stats.locked_capital)} icon={DollarSign} color="bg-indigo-500" testid="kpi-capital" subtitle="In available stock" onClick={() => navigate("/inventory")} />
-        <KPICard title="Realized Profit" value={formatNPR(stats.total_realized_profit)} icon={TrendingUp} color="bg-emerald-500" testid="kpi-profit" subtitle="From sold vehicles" onClick={() => navigate("/finance")} />
-      </div>
-
-      {/* KPI Row 2 */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-3 gap-4">
-        <KPICard title="Customers" value={stats.total_customers} icon={Users} color="bg-purple-500" testid="kpi-customers" onClick={() => navigate("/customers")} />
         <KPICard title="Pending Jobs" value={stats.pending_jobs} icon={Wrench} color="bg-orange-500" testid="kpi-pending-jobs" onClick={() => navigate("/jobs")} />
-        <KPICard title="Total Vehicles" value={stats.total_vehicles} icon={Package} color="bg-slate-500" testid="kpi-total" subtitle="All time" onClick={() => navigate("/inventory")} />
       </div>
 
       {/* Charts + Alerts */}
