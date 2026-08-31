@@ -38,10 +38,11 @@ export default function Layout() {
   const handleLogout = () => { logout(); navigate("/login"); };
   const visibleNavItems = navItems.filter(({ path }) => canAccessPath(user?.role, path));
 
-  // Live presence: while the app is open, tell the backend this user is online every 30s
-  // (and immediately on mount / when the tab is refocused). The dashboard's "online now"
-  // counter reads the other side of this — see OnlineUsers in Dashboard.jsx. Fire-and-forget:
-  // a failed ping just means this user drops out of the count until the next one lands.
+  // Live presence: while the app is open, tell the backend this device is online every 30s
+  // (and immediately on mount / when the tab is refocused). The heartbeat carries a
+  // per-browser device id (see api.js); the dashboard's "devices online" counter reads the
+  // other side of this — see OnlineUsers in Dashboard.jsx. Fire-and-forget: a failed ping
+  // just means this device drops out of the count until the next one lands.
   useEffect(() => {
     if (!user) return;
     const ping = () => { api.post("/presence/heartbeat").catch(() => {}); };

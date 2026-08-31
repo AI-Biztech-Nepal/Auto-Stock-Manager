@@ -66,16 +66,18 @@ const LiveClock = () => {
   );
 };
 
-// Live headcount of people from this company currently in the app (Layout.jsx sends a
-// heartbeat from every session). This component registers its own device first, then
-// polls the count every 15s — so whoever has the dashboard open always shows up, even if
-// the Layout heartbeat hasn't landed yet. Sits beside the date bubble in the header.
+// Live count of devices from this company currently in the app (Layout.jsx sends a
+// heartbeat from every session, tagged with a per-browser device id). This component
+// registers its own device first, then polls the count every 15s — so whoever has the
+// dashboard open always shows up, even if the Layout heartbeat hasn't landed yet. The
+// backend returns only the number, no device or account details. Sits beside the date
+// bubble in the header.
 const OnlineUsers = () => {
-  const [data, setData] = useState({ count: 0, users: [] });
+  const [count, setCount] = useState(0);
   useEffect(() => {
     let alive = true;
     const load = () => api.get("/presence/online")
-      .then(r => { if (alive) setData(r.data); })
+      .then(r => { if (alive) setCount(r.data.count); })
       .catch(() => {});
     const tick = () => api.post("/presence/heartbeat").catch(() => {}).then(load);
     tick();
@@ -86,14 +88,16 @@ const OnlineUsers = () => {
     <div
       className="flex items-center gap-2 bg-green-50 border border-green-100 px-3 py-1.5 rounded-lg"
       data-testid="online-users-display"
-      title={data.users?.length ? `Online now: ${data.users.join(", ")}` : "Online now"}
+      title="Devices currently accessing the app"
     >
       <span className="relative flex h-2 w-2">
         <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
         <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500" />
       </span>
       <Users size={14} className="text-green-600" />
-      <span className="text-xs font-semibold text-green-700 tabular-nums">{data.count} online</span>
+      <span className="text-xs font-semibold text-green-700 tabular-nums">
+        {count} {count === 1 ? "device" : "devices"} online
+      </span>
     </div>
   );
 };

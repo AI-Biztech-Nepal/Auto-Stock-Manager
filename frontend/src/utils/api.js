@@ -9,10 +9,23 @@ const API_URL = process.env.REACT_APP_BACKEND_URL || "";
 // refresh. 30s is generous for a real page load but still bounds the wait.
 const api = axios.create({ baseURL: `${API_URL}/api`, timeout: 30000 });
 
+// A stable per-browser id, minted once and kept in localStorage (so it survives restarts
+// but differs between a user's phone and laptop). The backend uses it to count distinct
+// devices for the dashboard "online now" pill — it's an opaque random id, not a fingerprint.
+const getDeviceId = () => {
+  let id = localStorage.getItem("gng_device_id");
+  if (!id) {
+    id = (crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`);
+    localStorage.setItem("gng_device_id", id);
+  }
+  return id;
+};
+
 api.interceptors.request.use((config) => {
   // localStorage persists across tabs/browser restarts, matching AuthContext
   const token = localStorage.getItem("gng_token");
   if (token) config.headers.Authorization = `Bearer ${token}`;
+  config.headers["X-Device-Id"] = getDeviceId();
   return config;
 });
 
