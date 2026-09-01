@@ -3454,11 +3454,20 @@ async def _run_startup_tasks():
     await db.vendor_payments.create_index("vendor_id")
     await db.job_cards.create_index("status")
 
-    # ownership_termination_status changed from the doc-tracking vocabulary
-    # (pending/ok/missing) to a plain Yes/No/Pending answer when the upload card was
-    # replaced by an inline dropdown — the office keeps the paperwork, we just record
-    # whether termination is done. Remap the legacy values so old vehicles show a valid
-    # option. Idempotent: only rows still holding "ok"/"missing" match.
+    # Sanaakhat (ownership termination) is a plain Yes/No/Pending flag on each vehicle,
+    # editable straight from the inventory card. It post-dates the original MySQL schema,
+    # so add the column onto an existing table if it's missing (MariaDB 10.5+ / MySQL 8+
+    # support ADD COLUMN IF NOT EXISTS; the Mongo backend needs no schema step). Then remap
+    # the legacy doc-tracking vocabulary (pending/ok/missing) it briefly used to yes/no —
+    # idempotent, only rows still holding "ok"/"missing" match.
+    if DB_BACKEND == "mysql":
+        try:
+            await db.execute_raw(
+                "ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS "
+                "ownership_termination_status VARCHAR(20) DEFAULT 'pending'"
+            )
+        except Exception:
+            logger.warning("Could not ensure vehicles.ownership_termination_status column", exc_info=True)
     await db.vehicles.update_many({"ownership_termination_status": "ok"}, {"$set": {"ownership_termination_status": "yes"}})
     await db.vehicles.update_many({"ownership_termination_status": "missing"}, {"$set": {"ownership_termination_status": "no"}})
     if not await db.settings.find_one({"id": "general"}):

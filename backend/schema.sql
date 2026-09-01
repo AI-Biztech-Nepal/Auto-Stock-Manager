@@ -188,6 +188,7 @@ CREATE TABLE IF NOT EXISTS vehicles (
   insurance_status VARCHAR(20),
   tax_clearance_status VARCHAR(20),
   transfer_status VARCHAR(20),
+  ownership_termination_status VARCHAR(20) DEFAULT 'pending',
   created_at VARCHAR(40),
   updated_at VARCHAR(40),
   sold_date VARCHAR(20),

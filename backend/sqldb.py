@@ -53,7 +53,8 @@ TABLES = {
                               "accessories_cost", "purchase_date", "purchase_source", "vendor_id", "purchase_from",
                               "linked_contact_type", "linked_contact_id", "linked_contact_name", "selling_price",
                               "minimum_selling_price", "notes", "status", "bluebook_status", "insurance_status",
-                              "tax_clearance_status", "transfer_status", "created_at", "updated_at", "sold_date",
+                              "tax_clearance_status", "transfer_status", "ownership_termination_status",
+                              "created_at", "updated_at", "sold_date",
                               "customer_id", "salesperson_id", "salesperson_name", "discount", "created_by"}},
     "sales": {"columns": {"id", "company_id", "vehicle_id", "customer_id", "sale_price", "extra_expenses", "expenses_total",
                            "total_amount", "payment_method", "paid_cash", "paid_bank", "due_amount", "due_date",
@@ -213,6 +214,15 @@ class MySQLDatabase:
                         client_flag=CLIENT.FOUND_ROWS,
                     )
         return self._pool
+
+    async def execute_raw(self, sql: str):
+        """Run one literal SQL statement — schema migrations only, no user data. server.py's
+        startup() uses this to idempotently add columns a newer app version needs onto an
+        already-created table (Mongo has no equivalent, so callers guard on DB_BACKEND)."""
+        pool = await self.get_pool()
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(sql)
 
     def __getattr__(self, name):
         if name not in TABLES:

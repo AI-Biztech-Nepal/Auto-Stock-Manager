@@ -282,6 +282,24 @@ export default function Inventory() {
 
   useEffect(() => { fetchVehicles(); }, [fetchVehicles]);
 
+  // Sanaakhat (ownership termination) is a quick 3-state flag — cycle it straight from the
+  // card chip (Pending → Yes → No → Pending) so staff don't have to open the vehicle just
+  // to flip it. Optimistic; `filtered` re-derives from `vehicles` automatically.
+  const cycleTermination = async (v) => {
+    const order = { pending: "yes", yes: "no", no: "pending" };
+    const current = v.ownership_termination_status || "pending";
+    const next = order[current] || "pending";
+    const label = { yes: "Yes", no: "No", pending: "Pending" }[next];
+    setVehicles(prev => prev.map(x => (x.id === v.id ? { ...x, ownership_termination_status: next } : x)));
+    try {
+      await api.put(`/vehicles/${v.id}`, { ownership_termination_status: next });
+      toast.success(`Sanaakhat set to ${label}`);
+    } catch {
+      setVehicles(prev => prev.map(x => (x.id === v.id ? { ...x, ownership_termination_status: current } : x)));
+      toast.error("Couldn't update Sanaakhat");
+    }
+  };
+
   useEffect(() => {
     // Sold vehicles live in the Sold Stock archive, not the active inventory grid.
     let result = vehicles.filter(v => v.status !== "sold");
@@ -724,9 +742,21 @@ export default function Inventory() {
                       {isDND && <Moon size={11} title="Do Not Disturb — snoozed" />}
                       {st.label}
                     </span>
-                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wide ${tm.bg} ${tm.text}`} data-testid="vehicle-card-termination">
-                      {tm.label}
-                    </span>
+                    {canManageStock ? (
+                      <button
+                        type="button"
+                        onClick={e => { e.stopPropagation(); cycleTermination(v); }}
+                        className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wide cursor-pointer transition hover:brightness-95 active:scale-95 ${tm.bg} ${tm.text}`}
+                        title="Click to change Sanaakhat (Pending → Yes → No)"
+                        data-testid="vehicle-card-termination"
+                      >
+                        {tm.label}
+                      </button>
+                    ) : (
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wide ${tm.bg} ${tm.text}`} data-testid="vehicle-card-termination">
+                        {tm.label}
+                      </span>
+                    )}
                     <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wide ${ag.bg} ${ag.text}`}>
                       {v.aging?.days}d · {ag.label}
                     </span>
