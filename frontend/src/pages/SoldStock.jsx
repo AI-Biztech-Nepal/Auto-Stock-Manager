@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { Search, ChevronDown, ChevronRight, Archive, RotateCcw, X } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
-import { formatNPR, formatOwnership, getStatusStyle } from "../utils/helpers";
+import { formatNPR, formatOwnership, getStatusStyle, getDocStyle } from "../utils/helpers";
 import HoverADDate from "../components/HoverADDate";
 import BSDatePicker from "../components/BSDatePicker";
 import { useAuth } from "../context/AuthContext";
@@ -269,6 +269,7 @@ export default function SoldStock() {
                     <div className="border-t border-slate-100 divide-y divide-slate-100">
                       {g.vehicles.map(v => {
                         const dts = daysToSell(v);
+                        const tr = getDocStyle(v.transfer_status);
                         return (
                           <div
                             key={v.id}
@@ -277,7 +278,10 @@ export default function SoldStock() {
                             className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-4 px-4 py-3 hover:bg-slate-50 cursor-pointer transition-colors"
                           >
                             <div className="min-w-0 flex-1">
-                              <div className="font-semibold text-slate-900 text-sm truncate">{v.brand} {v.model}</div>
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className="font-semibold text-slate-900 text-sm truncate">{v.brand} {v.model}</span>
+                                <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide ${tr.bg} ${tr.text}`} data-testid="sold-row-transfer" title="Ownership transfer status">Transfer {tr.label}</span>
+                              </div>
                               <div className="text-xs text-slate-500 mt-0.5">
                                 {v.year} · {formatOwnership(v.ownership_number)}
                                 {v.registration_number && <span className="font-mono"> · {v.registration_number}</span>}

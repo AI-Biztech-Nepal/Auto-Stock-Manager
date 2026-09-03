@@ -48,6 +48,22 @@ export default function SoldStockDetail() {
 
   useEffect(() => { fetchVehicle(); }, [fetchVehicle]);
 
+  // The ownership-transfer status (the same transfer_status shown in the vehicle's
+  // document section) is worth checking on a sold vehicle too — surface it here as an
+  // inline dropdown so it can be updated without opening the full record. Optimistic.
+  const TRANSFER_LABELS = { pending: "Pending", ok: "OK", missing: "Missing" };
+  const updateTransfer = async (val) => {
+    const prev = vehicle.transfer_status;
+    setVehicle(v => ({ ...v, transfer_status: val }));
+    try {
+      await api.put(`/vehicles/${id}`, { transfer_status: val });
+      toast.success(`Transfer marked ${TRANSFER_LABELS[val] || val}`);
+    } catch {
+      setVehicle(v => ({ ...v, transfer_status: prev }));
+      toast.error("Couldn't update transfer status");
+    }
+  };
+
   const openReturnModal = async () => {
     try {
       const r = await api.get(`/vehicles/${id}/active-sale`);
@@ -162,6 +178,22 @@ export default function SoldStockDetail() {
           <Row label="Purchase Date"><span className="text-sm font-medium text-slate-900 sm:text-right"><HoverADDate date={vehicle.purchase_date} /></span></Row>
           <Row label="Sold Date"><span className="text-sm font-medium text-slate-900 sm:text-right">{vehicle.sold_date ? <HoverADDate date={vehicle.sold_date} /> : "—"}</span></Row>
           <Row label="Days to Sell"><span className="text-sm font-medium text-slate-900 sm:text-right">{daysToSell(vehicle) ?? "—"}</span></Row>
+          <Row label="Transfer">
+            {isAdmin ? (
+              <select
+                data-testid="transfer-status-select"
+                value={vehicle.transfer_status || "pending"}
+                onChange={e => updateTransfer(e.target.value)}
+                className="text-sm font-medium text-slate-900 border border-slate-200 rounded-lg px-2 py-1 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="pending">Pending</option>
+                <option value="ok">OK</option>
+                <option value="missing">Missing</option>
+              </select>
+            ) : (
+              <span className="text-sm font-medium text-slate-900 sm:text-right capitalize">{TRANSFER_LABELS[vehicle.transfer_status] || "Pending"}</span>
+            )}
+          </Row>
         </div>
       </div>
 
