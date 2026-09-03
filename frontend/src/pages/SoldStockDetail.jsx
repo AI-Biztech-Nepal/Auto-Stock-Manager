@@ -3,7 +3,7 @@ import { useParams, useNavigate, Link } from "react-router-dom";
 import { ArrowLeft, Undo2, ExternalLink, Lock, Store, User } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
-import { formatNPR, formatOwnership } from "../utils/helpers";
+import { formatNPR, formatOwnership, TRANSFER_STATUS_OPTIONS, getTransferStatusStyle } from "../utils/helpers";
 import { ReturnModal } from "./VehicleModals";
 import HoverADDate from "../components/HoverADDate";
 import { useAuth } from "../context/AuthContext";
@@ -48,18 +48,17 @@ export default function SoldStockDetail() {
 
   useEffect(() => { fetchVehicle(); }, [fetchVehicle]);
 
-  // The ownership-transfer status (the same transfer_status shown in the vehicle's
-  // document section) is worth checking on a sold vehicle too — surface it here as an
-  // inline dropdown so it can be updated without opening the full record. Optimistic.
-  const TRANSFER_LABELS = { pending: "Pending", ok: "OK", missing: "Missing" };
+  // Post-sale name transfer to the buyer — its own field (ownership_transfer_status),
+  // not the in-inventory transfer-paperwork status. Editable inline here so it can be
+  // updated without opening the full record. Optimistic.
   const updateTransfer = async (val) => {
-    const prev = vehicle.transfer_status;
-    setVehicle(v => ({ ...v, transfer_status: val }));
+    const prev = vehicle.ownership_transfer_status;
+    setVehicle(v => ({ ...v, ownership_transfer_status: val }));
     try {
-      await api.put(`/vehicles/${id}`, { transfer_status: val });
-      toast.success(`Transfer marked ${TRANSFER_LABELS[val] || val}`);
+      await api.put(`/vehicles/${id}`, { ownership_transfer_status: val });
+      toast.success(`Transfer marked ${getTransferStatusStyle(val).label}`);
     } catch {
-      setVehicle(v => ({ ...v, transfer_status: prev }));
+      setVehicle(v => ({ ...v, ownership_transfer_status: prev }));
       toast.error("Couldn't update transfer status");
     }
   };
@@ -182,16 +181,14 @@ export default function SoldStockDetail() {
             {isAdmin ? (
               <select
                 data-testid="transfer-status-select"
-                value={vehicle.transfer_status || "pending"}
+                value={vehicle.ownership_transfer_status || "pending"}
                 onChange={e => updateTransfer(e.target.value)}
                 className="text-sm font-medium text-slate-900 border border-slate-200 rounded-lg px-2 py-1 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
-                <option value="pending">Pending</option>
-                <option value="ok">OK</option>
-                <option value="missing">Missing</option>
+                {TRANSFER_STATUS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
               </select>
             ) : (
-              <span className="text-sm font-medium text-slate-900 sm:text-right capitalize">{TRANSFER_LABELS[vehicle.transfer_status] || "Pending"}</span>
+              <span className="text-sm font-medium text-slate-900 sm:text-right">{getTransferStatusStyle(vehicle.ownership_transfer_status).label}</span>
             )}
           </Row>
         </div>

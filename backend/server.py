@@ -945,6 +945,10 @@ class VehicleCreate(BaseModel):
     tax_clearance_status: str = "pending"
     transfer_status: str = "pending"
     ownership_termination_status: str = "pending"
+    # Post-sale name-transfer to the buyer, tracked on the Sold Stock screens. Deliberately
+    # separate from transfer_status above (which is the transfer-paperwork doc status while
+    # the vehicle is still in inventory) — different thing, different lifecycle stage.
+    ownership_transfer_status: str = "pending"
 
 class VehicleUpdate(BaseModel):
     brand: Optional[str] = None; model: Optional[str] = None
@@ -969,6 +973,7 @@ class VehicleUpdate(BaseModel):
     bluebook_status: Optional[str] = None; insurance_status: Optional[str] = None
     tax_clearance_status: Optional[str] = None; transfer_status: Optional[str] = None
     ownership_termination_status: Optional[str] = None
+    ownership_transfer_status: Optional[str] = None
 
 class VehicleStatusUpdate(BaseModel):
     status: str
@@ -1559,7 +1564,7 @@ def _parse_vehicle_import_rows(content: bytes, filename: str, created_by: str):
                 "status": status_val,
                 "bluebook_status": "pending", "insurance_status": "pending",
                 "tax_clearance_status": "pending", "transfer_status": "pending",
-                "ownership_termination_status": "pending",
+                "ownership_termination_status": "pending", "ownership_transfer_status": "pending",
                 "sold_date": None, "customer_id": None,
                 "salesperson_id": None, "salesperson_name": None, "discount": 0,
                 "created_at": datetime.now(timezone.utc).isoformat(),
@@ -3461,13 +3466,13 @@ async def _run_startup_tasks():
     # the legacy doc-tracking vocabulary (pending/ok/missing) it briefly used to yes/no —
     # idempotent, only rows still holding "ok"/"missing" match.
     if DB_BACKEND == "mysql":
-        try:
-            await db.execute_raw(
-                "ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS "
-                "ownership_termination_status VARCHAR(20) DEFAULT 'pending'"
-            )
-        except Exception:
-            logger.warning("Could not ensure vehicles.ownership_termination_status column", exc_info=True)
+        for _col in ("ownership_termination_status", "ownership_transfer_status"):
+            try:
+                await db.execute_raw(
+                    f"ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS {_col} VARCHAR(20) DEFAULT 'pending'"
+                )
+            except Exception:
+                logger.warning("Could not ensure vehicles.%s column", _col, exc_info=True)
     await db.vehicles.update_many({"ownership_termination_status": "ok"}, {"$set": {"ownership_termination_status": "yes"}})
     await db.vehicles.update_many({"ownership_termination_status": "missing"}, {"$set": {"ownership_termination_status": "no"}})
     if not await db.settings.find_one({"id": "general"}):

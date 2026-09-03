@@ -74,6 +74,23 @@ export const getDocStyle = (status) => {
   return map[status] || map.pending;
 };
 
+// ownership_transfer_status — the post-sale name transfer to the buyer, tracked on the
+// Sold Stock screens. Its own field, separate from transfer_status (the in-inventory
+// transfer-paperwork doc status).
+export const TRANSFER_STATUS_OPTIONS = [
+  { value: "pending", label: "Pending" },
+  { value: "in_progress", label: "In Progress" },
+  { value: "done", label: "Done" },
+];
+export const getTransferStatusStyle = (status) => {
+  const map = {
+    pending:     { bg: "bg-yellow-100", text: "text-yellow-800", label: "Pending" },
+    in_progress: { bg: "bg-blue-100",   text: "text-blue-800",   label: "In Progress" },
+    done:        { bg: "bg-green-100",  text: "text-green-800",  label: "Done" },
+  };
+  return map[status] || map.pending;
+};
+
 // ownership_termination_status is a plain Yes/No/Pending answer (the paperwork stays
 // with the government office) — surfaced as a bullet on the inventory card.
 export const getTerminationStyle = (status) => {

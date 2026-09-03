@@ -54,7 +54,7 @@ TABLES = {
                               "linked_contact_type", "linked_contact_id", "linked_contact_name", "selling_price",
                               "minimum_selling_price", "notes", "status", "bluebook_status", "insurance_status",
                               "tax_clearance_status", "transfer_status", "ownership_termination_status",
-                              "created_at", "updated_at", "sold_date",
+                              "ownership_transfer_status", "created_at", "updated_at", "sold_date",
                               "customer_id", "salesperson_id", "salesperson_name", "discount", "created_by"}},
     "sales": {"columns": {"id", "company_id", "vehicle_id", "customer_id", "sale_price", "extra_expenses", "expenses_total",
                            "total_amount", "payment_method", "paid_cash", "paid_bank", "due_amount", "due_date",

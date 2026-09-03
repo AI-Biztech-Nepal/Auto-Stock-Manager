@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { Search, ChevronDown, ChevronRight, Archive, RotateCcw, X } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
-import { formatNPR, formatOwnership, getStatusStyle, getDocStyle } from "../utils/helpers";
+import { formatNPR, formatOwnership, getStatusStyle, getTransferStatusStyle } from "../utils/helpers";
 import HoverADDate from "../components/HoverADDate";
 import BSDatePicker from "../components/BSDatePicker";
 import { useAuth } from "../context/AuthContext";
@@ -269,7 +269,7 @@ export default function SoldStock() {
                     <div className="border-t border-slate-100 divide-y divide-slate-100">
                       {g.vehicles.map(v => {
                         const dts = daysToSell(v);
-                        const tr = getDocStyle(v.transfer_status);
+                        const tr = getTransferStatusStyle(v.ownership_transfer_status);
                         return (
                           <div
                             key={v.id}
