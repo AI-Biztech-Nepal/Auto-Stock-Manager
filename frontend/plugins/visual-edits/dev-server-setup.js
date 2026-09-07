@@ -343,7 +343,12 @@ const SUP_PASS = getCodeServerPassword();
 function setupDevServer(config) {
   config.setupMiddlewares = (middlewares, devServer) => {
     if (!devServer) throw new Error("webpack-dev-server not defined");
-    devServer.app.use(express.json());
+    // Scoped to /edit-file only (not a blanket app.use) — a global express.json() here
+    // consumes the request body for every route on this dev server, including proxied
+    // /api/* calls (see package.json's "proxy"). http-proxy-middleware then has nothing
+    // left to stream to the upstream backend, so any proxied POST with a body (e.g.
+    // login) just hangs until it times out, while GETs look fine since they have no body.
+    devServer.app.use("/edit-file", express.json());
 
     // CORS origin validation
     const isAllowedOrigin = (origin) => {
