@@ -9,7 +9,8 @@ import { AddVehicleModal } from "./AddVehicleModal";
 import { VehicleDetailModal } from "./VehicleDetail";
 import HoverADDate from "../components/HoverADDate";
 import BSDatePicker from "../components/BSDatePicker";
-import { formatBSDate } from "../utils/nepali-date";
+import PeriodToggle, { PERIOD_OPTIONS } from "../components/PeriodToggle";
+import { formatBSDate, getCurrentBSMonthRange, getCurrentWeekRange, getTodayAD } from "../utils/nepali-date";
 import { useAuth } from "../context/AuthContext";
 import { hasFullVehicleAccess } from "../utils/permissions";
 
@@ -21,6 +22,9 @@ const STATUSES = ["all", ...VEHICLE_STATUS_OPTIONS.filter(o => o.value !== "sold
 const STATUS_ICONS = { all: Filter, unlisted: EyeOff, in_repair: Wrench, available: CheckCircle2, reserved: Clock };
 const AGING_CATEGORIES = ["all", "fresh", "normal", "slow", "dead"];
 const AGING_RANGES = { fresh: "0–30 days", normal: "31–45 days", slow: "46–60 days", dead: "60+ days" };
+
+// periodFilter (below) uses the shared PeriodToggle's three presets, applied here
+// against created_at (when stock was entered).
 
 // A single photo isn't enough for a storefront listing — this is the bar a vehicle
 // needs to clear before it's considered adequately photographed.
@@ -62,6 +66,10 @@ export default function Inventory() {
   const [brandFilter, setBrandFilter] = useState("all");
   const [agingFilter, setAgingFilter] = useState(searchParams.get("aging") || "all");
   const [dateFilter, setDateFilter] = useState("");
+  // "all" = off, else a quick-range preset over the same field dateFilter above uses
+  // (created_at — when the stock was entered, not purchase_date). Mutually exclusive
+  // with dateFilter's exact-date pick — setting one clears the other, see their setters.
+  const [periodFilter, setPeriodFilter] = useState("all");
   // null = off, "none" = zero photos, "low" = fewer than MIN_PHOTOS
   const [photoFilter, setPhotoFilter] = useState(null);
   const [photoMenuOpen, setPhotoMenuOpen] = useState(false);
@@ -157,6 +165,31 @@ export default function Inventory() {
   const totalSellingPrice = filtered.reduce((sum, v) => sum + (v.selling_price || 0), 0);
   const lockedCapital = filtered.filter(v => v.status === "available").reduce((sum, v) => sum + (v.total_investment || 0), 0);
 
+  // AD range for the active period tab, against created_at (same field dateFilter uses).
+  // Toggling a period tab clears the exact-date pick (see the PeriodToggle onChange
+  // below) and vice versa (see the BSDatePicker's onChange further down) — an exact
+  // date and a range both narrowing created_at at once reads as confusing, not additive.
+  const periodRange = periodFilter === "daily" ? { start: getTodayAD(), end: getTodayAD() }
+    : periodFilter === "weekly" ? getCurrentWeekRange()
+    : periodFilter === "monthly" ? getCurrentBSMonthRange()
+    : null;
+
+  // Same permission split the per-card finance row already uses — reused so the "Total
+  // Vehicles" popup (the one summary tile parts_supervisor can actually reach) doesn't
+  // leak investment/selling figures to a role the other three tiles are already hidden from.
+  const showFinRow = !hideFinancials || !isPartsOnly;
+
+  // Dedicated report popup for each summary tile above — null | "all" | "investment" | "locked" | "selling".
+  const [summaryModalView, setSummaryModalView] = useState(null);
+  const SUMMARY_MODAL_TITLE = { all: "All Vehicles", investment: "Total Investment", locked: "Locked Capital", selling: "Total Selling Price" };
+  const summaryModalRows = useMemo(() => {
+    if (summaryModalView === "investment") return [...filtered].sort((a, b) => (b.total_investment || 0) - (a.total_investment || 0));
+    if (summaryModalView === "locked") return filtered.filter(v => v.status === "available").sort((a, b) => (b.total_investment || 0) - (a.total_investment || 0));
+    if (summaryModalView === "selling") return filtered.filter(v => v.selling_price).sort((a, b) => (b.selling_price || 0) - (a.selling_price || 0));
+    if (summaryModalView === "all") return filtered;
+    return [];
+  }, [filtered, summaryModalView]);
+
   // Counts per status toggle, applying every other active filter so switching tabs shows
   // what would actually appear rather than a total unaffected by search/brand/aging/date.
   // Scrap has no toggle of its own (it's a do-not-disturb terminal stage) and is deliberately
@@ -169,6 +202,7 @@ export default function Inventory() {
     if (agingFilter !== "all") result = result.filter(v => v.aging?.category === agingFilter);
     if (brandFilter !== "all") result = result.filter(v => v.brand === brandFilter);
     if (dateFilter) result = result.filter(v => v.created_at?.slice(0, 10) === dateFilter);
+    if (periodRange) result = result.filter(v => { const d = v.created_at?.slice(0, 10); return d && d >= periodRange.start && d <= periodRange.end; });
     if (photoFilter === "none") result = result.filter(v => !v.has_photo && v.status !== "scrap");
     else if (photoFilter === "low") result = result.filter(v => (v.photo_count ?? 0) < MIN_PHOTOS && v.status !== "scrap");
     if (search) {
@@ -193,6 +227,7 @@ export default function Inventory() {
     if (agingFilter !== "all") result = result.filter(v => v.aging?.category === agingFilter);
     if (brandFilter !== "all") result = result.filter(v => v.brand === brandFilter);
     if (dateFilter) result = result.filter(v => v.created_at?.slice(0, 10) === dateFilter);
+    if (periodRange) result = result.filter(v => { const d = v.created_at?.slice(0, 10); return d && d >= periodRange.start && d <= periodRange.end; });
     if (search) {
       const q = search.toLowerCase();
       const qNoSlash = q.replace(/\//g, "");
@@ -214,6 +249,7 @@ export default function Inventory() {
     if (agingFilter !== "all") result = result.filter(v => v.aging?.category === agingFilter);
     if (brandFilter !== "all") result = result.filter(v => v.brand === brandFilter);
     if (dateFilter) result = result.filter(v => v.created_at?.slice(0, 10) === dateFilter);
+    if (periodRange) result = result.filter(v => { const d = v.created_at?.slice(0, 10); return d && d >= periodRange.start && d <= periodRange.end; });
     if (search) {
       const q = search.toLowerCase();
       const qNoSlash = q.replace(/\//g, "");
@@ -308,6 +344,7 @@ export default function Inventory() {
     if (agingFilter !== "all") result = result.filter(v => v.aging?.category === agingFilter);
     if (brandFilter !== "all") result = result.filter(v => v.brand === brandFilter);
     if (dateFilter) result = result.filter(v => v.created_at?.slice(0, 10) === dateFilter);
+    if (periodRange) result = result.filter(v => { const d = v.created_at?.slice(0, 10); return d && d >= periodRange.start && d <= periodRange.end; });
     if (photoFilter === "none") result = result.filter(v => !v.has_photo && v.status !== "scrap");
     else if (photoFilter === "low") result = result.filter(v => (v.photo_count ?? 0) < MIN_PHOTOS && v.status !== "scrap");
     if (search) {
@@ -323,7 +360,7 @@ export default function Inventory() {
     result.sort(sortStock);
 
     setFiltered(result);
-  }, [vehicles, search, statusFilter, brandFilter, agingFilter, dateFilter, photoFilter]);
+  }, [vehicles, search, statusFilter, brandFilter, agingFilter, dateFilter, periodFilter, photoFilter]);
 
   const handleSave = async (e) => {
     e.preventDefault();
@@ -375,6 +412,7 @@ export default function Inventory() {
           <p className="text-sm text-slate-500">{filtered.length} vehicles found</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
+          <PeriodToggle period={periodFilter} onChange={p => { setPeriodFilter(p); setDateFilter(""); }} testid="inventory-period-toggle" allowOff />
           {!isFrontDesk && (
             <button
               onClick={exportStock}
@@ -605,7 +643,7 @@ export default function Inventory() {
             ))}
           </select>
           <div className="w-44" data-testid="date-filter-input">
-            <BSDatePicker value={dateFilter} onChange={setDateFilter} />
+            <BSDatePicker value={dateFilter} onChange={val => { setDateFilter(val); setPeriodFilter("all"); }} />
           </div>
           {dateFilter && (
             <button
@@ -624,12 +662,17 @@ export default function Inventory() {
       {!loading && !isFrontDesk && (
         <div className="grid grid-cols-2 lg:grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-4">
           {[
-            { label: "Total Vehicles", value: filtered.length, icon: Package, color: "bg-blue-500" },
-            !hideFinancials && { label: "Total Investment", value: formatNPR(totalInvestment), icon: Wallet, color: "bg-indigo-500" },
-            !hideFinancials && { label: "Locked Capital", value: formatNPR(lockedCapital), icon: Lock, color: "bg-purple-500" },
-            !isPartsOnly && { label: "Total Selling Price", value: formatNPR(totalSellingPrice), icon: DollarSign, color: "bg-green-500" },
+            { label: "Total Vehicles", value: filtered.length, icon: Package, color: "bg-blue-500", view: "all" },
+            !hideFinancials && { label: "Total Investment", value: formatNPR(totalInvestment), icon: Wallet, color: "bg-indigo-500", view: "investment" },
+            !hideFinancials && { label: "Locked Capital", value: formatNPR(lockedCapital), icon: Lock, color: "bg-purple-500", view: "locked" },
+            !isPartsOnly && { label: "Total Selling Price", value: formatNPR(totalSellingPrice), icon: DollarSign, color: "bg-green-500", view: "selling" },
           ].filter(Boolean).map(c => (
-            <div key={c.label} className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 flex items-center gap-3 min-w-0">
+            <div
+              key={c.label}
+              onClick={() => setSummaryModalView(c.view)}
+              data-testid={`inventory-summary-tile-${c.view}`}
+              className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 flex items-center gap-3 min-w-0 cursor-pointer hover:shadow-md active:scale-[0.98] transition-all"
+            >
               <div className={`w-9 h-9 rounded-lg ${c.color} flex items-center justify-center shrink-0`}>
                 <c.icon size={16} className="text-white" />
               </div>
@@ -697,12 +740,14 @@ export default function Inventory() {
               ? `No ${getAgingStyle(agingFilter).label.toLowerCase()} (${AGING_RANGES[agingFilter]}) vehicles found`
               : dateFilter
                 ? `No stock entered on ${formatBSDate(dateFilter)} BS`
-                : "No vehicles found"}
+                : periodFilter !== "all"
+                  ? `No stock entered ${PERIOD_OPTIONS.find(p => p.key === periodFilter)?.label.toLowerCase()}`
+                  : "No vehicles found"}
           </p>
           <p className="text-sm mt-1">
             {agingFilter !== "all"
               ? "No vehicles fall into this stock age range right now."
-              : search || statusFilter !== "all" || brandFilter !== "all" || dateFilter || photoFilter
+              : search || statusFilter !== "all" || brandFilter !== "all" || dateFilter || periodFilter !== "all" || photoFilter
                 ? "Try adjusting your filters"
                 : "Add your first vehicle to get started"}
           </p>
@@ -890,6 +935,93 @@ export default function Inventory() {
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-4" onClick={() => setPreviewPhoto(null)}>
           <button onClick={() => setPreviewPhoto(null)} className="absolute top-4 right-4 w-11 h-11 flex items-center justify-center rounded-lg bg-white/10 hover:bg-white/20 text-white">✕</button>
           <img src={previewPhoto} alt="Vehicle full size" className="max-w-full max-h-full object-contain rounded-lg" onClick={e => e.stopPropagation()} />
+        </div>
+      )}
+
+      {/* Dedicated report popup for each Summary tile — same rows filtered/sorted per
+          tile (see summaryModalRows), clicking a row opens that vehicle the same way
+          the grid below does. */}
+      {summaryModalView && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          onClick={() => setSummaryModalView(null)}
+          data-testid="inventory-summary-modal-backdrop"
+        >
+          <div
+            className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden"
+            onClick={e => e.stopPropagation()}
+            data-testid="inventory-summary-modal"
+          >
+            <div className="flex items-center justify-between gap-3 p-4 sm:p-5 border-b border-slate-100 shrink-0">
+              <div className="min-w-0">
+                <h2 className="text-lg font-bold text-slate-900">{SUMMARY_MODAL_TITLE[summaryModalView]}</h2>
+                <p className="text-xs text-slate-500 mt-0.5">{summaryModalRows.length} vehicle{summaryModalRows.length !== 1 ? "s" : ""}</p>
+              </div>
+              <div className="flex items-center gap-4 shrink-0">
+                {summaryModalView !== "all" && (
+                  <div className="text-right">
+                    <div
+                      className={`text-sm font-bold ${summaryModalView === "selling" ? "text-green-700" : summaryModalView === "locked" ? "text-purple-700" : "text-indigo-700"}`}
+                      data-testid="inventory-summary-modal-total"
+                    >
+                      Total: {formatNPR(
+                        summaryModalView === "investment" ? totalInvestment
+                          : summaryModalView === "locked" ? lockedCapital
+                          : totalSellingPrice
+                      )}
+                    </div>
+                  </div>
+                )}
+                <button
+                  onClick={() => setSummaryModalView(null)}
+                  className="w-11 h-11 -mr-2.5 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500 shrink-0"
+                  data-testid="close-inventory-summary-modal"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+
+            <div className="overflow-y-auto divide-y divide-slate-100">
+              {summaryModalRows.length === 0 ? (
+                <p className="text-sm text-slate-400 text-center py-10">No vehicles to show</p>
+              ) : (
+                summaryModalRows.map(v => {
+                  const st = getStatusStyle(v.status);
+                  return (
+                    <div
+                      key={v.id}
+                      onClick={() => { setSummaryModalView(null); setSelectedVehicleId(v.id); }}
+                      data-testid="inventory-summary-modal-row"
+                      className="flex items-center justify-between gap-3 px-4 sm:px-5 py-3 cursor-pointer hover:bg-slate-50 transition-colors"
+                    >
+                      <div className="min-w-0">
+                        <div className="font-semibold text-slate-900 text-sm truncate" style={{ fontFamily: "Manrope" }}>{v.brand} {v.model}</div>
+                        <div className="text-xs text-slate-500 truncate flex items-center gap-1.5 mt-0.5">
+                          <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide ${st.bg} ${st.text}`}>{st.label}</span>
+                          {v.registration_number && <span className="font-mono">{v.registration_number}</span>}
+                        </div>
+                      </div>
+                      <div className="text-right shrink-0">
+                        {summaryModalView === "selling" && (
+                          <div className="text-sm font-bold text-green-700">{formatNPR(v.selling_price)}</div>
+                        )}
+                        {(summaryModalView === "investment" || summaryModalView === "locked") && (
+                          <div className="text-sm font-bold text-indigo-700">{formatNPR(v.total_investment)}</div>
+                        )}
+                        {summaryModalView === "all" && showFinRow && (
+                          <>
+                            {!hideFinancials && <div className="text-sm font-bold text-indigo-700">{formatNPR(v.total_investment)}</div>}
+                            {!isPartsOnly && v.selling_price ? <div className="text-xs text-green-700 mt-0.5">{formatNPR(v.selling_price)}</div> : null}
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
         </div>
       )}
     </div>

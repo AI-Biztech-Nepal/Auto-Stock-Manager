@@ -5,6 +5,7 @@ import { AlertTriangle, TrendingUp, Package, Users, Wrench, DollarSign, Clock, S
 import api from "../utils/api";
 import { formatNPR } from "../utils/helpers";
 import HoverADDate from "../components/HoverADDate";
+import PeriodToggle, { PERIOD_OPTIONS } from "../components/PeriodToggle";
 import { useAuth } from "../context/AuthContext";
 import {
   getCurrentBSDate, getCurrentBSMonthRange, getCurrentWeekRange,
@@ -120,16 +121,10 @@ const AccountingKPI = ({ label, value, color, icon: Icon, sub, onClick, testid }
 );
 
 // ── Period toggle ─────────────────────────────────────────────────────
-// One control in the dashboard header that scopes every period-capable figure
-// on the page — "Today" is just records dated today, "This Week" the current
-// calendar week (Sun–Sat), "This Month" the whole current BS month.
-// Current-state cards (available stock, pending jobs, alerts) have no period
-// meaning and deliberately ignore it.
-const PERIODS = [
-  { key: "daily", label: "Today" },
-  { key: "weekly", label: "This Week" },
-  { key: "monthly", label: "This Month" },
-];
+// The toggle itself now lives in components/PeriodToggle.jsx (shared across pages).
+// "Today" is just records dated today, "This Week" the current calendar week
+// (Sun–Sat), "This Month" the whole current BS month. Current-state cards (available
+// stock, pending jobs, alerts) have no period meaning and deliberately ignore it.
 
 // Short "1 Sep" style label for the weekly range — the week is a plain calendar
 // week (Sun–Sat), not a BS-aligned period, so it doesn't get a BS_MONTHS label
@@ -144,25 +139,6 @@ const PERIOD_EMPTY_TEXT = {
   weekly: "No sales this week as of now!",
   monthly: "No sales this month as of now!",
 };
-
-const PeriodToggle = ({ period, onChange }) => (
-  <div className="flex gap-1 bg-slate-100 rounded-lg p-1" data-testid="dashboard-period-toggle">
-    {PERIODS.map(p => (
-      <button
-        key={p.key}
-        data-testid={`period-tab-${p.key}`}
-        onClick={() => onChange(p.key)}
-        className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-all ${
-          period === p.key
-            ? "bg-white shadow text-blue-700"
-            : "text-slate-500 hover:text-slate-700"
-        }`}
-      >
-        {p.label}
-      </button>
-    ))}
-  </div>
-);
 
 // ── Accounting Summary Block ───────────────────────────────────────────
 // Follows the dashboard's global period (passed in as a prop) — the period toggle
@@ -247,7 +223,7 @@ function AccountingSummary({ period }) {
             Accounting Summary
           </h2>
           <p className="text-xs text-slate-500 mt-0.5">
-            {data ? data.periodLabel : (PERIODS.find(p => p.key === period)?.label || "Today")}
+            {data ? data.periodLabel : (PERIOD_OPTIONS.find(p => p.key === period)?.label || "Today")}
           </p>
         </div>
       </div>
@@ -568,7 +544,7 @@ export default function Dashboard() {
           <p className="text-sm text-slate-500 mt-0.5">Overview of {user?.company_name || "your"} operations</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          <PeriodToggle period={period} onChange={changePeriod} />
+          <PeriodToggle period={period} onChange={changePeriod} testid="dashboard-period-toggle" />
           {/* Status pills — one tidy row (was date+clock stacked over online-count, which
               read as misaligned once the toggle grew a third tab). Hidden below sm: purely
               informational, and the toggle above already stays reachable on phones. */}
