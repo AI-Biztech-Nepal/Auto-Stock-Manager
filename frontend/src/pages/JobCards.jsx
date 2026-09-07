@@ -3,10 +3,11 @@ import { Plus, Search, Wrench, X, Package, Pencil, ShoppingBag } from "lucide-re
 import { toast } from "sonner";
 import api from "../utils/api";
 import { formatNPR, getJobStyle, getStatusStyle, VEHICLE_STATUS_OPTIONS } from "../utils/helpers";
-import { formatBSDate } from "../utils/nepali-date";
+import { formatBSDate, getCurrentBSMonthRange, getCurrentWeekRange, getTodayAD } from "../utils/nepali-date";
 import VehicleComboBox from "../components/VehicleComboBox";
 import BSDatePicker from "../components/BSDatePicker";
 import HoverADDate from "../components/HoverADDate";
+import PeriodToggle from "../components/PeriodToggle";
 import { useAuth } from "../context/AuthContext";
 import { canEditJobs, canDeleteJobs, PARTS_ALLOWED_VEHICLE_STATUSES } from "../utils/permissions";
 
@@ -48,6 +49,9 @@ export default function JobCards() {
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState("all");
   const [vehicleStatusFilter, setVehicleStatusFilter] = useState("all");
+  // "all" (default) | "daily" | "weekly" | "monthly" — scopes to created_at, the same
+  // date this page's cards already display as "Created".
+  const [periodFilter, setPeriodFilter] = useState("all");
   const [search, setSearch] = useState("");
   const [showModal, setShowModal] = useState(false);
   const [editingJob, setEditingJob] = useState(null);
@@ -99,6 +103,12 @@ export default function JobCards() {
     api.get("/team").then(r => setMechanics(r.data.filter(m => m.role === "mechanic"))).catch(() => {});
   }, [fetchJobs]);
 
+  // AD range for the active period tab, against created_at.
+  const periodRange = periodFilter === "daily" ? { start: getTodayAD(), end: getTodayAD() }
+    : periodFilter === "weekly" ? getCurrentWeekRange()
+    : periodFilter === "monthly" ? getCurrentBSMonthRange()
+    : null;
+
   useEffect(() => {
     let result = [...jobs];
     if (statusFilter !== "all") result = result.filter(j => j.status === statusFilter);
@@ -107,6 +117,7 @@ export default function JobCards() {
         ? result.filter(j => !j.vehicle_id)
         : result.filter(j => j.vehicle_status === vehicleStatusFilter);
     }
+    if (periodRange) result = result.filter(j => { const d = j.created_at?.slice(0, 10); return d && d >= periodRange.start && d <= periodRange.end; });
     if (search) {
       const q = search.toLowerCase();
       result = result.filter(j =>
@@ -120,7 +131,7 @@ export default function JobCards() {
       );
     }
     setFiltered(result);
-  }, [jobs, statusFilter, vehicleStatusFilter, search]);
+  }, [jobs, statusFilter, vehicleStatusFilter, periodFilter, search]); // eslint-disable-line react-hooks/exhaustive-deps -- periodRange is derived fresh from periodFilter each render (a new object every time), so depending on periodFilter itself is the stable, correct trigger
 
   const partsTotalCost = jobParts.reduce((s, p) => s + p.quantity * p.unit_cost, 0);
 
@@ -333,8 +344,8 @@ export default function JobCards() {
     completed: jobs.filter(j => j.status === "completed").length,
   };
 
-  const hasActiveFilters = statusFilter !== "all" || vehicleStatusFilter !== "all" || search !== "";
-  const clearFilters = () => { setStatusFilter("all"); setVehicleStatusFilter("all"); setSearch(""); };
+  const hasActiveFilters = statusFilter !== "all" || vehicleStatusFilter !== "all" || periodFilter !== "all" || search !== "";
+  const clearFilters = () => { setStatusFilter("all"); setVehicleStatusFilter("all"); setPeriodFilter("all"); setSearch(""); };
 
   return (
     <div className="space-y-5 animate-fade-in">
@@ -351,11 +362,14 @@ export default function JobCards() {
             ) : `${filtered.length} records`}
           </p>
         </div>
-        {canEdit && (
-          <button onClick={openModal} data-testid="create-job-button" className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-3 rounded-lg transition-all active:scale-95 shadow-sm">
-            <Plus size={16} /> New Job Card
-          </button>
-        )}
+        <div className="flex items-center gap-2 flex-wrap">
+          <PeriodToggle period={periodFilter} onChange={setPeriodFilter} testid="job-cards-period-toggle" allowOff />
+          {canEdit && (
+            <button onClick={openModal} data-testid="create-job-button" className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-3 rounded-lg transition-all active:scale-95 shadow-sm">
+              <Plus size={16} /> New Job Card
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Stats */}

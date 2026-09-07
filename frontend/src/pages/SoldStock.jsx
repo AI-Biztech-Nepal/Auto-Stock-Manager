@@ -7,7 +7,8 @@ import { formatNPR, formatOwnership, getStatusStyle, getTransferStatusStyle } fr
 import HoverADDate from "../components/HoverADDate";
 import BSDatePicker from "../components/BSDatePicker";
 import { useAuth } from "../context/AuthContext";
-import { adToBsDate, BS_MONTHS, formatBSDate } from "../utils/nepali-date";
+import { adToBsDate, BS_MONTHS, formatBSDate, getCurrentBSMonthRange, getCurrentWeekRange, getTodayAD } from "../utils/nepali-date";
+import PeriodToggle, { PERIOD_OPTIONS } from "../components/PeriodToggle";
 
 const monthLabelAD = (ym) => {
   if (!ym || ym === "unknown") return "Unknown Date";
@@ -50,6 +51,14 @@ export default function SoldStock() {
   const [collapsed, setCollapsed] = useState(() => new Set());
   const [dateMode, setDateMode] = useState("bs"); // "bs" | "ad" — which calendar groups the list into months
   const [dateFilter, setDateFilter] = useState(""); // AD "YYYY-MM-DD" — exact sold/returned date to filter to
+  // "all" (default) | "daily" | "weekly" | "monthly" — quick range over the same date
+  // field dateFilter narrows to an exact day on (sold_date on the Sold tab, returned_at
+  // on Returned). Mutually exclusive with dateFilter — see their setters below.
+  const [periodFilter, setPeriodFilter] = useState("all");
+  const periodRange = periodFilter === "daily" ? { start: getTodayAD(), end: getTodayAD() }
+    : periodFilter === "weekly" ? getCurrentWeekRange()
+    : periodFilter === "monthly" ? getCurrentBSMonthRange()
+    : null;
 
   const fetchSold = useCallback(async () => {
     try {
@@ -79,8 +88,9 @@ export default function SoldStock() {
       );
     }
     if (dateFilter) result = result.filter(v => v.sold_date?.slice(0, 10) === dateFilter);
+    if (periodRange) result = result.filter(v => { const d = v.sold_date?.slice(0, 10); return d && d >= periodRange.start && d <= periodRange.end; });
     return result;
-  }, [vehicles, search, dateFilter]);
+  }, [vehicles, search, dateFilter, periodFilter]); // eslint-disable-line react-hooks/exhaustive-deps -- periodRange is derived fresh from periodFilter each render (a new object every time), so depending on periodFilter itself is the stable, correct trigger
 
   const filteredReturned = useMemo(() => {
     let result = returnedSales;
@@ -92,8 +102,9 @@ export default function SoldStock() {
       );
     }
     if (dateFilter) result = result.filter(s => s.returned_at?.slice(0, 10) === dateFilter);
+    if (periodRange) result = result.filter(s => { const d = s.returned_at?.slice(0, 10); return d && d >= periodRange.start && d <= periodRange.end; });
     return result;
-  }, [returnedSales, search, dateFilter]);
+  }, [returnedSales, search, dateFilter, periodFilter]); // eslint-disable-line react-hooks/exhaustive-deps -- see note above
 
   const groups = useMemo(() => {
     const byMonth = {};
@@ -158,7 +169,8 @@ export default function SoldStock() {
               : `${count} vehicles returned · re-entered the pipeline`}
           </p>
         </div>
-        <div className="flex items-start gap-3">
+        <div className="flex items-start gap-3 flex-wrap">
+          <PeriodToggle period={periodFilter} onChange={p => { setPeriodFilter(p); setDateFilter(""); }} testid="sold-stock-period-toggle" allowOff />
           <div className="flex items-center bg-slate-100 rounded-lg p-1" data-testid="sold-stock-date-mode-toggle">
             {[["bs", "Nepali"], ["ad", "English"]].map(([mode, label]) => (
               <button
@@ -174,7 +186,7 @@ export default function SoldStock() {
             ))}
           </div>
           <div className="w-44" data-testid="sold-stock-date-filter-input">
-            <BSDatePicker value={dateFilter} onChange={setDateFilter} mode={dateMode} />
+            <BSDatePicker value={dateFilter} onChange={val => { setDateFilter(val); setPeriodFilter("all"); }} mode={dateMode} />
           </div>
           {dateFilter && (
             <button
@@ -240,6 +252,8 @@ export default function SoldStock() {
                 ? (dateMode === "bs"
                     ? `No vehicles sold on ${formatBSDate(dateFilter)} BS`
                     : `No vehicles sold on ${new Date(`${dateFilter}T00:00:00`).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}`)
+                : periodFilter !== "all"
+                ? `No vehicles sold ${PERIOD_OPTIONS.find(p => p.key === periodFilter)?.label.toLowerCase()}`
                 : search
                 ? "Try adjusting your search"
                 : "Vehicles marked sold will appear here, grouped by month."}
@@ -325,6 +339,8 @@ export default function SoldStock() {
               ? (dateMode === "bs"
                   ? `No vehicles returned on ${formatBSDate(dateFilter)} BS`
                   : `No vehicles returned on ${new Date(`${dateFilter}T00:00:00`).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}`)
+              : periodFilter !== "all"
+              ? `No vehicles returned ${PERIOD_OPTIONS.find(p => p.key === periodFilter)?.label.toLowerCase()}`
               : search
               ? "Try adjusting your search"
               : "Sold vehicles that get returned back into the pipeline will appear here, grouped by month."}
