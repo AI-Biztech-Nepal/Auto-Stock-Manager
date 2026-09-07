@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
 import { AlertTriangle, TrendingUp, Package, Users, Wrench, DollarSign, Clock, ShoppingCart, CalendarDays, TrendingDown, Banknote, Sparkles } from "lucide-react";
@@ -169,16 +169,20 @@ const PeriodToggle = ({ period, onChange }) => (
 // up every time the period toggle is clicked in the header above (even a re-click
 // of the already-active tab) — used to pop the detailed sales list open on demand
 // instead of leaving the tiles/ribbon below as the only view of that period's sales.
+// It starts at `null` (never "hasn't clicked yet" vs. "clicked" via a mutable ref) —
+// a ref-based "skip the first effect run" guard looks right but breaks under
+// StrictMode's dev-only double-invoke-on-mount, which left the ref already flipped
+// by the time the second (real) mount effect ran, popping the modal open on every
+// page load/navigation instead of only on an actual click.
 function AccountingSummary({ period, openSignal }) {
   const navigate = useNavigate();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [recentSales, setRecentSales] = useState([]);
   const [showListModal, setShowListModal] = useState(false);
-  const isFirstSignal = useRef(true);
 
   useEffect(() => {
-    if (isFirstSignal.current) { isFirstSignal.current = false; return; }
+    if (openSignal == null) return;
     setShowListModal(true);
   }, [openSignal]);
 
@@ -351,7 +355,7 @@ function AccountingSummary({ period, openSignal }) {
           data-testid="period-sales-modal-backdrop"
         >
           <div
-            className="bg-white rounded-2xl shadow-2xl w-full max-w-xl max-h-[85vh] flex flex-col overflow-hidden"
+            className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden"
             onClick={e => e.stopPropagation()}
             data-testid="period-sales-modal"
           >
@@ -430,14 +434,16 @@ export default function Dashboard() {
   });
   const navigate = useNavigate();
 
-  // Ticks up on every period-toggle click, even re-clicking the already-active tab —
-  // AccountingSummary uses it to pop its detailed sales list open on demand (see openSignal
-  // there), since a same-value click wouldn't otherwise re-trigger anything off `period` alone.
-  const [periodClickToken, setPeriodClickToken] = useState(0);
+  // null until the first real click — AccountingSummary uses it to pop its detailed
+  // sales list open on demand (see openSignal there). Starts at null rather than 0 so
+  // "never clicked" stays distinguishable from "clicked" without needing a mount-order-
+  // sensitive ref, even re-clicking the already-active tab still ticks it since a
+  // same-value click wouldn't otherwise re-trigger anything off `period` alone.
+  const [periodClickToken, setPeriodClickToken] = useState(null);
 
   const changePeriod = (p) => {
     setPeriod(p);
-    setPeriodClickToken(t => t + 1);
+    setPeriodClickToken(t => (t ?? 0) + 1);
     try { localStorage.setItem(PERIOD_STORAGE_KEY, p); } catch { /* private mode — fine */ }
   };
 
