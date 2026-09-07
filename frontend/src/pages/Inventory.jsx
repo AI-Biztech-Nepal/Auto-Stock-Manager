@@ -360,7 +360,7 @@ export default function Inventory() {
     result.sort(sortStock);
 
     setFiltered(result);
-  }, [vehicles, search, statusFilter, brandFilter, agingFilter, dateFilter, periodFilter, photoFilter]);
+  }, [vehicles, search, statusFilter, brandFilter, agingFilter, dateFilter, periodFilter, photoFilter]); // eslint-disable-line react-hooks/exhaustive-deps -- periodRange is derived fresh from periodFilter each render (a new object every time), so depending on periodFilter itself is the stable, correct trigger
 
   const handleSave = async (e) => {
     e.preventDefault();
