@@ -51,6 +51,9 @@ export default function Sales() {
   const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  // Toggled by clicking the "This Month" summary card — restricts the list below to sales
+  // falling inside the current BS month (same range thisMonthSalesCount is computed against).
+  const [monthOnly, setMonthOnly] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -191,6 +194,7 @@ export default function Sales() {
     : summary?.this_month_sales;
 
   const filtered = sales.filter(s => {
+    if (monthOnly && bsMonthRange && !(s.sale_date >= bsMonthRange.start && s.sale_date <= bsMonthRange.end)) return false;
     if (!search) return true;
     const q = search.toLowerCase();
     return (s.vehicle_info || "").toLowerCase().includes(q) ||
@@ -206,32 +210,54 @@ export default function Sales() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Sales</h1>
-          <p className="text-sm text-slate-500">{sales.length} sales recorded</p>
+          <p className="text-sm text-slate-500">{monthOnly ? `${filtered.length} sales this month` : `${sales.length} sales recorded`}</p>
         </div>
         <button onClick={openModal} data-testid="new-sale-btn" className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-3 rounded-lg transition-all active:scale-95 shadow-sm">
           <Plus size={16} /> Record Sale
         </button>
       </div>
 
-      {/* Summary Cards */}
+      {/* Summary Cards — "This Month" doubles as a filter toggle: tap/click it to narrow
+          the table below to this BS month's sales, tap again to clear. */}
       {summary && (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
           {[
             { label: "Total Sales", value: summary.total_sales, icon: ShoppingBag, color: "bg-blue-500" },
             { label: "Total Revenue", value: formatNPR(summary.total_revenue), icon: TrendingUp, color: "bg-green-500" },
-            { label: "This Month", value: thisMonthSalesCount + " sales", icon: Calendar, color: "bg-indigo-500" },
+            { label: "This Month", value: thisMonthSalesCount + " sales", icon: Calendar, color: "bg-indigo-500", onClick: () => setMonthOnly(v => !v), active: monthOnly, testId: "this-month-card" },
             { label: "Avg Sale Price", value: formatNPR(summary.avg_sale_price), icon: DollarSign, color: "bg-purple-500" },
           ].map(c => (
-            <div key={c.label} className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 flex items-center gap-3">
+            <div
+              key={c.label}
+              onClick={c.onClick}
+              data-testid={c.testId}
+              className={`bg-white rounded-xl border shadow-sm p-4 flex items-center gap-3 text-left transition-all ${
+                c.onClick ? "cursor-pointer hover:shadow-md active:scale-[0.98]" : ""
+              } ${c.active ? "border-indigo-400 ring-2 ring-indigo-100" : "border-slate-200"}`}
+            >
               <div className={`w-9 h-9 rounded-lg ${c.color} flex items-center justify-center shrink-0`}>
                 <c.icon size={16} className="text-white" />
               </div>
-              <div>
+              <div className="min-w-0">
                 <div className="text-xs text-slate-500 font-medium">{c.label}</div>
-                <div className="text-lg font-bold text-slate-900" style={{ fontFamily: "Manrope" }}>{c.value}</div>
+                <div className="text-lg font-bold text-slate-900 truncate" style={{ fontFamily: "Manrope" }}>{c.value}</div>
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Active month-filter banner — same pattern as Inventory's aging filter banner */}
+      {monthOnly && (
+        <div className="flex items-center justify-between px-4 py-2.5 rounded-xl text-sm font-medium border bg-indigo-50 border-indigo-200 text-indigo-700" data-testid="month-filter-banner">
+          <span>Showing: <strong>This month's sales ({filtered.length})</strong></span>
+          <button
+            data-testid="clear-month-filter"
+            onClick={() => setMonthOnly(false)}
+            className="flex items-center gap-1 ml-3 hover:opacity-70 transition-opacity"
+          >
+            <X size={14} /> Clear filter
+          </button>
         </div>
       )}
 
@@ -296,8 +322,8 @@ export default function Sales() {
         {filtered.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-40 text-slate-500">
             <ShoppingBag size={32} className="mb-2 opacity-30" />
-            <p className="font-medium">No sales recorded yet</p>
-            <p className="text-xs mt-1 text-slate-400">Click "Record Sale" to add one</p>
+            <p className="font-medium">{monthOnly || search ? "No sales match this filter" : "No sales recorded yet"}</p>
+            <p className="text-xs mt-1 text-slate-400">{monthOnly || search ? "Try clearing the search or month filter" : 'Click "Record Sale" to add one'}</p>
           </div>
         ) : (
           <>

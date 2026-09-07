@@ -2267,6 +2267,14 @@ async def get_sales(start_date: Optional[str] = None, end_date: Optional[str] = 
         for j in all_jobs:
             job_cost_by_vehicle[j["vehicle_id"]] = job_cost_by_vehicle.get(j["vehicle_id"], 0) + _job_card_cost(j)
 
+    # Margin/profit reveal what the shop paid for the vehicle — restricted to Admin,
+    # same as get_sale (single). Only fetched for admins so the query is skipped
+    # entirely for roles that would never see the result anyway.
+    investment_by_vehicle: dict = {}
+    if cu.get("role", "admin") == "admin" and vehicle_ids:
+        full_vehicles = await db.vehicles.find({"id": {"$in": vehicle_ids}}, {"_id": 0, "id": 1, "purchase_price": 1, "accessories_cost": 1}).to_list(len(vehicle_ids))
+        investment_by_vehicle = await _batch_vehicle_investment(full_vehicles)
+
     for s in sales:
         v = vehicles_by_id.get(s.get("vehicle_id"))
         if v:
@@ -2277,6 +2285,12 @@ async def get_sales(start_date: Optional[str] = None, end_date: Optional[str] = 
         s["customer_name"] = c["name"] if c else "Walk-in Customer"
         s["customer_contact"] = c.get("contact_number") if c else None
         s["job_card_cost"] = job_cost_by_vehicle.get(s.get("vehicle_id"), 0)
+        if s.get("vehicle_id") in investment_by_vehicle:
+            investment = investment_by_vehicle[s["vehicle_id"]]
+            revenue = _sale_revenue(s)
+            s["total_investment"] = investment
+            s["profit"] = revenue - investment
+            s["profit_margin"] = round((revenue - investment) / revenue * 100, 2) if revenue else None
     return sales
 
 @api_router.post("/sales")

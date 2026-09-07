@@ -7,7 +7,7 @@ import { formatNPR } from "../utils/helpers";
 import HoverADDate from "../components/HoverADDate";
 import { useAuth } from "../context/AuthContext";
 import {
-  getCurrentBSDate, getCurrentBSMonthRange,
+  getCurrentBSDate, getCurrentBSMonthRange, getCurrentWeekRange,
   getTodayAD, BS_MONTHS,
 } from "../utils/nepali-date";
 
@@ -102,28 +102,48 @@ const OnlineUsers = () => {
   );
 };
 
-const AccountingKPI = ({ label, value, color, icon: Icon, sub }) => (
-  <div className={`rounded-xl p-4 ${color} flex items-center gap-4`}>
-    <div className="w-10 h-10 rounded-lg bg-white/30 flex items-center justify-center">
+const AccountingKPI = ({ label, value, color, icon: Icon, sub, onClick, testid }) => (
+  <div
+    onClick={onClick}
+    data-testid={testid}
+    className={`rounded-xl p-4 ${color} flex items-center gap-4 ${onClick ? "cursor-pointer hover:brightness-105 active:scale-[0.98] transition-all" : ""}`}
+  >
+    <div className="w-10 h-10 rounded-lg bg-white/30 flex items-center justify-center shrink-0">
       <Icon size={18} className="text-white" />
     </div>
-    <div>
+    <div className="min-w-0">
       <p className="text-xs font-semibold opacity-80 uppercase tracking-wider">{label}</p>
-      <p className="text-xl font-bold text-white" style={{ fontFamily: "Manrope, sans-serif" }}>{value}</p>
-      {sub && <p className="text-xs opacity-70 mt-0.5">{sub}</p>}
+      <p className="text-xl font-bold text-white truncate" style={{ fontFamily: "Manrope, sans-serif" }}>{value}</p>
+      {sub && <p className="text-xs opacity-70 mt-0.5 truncate">{sub}</p>}
     </div>
   </div>
 );
 
 // ── Period toggle ─────────────────────────────────────────────────────
 // One control in the dashboard header that scopes every period-capable figure
-// on the page — "Today" is just records dated today, "This Month" the whole
-// current BS month. Current-state cards (available stock, pending jobs, alerts)
-// have no period meaning and deliberately ignore it.
+// on the page — "Today" is just records dated today, "This Week" the current
+// calendar week (Sun–Sat), "This Month" the whole current BS month.
+// Current-state cards (available stock, pending jobs, alerts) have no period
+// meaning and deliberately ignore it.
 const PERIODS = [
   { key: "daily", label: "Today" },
+  { key: "weekly", label: "This Week" },
   { key: "monthly", label: "This Month" },
 ];
+
+// Short "1 Sep" style label for the weekly range — the week is a plain calendar
+// week (Sun–Sat), not a BS-aligned period, so it doesn't get a BS_MONTHS label
+// the way daily/monthly do.
+const fmtShortAD = (iso) => new Date(`${iso}T00:00:00`).toLocaleDateString("en-US", { day: "numeric", month: "short" });
+
+// Per-period copy for the Sales Highlight strip below the KPIs.
+const PERIOD_NOUN = { daily: "today", weekly: "this week", monthly: "this month" };
+const PERIOD_SALE_TITLE = { daily: "Today's Sale", weekly: "This Week's Sale", monthly: "Sale this month" };
+const PERIOD_EMPTY_TEXT = {
+  daily: "No sales for today as of now!",
+  weekly: "No sales this week as of now!",
+  monthly: "No sales this month as of now!",
+};
 
 const PeriodToggle = ({ period, onChange }) => (
   <div className="flex gap-1 bg-slate-100 rounded-lg p-1" data-testid="dashboard-period-toggle">
@@ -157,6 +177,9 @@ function AccountingSummary({ period }) {
     let start, end;
     if (period === "daily") {
       start = today; end = today;
+    } else if (period === "weekly") {
+      const range = getCurrentWeekRange();
+      start = range.start; end = range.end;
     } else {
       const range = getCurrentBSMonthRange();
       if (!range) return;
@@ -182,6 +205,10 @@ function AccountingSummary({ period }) {
         start = today; end = today;
         const bs = getCurrentBSDate();
         label = bs ? `${BS_MONTHS[bs.month - 1]} ${bs.day}, ${bs.year} BS` : today;
+      } else if (period === "weekly") {
+        const range = getCurrentWeekRange();
+        start = range.start; end = range.end;
+        label = `${fmtShortAD(range.start)} – ${fmtShortAD(range.end)}`;
       } else {
         const range = getCurrentBSMonthRange();
         start = range?.start ?? today; end = range?.end ?? today;
@@ -207,7 +234,7 @@ function AccountingSummary({ period }) {
             Accounting Summary
           </h2>
           <p className="text-xs text-slate-500 mt-0.5">
-            {data ? data.periodLabel : (period === "daily" ? "Today" : "This month")}
+            {data ? data.periodLabel : (PERIODS.find(p => p.key === period)?.label || "Today")}
           </p>
         </div>
       </div>
@@ -224,6 +251,8 @@ function AccountingSummary({ period }) {
             sub={`${data.purchase_count} vehicle${data.purchase_count !== 1 ? "s" : ""} purchased`}
             color="bg-blue-500"
             icon={ShoppingCart}
+            testid="kpi-total-cost"
+            onClick={() => navigate("/inventory")}
           />
           <AccountingKPI
             label="Total Sales"
@@ -231,6 +260,8 @@ function AccountingSummary({ period }) {
             sub={`${data.sold_count} vehicle${data.sold_count !== 1 ? "s" : ""} sold`}
             color="bg-green-500"
             icon={Banknote}
+            testid="kpi-total-sales"
+            onClick={() => navigate("/sales")}
           />
           <AccountingKPI
             label="Net Profit"
@@ -238,6 +269,8 @@ function AccountingSummary({ period }) {
             sub={isProfitPositive ? "Profitable period" : "Loss period"}
             color={isProfitPositive ? "bg-emerald-600" : "bg-red-500"}
             icon={isProfitPositive ? TrendingUp : TrendingDown}
+            testid="kpi-net-profit"
+            onClick={() => navigate("/finance")}
           />
         </div>
       ) : (
@@ -254,33 +287,47 @@ function AccountingSummary({ period }) {
         >
           <Sparkles size={16} className="text-green-600" />
           <h2 className="text-sm font-bold text-green-900 group-hover:underline">
-            {period === "daily" ? "Today's Sale" : "Sale this month"}
+            {PERIOD_SALE_TITLE[period] || "Sales"}
           </h2>
           <span className="text-xs font-medium text-green-700 bg-green-100 px-2 py-0.5 rounded-full">
-            {recentSales.length} {period === "daily" ? "today" : "this month"}
+            {recentSales.length} {PERIOD_NOUN[period] || ""}
           </span>
         </div>
         {recentSales.length > 0 ? (
           <div className="flex gap-3 overflow-x-auto pb-1">
-            {recentSales.map(s => (
-              <div
-                key={s.id}
-                onClick={() => navigate(`/sold-stock/${s.vehicle_id}`)}
-                data-testid="recent-sale-card"
-                className="shrink-0 w-56 bg-white rounded-lg border border-green-100 shadow-sm p-3 cursor-pointer hover:shadow-md hover:border-green-300 transition-all"
-              >
-                <div className="font-bold text-slate-900 text-sm truncate mb-1" style={{ fontFamily: "Manrope" }}>
-                  {s.vehicle_info || "Vehicle"}
+            {recentSales.map(s => {
+              const extraCosts = (s.expenses_total || 0) + (s.job_card_cost || 0);
+              // profit is admin-only (see get_sales in server.py) — undefined for any other role,
+              // so this card silently omits the row instead of showing "NPR NaN".
+              const hasProfit = s.profit !== undefined && s.profit !== null;
+              return (
+                <div
+                  key={s.id}
+                  onClick={() => navigate(`/sold-stock/${s.vehicle_id}`)}
+                  data-testid="recent-sale-card"
+                  className="shrink-0 w-56 bg-white rounded-lg border border-green-100 shadow-sm p-3 cursor-pointer hover:shadow-md hover:border-green-300 transition-all"
+                >
+                  <div className="font-bold text-slate-900 text-sm truncate mb-1" style={{ fontFamily: "Manrope" }}>
+                    {s.vehicle_info || "Vehicle"}
+                  </div>
+                  <div className="text-xs text-slate-500 mb-1 truncate">{s.customer_name}</div>
+                  <div className="text-sm font-semibold text-green-700 mb-1">{formatNPR(s.sale_price)}</div>
+                  {extraCosts > 0 && (
+                    <div className="text-xs text-orange-600 mb-1">+{formatNPR(extraCosts)} extra costs</div>
+                  )}
+                  {hasProfit && (
+                    <div className={`text-xs font-medium mb-1 ${s.profit >= 0 ? "text-emerald-700" : "text-red-600"}`} data-testid="recent-sale-profit">
+                      Profit: {formatNPR(s.profit)}
+                    </div>
+                  )}
+                  <div className="text-xs text-slate-500">Sold: <HoverADDate date={s.sale_date} /></div>
                 </div>
-                <div className="text-xs text-slate-500 mb-1 truncate">{s.customer_name}</div>
-                <div className="text-sm font-semibold text-green-700 mb-1">{formatNPR(s.sale_price)}</div>
-                <div className="text-xs text-slate-500">Sold: <HoverADDate date={s.sale_date} /></div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         ) : (
           <p className="text-sm text-green-700/80 text-center py-3" data-testid="recent-sales-empty">
-            {period === "daily" ? "No sales for today as of now!" : "No sales this month as of now!"}
+            {PERIOD_EMPTY_TEXT[period] || "No sales as of now!"}
           </p>
         )}
       </div>
@@ -340,19 +387,20 @@ export default function Dashboard() {
           <h1 className="text-2xl font-bold text-slate-900">Dashboard</h1>
           <p className="text-sm text-slate-500 mt-0.5">Overview of {user?.company_name || "your"} operations</p>
         </div>
-        <div className="flex items-center gap-3 flex-wrap">
+        <div className="flex items-center gap-2 flex-wrap">
           <PeriodToggle period={period} onChange={changePeriod} />
-          <div className="hidden sm:flex items-start" style={{ gap: "30px" }}>
+          {/* Status pills — one tidy row (was date+clock stacked over online-count, which
+              read as misaligned once the toggle grew a third tab). Hidden below sm: purely
+              informational, and the toggle above already stays reachable on phones. */}
+          <div className="hidden sm:flex items-center gap-2 flex-wrap">
             <OnlineUsers />
             {bsDateStr && (
-              <div className="flex flex-col items-end gap-1.5">
-                <div className="flex items-center gap-2 bg-blue-50 border border-blue-100 px-3 py-1.5 rounded-lg" data-testid="bs-today-display">
-                  <CalendarDays size={14} className="text-blue-600" />
-                  <span className="text-xs font-semibold text-blue-700">{bsDateStr}</span>
-                </div>
-                <LiveClock />
+              <div className="flex items-center gap-2 bg-blue-50 border border-blue-100 px-3 py-1.5 rounded-lg" data-testid="bs-today-display">
+                <CalendarDays size={14} className="text-blue-600" />
+                <span className="text-xs font-semibold text-blue-700">{bsDateStr}</span>
               </div>
             )}
+            <LiveClock />
           </div>
         </div>
       </div>
