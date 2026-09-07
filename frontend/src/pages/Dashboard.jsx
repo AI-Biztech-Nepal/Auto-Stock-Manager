@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
 import { AlertTriangle, TrendingUp, Package, Users, Wrench, DollarSign, Clock, ShoppingCart, CalendarDays, TrendingDown, Banknote, Sparkles } from "lucide-react";
@@ -165,12 +165,22 @@ const PeriodToggle = ({ period, onChange }) => (
 );
 
 // ── Accounting Summary Block ───────────────────────────────────────────
-// Follows the dashboard's global period (passed in as a prop).
-function AccountingSummary({ period }) {
+// Follows the dashboard's global period (passed in as a prop). `openSignal` ticks
+// up every time the period toggle is clicked in the header above (even a re-click
+// of the already-active tab) — used to pop the detailed sales list open on demand
+// instead of leaving the tiles/ribbon below as the only view of that period's sales.
+function AccountingSummary({ period, openSignal }) {
   const navigate = useNavigate();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [recentSales, setRecentSales] = useState([]);
+  const [showListModal, setShowListModal] = useState(false);
+  const isFirstSignal = useRef(true);
+
+  useEffect(() => {
+    if (isFirstSignal.current) { isFirstSignal.current = false; return; }
+    setShowListModal(true);
+  }, [openSignal]);
 
   useEffect(() => {
     const today = getTodayAD();
@@ -331,6 +341,77 @@ function AccountingSummary({ period }) {
           </p>
         )}
       </div>
+
+      {/* Detailed list popup — opens on every period-toggle click (see openSignal above).
+          The tiles/ribbon above are a glance; this is the full breakdown per vehicle. */}
+      {showListModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          onClick={() => setShowListModal(false)}
+          data-testid="period-sales-modal-backdrop"
+        >
+          <div
+            className="bg-white rounded-2xl shadow-2xl w-full max-w-xl max-h-[85vh] flex flex-col overflow-hidden"
+            onClick={e => e.stopPropagation()}
+            data-testid="period-sales-modal"
+          >
+            <div className="flex items-center justify-between p-4 sm:p-5 border-b border-slate-100 shrink-0">
+              <div>
+                <h2 className="text-lg font-bold text-slate-900">{PERIOD_SALE_TITLE[period] || "Sales"}</h2>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  {recentSales.length} vehicle{recentSales.length !== 1 ? "s" : ""} sold{data?.periodLabel ? ` · ${data.periodLabel}` : ""}
+                </p>
+              </div>
+              <button
+                onClick={() => setShowListModal(false)}
+                className="w-11 h-11 -mr-2.5 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500 shrink-0"
+                data-testid="close-period-sales-modal"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="overflow-y-auto divide-y divide-slate-100">
+              {recentSales.length === 0 ? (
+                <p className="text-sm text-slate-400 text-center py-10">{PERIOD_EMPTY_TEXT[period] || "No sales as of now!"}</p>
+              ) : (
+                recentSales.map(s => {
+                  const extraCosts = (s.expenses_total || 0) + (s.job_card_cost || 0);
+                  const hasProfit = s.profit !== undefined && s.profit !== null;
+                  return (
+                    <div
+                      key={s.id}
+                      onClick={() => { setShowListModal(false); navigate(`/sold-stock/${s.vehicle_id}`); }}
+                      data-testid="period-sales-modal-row"
+                      className="flex items-center justify-between gap-3 px-4 sm:px-5 py-3 cursor-pointer hover:bg-slate-50 transition-colors"
+                    >
+                      <div className="min-w-0">
+                        <div className="font-semibold text-slate-900 text-sm truncate" style={{ fontFamily: "Manrope" }}>
+                          {s.vehicle_info || "Vehicle"}
+                        </div>
+                        <div className="text-xs text-slate-500 truncate">
+                          {s.customer_name} · Sold: <HoverADDate date={s.sale_date} />
+                        </div>
+                        {extraCosts > 0 && (
+                          <div className="text-xs text-orange-600 mt-0.5">+{formatNPR(extraCosts)} extra costs</div>
+                        )}
+                      </div>
+                      <div className="text-right shrink-0">
+                        <div className="text-sm font-bold text-green-700">{formatNPR(s.sale_price)}</div>
+                        {hasProfit && (
+                          <div className={`text-xs font-semibold mt-0.5 ${s.profit >= 0 ? "text-emerald-700" : "text-red-600"}`} data-testid="period-sales-modal-profit">
+                            Profit: {formatNPR(s.profit)}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -349,8 +430,14 @@ export default function Dashboard() {
   });
   const navigate = useNavigate();
 
+  // Ticks up on every period-toggle click, even re-clicking the already-active tab —
+  // AccountingSummary uses it to pop its detailed sales list open on demand (see openSignal
+  // there), since a same-value click wouldn't otherwise re-trigger anything off `period` alone.
+  const [periodClickToken, setPeriodClickToken] = useState(0);
+
   const changePeriod = (p) => {
     setPeriod(p);
+    setPeriodClickToken(t => t + 1);
     try { localStorage.setItem(PERIOD_STORAGE_KEY, p); } catch { /* private mode — fine */ }
   };
 
@@ -406,7 +493,7 @@ export default function Dashboard() {
       </div>
 
       {/* Period-scoped: follows the toggle above. Lifetime totals now live on the Finance tab. */}
-      <AccountingSummary period={period} />
+      <AccountingSummary period={period} openSignal={periodClickToken} />
 
       {/* Current stock & workload — a live "right now" snapshot, not affected by the period toggle */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
