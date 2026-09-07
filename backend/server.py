@@ -3329,6 +3329,36 @@ async def accounting_summary(start_date: str, end_date: str, cu: dict = Depends(
         "total_investment_sold": total_investment_sold,
     }
 
+@api_router.get("/reports/purchases")
+async def report_purchases(start_date: str, end_date: str, cu: dict = Depends(admin_only)):
+    """Vehicles purchased within [start_date, end_date], with the same per-vehicle
+    investment breakdown that this endpoint's total_cost above sums up — powers the
+    Dashboard's Total Cost popup with a line-item list that reconciles with that tile,
+    the same way /sales already powers the Total Sales / Net Profit popups."""
+    purchased = await db.vehicles.find(
+        {"purchase_date": {"$gte": start_date, "$lte": end_date}}, {"_id": 0}
+    ).to_list(5000)
+    if not purchased:
+        return []
+    investment_by_vehicle = await _batch_vehicle_investment(purchased)
+    result = []
+    for v in purchased:
+        base = v.get("purchase_price", 0) + v.get("accessories_cost", 0)
+        total_investment = investment_by_vehicle.get(v["id"], base)
+        result.append({
+            "id": v["id"],
+            "vehicle_info": f"{v.get('brand','')} {v.get('model','')} {v.get('year','')}".strip(),
+            "registration_number": v.get("registration_number"),
+            "purchase_source": v.get("purchase_source"),
+            "purchase_date": v.get("purchase_date"),
+            "purchase_price": v.get("purchase_price", 0),
+            "extra_costs": round(total_investment - base, 2),
+            "total_investment": total_investment,
+            "status": v.get("status"),
+        })
+    result.sort(key=lambda r: r["purchase_date"] or "", reverse=True)
+    return result
+
 # ── AUDIT LOGS ────────────────────────────────────────────────────────
 @api_router.get("/audit-logs")
 async def get_audit_logs(cu: dict = Depends(admin_only)):

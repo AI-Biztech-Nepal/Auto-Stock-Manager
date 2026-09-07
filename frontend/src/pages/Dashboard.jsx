@@ -165,26 +165,21 @@ const PeriodToggle = ({ period, onChange }) => (
 );
 
 // ── Accounting Summary Block ───────────────────────────────────────────
-// Follows the dashboard's global period (passed in as a prop). `openSignal` ticks
-// up every time the period toggle is clicked in the header above (even a re-click
-// of the already-active tab) — used to pop the detailed sales list open on demand
-// instead of leaving the tiles/ribbon below as the only view of that period's sales.
-// It starts at `null` (never "hasn't clicked yet" vs. "clicked" via a mutable ref) —
-// a ref-based "skip the first effect run" guard looks right but breaks under
-// StrictMode's dev-only double-invoke-on-mount, which left the ref already flipped
-// by the time the second (real) mount effect ran, popping the modal open on every
-// page load/navigation instead of only on an actual click.
-function AccountingSummary({ period, openSignal }) {
+// Follows the dashboard's global period (passed in as a prop) — the period toggle
+// is a pure filter and never opens anything on its own. Each KPI tile below opens
+// its own detail popup instead: Total Sales / Net Profit both open the sales list
+// (salesModalView picks which summary to emphasize up top), Total Cost opens the
+// separate purchases list.
+function AccountingSummary({ period }) {
   const navigate = useNavigate();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [recentSales, setRecentSales] = useState([]);
-  const [showListModal, setShowListModal] = useState(false);
-
-  useEffect(() => {
-    if (openSignal == null) return;
-    setShowListModal(true);
-  }, [openSignal]);
+  const [purchases, setPurchases] = useState([]);
+  // null | "sales" | "profit" — which tile opened the sales-list popup, and so which
+  // summary (Total Sale only, or Total Sale + Total Profit) it shows top-right.
+  const [salesModalView, setSalesModalView] = useState(null);
+  const [showPurchasesModal, setShowPurchasesModal] = useState(false);
 
   useEffect(() => {
     const today = getTodayAD();
@@ -201,12 +196,16 @@ function AccountingSummary({ period, openSignal }) {
     }
     // Filtered server-side now (start_date/end_date) instead of fetching the
     // entire sales history and filtering client-side — that full-history fetch
-    // plus its N+1 vehicle/customer lookups was why the ribbon felt slow.
+    // plus its N+1 vehicle/customer lookups was why the ribbon felt slow. Purchases
+    // fetched alongside — both popups' lists are ready before either tile is clicked.
     api.get(`/sales?start_date=${start}&end_date=${end}`)
       .then(r => {
         const sorted = [...r.data].sort((a, b) => new Date(b.sale_date) - new Date(a.sale_date));
         setRecentSales(sorted);
       })
+      .catch(() => {});
+    api.get(`/reports/purchases?start_date=${start}&end_date=${end}`)
+      .then(r => setPurchases(r.data))
       .catch(() => {});
   }, [period]);
 
@@ -266,7 +265,7 @@ function AccountingSummary({ period, openSignal }) {
             color="bg-blue-500"
             icon={ShoppingCart}
             testid="kpi-total-cost"
-            onClick={() => navigate("/inventory")}
+            onClick={() => setShowPurchasesModal(true)}
           />
           <AccountingKPI
             label="Total Sales"
@@ -275,7 +274,7 @@ function AccountingSummary({ period, openSignal }) {
             color="bg-green-500"
             icon={Banknote}
             testid="kpi-total-sales"
-            onClick={() => navigate("/sales")}
+            onClick={() => setSalesModalView("sales")}
           />
           <AccountingKPI
             label="Net Profit"
@@ -284,7 +283,7 @@ function AccountingSummary({ period, openSignal }) {
             color={isProfitPositive ? "bg-emerald-600" : "bg-red-500"}
             icon={isProfitPositive ? TrendingUp : TrendingDown}
             testid="kpi-net-profit"
-            onClick={() => navigate("/finance")}
+            onClick={() => setSalesModalView("profit")}
           />
         </div>
       ) : (
@@ -346,12 +345,13 @@ function AccountingSummary({ period, openSignal }) {
         )}
       </div>
 
-      {/* Detailed list popup — opens on every period-toggle click (see openSignal above).
-          The tiles/ribbon above are a glance; this is the full breakdown per vehicle. */}
-      {showListModal && (
+      {/* Sales-list popup — opened by either the Total Sales or Net Profit tile
+          (salesModalView says which). Same rows either way; only the top-right
+          summary changes to match whichever tile was clicked. */}
+      {salesModalView && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-          onClick={() => setShowListModal(false)}
+          onClick={() => setSalesModalView(null)}
           data-testid="period-sales-modal-backdrop"
         >
           <div
@@ -359,20 +359,34 @@ function AccountingSummary({ period, openSignal }) {
             onClick={e => e.stopPropagation()}
             data-testid="period-sales-modal"
           >
-            <div className="flex items-center justify-between p-4 sm:p-5 border-b border-slate-100 shrink-0">
-              <div>
+            <div className="flex items-center justify-between gap-3 p-4 sm:p-5 border-b border-slate-100 shrink-0">
+              <div className="min-w-0">
                 <h2 className="text-lg font-bold text-slate-900">{PERIOD_SALE_TITLE[period] || "Sales"}</h2>
                 <p className="text-xs text-slate-500 mt-0.5">
                   {recentSales.length} vehicle{recentSales.length !== 1 ? "s" : ""} sold{data?.periodLabel ? ` · ${data.periodLabel}` : ""}
                 </p>
               </div>
-              <button
-                onClick={() => setShowListModal(false)}
-                className="w-11 h-11 -mr-2.5 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500 shrink-0"
-                data-testid="close-period-sales-modal"
-              >
-                ✕
-              </button>
+              <div className="flex items-center gap-4 shrink-0">
+                {/* Top-right summary — reads straight off the same `data` the tiles show,
+                    so these totals always reconcile with the tile that opened this. */}
+                <div className="text-right">
+                  {salesModalView === "profit" && (
+                    <div className={`text-sm font-bold ${data && data.net_profit >= 0 ? "text-emerald-700" : "text-red-600"}`} data-testid="sales-modal-total-profit">
+                      Total Profit: {formatNPR(data?.net_profit)}
+                    </div>
+                  )}
+                  <div className="text-xs text-slate-500 font-medium" data-testid="sales-modal-total-sale">
+                    Total Sale: {formatNPR(data?.total_sales)}
+                  </div>
+                </div>
+                <button
+                  onClick={() => setSalesModalView(null)}
+                  className="w-11 h-11 -mr-2.5 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500 shrink-0"
+                  data-testid="close-period-sales-modal"
+                >
+                  ✕
+                </button>
+              </div>
             </div>
 
             <div className="overflow-y-auto divide-y divide-slate-100">
@@ -385,7 +399,7 @@ function AccountingSummary({ period, openSignal }) {
                   return (
                     <div
                       key={s.id}
-                      onClick={() => { setShowListModal(false); navigate(`/sold-stock/${s.vehicle_id}`); }}
+                      onClick={() => { setSalesModalView(null); navigate(`/sold-stock/${s.vehicle_id}`); }}
                       data-testid="period-sales-modal-row"
                       className="flex items-center justify-between gap-3 px-4 sm:px-5 py-3 cursor-pointer hover:bg-slate-50 transition-colors"
                     >
@@ -416,6 +430,84 @@ function AccountingSummary({ period, openSignal }) {
           </div>
         </div>
       )}
+
+      {/* Purchases popup — opened by the Total Cost tile. Separate from the sales popup
+          above since these are vehicles bought in the period, not sold — a different
+          list entirely, from /reports/purchases (mirrors this endpoint's own total_cost
+          math so the header total always matches the tile). */}
+      {showPurchasesModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          onClick={() => setShowPurchasesModal(false)}
+          data-testid="period-purchases-modal-backdrop"
+        >
+          <div
+            className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden"
+            onClick={e => e.stopPropagation()}
+            data-testid="period-purchases-modal"
+          >
+            <div className="flex items-center justify-between gap-3 p-4 sm:p-5 border-b border-slate-100 shrink-0">
+              <div className="min-w-0">
+                <h2 className="text-lg font-bold text-slate-900">
+                  {period === "daily" ? "Today's Purchases" : period === "weekly" ? "This Week's Purchases" : "Purchases this month"}
+                </h2>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  {purchases.length} vehicle{purchases.length !== 1 ? "s" : ""} purchased{data?.periodLabel ? ` · ${data.periodLabel}` : ""}
+                </p>
+              </div>
+              <div className="flex items-center gap-4 shrink-0">
+                <div className="text-right">
+                  <div className="text-sm font-bold text-blue-700" data-testid="purchases-modal-total-cost">
+                    Total Cost: {formatNPR(data?.total_cost)}
+                  </div>
+                </div>
+                <button
+                  onClick={() => setShowPurchasesModal(false)}
+                  className="w-11 h-11 -mr-2.5 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500 shrink-0"
+                  data-testid="close-period-purchases-modal"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+
+            <div className="overflow-y-auto divide-y divide-slate-100">
+              {purchases.length === 0 ? (
+                <p className="text-sm text-slate-400 text-center py-10">
+                  {period === "daily" ? "No vehicles purchased today as of now!" : period === "weekly" ? "No vehicles purchased this week as of now!" : "No vehicles purchased this month as of now!"}
+                </p>
+              ) : (
+                purchases.map(v => (
+                  <div
+                    key={v.id}
+                    onClick={() => { setShowPurchasesModal(false); navigate(`/inventory/${v.id}`); }}
+                    data-testid="period-purchases-modal-row"
+                    className="flex items-center justify-between gap-3 px-4 sm:px-5 py-3 cursor-pointer hover:bg-slate-50 transition-colors"
+                  >
+                    <div className="min-w-0">
+                      <div className="font-semibold text-slate-900 text-sm truncate" style={{ fontFamily: "Manrope" }}>
+                        {v.vehicle_info || "Vehicle"}
+                      </div>
+                      <div className="text-xs text-slate-500 truncate">
+                        {v.registration_number || v.purchase_source || "—"} · Purchased: <HoverADDate date={v.purchase_date} />
+                      </div>
+                      {v.extra_costs > 0 && (
+                        <div className="text-xs text-orange-600 mt-0.5">+{formatNPR(v.extra_costs)} extra costs</div>
+                      )}
+                    </div>
+                    <div className="text-right shrink-0">
+                      <div className="text-sm font-bold text-blue-700">{formatNPR(v.purchase_price)}</div>
+                      <div className="text-xs font-semibold text-slate-500 mt-0.5">
+                        Total: {formatNPR(v.total_investment)}
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -434,16 +526,11 @@ export default function Dashboard() {
   });
   const navigate = useNavigate();
 
-  // null until the first real click — AccountingSummary uses it to pop its detailed
-  // sales list open on demand (see openSignal there). Starts at null rather than 0 so
-  // "never clicked" stays distinguishable from "clicked" without needing a mount-order-
-  // sensitive ref, even re-clicking the already-active tab still ticks it since a
-  // same-value click wouldn't otherwise re-trigger anything off `period` alone.
-  const [periodClickToken, setPeriodClickToken] = useState(null);
-
+  // Pure filter — just scopes the KPIs/ribbon below to the chosen period. Opening a
+  // detail popup is now each KPI tile's own job (see AccountingSummary), not the
+  // toggle's.
   const changePeriod = (p) => {
     setPeriod(p);
-    setPeriodClickToken(t => (t ?? 0) + 1);
     try { localStorage.setItem(PERIOD_STORAGE_KEY, p); } catch { /* private mode — fine */ }
   };
 
@@ -499,7 +586,7 @@ export default function Dashboard() {
       </div>
 
       {/* Period-scoped: follows the toggle above. Lifetime totals now live on the Finance tab. */}
-      <AccountingSummary period={period} openSignal={periodClickToken} />
+      <AccountingSummary period={period} />
 
       {/* Current stock & workload — a live "right now" snapshot, not affected by the period toggle */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
