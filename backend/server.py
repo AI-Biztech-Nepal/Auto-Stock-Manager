@@ -2672,9 +2672,11 @@ async def get_sales(start_date: Optional[str] = None, end_date: Optional[str] = 
     # same as get_sale (single). Only fetched for admins so the query is skipped
     # entirely for roles that would never see the result anyway.
     investment_by_vehicle: dict = {}
+    purchase_price_by_vehicle: dict = {}
     if cu.get("role", "admin") == "admin" and vehicle_ids:
         full_vehicles = await db.vehicles.find({"id": {"$in": vehicle_ids}}, {"_id": 0, "id": 1, "purchase_price": 1, "accessories_cost": 1}).to_list(len(vehicle_ids))
         investment_by_vehicle = await _batch_vehicle_investment(full_vehicles)
+        purchase_price_by_vehicle = {v["id"]: v.get("purchase_price", 0) for v in full_vehicles}
 
     for s in sales:
         v = vehicles_by_id.get(s.get("vehicle_id"))
@@ -2689,7 +2691,12 @@ async def get_sales(start_date: Optional[str] = None, end_date: Optional[str] = 
         if s.get("vehicle_id") in investment_by_vehicle:
             investment = investment_by_vehicle[s["vehicle_id"]]
             revenue = _sale_revenue(s)
+            purchase_price = purchase_price_by_vehicle.get(s["vehicle_id"], 0)
             s["total_investment"] = investment
+            s["purchase_price"] = purchase_price
+            # Everything spent on top of the purchase price (accessories + repair
+            # expenses + job cards) — powers the per-vehicle bill in the Net Profit popup.
+            s["extra_investment"] = round(investment - purchase_price, 2)
             s["profit"] = revenue - investment
             s["profit_margin"] = round((revenue - investment) / revenue * 100, 2) if revenue else None
     return sales
@@ -3725,6 +3732,10 @@ async def accounting_summary(start_date: str, end_date: str, cu: dict = Depends(
     ).to_list(5000)
     purchase_count = len(purchased)
     total_cost = sum((await _batch_vehicle_investment(purchased)).values())
+    # Bare purchase price only (no accessories/repairs) — the "Vehicle Purchase Cost"
+    # tile shows this; total_cost stays the fuller investment figure for anything
+    # that still wants it.
+    total_purchase_price = sum(v.get("purchase_price", 0) for v in purchased)
 
     # Sales in period — use Sales table as source of truth
     sales_in_period = await db.sales.find(
@@ -3753,6 +3764,7 @@ async def accounting_summary(start_date: str, end_date: str, cu: dict = Depends(
     return {
         "period": {"start": start_date, "end": end_date},
         "total_cost": total_cost,
+        "total_purchase_price": total_purchase_price,
         "purchase_count": purchase_count,
         "total_sales": total_sales,
         "sold_count": sold_count,

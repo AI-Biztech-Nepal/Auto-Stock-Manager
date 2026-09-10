@@ -213,6 +213,12 @@ function AccountingSummary({ period }) {
   useEffect(() => { fetchSummary(); }, [fetchSummary]);
 
   const isProfitPositive = data && data.net_profit >= 0;
+  // "Vehicle Purchase Cost" = bare purchase price, no accessories/repairs. Backend
+  // sends total_purchase_price once deployed; until then sum it off the purchases list
+  // (which already carries per-vehicle purchase_price) so the figure is right today.
+  const vehiclePurchaseCost = data?.total_purchase_price != null
+    ? data.total_purchase_price
+    : purchases.reduce((sum, v) => sum + (v.purchase_price || 0), 0);
 
   return (
     <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5" data-testid="accounting-summary">
@@ -235,8 +241,8 @@ function AccountingSummary({ period }) {
       ) : data ? (
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <AccountingKPI
-            label="Total Cost"
-            value={formatNPR(data.total_cost)}
+            label="Vehicle Purchase Cost"
+            value={formatNPR(vehiclePurchaseCost)}
             sub={`${data.purchase_count} vehicle${data.purchase_count !== 1 ? "s" : ""} purchased`}
             color="bg-blue-500"
             icon={ShoppingCart}
@@ -244,7 +250,7 @@ function AccountingSummary({ period }) {
             onClick={() => setShowPurchasesModal(true)}
           />
           <AccountingKPI
-            label="Total Sales"
+            label="Total Vehicle Sale"
             value={formatNPR(data.total_sales)}
             sub={`${data.sold_count} vehicle${data.sold_count !== 1 ? "s" : ""} sold`}
             color="bg-green-500"
@@ -286,9 +292,6 @@ function AccountingSummary({ period }) {
           <div className="flex gap-3 overflow-x-auto pb-1">
             {recentSales.map(s => {
               const extraCosts = (s.expenses_total || 0) + (s.job_card_cost || 0);
-              // profit is admin-only (see get_sales in server.py) — undefined for any other role,
-              // so this card silently omits the row instead of showing "NPR NaN".
-              const hasProfit = s.profit !== undefined && s.profit !== null;
               return (
                 <div
                   key={s.id}
@@ -304,11 +307,6 @@ function AccountingSummary({ period }) {
                   {extraCosts > 0 && (
                     <div className="text-xs text-orange-600 mb-1">+{formatNPR(extraCosts)} extra costs</div>
                   )}
-                  {hasProfit && (
-                    <div className={`text-xs font-medium mb-1 ${s.profit >= 0 ? "text-emerald-700" : "text-red-600"}`} data-testid="recent-sale-profit">
-                      Profit: {formatNPR(s.profit)}
-                    </div>
-                  )}
                   <div className="text-xs text-slate-500">Sold: <HoverADDate date={s.sale_date} /></div>
                 </div>
               );
@@ -321,9 +319,9 @@ function AccountingSummary({ period }) {
         )}
       </div>
 
-      {/* Sales-list popup — opened by either the Total Sales or Net Profit tile
-          (salesModalView says which). Same rows either way; only the top-right
-          summary changes to match whichever tile was clicked. */}
+      {/* Sales-list popup — opened by either the Total Vehicle Sale or Net Profit tile
+          (salesModalView says which). Net Profit adds a per-vehicle bill to each row
+          (purchased / extra / sold / profit) and a Total Profit figure up top. */}
       {salesModalView && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
@@ -352,7 +350,7 @@ function AccountingSummary({ period }) {
                     </div>
                   )}
                   <div className="text-xs text-slate-500 font-medium" data-testid="sales-modal-total-sale">
-                    Total Sale: {formatNPR(data?.total_sales)}
+                    Total Vehicle Sale: {formatNPR(data?.total_sales)}
                   </div>
                 </div>
                 <button
@@ -372,32 +370,71 @@ function AccountingSummary({ period }) {
                 recentSales.map(s => {
                   const extraCosts = (s.expenses_total || 0) + (s.job_card_cost || 0);
                   const hasProfit = s.profit !== undefined && s.profit !== null;
+                  const showBill = salesModalView === "profit" && hasProfit;
+                  const extra = s.extra_investment != null ? s.extra_investment : extraCosts;
+                  // purchase_price is admin-only and only lands once the backend ships it;
+                  // until then, back it out of the numbers we do have so the bill still
+                  // reconciles (sold − purchased − extra === profit).
+                  const purchased = s.purchase_price != null
+                    ? s.purchase_price
+                    : Math.max(0, (s.sale_price || 0) - (s.profit || 0) - extra);
+                  const invested = purchased + extra;
                   return (
                     <div
                       key={s.id}
                       onClick={() => { setSalesModalView(null); navigate(`/sold-stock/${s.vehicle_id}`); }}
                       data-testid="period-sales-modal-row"
-                      className="flex items-center justify-between gap-3 px-4 sm:px-5 py-3 cursor-pointer hover:bg-slate-50 transition-colors"
+                      className="px-4 sm:px-5 py-3 cursor-pointer hover:bg-slate-50 transition-colors"
                     >
-                      <div className="min-w-0">
-                        <div className="font-semibold text-slate-900 text-sm truncate" style={{ fontFamily: "Manrope" }}>
-                          {s.vehicle_info || "Vehicle"}
+                      <div className={showBill ? "" : "flex items-center justify-between gap-3"}>
+                        <div className="min-w-0">
+                          <div className="font-semibold text-slate-900 text-sm truncate" style={{ fontFamily: "Manrope" }}>
+                            {s.vehicle_info || "Vehicle"}
+                          </div>
+                          <div className="text-xs text-slate-500 truncate">
+                            {s.customer_name} · Sold: <HoverADDate date={s.sale_date} />
+                          </div>
+                          {!showBill && extraCosts > 0 && (
+                            <div className="text-xs text-orange-600 mt-0.5">+{formatNPR(extraCosts)} extra costs</div>
+                          )}
                         </div>
-                        <div className="text-xs text-slate-500 truncate">
-                          {s.customer_name} · Sold: <HoverADDate date={s.sale_date} />
-                        </div>
-                        {extraCosts > 0 && (
-                          <div className="text-xs text-orange-600 mt-0.5">+{formatNPR(extraCosts)} extra costs</div>
-                        )}
-                      </div>
-                      <div className="text-right shrink-0">
-                        <div className="text-sm font-bold text-green-700">{formatNPR(s.sale_price)}</div>
-                        {hasProfit && (
-                          <div className={`text-xs font-semibold mt-0.5 ${s.profit >= 0 ? "text-emerald-700" : "text-red-600"}`} data-testid="period-sales-modal-profit">
-                            Profit: {formatNPR(s.profit)}
+                        {!showBill && (
+                          <div className="text-right shrink-0">
+                            <div className="text-sm font-bold text-green-700">{formatNPR(s.sale_price)}</div>
                           </div>
                         )}
                       </div>
+
+                      {showBill && (
+                        <div className="mt-2.5 rounded-lg border border-slate-200 bg-white overflow-hidden text-xs" data-testid="period-sales-modal-bill">
+                          <div className="px-3 pt-2 pb-2 space-y-1.5">
+                            <div className="flex items-baseline justify-between">
+                              <span className="text-slate-500">Purchased amount</span>
+                              <span className="font-medium text-slate-700 tabular-nums">{formatNPR(purchased)}</span>
+                            </div>
+                            <div className="flex items-baseline justify-between">
+                              <span className="text-slate-500">Extra expenses</span>
+                              <span className="font-medium text-slate-700 tabular-nums">+ {formatNPR(extra)}</span>
+                            </div>
+                            <div className="flex items-baseline justify-between pt-1.5 border-t border-dashed border-slate-200">
+                              <span className="text-slate-400">Total invested</span>
+                              <span className="font-medium text-slate-500 tabular-nums">{formatNPR(invested)}</span>
+                            </div>
+                            <div className="flex items-baseline justify-between">
+                              <span className="text-slate-500">Sold amount</span>
+                              <span className="font-semibold text-emerald-600 tabular-nums">{formatNPR(s.sale_price)}</span>
+                            </div>
+                          </div>
+                          <div className={`flex items-center justify-between px-3 py-2 border-t ${s.profit >= 0 ? "bg-emerald-50 border-emerald-100" : "bg-rose-50 border-rose-100"}`}>
+                            <span className={`font-bold ${s.profit >= 0 ? "text-emerald-800" : "text-rose-800"}`}>
+                              {s.profit >= 0 ? "Profit made" : "Loss"}
+                            </span>
+                            <span className={`font-bold text-sm tabular-nums ${s.profit >= 0 ? "text-emerald-700" : "text-rose-700"}`} data-testid="period-sales-modal-profit">
+                              {formatNPR(s.profit)}
+                            </span>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   );
                 })
@@ -434,7 +471,7 @@ function AccountingSummary({ period }) {
               <div className="flex items-center gap-4 shrink-0">
                 <div className="text-right">
                   <div className="text-sm font-bold text-blue-700" data-testid="purchases-modal-total-cost">
-                    Total Cost: {formatNPR(data?.total_cost)}
+                    Vehicle Purchase Cost: {formatNPR(vehiclePurchaseCost)}
                   </div>
                 </div>
                 <button
@@ -467,15 +504,9 @@ function AccountingSummary({ period }) {
                       <div className="text-xs text-slate-500 truncate">
                         {v.registration_number || v.purchase_source || "—"} · Purchased: <HoverADDate date={v.purchase_date} />
                       </div>
-                      {v.extra_costs > 0 && (
-                        <div className="text-xs text-orange-600 mt-0.5">+{formatNPR(v.extra_costs)} extra costs</div>
-                      )}
                     </div>
                     <div className="text-right shrink-0">
                       <div className="text-sm font-bold text-blue-700">{formatNPR(v.purchase_price)}</div>
-                      <div className="text-xs font-semibold text-slate-500 mt-0.5">
-                        Total: {formatNPR(v.total_investment)}
-                      </div>
                     </div>
                   </div>
                 ))
@@ -484,6 +515,7 @@ function AccountingSummary({ period }) {
           </div>
         </div>
       )}
+
     </div>
   );
 }
