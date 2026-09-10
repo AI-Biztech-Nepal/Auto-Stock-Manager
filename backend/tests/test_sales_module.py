@@ -74,7 +74,9 @@ class TestSalesCRUD:
                 {"name": "TEST_Custom Fee", "amount": 500}
             ],
             "payment_method": "Cash",
-            "notes": "TEST sale"
+            "notes": "TEST sale",
+            "witness_name": "TEST Witness", "witness_address": "TEST Addr",
+            "witness_phone": "9800000009", "witness_id_number": "TEST-ID-1",
         }
         resp = auth.post(f"{BASE_URL}/api/sales", json=payload)
         assert resp.status_code == 200, resp.text
@@ -166,7 +168,9 @@ class TestSalesWithCustomer:
             "customer_id": TestSalesWithCustomer.customer_id,
             "sale_price": 170000,
             "payment_method": "Bank Transfer",
-            "extra_expenses": []
+            "extra_expenses": [],
+            "witness_name": "TEST Witness", "witness_address": "TEST Addr",
+            "witness_phone": "9800000009", "witness_id_number": "TEST-ID-1",
         })
         assert resp.status_code == 200
         data = resp.json()

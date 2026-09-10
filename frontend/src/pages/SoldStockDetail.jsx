@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
-import { ArrowLeft, Undo2, ExternalLink, Lock, Store, User } from "lucide-react";
+import { ArrowLeft, Undo2, ExternalLink, Lock, Store, User, Pencil, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
 import { formatNPR, formatOwnership, TRANSFER_STATUS_OPTIONS, getTransferStatusStyle } from "../utils/helpers";
@@ -47,6 +47,22 @@ export default function SoldStockDetail() {
   }, [id, navigate]);
 
   useEffect(() => { fetchVehicle(); }, [fetchVehicle]);
+
+  // The sale behind this sold vehicle — powers the Edit / Delete Sale actions.
+  useEffect(() => {
+    if (!isAdmin) return;
+    api.get(`/vehicles/${id}/active-sale`).then(r => setActiveSale(r.data)).catch(() => {});
+  }, [id, isAdmin]);
+
+  const deleteSale = async () => {
+    if (!activeSale) return;
+    if (!window.confirm("Delete this sale? The vehicle will be restored to available.")) return;
+    try {
+      await api.delete(`/sales/${activeSale.id}`);
+      toast.success("Sale deleted, vehicle restored");
+      navigate("/sold-stock");
+    } catch (err) { toast.error(err.response?.data?.detail || "Failed to delete sale"); }
+  };
 
   // Post-sale name transfer to the buyer — its own field (ownership_transfer_status),
   // not the in-inventory transfer-paperwork status. Editable inline here so it can be
@@ -109,8 +125,14 @@ export default function SoldStockDetail() {
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <span className="px-2.5 py-1 rounded-full text-xs font-semibold uppercase tracking-wide bg-green-100 text-green-800" data-testid="sold-status-badge">Sold</span>
+          {isAdmin && activeSale && (
+            <button onClick={() => navigate(`/sales/${activeSale.id}`)} className="flex items-center gap-1.5 px-3 py-2 border border-slate-200 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50 transition-colors" data-testid="edit-sale-btn"><Pencil size={14} /> Edit Sale</button>
+          )}
           {isAdmin && vehicle.status === "sold" && (
             <button onClick={openReturnModal} className="flex items-center gap-1.5 px-3 py-2 border border-amber-200 text-amber-700 rounded-lg text-sm font-medium hover:bg-amber-50 transition-colors" data-testid="record-return-btn"><Undo2 size={14} /> Record Return</button>
+          )}
+          {isAdmin && activeSale && (
+            <button onClick={deleteSale} className="flex items-center gap-1.5 px-3 py-2 border border-red-200 text-red-600 rounded-lg text-sm font-medium hover:bg-red-50 transition-colors" data-testid="delete-sale-btn"><Trash2 size={14} /> Delete Sale</button>
           )}
         </div>
       </div>

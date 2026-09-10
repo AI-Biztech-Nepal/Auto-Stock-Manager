@@ -1021,9 +1021,17 @@ class SaleCreate(BaseModel):
     payment_method: str = "Cash"
     paid_cash: float = 0
     paid_bank: float = 0
+    advance_payment: float = 0  # booking / token amount, counted toward what's paid
+    due_amount: Optional[float] = None  # explicit override; None → auto (grand total − paid)
     due_date: Optional[str] = None
     sale_date: Optional[str] = None
+    ownership_transfer_date: Optional[str] = None  # BS date the vehicle "passes" to the buyer's name
     notes: Optional[str] = None
+    # Sale-deed witness block — all four required (validated in create_sale).
+    witness_name: Optional[str] = None
+    witness_address: Optional[str] = None
+    witness_phone: Optional[str] = None
+    witness_id_number: Optional[str] = None
 
 class SaleUpdate(BaseModel):
     vehicle_id: str
@@ -1033,13 +1041,17 @@ class SaleUpdate(BaseModel):
     payment_method: str = "Cash"
     paid_cash: float = 0
     paid_bank: float = 0
+    advance_payment: float = 0
+    due_amount: Optional[float] = None
     due_date: Optional[str] = None
     sale_date: Optional[str] = None
+    ownership_transfer_date: Optional[str] = None
     notes: Optional[str] = None
 
 class CustomerCreate(BaseModel):
     name: str; contact_number: str
     address: Optional[str] = None
+    id_number: Optional[str] = None  # driving licence / citizenship no.
     occupation: Optional[str] = None
     budget_min: Optional[float] = None
     budget_max: Optional[float] = None
@@ -1687,6 +1699,368 @@ async def import_vehicles(file: UploadFile = File(...), confirm: bool = False, c
         "message": f"Imported {inserted} vehicle{'s' if inserted != 1 else ''} successfully." + (f" {len(sold_docs)} marked Sold were added to the Sales tab too." if sold_docs else ""),
     }
 
+# ── Sales spreadsheet import ──────────────────────────────────────────
+# Ingests the shop's own "Sales Record 20XX" workbook (one sheet per BS month, 19
+# columns). Each row is matched to a vehicle already in Inventory by registration
+# number; unmatched rows and rows whose vehicle already has a sale are skipped, not
+# failed — so the same file can be re-uploaded any time and only picks up new rows.
+
+_SALES_IMPORT_HEADERS = {
+    "date": ("date", " date", "sale date", "date sold"),
+    "bike": ("bike/scuty", "bike / scuty", "bike", "bike model / name", "bike/scuty "),
+    "customer": ("customer name", " customer name", "customer"),
+    "pass_date": ("pass date",),
+    "helmet": ("helmat", "helmet"),
+    "advance": ("advances", "advance"),
+    "received": ("received amt", "received", "received amount"),
+    "due": ("due amt", "due", "due amount", "remaining due"),
+    "total": ("total  amt", "total amt", "total amount", "selling price"),
+    "status": ("status",),
+    "remark": ("remark", "remarks"),
+    "source": ("sources", "source"),
+    "term": ("transcation term", "transaction term", "term"),
+    "witness_relation": ("relations", "relation"),
+}
+
+def _norm_reg(s) -> str:
+    """Normalise a registration number for matching: drop spaces/case and leading
+    zeros on each side of the slash, so '40/3593' and '040/3593' are the same."""
+    if s is None:
+        return ""
+    t = str(s).strip().lower().replace(" ", "")
+    if "/" in t:
+        parts = t.split("/")
+        return "/".join((p.lstrip("0") or "0") for p in parts)
+    return t
+
+def _bs_to_ad_iso(val) -> Optional[str]:
+    """BS date (datetime with BS year, or 'YYYY/MM/DD' / 'YYYY-MM-DD' string) → AD 'YYYY-MM-DD'."""
+    if val is None or (isinstance(val, str) and not val.strip()):
+        return None
+    try:
+        import nepali_datetime
+        if isinstance(val, datetime):
+            y, m, d = val.year, val.month, val.day
+        else:
+            parts = re.split(r"[/\-.]", str(val).strip())
+            y, m, d = int(parts[0]), int(parts[1]), int(parts[2])
+        if y < 1975 or y > 2100:  # not a plausible BS year — assume it's already AD
+            return val.date().isoformat() if isinstance(val, datetime) else str(val).strip()
+        return nepali_datetime.date(y, m, d).to_datetime_date().isoformat()
+    except Exception:
+        return None
+
+def _import_money(val):
+    """Returns (amount: float, cleared: bool, is_return: bool). Handles '-', '20000(Paid)',
+    '100,000  (Paid)', '25000(Clear)', 'RETURN', bare numbers."""
+    if val is None:
+        return 0.0, False, False
+    s = str(val).strip()
+    if s in ("", "-"):
+        return 0.0, False, False
+    if re.search(r"return", s, re.I):
+        return 0.0, False, True
+    cleared = bool(re.search(r"pai?d|clear", s, re.I))
+    num = re.sub(r"[^\d.]", "", s)
+    try:
+        return (float(num) if num else 0.0), cleared, False
+    except ValueError:
+        return 0.0, False, False
+
+def _import_refund_from_remark(remark, fallback_total: float) -> float:
+    """Pull a refund figure out of a free-text remark like 'Refund Amt 110K' /
+    'Return Amt: 107,000.' / 'REFUND AMT 78200'. 'K' means thousands."""
+    if not remark:
+        return 0.0
+    m = re.search(r"(?:refund|return)[^\d]{0,12}?([\d,]+)\s*(k)?", str(remark), re.I)
+    if not m:
+        return 0.0
+    try:
+        n = float(m.group(1).replace(",", ""))
+        if m.group(2) or (n < 2000 and n > 0):  # '40K' or a bare '40' both mean 40,000 here
+            n *= 1000
+        return round(min(n, fallback_total) if fallback_total else n, 2)
+    except ValueError:
+        return 0.0
+
+def _parse_sales_import_rows(content: bytes, filename: str):
+    fn = (filename or "").lower()
+    sheets: dict = {}
+    if fn.endswith(".csv"):
+        import csv, io
+        text = content.decode("utf-8-sig", errors="ignore")
+        sheets["Sheet1"] = [list(r) for r in csv.reader(io.StringIO(text))]
+    elif fn.endswith(".xlsx"):
+        import openpyxl, io
+        try:
+            wb = openpyxl.load_workbook(io.BytesIO(content), data_only=True)
+        except Exception:
+            raise HTTPException(400, "Could not read file. Make sure it's a valid .xlsx sheet.")
+        for name in wb.sheetnames:
+            sheets[name] = [list(r) for r in wb[name].iter_rows(values_only=True)]
+    else:
+        raise HTTPException(400, "Unsupported file type. Use .xlsx or .csv")
+
+    parsed = []
+    for sheet_name, rows in sheets.items():
+        # Find the header row (first row containing 'bike' and 'customer'-ish cells).
+        header_idx = None
+        for idx, row in enumerate(rows[:6]):
+            cells = [str(c).strip().lower() for c in row if c is not None]
+            if any("bike" in c for c in cells) and any("customer" in c or "date" in c for c in cells):
+                header_idx = idx
+                break
+        if header_idx is None:
+            continue
+        raw_headers = [str(h).strip().lower() if h is not None else "" for h in rows[header_idx]]
+        col = {}
+        for key, names in _SALES_IMPORT_HEADERS.items():
+            for i, h in enumerate(raw_headers):
+                if h in names:
+                    col.setdefault(key, i)  # first match
+        # Customer phone = the first 'contact number' column; witness block = the bare
+        # 'name' + the 'contact number' that comes after it (the "Extra Details" section).
+        contact_cols = [i for i, h in enumerate(raw_headers) if h in ("contact number", "customer phone", "phone")]
+        if contact_cols:
+            col["phone"] = contact_cols[0]
+        for i, h in enumerate(raw_headers):
+            if h == "name":
+                col["witness_name"] = i
+                break
+        wn = col.get("witness_name")
+        if wn is not None:
+            after = [i for i in contact_cols if i > wn]
+            if after:
+                col["witness_phone"] = after[0]
+
+        def g(row, key):
+            i = col.get(key)
+            if i is None or i >= len(row):
+                return None
+            return row[i]
+
+        for sheet_row_num, row in enumerate(rows[header_idx + 1:], start=header_idx + 2):
+            if all(c is None or str(c).strip() == "" for c in row):
+                continue
+            bike = g(row, "bike")
+            if not bike or not str(bike).strip():
+                continue
+            if str(g(row, "date") or "").strip().upper() in ("TOTAL", "LEGEND:"):
+                continue
+            bike_s = str(bike).strip()
+            # reg number = the last whitespace-separated token (the plate always sits at the
+            # end: 'Dio 40/3593', '150 Pulsar 57/739', 'Pleasure AAA9399'). Parens stripped.
+            toks = bike_s.replace("(", " ").replace(")", " ").split()
+            if toks and re.search(r"\d", toks[-1]):
+                reg = toks[-1]
+                model_name = " ".join(toks[:-1]) or reg
+            else:
+                reg, model_name = None, bike_s
+
+            adv_amt, _, _ = _import_money(g(row, "advance"))
+            recv_amt, _, _ = _import_money(g(row, "received"))
+            due_amt, due_cleared, due_return = _import_money(g(row, "due"))
+            total_amt, _, total_return = _import_money(g(row, "total"))
+            is_return = due_return or total_return or bool(re.search(r"return|refund", str(g(row, "remark") or ""), re.I))
+
+            total_given = total_amt > 0
+            sale_price = total_amt or round(adv_amt + recv_amt + due_amt, 2)
+            due_final = 0.0 if (due_cleared or is_return) else due_amt
+            refund = _import_refund_from_remark(g(row, "remark"), sale_price) if is_return else 0.0
+
+            # Things the admin should eyeball after import (row still imports).
+            review = []
+            if reg and "/" not in reg:
+                review.append(f"unusual reg. no. '{reg}'")
+            if is_return and not refund:
+                review.append("returned, but no refund amount in the remark")
+            if not total_given:
+                review.append("sale price was blank, derived from advance + received + due")
+            if not is_return and total_given and abs(round(sale_price - (adv_amt + recv_amt + due_amt), 2)) > 1:
+                review.append("advance + received + due doesn't equal the total")
+            if sale_price <= 0:
+                review.append("sale price is zero")
+            term = str(g(row, "term") or "")
+            is_cash = "cash" in term.lower() and "online" not in term.lower()
+
+            cust = str(g(row, "customer") or "").strip()
+            walk_in = (not cust) or cust.lower() in ("walk-in", "walk in", "walkin")
+
+            parsed.append({
+                "sheet": sheet_name,
+                "row": sheet_row_num,
+                "reg_raw": reg,
+                "reg_norm": _norm_reg(reg) if reg else "",
+                "model_name": model_name,
+                "sale_date": _bs_to_ad_iso(g(row, "date")),
+                "pass_date": _bs_to_ad_iso(g(row, "pass_date")),
+                "customer_name": None if walk_in else cust,
+                "customer_phone": None if walk_in else (str(g(row, "phone")).strip() if g(row, "phone") is not None else None),
+                "helmet_given": bool(re.search(r"yes", str(g(row, "helmet") or ""), re.I)),
+                "advance_payment": adv_amt,
+                "paid_cash": recv_amt if is_cash else 0.0,
+                "paid_bank": 0.0 if is_cash else recv_amt,
+                "sale_price": sale_price,
+                "due_amount": due_final,
+                "transfer_status": "done" if re.search(r"^pass", str(g(row, "status") or "").strip(), re.I) else "pending",
+                "notes": " | ".join(filter(None, [
+                    str(g(row, "remark")).strip() if g(row, "remark") else None,
+                    f"Source: {str(g(row, 'source')).strip()}" if g(row, "source") else None,
+                    f"Terms: {term.strip()}" if term.strip() else None,
+                ])) or None,
+                "witness_name": str(g(row, "witness_name")).strip() if g(row, "witness_name") else None,
+                "witness_phone": str(g(row, "witness_phone")).strip() if g(row, "witness_phone") is not None else None,
+                "witness_relation": str(g(row, "witness_relation")).strip() if g(row, "witness_relation") else None,
+                "is_return": is_return,
+                "refund_amount": refund,
+                "review_note": "; ".join(review) or None,
+            })
+    return parsed
+
+
+@api_router.post("/sales/import")
+async def import_sales(file: UploadFile = File(...), confirm: bool = False, cu: dict = Depends(admin_only)):
+    content = await file.read()
+    parsed = _parse_sales_import_rows(content, file.filename)
+    if not parsed:
+        raise HTTPException(400, "No sales rows found. Expected a 'Bike/scuty' column with a header row.")
+
+    # Index inventory by normalised registration number, and note which vehicles
+    # already have a sale so those rows are skipped rather than duplicated.
+    all_v = await db.vehicles.find({}, {"_id": 0, "id": 1, "registration_number": 1, "status": 1, "brand": 1, "model": 1}).to_list(100000)
+    inv_by_reg: dict = {}
+    for v in all_v:
+        if v.get("registration_number"):
+            inv_by_reg.setdefault(_norm_reg(v["registration_number"]), v)
+    veh_with_sale = {s["vehicle_id"] for s in await db.sales.find({}, {"_id": 0, "vehicle_id": 1}).to_list(100000) if s.get("vehicle_id")}
+
+    # Every row falls into exactly one bucket. Rows we can't parse (no reg#, no date)
+    # are skipped like unmatched rows — a bulk historical import shouldn't be blocked
+    # by one messy cell out of hundreds.
+    to_import, skipped_no_match, skipped_recorded, skipped_bad = [], [], [], []
+    seen_regs = set()
+    for p in parsed:
+        label = f"{p['model_name']} {p['reg_raw'] or ''}".strip()
+        base = {"sheet": p["sheet"], "row": p["row"], "sale": label}
+        if not p["reg_norm"]:
+            skipped_bad.append({**base, "reason": "Couldn't read a registration number"})
+            continue
+        if not p["sale_date"]:
+            skipped_bad.append({**base, "reason": "Couldn't read the sale date"})
+            continue
+        v = inv_by_reg.get(p["reg_norm"])
+        if not v:
+            skipped_no_match.append({**base, "reason": "Not in Inventory"})
+            continue
+        if v["id"] in veh_with_sale or p["reg_norm"] in seen_regs:
+            skipped_recorded.append({**base, "reason": "A sale already exists for this vehicle"})
+            continue
+        seen_regs.add(p["reg_norm"])
+        to_import.append({**p, "vehicle_id": v["id"], "vehicle_status": v["status"], "sale": label})
+
+    flagged = sum(1 for r in to_import if r.get("review_note"))
+    summary = {
+        "total_rows": len(parsed),
+        "to_import": len(to_import),
+        "flagged_for_review": flagged,
+        "skipped_not_in_inventory": len(skipped_no_match),
+        "skipped_already_recorded": len(skipped_recorded),
+        "errors": len(skipped_bad),
+    }
+
+    if not confirm:
+        return {
+            "committed": False, "inserted": 0, **summary,
+            "sample_import": [{"sheet": r["sheet"], "row": r["row"], "sale": r["sale"], "date": r["sale_date"],
+                               "price": r["sale_price"], "due": r["due_amount"], "customer": r["customer_name"] or "Walk-in",
+                               "returned": r["is_return"], "review_note": r.get("review_note")} for r in to_import[:80]],
+            "not_in_inventory": skipped_no_match[:100],
+            "already_recorded": skipped_recorded[:60],
+            "row_errors": skipped_bad[:60],
+            "message": (f"{len(to_import)} sale(s) ready to import"
+                        + (f" ({flagged} flagged 'might need attention')" if flagged else "") + ". "
+                        f"{len(skipped_no_match)} not in Inventory, "
+                        f"{len(skipped_recorded)} already recorded, {len(skipped_bad)} unreadable — all skipped. "
+                        "Nothing imported yet — confirm to proceed."),
+        }
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    # Reuse customers by (name, phone); create the rest.
+    existing_cust = {}
+    for c in await db.customers.find({}, {"_id": 0, "id": 1, "name": 1, "contact_number": 1}).to_list(100000):
+        existing_cust[(str(c.get("name") or "").strip().lower(), str(c.get("contact_number") or "").strip())] = c["id"]
+
+    inserted = 0
+    for r in to_import:
+        customer_id = None
+        if r["customer_name"]:
+            key = (r["customer_name"].strip().lower(), (r["customer_phone"] or "").strip())
+            customer_id = existing_cust.get(key)
+            if not customer_id:
+                customer_id = str(uuid.uuid4())
+                await db.customers.insert_one({
+                    "id": customer_id, "name": r["customer_name"],
+                    "contact_number": r["customer_phone"] or "", "address": None, "id_number": None,
+                    "created_at": now_iso, "last_purchase_date": r["sale_date"],
+                })
+                existing_cust[key] = customer_id
+
+        paid_total = r["advance_payment"] + r["paid_cash"] + r["paid_bank"]
+        pm_parts = []
+        if r["paid_cash"] > 0: pm_parts.append("Cash")
+        if r["paid_bank"] > 0: pm_parts.append("Bank Transfer")
+        if r["advance_payment"] > 0: pm_parts.append("Advance")
+        sale_doc = {
+            "id": str(uuid.uuid4()), "vehicle_id": r["vehicle_id"], "customer_id": customer_id,
+            "sale_price": r["sale_price"], "extra_expenses": [], "expenses_total": 0,
+            "total_amount": r["sale_price"],
+            "payment_method": " + ".join(pm_parts) if pm_parts else "Due",
+            "paid_cash": r["paid_cash"], "paid_bank": r["paid_bank"], "advance_payment": r["advance_payment"],
+            "due_amount": r["due_amount"],
+            "due_date": None,
+            "payment_status": "Paid" if r["due_amount"] <= 0 else ("Partial" if paid_total > 0 else "Unpaid"),
+            "sale_date": r["sale_date"],
+            "ownership_transfer_date": r["pass_date"],
+            "helmet_given": r["helmet_given"],
+            "notes": r["notes"],
+            "witness_name": r["witness_name"], "witness_address": None,
+            "witness_phone": r["witness_phone"], "witness_id_number": None,
+            "witness_relation": r["witness_relation"],
+            "created_by": cu.get("username"), "created_at": now_iso,
+            "imported": True,
+            "needs_review": bool(r.get("review_note")),
+            "review_note": r.get("review_note"),
+        }
+        if r["is_return"]:
+            refund = round(r["refund_amount"], 2)
+            sale_doc.update({
+                "returned": True, "returned_at": now_iso,
+                "returned_status": "available",
+                "refund_amount": refund,
+                "retained_amount": round(r["sale_price"] - refund, 2),
+                "return_notes": "Imported as returned",
+                "due_amount": 0,
+            })
+        await db.sales.insert_one(sale_doc)
+        # Flip the vehicle to Sold (or leave it out of stock as the return implies).
+        veh_update = {"updated_at": now_iso, "ownership_transfer_status": r["transfer_status"]}
+        if r["is_return"]:
+            veh_update.update({"status": "available", "sold_date": None, "customer_id": None})
+        else:
+            veh_update.update({"status": "sold", "sold_date": r["sale_date"],
+                               "selling_price": r["sale_price"], "customer_id": customer_id})
+        await db.vehicles.update_one({"id": r["vehicle_id"]}, {"$set": veh_update})
+        inserted += 1
+
+    await db.audit_logs.insert_one({"action": "sales_bulk_imported", "user": cu["username"],
+        "timestamp": now_iso, "details": f"Imported {inserted} sales from {file.filename}"})
+
+    return {"committed": True, **summary, "inserted": inserted,
+            "message": f"Imported {inserted} sale{'s' if inserted != 1 else ''}"
+                       + (f", {flagged} flagged for review" if flagged else "") + ". "
+                       f"{len(skipped_no_match)} skipped (not in Inventory), {len(skipped_recorded)} already recorded."}
+
+
 @api_router.get("/vehicles/{vid}")
 async def get_vehicle(vid: str, cu: dict = Depends(require("vehicles", "view"))):
     v = await db.vehicles.find_one({"id": vid}, {"_id": 0})
@@ -1904,6 +2278,33 @@ async def return_vehicle(vid: str, body: VehicleReturnRequest, cu: dict = Depend
 
     v = await db.vehicles.find_one({"id": vid}, {"_id": 0})
     return {"vehicle": v, "refund_amount": refund_amount, "retained_amount": retained_amount}
+
+@api_router.post("/sales/{sid}/undo-return")
+async def undo_sale_return(sid: str, cu: dict = Depends(admin_only)):
+    """Reverse a return that shouldn't have happened: the sale goes back to a normal sale
+    and the vehicle back to Sold. Only works if the vehicle hasn't since been resold."""
+    s = await db.sales.find_one({"id": sid}, {"_id": 0})
+    if not s: raise HTTPException(404, "Sale not found")
+    if not s.get("returned"): raise HTTPException(400, "This sale is not marked returned")
+    other = await db.sales.find_one({"vehicle_id": s["vehicle_id"], "returned": {"$ne": True}, "id": {"$ne": sid}})
+    if other:
+        raise HTTPException(400, "That vehicle has another active sale — can't undo this return")
+    paid_total = (s.get("paid_cash") or 0) + (s.get("paid_bank") or 0) + (s.get("advance_payment") or 0)
+    due_amount = max(round((s.get("total_amount") or 0) - paid_total, 2), 0)
+    payment_status = "Paid" if due_amount <= 0 else ("Partial" if paid_total > 0 else "Unpaid")
+    await db.sales.update_one({"id": sid}, {"$set": {
+        "returned": False, "due_amount": due_amount, "payment_status": payment_status,
+        "returned_at": None, "returned_status": None, "refund_amount": None,
+        "retained_amount": None, "return_notes": None,
+    }})
+    await db.vehicles.update_one({"id": s["vehicle_id"]}, {"$set": {
+        "status": "sold", "sold_date": s.get("sale_date"), "customer_id": s.get("customer_id"),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }})
+    await db.audit_logs.insert_one({"action": "vehicle_return_undone", "vehicle_id": s["vehicle_id"],
+        "user": cu["username"], "timestamp": datetime.now(timezone.utc).isoformat(),
+        "details": f"Return on sale {sid} reversed — vehicle back to Sold"})
+    return {"message": "Return reversed — vehicle back to Sold"}
 
 @api_router.delete("/vehicles/{vid}")
 async def delete_vehicle(vid: str, cu: dict = Depends(admin_only)):
@@ -2298,10 +2699,20 @@ async def create_sale(sale: SaleCreate, cu: dict = Depends(require("sales", "cre
     v = await db.vehicles.find_one({"id": sale.vehicle_id}, {"_id": 0})
     if not v: raise HTTPException(404, "Vehicle not found")
     if v.get("status") != "available": raise HTTPException(400, f"Vehicle is already {v.get('status')}")
+    # Sale-deed witness block — captured with the buyer when a new customer is entered
+    # on the form; the required-ness of it is enforced there, not here (a sale against an
+    # already-recorded customer skips the panel and sends nothing).
+    _witness = {
+        "witness_name": (sale.witness_name or "").strip() or None,
+        "witness_address": (sale.witness_address or "").strip() or None,
+        "witness_phone": (sale.witness_phone or "").strip() or None,
+        "witness_id_number": (sale.witness_id_number or "").strip() or None,
+    }
     expenses_total = sum(float(e.get("amount", 0)) for e in sale.extra_expenses)
     total_amount = sale.sale_price + expenses_total
-    paid_total = (sale.paid_cash or 0) + (sale.paid_bank or 0)
-    due_amount = max(round(total_amount - paid_total, 2), 0)
+    paid_total = (sale.paid_cash or 0) + (sale.paid_bank or 0) + (sale.advance_payment or 0)
+    # Due amount: use the explicit value the form sent if any, otherwise auto (total − paid).
+    due_amount = round(sale.due_amount, 2) if sale.due_amount is not None else max(round(total_amount - paid_total, 2), 0)
     payment_status = "Paid" if due_amount <= 0 else ("Partial" if paid_total > 0 else "Unpaid")
     sale_date = sale.sale_date or datetime.now(timezone.utc).date().isoformat()
     doc = {
@@ -2315,11 +2726,14 @@ async def create_sale(sale: SaleCreate, cu: dict = Depends(require("sales", "cre
         "payment_method": sale.payment_method,
         "paid_cash": sale.paid_cash or 0,
         "paid_bank": sale.paid_bank or 0,
+        "advance_payment": sale.advance_payment or 0,
         "due_amount": due_amount,
         "due_date": sale.due_date,
         "payment_status": payment_status,
         "sale_date": sale_date,
+        "ownership_transfer_date": sale.ownership_transfer_date,
         "notes": sale.notes,
+        **_witness,
         "created_by": cu.get("username"),
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -2458,6 +2872,7 @@ async def get_sale(sid: str, cu: dict = Depends(require("sales", "view"))):
     s["customer_name"] = c["name"] if c else "Walk-in Customer"
     s["customer_contact"] = c.get("contact_number") if c else None
     s["customer_address"] = c.get("address") if c else None
+    s["customer_id_number"] = c.get("id_number") if c else None
     # Margin/profit reveal what the shop paid for the vehicle — restricted to Admin
     # to keep that number away from front desk, same as the vehicle-level fields.
     if cu.get("role", "admin") == "admin" and v:
@@ -2478,8 +2893,8 @@ async def update_sale(sid: str, sale: SaleUpdate, cu: dict = Depends(get_current
     if not v: raise HTTPException(404, "Vehicle not found")
     expenses_total = sum(float(e.get("amount", 0)) for e in sale.extra_expenses)
     total_amount = sale.sale_price + expenses_total
-    paid_total = (sale.paid_cash or 0) + (sale.paid_bank or 0)
-    due_amount = max(round(total_amount - paid_total, 2), 0)
+    paid_total = (sale.paid_cash or 0) + (sale.paid_bank or 0) + (sale.advance_payment or 0)
+    due_amount = round(sale.due_amount, 2) if sale.due_amount is not None else max(round(total_amount - paid_total, 2), 0)
     payment_status = "Paid" if due_amount <= 0 else ("Partial" if paid_total > 0 else "Unpaid")
     sale_date = sale.sale_date or existing.get("sale_date")
     update_doc = {
@@ -2492,10 +2907,12 @@ async def update_sale(sid: str, sale: SaleUpdate, cu: dict = Depends(get_current
         "payment_method": sale.payment_method,
         "paid_cash": sale.paid_cash or 0,
         "paid_bank": sale.paid_bank or 0,
+        "advance_payment": sale.advance_payment or 0,
         "due_amount": due_amount,
         "due_date": sale.due_date,
         "payment_status": payment_status,
         "sale_date": sale_date,
+        "ownership_transfer_date": sale.ownership_transfer_date,
         "notes": sale.notes,
         "updated_by": cu.get("username"),
         "updated_at": datetime.now(timezone.utc).isoformat(),
@@ -2526,6 +2943,20 @@ async def delete_sale(sid: str, cu: dict = Depends(get_current_user)):
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }})
     return {"message": "Sale deleted, vehicle restored to available"}
+
+@api_router.patch("/sales/{sid}/review")
+async def set_sale_review(sid: str, body: dict, cu: dict = Depends(admin_only)):
+    """Toggle the 'might need attention' flag on an imported sale — the admin clears it
+    once they've checked the row (or re-flags it)."""
+    s = await db.sales.find_one({"id": sid}, {"_id": 0})
+    if not s: raise HTTPException(404, "Not found")
+    needs = bool(body.get("needs_review"))
+    await db.sales.update_one({"id": sid}, {"$set": {
+        "needs_review": needs,
+        "reviewed_by": None if needs else cu.get("username"),
+        "reviewed_at": None if needs else datetime.now(timezone.utc).isoformat(),
+    }})
+    return {"needs_review": needs}
 
 # ── TEAM ──────────────────────────────────────────────────────────────
 @api_router.get("/team")
@@ -3517,6 +3948,28 @@ async def _run_startup_tasks():
                 )
             except Exception:
                 logger.warning("Could not ensure vehicles.%s column", _col, exc_info=True)
+        # Buyer's ID and the sale-deed witness block post-date the original schema —
+        # add them onto the existing tables if missing (same ADD COLUMN IF NOT EXISTS
+        # pattern; the Mongo backend needs no schema step).
+        _post_schema_cols = [
+            ("customers", "id_number", "VARCHAR(100)"),
+            ("sales", "witness_name", "VARCHAR(255)"),
+            ("sales", "witness_address", "VARCHAR(500)"),
+            ("sales", "witness_phone", "VARCHAR(50)"),
+            ("sales", "witness_id_number", "VARCHAR(100)"),
+            ("sales", "advance_payment", "DOUBLE"),
+            ("sales", "ownership_transfer_date", "VARCHAR(20)"),
+            ("sales", "witness_relation", "VARCHAR(100)"),
+            ("sales", "helmet_given", "TINYINT(1)"),
+            ("sales", "imported", "TINYINT(1)"),
+            ("sales", "needs_review", "TINYINT(1)"),
+            ("sales", "review_note", "VARCHAR(500)"),
+        ]
+        for _tbl, _col, _type in _post_schema_cols:
+            try:
+                await db.execute_raw(f"ALTER TABLE {_tbl} ADD COLUMN IF NOT EXISTS {_col} {_type}")
+            except Exception:
+                logger.warning("Could not ensure %s.%s column", _tbl, _col, exc_info=True)
     await db.vehicles.update_many({"ownership_termination_status": "ok"}, {"$set": {"ownership_termination_status": "yes"}})
     await db.vehicles.update_many({"ownership_termination_status": "missing"}, {"$set": {"ownership_termination_status": "no"}})
     if not await db.settings.find_one({"id": "general"}):

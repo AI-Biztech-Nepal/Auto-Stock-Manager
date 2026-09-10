@@ -52,6 +52,8 @@ def test_create_sale_increments_dashboard(auth_headers):
         "sale_price": vehicle.get("asking_price", 100000),
         "sale_date": "2025-01-15",
         "payment_method": "cash",
+        "witness_name": "TEST Witness", "witness_address": "TEST Addr",
+        "witness_phone": "9800000009", "witness_id_number": "TEST-ID-1",
         "expenses": [],
         "notes": "TEST_dashboard_fix_sale"
     }
@@ -92,6 +94,8 @@ def test_delete_sale_decrements_dashboard(auth_headers):
         "sale_price": vehicle.get("asking_price", 100000),
         "sale_date": "2025-01-15",
         "payment_method": "cash",
+        "witness_name": "TEST Witness", "witness_address": "TEST Addr",
+        "witness_phone": "9800000009", "witness_id_number": "TEST-ID-1",
         "expenses": [],
         "notes": "TEST_delete_decrement"
     }

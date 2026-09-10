@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, Pencil, Trash2, X, ChevronDown, ChevronUp, UserPlus, Lock, Undo2 } from "lucide-react";
+import { ArrowLeft, Pencil, Trash2, X, ChevronDown, ChevronUp, UserPlus, Lock, Undo2, AlertTriangle, CheckCircle2 } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
 import { formatNPR } from "../utils/helpers";
@@ -94,10 +94,13 @@ export default function SaleDetail() {
       vehicle_id: sale.vehicle_id,
       customer_id: sale.customer_id || "",
       sale_price: sale.sale_price,
+      advance_payment: sale.advance_payment || "",
       paid_cash: sale.paid_cash || "",
       paid_bank: sale.paid_bank || "",
+      due_amount: sale.due_amount != null ? sale.due_amount : "",
       due_date: sale.due_date || "",
       sale_date: sale.sale_date || "",
+      ownership_transfer_date: sale.ownership_transfer_date || "",
       notes: sale.notes || "",
     });
     setExpenseItems(sale.extra_expenses?.length > 0 ? sale.extra_expenses : []);
@@ -129,8 +132,9 @@ export default function SaleDetail() {
 
   const expensesTotal = expenseItems.reduce((s, e) => s + Number(e.amount || 0), 0);
   const grandTotal = (Number(editForm.sale_price) || 0) + expensesTotal;
-  const amountPaid = (Number(editForm.paid_cash) || 0) + (Number(editForm.paid_bank) || 0);
-  const amountDue = Math.max(Number((grandTotal - amountPaid).toFixed(2)), 0);
+  const amountPaid = (Number(editForm.paid_cash) || 0) + (Number(editForm.paid_bank) || 0) + (Number(editForm.advance_payment) || 0);
+  const autoDue = Math.max(Number((grandTotal - amountPaid).toFixed(2)), 0);
+  const amountDue = editForm.due_amount === "" ? autoDue : Math.max(Number(editForm.due_amount) || 0, 0);
   const availablePresets = PRESET_EXPENSES.filter(p => !expenseItems.some(e => e.name === p.name));
 
   const addPresetExpense = (name) => {
@@ -154,16 +158,23 @@ export default function SaleDetail() {
     if (!editForm.vehicle_id || !editForm.sale_price) { toast.error("Vehicle and Sale Price are required"); return; }
     setSaving(true);
     try {
+      const pmParts = [];
+      if (Number(editForm.paid_cash) > 0) pmParts.push("Cash");
+      if (Number(editForm.paid_bank) > 0) pmParts.push("Bank Transfer");
+      if (Number(editForm.advance_payment) > 0) pmParts.push("Advance");
       const payload = {
         vehicle_id: editForm.vehicle_id,
         customer_id: editForm.customer_id || null,
         sale_price: Number(editForm.sale_price),
         extra_expenses: expenseItems.map(e => ({ name: e.name, amount: Number(e.amount) || 0 })),
-        payment_method: (Number(editForm.paid_bank) > 0 && Number(editForm.paid_cash) > 0) ? "Cash + Bank Transfer" : (Number(editForm.paid_bank) > 0 ? "Bank Transfer" : (Number(editForm.paid_cash) > 0 ? "Cash" : "Due")),
+        payment_method: pmParts.length ? pmParts.join(" + ") : "Due",
         paid_cash: Number(editForm.paid_cash) || 0,
         paid_bank: Number(editForm.paid_bank) || 0,
+        advance_payment: Number(editForm.advance_payment) || 0,
+        due_amount: editForm.due_amount === "" ? undefined : (Number(editForm.due_amount) || 0),
         due_date: editForm.due_date || undefined,
         sale_date: editForm.sale_date || undefined,
+        ownership_transfer_date: editForm.ownership_transfer_date || undefined,
         notes: editForm.notes,
       };
       await api.put(`/sales/${id}`, payload);
@@ -186,6 +197,23 @@ export default function SaleDetail() {
   const openReturnModal = () => {
     setReturnForm({ refund_amount: "", new_status: "available", notes: "" });
     setShowReturnModal(true);
+  };
+
+  const markReviewed = async () => {
+    try {
+      await api.patch(`/sales/${id}/review`, { needs_review: false });
+      toast.success("Marked as reviewed");
+      fetchSale();
+    } catch (err) { toast.error(getErrMsg(err, "Failed to update")); }
+  };
+
+  const undoReturn = async () => {
+    if (!window.confirm("Undo this return? The sale goes back to a normal sale and the vehicle back to Sold.")) return;
+    try {
+      await api.post(`/sales/${id}/undo-return`);
+      toast.success("Return reversed — vehicle back to Sold");
+      fetchSale();
+    } catch (err) { toast.error(getErrMsg(err, "Failed to undo return")); }
   };
 
   const submitReturn = async (e) => {
@@ -233,6 +261,9 @@ export default function SaleDetail() {
               {!sale.returned && sale.vehicle_status === "sold" && (
                 <button onClick={openReturnModal} data-testid="record-return-btn" className="flex items-center gap-1.5 px-3 py-3 border border-amber-200 text-amber-700 rounded-lg text-sm font-medium hover:bg-amber-50 transition-colors"><Undo2 size={14} /> Record Return</button>
               )}
+              {sale.returned && (
+                <button onClick={undoReturn} data-testid="undo-return-btn" className="flex items-center gap-1.5 px-3 py-3 border border-amber-200 text-amber-700 rounded-lg text-sm font-medium hover:bg-amber-50 transition-colors"><Undo2 size={14} /> Undo Return</button>
+              )}
               <button onClick={deleteSale} data-testid="delete-sale-btn" className="flex items-center gap-1.5 px-3 py-3 border border-red-200 text-red-600 rounded-lg text-sm font-medium hover:bg-red-50 transition-colors"><Trash2 size={14} /> Delete</button>
             </>
           )}
@@ -253,9 +284,14 @@ export default function SaleDetail() {
               />
             </Field>
 
-            <Field label="Sale Date">
-              <BSDatePicker value={editForm.sale_date} onChange={val => setEditForm({ ...editForm, sale_date: val })} data-testid="edit-sale-date-input" />
-            </Field>
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="Sale Date">
+                <BSDatePicker value={editForm.sale_date} onChange={val => setEditForm({ ...editForm, sale_date: val })} data-testid="edit-sale-date-input" />
+              </Field>
+              <Field label="Vehicle Pass Date">
+                <BSDatePicker value={editForm.ownership_transfer_date} onChange={val => setEditForm({ ...editForm, ownership_transfer_date: val })} />
+              </Field>
+            </div>
 
             <Field label="Customer">
               <div className="flex gap-2">
@@ -287,11 +323,17 @@ export default function SaleDetail() {
               <Field label="Sale Price (NPR)" required>
                 <input type="text" inputMode="numeric" value={editForm.sale_price} onChange={e => setEditForm({ ...editForm, sale_price: e.target.value })} className={inp} data-testid="edit-sale-price-input" />
               </Field>
+              <Field label="Advance Payment (NPR)">
+                <input type="text" inputMode="numeric" value={editForm.advance_payment} onChange={e => setEditForm({ ...editForm, advance_payment: e.target.value })} className={inp} />
+              </Field>
               <Field label="Paid by Cash (NPR)">
                 <input type="text" inputMode="numeric" value={editForm.paid_cash} onChange={e => setEditForm({ ...editForm, paid_cash: e.target.value })} className={inp} />
               </Field>
               <Field label="Paid by Bank Transfer (NPR)">
                 <input type="text" inputMode="numeric" value={editForm.paid_bank} onChange={e => setEditForm({ ...editForm, paid_bank: e.target.value })} className={inp} />
+              </Field>
+              <Field label="Due Amount (NPR)">
+                <input type="text" inputMode="numeric" value={editForm.due_amount === "" ? autoDue : editForm.due_amount} onChange={e => setEditForm({ ...editForm, due_amount: e.target.value })} className={inp} />
               </Field>
               <Field label="Due Date">
                 <BSDatePicker value={editForm.due_date} onChange={val => setEditForm({ ...editForm, due_date: val })} />
@@ -367,6 +409,24 @@ export default function SaleDetail() {
         </form>
       ) : (
         <>
+          {sale.needs_review && (
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center gap-3" data-testid="sale-review-banner">
+              <div className="flex-1">
+                <div className="flex items-center gap-1.5 text-sm font-bold text-amber-800">
+                  <AlertTriangle size={15} /> Might need attention
+                </div>
+                <p className="text-xs text-amber-700 mt-0.5">
+                  Imported from the spreadsheet{sale.review_note ? ` — ${sale.review_note}` : ""}. Check the details{isAdmin ? ", fix anything off with Edit," : ""} then mark it reviewed.
+                </p>
+              </div>
+              {isAdmin && (
+                <button onClick={markReviewed} data-testid="mark-reviewed-btn" className="shrink-0 flex items-center gap-1.5 px-3 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-sm font-semibold">
+                  <CheckCircle2 size={14} /> Mark reviewed
+                </button>
+              )}
+            </div>
+          )}
+
           {/* Amount Summary */}
           <div className="grid grid-cols-2 lg:grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-4">
             {[
@@ -432,17 +492,34 @@ export default function SaleDetail() {
           {/* Details */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
-              <h3 className="text-sm font-bold text-slate-900 mb-1">Customer</h3>
+              <h3 className="text-sm font-bold text-slate-900 mb-1">Buyer</h3>
               <Row label="Name"><span className="text-sm font-medium text-slate-900 sm:text-right">{sale.customer_name}</span></Row>
-              <Row label="Contact"><span className="text-sm font-medium text-slate-900 sm:text-right">{sale.customer_contact || "—"}</span></Row>
+              <Row label="Phone No."><span className="text-sm font-medium text-slate-900 sm:text-right">{sale.customer_contact || "—"}</span></Row>
               <Row label="Address"><span className="text-sm font-medium text-slate-900 sm:text-right">{sale.customer_address || "—"}</span></Row>
+              <Row label="Licence / Citizenship No."><span className="text-sm font-medium text-slate-900 sm:text-right">{sale.customer_id_number || "—"}</span></Row>
             </div>
+            {sale.witness_name && (
+              <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5" data-testid="sale-witness-card">
+                <h3 className="text-sm font-bold text-slate-900 mb-1">Witness</h3>
+                <Row label="Name"><span className="text-sm font-medium text-slate-900 sm:text-right">{sale.witness_name}</span></Row>
+                <Row label="Phone No."><span className="text-sm font-medium text-slate-900 sm:text-right">{sale.witness_phone || "—"}</span></Row>
+                <Row label="Address"><span className="text-sm font-medium text-slate-900 sm:text-right">{sale.witness_address || "—"}</span></Row>
+                <Row label="Licence / Citizenship No."><span className="text-sm font-medium text-slate-900 sm:text-right">{sale.witness_id_number || "—"}</span></Row>
+              </div>
+            )}
             <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
               <h3 className="text-sm font-bold text-slate-900 mb-1">Payment</h3>
               <Row label="Sale Date"><span className="text-sm font-medium text-slate-900 sm:text-right"><HoverADDate date={sale.sale_date} /></span></Row>
+              {sale.ownership_transfer_date && (
+                <Row label="Vehicle Pass Date"><span className="text-sm font-medium text-slate-900 sm:text-right"><HoverADDate date={sale.ownership_transfer_date} /></span></Row>
+              )}
               <Row label="Payment Method"><span className="text-sm font-medium text-slate-900 sm:text-right">{sale.payment_method}</span></Row>
+              {sale.advance_payment > 0 && (
+                <Row label="Advance Payment"><span className="text-sm font-medium text-slate-900 sm:text-right">{formatNPR(sale.advance_payment)}</span></Row>
+              )}
               <Row label="Paid by Cash"><span className="text-sm font-medium text-slate-900 sm:text-right">{formatNPR(sale.paid_cash || 0)}</span></Row>
               <Row label="Paid by Bank"><span className="text-sm font-medium text-slate-900 sm:text-right">{formatNPR(sale.paid_bank || 0)}</span></Row>
+              <Row label="Due Amount"><span className={`text-sm font-medium sm:text-right ${sale.due_amount > 0 ? "text-red-600" : "text-slate-900"}`}>{formatNPR(sale.due_amount || 0)}</span></Row>
               {sale.due_amount > 0 && (
                 <Row label="Due Date"><span className="text-sm font-medium text-red-600 sm:text-right">{sale.due_date ? <HoverADDate date={sale.due_date} /> : "Not set"}</span></Row>
               )}
