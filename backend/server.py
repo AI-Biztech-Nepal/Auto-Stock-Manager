@@ -3964,6 +3964,8 @@ async def _run_startup_tasks():
             ("sales", "imported", "TINYINT(1)"),
             ("sales", "needs_review", "TINYINT(1)"),
             ("sales", "review_note", "VARCHAR(500)"),
+            ("sales", "reviewed_by", "VARCHAR(100)"),
+            ("sales", "reviewed_at", "VARCHAR(40)"),
         ]
         for _tbl, _col, _type in _post_schema_cols:
             try:

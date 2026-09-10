@@ -244,6 +244,8 @@ CREATE TABLE IF NOT EXISTS sales (
   imported TINYINT(1),
   needs_review TINYINT(1),
   review_note VARCHAR(500),
+  reviewed_by VARCHAR(100),
+  reviewed_at VARCHAR(40),
   created_by VARCHAR(100),
   created_at VARCHAR(40),
   updated_by VARCHAR(100),
