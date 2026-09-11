@@ -144,7 +144,7 @@ export default function Sales() {
   const selectedCustomer = customers.find(c => c.id === form.customer_id) || null;
 
   const buyerComplete = buyer.name.trim() && buyer.address.trim() && buyer.contact_number.trim();
-  const witnessComplete = form.witness_name.trim() && form.witness_address.trim() && form.witness_phone.trim() && form.witness_id_number.trim();
+  const witnessComplete = form.witness_name.trim() && form.witness_address.trim() && form.witness_phone.trim();
 
   const saveNewCustomer = async () => {
     if (!buyerComplete) { toast.error("Fill in the buyer's name, address, and phone number"); return; }
@@ -203,7 +203,7 @@ export default function Sales() {
         toast.error("Fill in the buyer's name, address, and phone number"); return;
       }
       if (!witnessComplete) {
-        toast.error("Fill in all four witness details"); return;
+        toast.error("Fill in the witness's name, address, and phone number"); return;
       }
     }
     setSaving(true);
@@ -598,7 +598,7 @@ export default function Sales() {
                               <input value={buyer[bkey]} onChange={e => setBuyer({ ...buyer, [bkey]: e.target.value })} placeholder={ph} className={miniInp} data-testid={`buyer-${bkey.replace(/_/g, "-")}`} />
                             </MiniField>
                           )}
-                          <MiniField label={label} required>
+                          <MiniField label={label} required={wkey !== "witness_id_number"}>
                             <input value={form[wkey]} onChange={e => setForm({ ...form, [wkey]: e.target.value })} placeholder={ph} className={miniInp} data-testid={wkey.replace(/_/g, "-")} />
                           </MiniField>
                         </div>
