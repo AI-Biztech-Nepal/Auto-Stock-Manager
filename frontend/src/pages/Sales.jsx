@@ -143,11 +143,11 @@ export default function Sales() {
 
   const selectedCustomer = customers.find(c => c.id === form.customer_id) || null;
 
-  const buyerComplete = buyer.name.trim() && buyer.address.trim() && buyer.contact_number.trim() && buyer.id_number.trim();
+  const buyerComplete = buyer.name.trim() && buyer.address.trim() && buyer.contact_number.trim();
   const witnessComplete = form.witness_name.trim() && form.witness_address.trim() && form.witness_phone.trim() && form.witness_id_number.trim();
 
   const saveNewCustomer = async () => {
-    if (!buyerComplete) { toast.error("Fill in all four buyer's details"); return; }
+    if (!buyerComplete) { toast.error("Fill in the buyer's name, address, and phone number"); return; }
     setAddingCust(true);
     try {
       const r = await api.post("/customers", {
@@ -200,7 +200,7 @@ export default function Sales() {
     const enteringNewBuyer = showAddCust && !form.customer_id;
     if (showAddCust) {
       if (enteringNewBuyer && !buyerComplete) {
-        toast.error("Fill in all four buyer's details"); return;
+        toast.error("Fill in the buyer's name, address, and phone number"); return;
       }
       if (!witnessComplete) {
         toast.error("Fill in all four witness details"); return;
@@ -594,7 +594,7 @@ export default function Sales() {
                               <span className="text-slate-400">{label}: </span>{selectedCustomer[bkey] || "—"}
                             </div>
                           ) : (
-                            <MiniField label={label} required>
+                            <MiniField label={label} required={bkey !== "id_number"}>
                               <input value={buyer[bkey]} onChange={e => setBuyer({ ...buyer, [bkey]: e.target.value })} placeholder={ph} className={miniInp} data-testid={`buyer-${bkey.replace(/_/g, "-")}`} />
                             </MiniField>
                           )}
