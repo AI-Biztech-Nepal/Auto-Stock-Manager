@@ -3,6 +3,8 @@ import { Plus, Edit, Trash2, Handshake, TrendingUp } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
 import { formatNPR } from "../utils/helpers";
+import ViewToggle, { useViewMode } from "../components/ViewToggle";
+import ListRow from "../components/ListRow";
 
 export default function Partners() {
   const [partners, setPartners] = useState([]);
@@ -12,6 +14,7 @@ export default function Partners() {
   const [editItem, setEditItem] = useState(null);
   const [form, setForm] = useState({ name: "", capital_contribution: "", stake_percentage: "", contact: "" });
   const [saving, setSaving] = useState(false);
+  const [view, setView] = useViewMode();
 
   const fetchData = useCallback(async () => {
     try {
@@ -58,9 +61,12 @@ export default function Partners() {
           <h1 className="text-2xl font-bold text-slate-900">Partner Dashboard</h1>
           <p className="text-sm text-slate-500">Financial visibility & profit sharing</p>
         </div>
-        <button onClick={openAdd} data-testid="add-partner-button" className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-3 rounded-lg transition-all active:scale-95 shadow-sm">
-          <Plus size={16} /> Add Partner
-        </button>
+        <div className="flex items-center gap-2">
+          <ViewToggle view={view} onChange={setView} testid="partners-view-toggle" />
+          <button onClick={openAdd} data-testid="add-partner-button" className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-3 rounded-lg transition-all active:scale-95 shadow-sm">
+            <Plus size={16} /> Add Partner
+          </button>
+        </div>
       </div>
 
       {/* Summary Cards */}
@@ -94,6 +100,36 @@ export default function Partners() {
       {/* Partner Cards */}
       {loading ? (
         <div className="flex items-center justify-center h-48"><div className="animate-spin w-7 h-7 border-4 border-blue-600 border-t-transparent rounded-full" /></div>
+      ) : view === "list" ? (
+        <div className="space-y-2">
+          {partners.map(p => {
+            const profitShare = totalProfit * p.stake_percentage / 100;
+            const roi = p.capital_contribution > 0 ? ((profitShare / p.capital_contribution) * 100).toFixed(1) : 0;
+            return (
+              <ListRow
+                key={p.id}
+                testid="partner-card"
+                thumb={<div className="w-full h-full bg-blue-600 flex items-center justify-center text-white font-bold text-sm">{p.name[0]?.toUpperCase()}</div>}
+                title={p.name}
+                subtitle={p.contact || "No contact"}
+                meta={
+                  <div>
+                    <div className="font-semibold text-slate-800">{formatNPR(p.capital_contribution)}</div>
+                    <div className="text-emerald-600">{formatNPR(profitShare)} share</div>
+                  </div>
+                }
+                pills={<>
+                  <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-blue-100 text-blue-700">{p.stake_percentage}% stake</span>
+                  <span className={`px-2 py-0.5 rounded-full text-[11px] font-semibold ${roi > 0 ? "bg-green-100 text-green-700" : "bg-slate-100 text-slate-600"}`}>ROI {roi}%</span>
+                </>}
+                actions={<>
+                  <button onClick={() => openEdit(p)} className="w-9 h-9 flex items-center justify-center hover:bg-slate-100 rounded-lg transition-colors"><Edit size={14} className="text-slate-400" /></button>
+                  <button onClick={() => handleDelete(p.id)} className="w-9 h-9 flex items-center justify-center hover:bg-red-50 rounded-lg transition-colors"><Trash2 size={14} className="text-red-400" /></button>
+                </>}
+              />
+            );
+          })}
+        </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
           {partners.map(p => {

@@ -3,6 +3,8 @@ import { Plus, Search, Trash2, AlertCircle, CheckCircle } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
 import { formatNPR, formatDateDual } from "../utils/helpers";
+import ViewToggle, { useViewMode } from "../components/ViewToggle";
+import ListRow from "../components/ListRow";
 
 export default function EMI() {
   const [emis, setEmis] = useState([]);
@@ -15,6 +17,7 @@ export default function EMI() {
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({ customer_id: "", vehicle_id: "", loan_amount: "", down_payment: "", interest_rate: "12", tenure_months: "12", start_date: "", financer_name: "", notes: "" });
   const [payForm, setPayForm] = useState({ emi_id: "", amount: "", payment_date: "", notes: "" });
+  const [view, setView] = useViewMode();
 
   const fetchEMI = useCallback(async () => {
     try { const r = await api.get("/emi"); setEmis(r.data); }
@@ -70,9 +73,12 @@ export default function EMI() {
           <h1 className="text-2xl font-bold text-slate-900">EMI & Financing</h1>
           <p className="text-sm text-slate-500">{activeEMIs.length} active plans · Receivable: <span className="font-semibold text-blue-600">{formatNPR(totalReceivable)}</span></p>
         </div>
-        <button onClick={() => setShowModal(true)} data-testid="create-emi-btn" className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-3 rounded-lg transition-all active:scale-95 shadow-sm">
-          <Plus size={16} /> New EMI Plan
-        </button>
+        <div className="flex items-center gap-2">
+          <ViewToggle view={view} onChange={setView} testid="emi-view-toggle" />
+          <button onClick={() => setShowModal(true)} data-testid="create-emi-btn" className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-3 rounded-lg transition-all active:scale-95 shadow-sm">
+            <Plus size={16} /> New EMI Plan
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -96,6 +102,36 @@ export default function EMI() {
         <div className="bg-white rounded-xl border border-slate-200 p-12 text-center text-slate-500">
           <p className="font-medium">No EMI plans yet</p>
           <p className="text-sm mt-1">Create plans for financed vehicle purchases</p>
+        </div>
+      ) : view === "list" ? (
+        <div className="space-y-2">
+          {emis.map(e => {
+            const pct = e.loan_amount > 0 ? Math.round((e.total_paid / e.loan_amount) * 100) : 0;
+            return (
+              <ListRow
+                key={e.id}
+                testid="emi-card"
+                title={e.customer_name || "Customer"}
+                subtitle={`${e.vehicle_name} · ${e.financer_name || "Self Finance"}`}
+                meta={
+                  <div>
+                    <div className="font-semibold text-slate-800">{formatNPR(e.monthly_installment)}/mo</div>
+                    <div className="text-red-600">{formatNPR(e.remaining_balance)} left</div>
+                  </div>
+                }
+                pills={<>
+                  <span className={`px-2 py-0.5 rounded-full text-[11px] font-semibold ${e.is_active ? "bg-blue-100 text-blue-700" : "bg-green-100 text-green-700"}`}>{e.is_active ? "Active" : "Closed"}</span>
+                  <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-slate-100 text-slate-600">{pct}% paid</span>
+                </>}
+                actions={e.is_active && (
+                  <button onClick={() => { setSelectedEmi(e); setPayForm({ emi_id: e.id, amount: String(e.monthly_installment), payment_date: "", notes: "" }); setShowPayModal(true); }}
+                    className="px-3 py-1.5 bg-blue-100 text-blue-700 text-xs font-semibold rounded-lg hover:bg-blue-200 transition-colors whitespace-nowrap" data-testid="record-emi-payment-btn">
+                    Record Payment
+                  </button>
+                )}
+              />
+            );
+          })}
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

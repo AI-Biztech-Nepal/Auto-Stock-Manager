@@ -4,6 +4,8 @@ import { toast } from "sonner";
 import api from "../utils/api";
 import { formatDateDual, getWhatsAppLink } from "../utils/helpers";
 import { useAuth } from "../context/AuthContext";
+import ViewToggle, { useViewMode } from "../components/ViewToggle";
+import ListRow from "../components/ListRow";
 
 const TYPE_LABELS = { sell: "Sell", exchange: "Exchange", service: "Book Service" };
 const STATUS_OPTIONS = ["new", "contacted", "closed"];
@@ -31,6 +33,7 @@ export default function Leads() {
   const [typeFilter, setTypeFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [expanded, setExpanded] = useState(null);
+  const [view, setView] = useViewMode();
 
   const fetchLeads = useCallback(async () => {
     try { const r = await api.get("/leads"); setLeads(r.data); }
@@ -66,7 +69,8 @@ export default function Leads() {
           <h1 className="text-2xl font-bold text-slate-900">Leads</h1>
           <p className="text-sm text-slate-500">{leads.length} submissions from the storefront (Sell / Exchange / Book Service)</p>
         </div>
-        <div className="flex gap-3 flex-wrap">
+        <div className="flex gap-3 flex-wrap items-center">
+          <ViewToggle view={view} onChange={setView} testid="leads-view-toggle" />
           <select value={typeFilter} onChange={e => setTypeFilter(e.target.value)} className={sel} data-testid="lead-type-filter">
             <option value="all">All Types</option>
             <option value="sell">Sell</option>
@@ -86,6 +90,31 @@ export default function Leads() {
         <div className="bg-white rounded-xl border border-slate-200 p-12 text-center text-slate-500">
           <p className="font-medium">No leads yet</p>
           <p className="text-sm mt-1">Sell / Exchange / Book Service submissions from the storefront will show up here</p>
+        </div>
+      ) : view === "list" ? (
+        <div className="space-y-2">
+          {filtered.map(l => (
+            <ListRow
+              key={l.id}
+              testid="lead-card"
+              title={l.name}
+              subtitle={`${l.phone} · ${formatDateDual(l.created_at)}`}
+              pills={
+                <span className="text-[11px] font-semibold uppercase tracking-wide bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded">
+                  {TYPE_LABELS[l.type] || l.type}
+                </span>
+              }
+              actions={<>
+                <select value={l.status} onChange={e => updateStatus(l.id, e.target.value)} className={sel} data-testid="lead-status-select">
+                  {STATUS_OPTIONS.map(s => <option key={s} value={s}>{s[0].toUpperCase() + s.slice(1)}</option>)}
+                </select>
+                <a href={getWhatsAppLink(l.phone, buildWhatsAppMessage(l, businessName))} target="_blank" rel="noopener noreferrer" title="Contact on WhatsApp" data-testid="lead-whatsapp-btn" className="w-9 h-9 flex items-center justify-center hover:bg-green-50 rounded-lg">
+                  <MessageCircle size={14} className="text-green-500" />
+                </a>
+                <button onClick={() => handleDelete(l.id)} className="w-9 h-9 flex items-center justify-center hover:bg-red-50 rounded-lg"><Trash2 size={14} className="text-red-400" /></button>
+              </>}
+            />
+          ))}
         </div>
       ) : (
         <div className="space-y-3">

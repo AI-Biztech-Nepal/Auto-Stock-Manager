@@ -4,6 +4,8 @@ import { toast } from "sonner";
 import api from "../utils/api";
 import { formatBSDate } from "../utils/nepali-date";
 import BSDatePicker from "../components/BSDatePicker";
+import ViewToggle, { useViewMode } from "../components/ViewToggle";
+import ListRow from "../components/ListRow";
 
 // ── Role config — add a new role by adding an entry here and to ROLE_ORDER ──
 const ROLE_META = {
@@ -24,6 +26,7 @@ export default function Team() {
   const [editItem, setEditItem] = useState(null);
   const [form, setForm] = useState({ name: "", role: "mechanic", contact: "", specialization: "", commission_rate: "", joining_date: "" });
   const [saving, setSaving] = useState(false);
+  const [view, setView] = useViewMode();
 
   const fetchTeam = useCallback(async () => {
     try { const r = await api.get("/team"); setMembers(r.data); }
@@ -103,6 +106,31 @@ export default function Team() {
     );
   };
 
+  const MemberRow = ({ member }) => {
+    const meta = roleMeta(member.role);
+    return (
+      <ListRow
+        testid="team-member-card"
+        thumb={<div className={`w-full h-full flex items-center justify-center text-white font-bold text-sm ${meta.avatar}`}>{member.name[0]?.toUpperCase()}</div>}
+        title={member.name}
+        subtitle={member.contact || (member.joining_date ? `Joined ${formatBSDate(member.joining_date)} BS` : "—")}
+        meta={member.role === "mechanic" && (
+          <div>
+            <div className="font-semibold text-slate-800">{member.completed_jobs || 0}/{member.total_jobs || 0} jobs</div>
+          </div>
+        )}
+        pills={<>
+          <span className={`text-[11px] px-2 py-0.5 rounded-full font-medium ${meta.badge}`}>{meta.label}</span>
+          {member.commission_rate ? <span className="text-[11px] px-2 py-0.5 rounded-full font-medium bg-slate-100 text-slate-600">{member.commission_rate}% comm.</span> : null}
+        </>}
+        actions={<>
+          <button onClick={() => openEdit(member)} className="w-9 h-9 flex items-center justify-center hover:bg-slate-100 rounded-lg transition-colors"><Edit size={14} className="text-slate-400" /></button>
+          <button onClick={() => handleDelete(member.id)} className="w-9 h-9 flex items-center justify-center hover:bg-red-50 rounded-lg transition-colors"><Trash2 size={14} className="text-red-400" /></button>
+        </>}
+      />
+    );
+  };
+
   return (
     <div className="space-y-6 animate-fade-in">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -110,9 +138,12 @@ export default function Team() {
           <h1 className="text-2xl font-bold text-slate-900">Team Management</h1>
           <p className="text-sm text-slate-500">{members.length} team members</p>
         </div>
-        <button onClick={openAdd} data-testid="add-member-button" className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-3 rounded-lg transition-all active:scale-95 shadow-sm">
-          <Plus size={16} /> Add Member
-        </button>
+        <div className="flex items-center gap-2">
+          <ViewToggle view={view} onChange={setView} testid="team-view-toggle" />
+          <button onClick={openAdd} data-testid="add-member-button" className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-3 rounded-lg transition-all active:scale-95 shadow-sm">
+            <Plus size={16} /> Add Member
+          </button>
+        </div>
       </div>
 
       {/* Stats */}
@@ -136,9 +167,15 @@ export default function Team() {
           {groupedByRole.map(({ role, meta, members: roleMembers }) => (
             <div key={role}>
               <h2 className="text-base font-bold text-slate-900 mb-3 flex items-center gap-2" style={{ fontFamily: "Manrope" }}><meta.Icon size={17} className={meta.statText} />{meta.label}</h2>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                {roleMembers.map(m => <MemberCard key={m.id} member={m} />)}
-              </div>
+              {view === "list" ? (
+                <div className="space-y-2">
+                  {roleMembers.map(m => <MemberRow key={m.id} member={m} />)}
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {roleMembers.map(m => <MemberCard key={m.id} member={m} />)}
+                </div>
+              )}
             </div>
           ))}
           {members.length === 0 && (

@@ -10,6 +10,8 @@ import { VehicleDetailModal } from "./VehicleDetail";
 import HoverADDate from "../components/HoverADDate";
 import BSDatePicker from "../components/BSDatePicker";
 import PeriodToggle, { PERIOD_OPTIONS } from "../components/PeriodToggle";
+import ViewToggle, { useViewMode } from "../components/ViewToggle";
+import ListRow from "../components/ListRow";
 import { formatBSDate, getCurrentBSMonthRange, getCurrentWeekRange, getTodayAD } from "../utils/nepali-date";
 import { useAuth } from "../context/AuthContext";
 import { hasFullVehicleAccess } from "../utils/permissions";
@@ -70,6 +72,7 @@ export default function Inventory() {
   // (created_at — when the stock was entered, not purchase_date). Mutually exclusive
   // with dateFilter's exact-date pick — setting one clears the other, see their setters.
   const [periodFilter, setPeriodFilter] = useState("all");
+  const [view, setView] = useViewMode();
   // null = off, "none" = zero photos, "low" = fewer than MIN_PHOTOS
   const [photoFilter, setPhotoFilter] = useState(null);
   const [photoMenuOpen, setPhotoMenuOpen] = useState(false);
@@ -413,6 +416,7 @@ export default function Inventory() {
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <PeriodToggle period={periodFilter} onChange={p => { setPeriodFilter(p); setDateFilter(""); }} testid="inventory-period-toggle" allowOff />
+          <ViewToggle view={view} onChange={setView} testid="inventory-view-toggle" />
           {!isFrontDesk && (
             <button
               onClick={exportStock}
@@ -760,6 +764,45 @@ export default function Inventory() {
               View all vehicles
             </button>
           )}
+        </div>
+      ) : view === "list" ? (
+        <div className="space-y-2">
+          {filtered.map(v => {
+            const ag = getAgingStyle(v.aging?.category);
+            const st = getStatusStyle(v.status);
+            const photo = v.thumb_photos?.[0];
+            return (
+              <ListRow
+                key={v.id}
+                testid="vehicle-row"
+                dim={v.status === "scrap"}
+                onClick={() => setSelectedVehicleId(v.id)}
+                thumb={photo ? <img src={photo.url} alt="" className="w-full h-full object-cover" /> : <Package size={16} className="text-slate-300" />}
+                title={`${v.brand} ${v.model}`}
+                subtitle={`${v.year} · ${v.registration_number || "No reg."} · ${formatOwnership(v.ownership_number)}`}
+                meta={!hideFinancials && (
+                  <div>
+                    <div className="font-semibold text-slate-800">{formatNPR(v.total_investment)}</div>
+                    {!isPartsOnly && <div className="text-slate-400">{v.selling_price ? formatNPR(v.selling_price) : "—"} selling</div>}
+                  </div>
+                )}
+                pills={<>
+                  <span className={`px-2 py-0.5 rounded-full text-[11px] font-semibold uppercase tracking-wide ${st.bg} ${st.text}`}>{st.label}</span>
+                  <span className={`px-2 py-0.5 rounded-full text-[11px] font-semibold uppercase tracking-wide ${ag.bg} ${ag.text}`}>{v.aging?.days}d</span>
+                </>}
+                actions={<>
+                  <button onClick={() => setSelectedVehicleId(v.id)} className="w-9 h-9 flex items-center justify-center hover:bg-slate-100 rounded-lg transition-colors" data-testid="view-vehicle-btn">
+                    <Eye size={14} className="text-slate-500" />
+                  </button>
+                  {isAdmin && (
+                    <button onClick={e => handleDelete(v.id, e)} className="w-9 h-9 flex items-center justify-center hover:bg-red-50 rounded-lg transition-colors" data-testid="delete-vehicle-btn">
+                      <Trash2 size={14} className="text-red-400" />
+                    </button>
+                  )}
+                </>}
+              />
+            );
+          })}
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">

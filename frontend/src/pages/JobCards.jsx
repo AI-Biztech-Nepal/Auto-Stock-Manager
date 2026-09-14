@@ -8,6 +8,8 @@ import VehicleComboBox from "../components/VehicleComboBox";
 import BSDatePicker from "../components/BSDatePicker";
 import HoverADDate from "../components/HoverADDate";
 import PeriodToggle from "../components/PeriodToggle";
+import ViewToggle, { useViewMode } from "../components/ViewToggle";
+import ListRow from "../components/ListRow";
 import { useAuth } from "../context/AuthContext";
 import { canEditJobs, canDeleteJobs, PARTS_ALLOWED_VEHICLE_STATUSES } from "../utils/permissions";
 
@@ -52,6 +54,7 @@ export default function JobCards() {
   // "all" (default) | "daily" | "weekly" | "monthly" — scopes to created_at, the same
   // date this page's cards already display as "Created".
   const [periodFilter, setPeriodFilter] = useState("all");
+  const [view, setView] = useViewMode();
   const [search, setSearch] = useState("");
   const [showModal, setShowModal] = useState(false);
   const [editingJob, setEditingJob] = useState(null);
@@ -364,6 +367,7 @@ export default function JobCards() {
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <PeriodToggle period={periodFilter} onChange={setPeriodFilter} testid="job-cards-period-toggle" allowOff />
+          <ViewToggle view={view} onChange={setView} testid="job-cards-view-toggle" />
           {canEdit && (
             <button onClick={openModal} data-testid="create-job-button" className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-3 rounded-lg transition-all active:scale-95 shadow-sm">
               <Plus size={16} /> New Job Card
@@ -420,6 +424,52 @@ export default function JobCards() {
               <button onClick={clearFilters} className="text-blue-600 hover:underline font-medium">Clear filters</button>
             </>
           ) : "No job cards found"}
+        </div>
+      ) : view === "list" ? (
+        <div className="space-y-2">
+          {filtered.map(job => {
+            const js = getJobStyle(job.status);
+            const vs = job.vehicle_id ? getStatusStyle(job.vehicle_status) : null;
+            const overBudget = job.actual_cost && job.actual_cost > job.estimated_cost;
+            return (
+              <ListRow
+                key={job.id}
+                testid="job-card"
+                thumb={<Wrench size={15} className="text-slate-300" />}
+                title={job.vehicle_id ? `${job.vehicle_brand} ${job.vehicle_model} ${job.vehicle_year || ""}` : (job.customer_name || "External job")}
+                subtitle={`#${job.job_number} · ${job.mechanic_name}${job.registration_number ? ` · ${job.registration_number}` : ""}`}
+                meta={
+                  <div>
+                    <div className={`font-semibold ${overBudget ? "text-red-600" : "text-slate-800"}`}>{formatNPR(job.actual_cost ?? job.estimated_cost)}</div>
+                    {job.actual_cost != null && <div className="text-slate-400">est. {formatNPR(job.estimated_cost)}</div>}
+                  </div>
+                }
+                pills={<>
+                  {!job.vehicle_id && <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold uppercase tracking-wide bg-orange-100 text-orange-700">External</span>}
+                  {job.is_warranty && <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold uppercase tracking-wide bg-teal-100 text-teal-700">Warranty</span>}
+                  <span className={`px-2 py-0.5 rounded-full text-[11px] font-semibold uppercase tracking-wide ${js.bg} ${js.text}`}>{js.label}</span>
+                </>}
+                actions={<>
+                  {canEdit && job.status === "pending" && (
+                    <button onClick={() => updateStatus(job.id, "in_progress")} disabled={updating === job.id} className="px-2.5 py-1.5 bg-blue-100 text-blue-700 text-xs font-medium rounded-lg hover:bg-blue-200 transition-colors disabled:opacity-60 whitespace-nowrap">
+                      Start Work
+                    </button>
+                  )}
+                  {canEdit && job.status === "in_progress" && (
+                    <button onClick={() => { const cost = window.prompt("Enter actual cost (NPR):"); if (cost !== null) updateStatus(job.id, "completed", cost || job.estimated_cost); }} disabled={updating === job.id} className="px-2.5 py-1.5 bg-green-100 text-green-700 text-xs font-medium rounded-lg hover:bg-green-200 transition-colors disabled:opacity-60 whitespace-nowrap">
+                      Complete
+                    </button>
+                  )}
+                  {canEdit && (
+                    <button onClick={() => openEditModal(job)} data-testid="edit-job-button" className="w-9 h-9 flex items-center justify-center hover:bg-slate-100 rounded-lg transition-colors">
+                      <Pencil size={14} className="text-slate-500" />
+                    </button>
+                  )}
+                  {canDelete && <button onClick={() => deleteJob(job.id)} className="text-xs text-red-400 hover:text-red-600 transition-colors px-2 py-1">Delete</button>}
+                </>}
+              />
+            );
+          })}
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">

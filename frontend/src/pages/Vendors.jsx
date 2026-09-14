@@ -4,6 +4,8 @@ import { Plus, Phone, MapPin, AlertTriangle, Edit, Trash2, CreditCard, Search, B
 import { toast } from "sonner";
 import api from "../utils/api";
 import { formatNPR, formatDateDual } from "../utils/helpers";
+import ViewToggle, { useViewMode } from "../components/ViewToggle";
+import ListRow from "../components/ListRow";
 
 export default function Vendors() {
   const navigate = useNavigate();
@@ -18,6 +20,7 @@ export default function Vendors() {
   const [selectedVendor, setSelectedVendor] = useState(null);
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState("");
+  const [view, setView] = useViewMode();
 
   const fetchVendors = useCallback(async () => {
     try { const r = await api.get("/vendors"); setVendors(r.data); }
@@ -86,9 +89,12 @@ export default function Vendors() {
           <h1 className="text-2xl font-bold text-slate-900">Vendor Management</h1>
           <p className="text-sm text-slate-500">{vendors.length} vendors · Total Due: <span className="font-semibold text-red-600">{formatNPR(totalDue)}</span></p>
         </div>
-        <button onClick={openAdd} data-testid="add-vendor-btn" className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-3 rounded-lg transition-all active:scale-95 shadow-sm">
-          <Plus size={16} /> Add Vendor
-        </button>
+        <div className="flex items-center gap-2">
+          <ViewToggle view={view} onChange={setView} testid="vendors-view-toggle" />
+          <button onClick={openAdd} data-testid="add-vendor-btn" className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-3 rounded-lg transition-all active:scale-95 shadow-sm">
+            <Plus size={16} /> Add Vendor
+          </button>
+        </div>
       </div>
 
       {/* Summary Cards */}
@@ -136,6 +142,37 @@ export default function Vendors() {
         <div className="bg-white rounded-xl border border-slate-200 p-12 text-center text-slate-500">
           <p className="font-medium">No vendors match "{search}"</p>
           <p className="text-sm mt-1">Try a different name, phone, or address</p>
+        </div>
+      ) : view === "list" ? (
+        <div className="space-y-2">
+          {filteredVendors.map(v => (
+            <ListRow
+              key={v.id}
+              testid="vendor-card"
+              onClick={() => navigate(`/finance?tab=ledger&vendor=${v.id}`)}
+              thumb={<div className="w-full h-full bg-slate-700 flex items-center justify-center text-white font-bold text-sm">{v.name[0]?.toUpperCase()}</div>}
+              title={v.name}
+              subtitle={`${v.phone}${v.address ? ` · ${v.address}` : ""}`}
+              meta={
+                <div>
+                  <div className="font-semibold text-slate-800">{formatNPR(v.total_purchased)}</div>
+                  <div className="text-slate-400">{v.vehicle_count} vehicles · {v.parts_count || 0} bills</div>
+                </div>
+              }
+              pills={v.remaining_due > 0 && (
+                <span className="flex items-center gap-1 text-xs font-semibold text-red-600 bg-red-50 px-2 py-0.5 rounded-lg">
+                  <AlertTriangle size={11} />Due: {formatNPR(v.remaining_due)}
+                </span>
+              )}
+              actions={<>
+                <button onClick={() => openPayment(v)} className="px-3 py-1.5 bg-green-100 text-green-700 text-xs font-semibold rounded-lg hover:bg-green-200 transition-colors" data-testid="record-payment-btn">
+                  <CreditCard size={12} className="inline mr-1" />Pay
+                </button>
+                <button onClick={() => openEdit(v)} className="w-9 h-9 flex items-center justify-center hover:bg-slate-100 rounded-lg"><Edit size={14} className="text-slate-400" /></button>
+                <button onClick={() => handleDelete(v.id)} className="w-9 h-9 flex items-center justify-center hover:bg-red-50 rounded-lg"><Trash2 size={14} className="text-red-400" /></button>
+              </>}
+            />
+          ))}
         </div>
       ) : (
         <div className="space-y-3">
