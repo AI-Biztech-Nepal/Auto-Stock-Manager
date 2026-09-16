@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
-import { Plus, Trash2, Edit, CheckCircle, AlertCircle, Clock, QrCode, Undo2, Store, User, Download, FileText } from "lucide-react";
+import { Plus, Trash2, Edit, CheckCircle, AlertCircle, Clock, QrCode, Undo2, Store, User, Download, FileText, Package } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
 import { formatNPR, getAgingStyle, getStatusStyle, getDocStyle, EXPENSE_CATEGORIES, VEHICLE_STATUS_OPTIONS, CONDITIONS, SOURCES, BRANDS, FUEL_TYPES, OWNERSHIP_OPTIONS, formatOwnership } from "../utils/helpers";
@@ -606,21 +606,49 @@ export function VehicleDetailModal({ id, onClose }) {
                       {/* Job cards contribute to the vehicle's expense total too (actual_cost once
                          completed, otherwise the estimate) — listed read-only here since they're
                          managed from the Job Cards page, not this modal. */}
-                      {vehicle.job_cards?.map(job => (
-                        <div key={job.id} data-testid="job-card-expense-row" className="flex items-center justify-between py-3">
-                          <div>
-                            <div className="text-sm font-medium text-slate-900 flex items-center gap-1.5">
-                              {job.work_description}
-                              <span className="px-1.5 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide bg-purple-100 text-purple-700">Job Card</span>
-                              {job.status !== "completed" && (
-                                <span className="px-1.5 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide bg-amber-100 text-amber-700">Estimate</span>
-                              )}
+                      {vehicle.job_cards?.map(job => {
+                        const jobTotal = job.actual_cost ?? job.estimated_cost ?? 0;
+                        const partsTotal = job.parts?.reduce((s, p) => s + p.quantity * p.unit_cost, 0) || 0;
+                        return (
+                          <div key={job.id} data-testid="job-card-expense-row" className="py-3">
+                            <div className="flex items-center justify-between">
+                              <div>
+                                <div className="text-sm font-medium text-slate-900 flex items-center gap-1.5">
+                                  {job.work_description}
+                                  <span className="px-1.5 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide bg-purple-100 text-purple-700">Job Card</span>
+                                  {job.status !== "completed" && (
+                                    <span className="px-1.5 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide bg-amber-100 text-amber-700">Estimate</span>
+                                  )}
+                                </div>
+                                <div className="text-xs text-slate-500">{job.job_number} · {job.mechanic_name}</div>
+                              </div>
+                              <span className="font-semibold text-slate-900">{formatNPR(jobTotal)}</span>
                             </div>
-                            <div className="text-xs text-slate-500">{job.job_number} · {job.mechanic_name}</div>
+                            {job.parts?.length > 0 ? (
+                              <div className="mt-2 bg-slate-50 rounded-lg px-3 py-2 border border-slate-100">
+                                <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-500 mb-1.5">
+                                  <Package size={11} /> Parts Used
+                                </div>
+                                {job.parts.map((p, i) => (
+                                  <div key={i} className="flex justify-between text-xs text-slate-600 py-0.5">
+                                    <span>{p.part_name} × {p.quantity}{(p.external || !p.part_id) && <span className="ml-1.5 text-[10px] font-semibold uppercase tracking-wide text-orange-500">External</span>}</span>
+                                    <span className="font-medium">{formatNPR(p.quantity * p.unit_cost)}</span>
+                                  </div>
+                                ))}
+                                <div className="flex justify-between text-xs font-bold text-slate-800 border-t border-slate-200 mt-1 pt-1">
+                                  <span>Parts Total</span>
+                                  <span className="text-blue-700">{formatNPR(partsTotal)}</span>
+                                </div>
+                                {partsTotal !== jobTotal && (
+                                  <div className="text-[11px] text-amber-600 mt-1">Parts total doesn't match job cost ({formatNPR(jobTotal)}) — check entry.</div>
+                                )}
+                              </div>
+                            ) : (
+                              <div className="mt-1 text-[11px] text-slate-400">No parts recorded — full amount entered directly against "{job.work_description}".</div>
+                            )}
                           </div>
-                          <span className="font-semibold text-slate-900">{formatNPR(job.actual_cost ?? job.estimated_cost)}</span>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                 </div>
