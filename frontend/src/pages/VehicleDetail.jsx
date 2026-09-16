@@ -639,9 +639,11 @@ export function VehicleDetailModal({ id, onClose }) {
                                   <span>Parts Total</span>
                                   <span className="text-blue-700">{formatNPR(partsTotal)}</span>
                                 </div>
-                                {partsTotal !== jobTotal && (
-                                  <div className="text-[11px] text-amber-600 mt-1">Parts total doesn't match job cost ({formatNPR(jobTotal)}) — check entry.</div>
-                                )}
+                                {partsTotal > jobTotal ? (
+                                  <div className="text-[11px] text-amber-600 mt-1">Parts total is higher than the job's price ({formatNPR(jobTotal)}) — worth double-checking.</div>
+                                ) : partsTotal < jobTotal ? (
+                                  <div className="text-[11px] text-slate-400 mt-1">{formatNPR(jobTotal - partsTotal)} of the job's price isn't itemized above — likely paint, labor, or other items not tracked in inventory.</div>
+                                ) : null}
                               </div>
                             ) : (
                               <div className="mt-1 text-[11px] text-slate-400">No parts recorded — full amount entered directly against "{job.work_description}".</div>
