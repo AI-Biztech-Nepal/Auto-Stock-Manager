@@ -3449,7 +3449,186 @@ async def monthly_breakdown_bs(cu: dict = Depends(admin_only)):
     (see Finance.jsx) instead of the Gregorian-month grouping /reports/financial uses."""
     return await _enriched_sales_for_closing()
 
-def _build_closing_report_xlsx(rows: list, month_label: str, prepared_by: str, business_name: str = "Auto Stock Manager") -> bytes:
+# Mirrors EXPENSE_CATEGORIES in frontend/src/utils/helpers.js — kept in sync by hand
+# since the report is the only backend consumer of the human-readable label.
+_EXPENSE_CATEGORY_LABELS = {
+    "denting_paint": "Denting/Paint", "servicing": "Servicing", "parts": "Parts Replacement",
+    "labor": "Labor Cost", "transport": "Transport", "commissions": "Commissions", "other": "Other",
+}
+
+# Cash-basis supplements to the Sales Closing sheet: money actually spent/collected in the
+# period, independent of which vehicle a sale is against. Deliberately separate queries
+# (not reusing _enriched_sales_for_closing) since these are dated by expense/payment date,
+# not sale_date, and cover vehicles that haven't sold yet this month.
+async def _expenses_for_closing(start_date: str, end_date: str):
+    q = {"date": {"$gte": start_date, "$lte": end_date}}
+    exps = await db.expenses.find(q, {"_id": 0}).sort("date", 1).to_list(5000)
+    vehicle_ids = list({e["vehicle_id"] for e in exps if e.get("vehicle_id")})
+    vehicles_by_id = {}
+    if vehicle_ids:
+        vs = await db.vehicles.find({"id": {"$in": vehicle_ids}}, {"_id": 0, "id": 1, "brand": 1, "model": 1, "year": 1, "registration_number": 1}).to_list(len(vehicle_ids))
+        vehicles_by_id = {v["id"]: v for v in vs}
+    out = []
+    for e in exps:
+        v = vehicles_by_id.get(e.get("vehicle_id"))
+        vehicle_label = "Vehicle removed"
+        if v:
+            parts = [v["brand"], v["model"]]
+            if v.get("year"): parts.append(str(v["year"]))
+            vehicle_label = " ".join(parts) + (f" ({v['registration_number']})" if v.get("registration_number") else "")
+        out.append({
+            "date": e.get("date"), "vehicle_label": vehicle_label,
+            "category_label": _EXPENSE_CATEGORY_LABELS.get(e.get("category"), e.get("category") or "Other"),
+            "description": e.get("description") or "", "amount": e.get("amount", 0) or 0,
+        })
+    return out
+
+async def _vendor_payments_for_closing(start_date: str, end_date: str):
+    q = {"payment_date": {"$gte": start_date, "$lte": end_date}}
+    pmts = await db.vendor_payments.find(q, {"_id": 0}).sort("payment_date", 1).to_list(5000)
+    vendor_ids = list({p["vendor_id"] for p in pmts if p.get("vendor_id")})
+    vendors_by_id = {}
+    if vendor_ids:
+        vs = await db.vendors.find({"id": {"$in": vendor_ids}}, {"_id": 0, "id": 1, "name": 1}).to_list(len(vendor_ids))
+        vendors_by_id = {v["id"]: v for v in vs}
+    out = []
+    for p in pmts:
+        out.append({
+            "date": p.get("payment_date"), "vendor_name": vendors_by_id.get(p.get("vendor_id"), {}).get("name", "Vendor removed"),
+            "notes": p.get("notes") or "", "amount": p.get("amount", 0) or 0,
+        })
+    return out
+
+async def _emi_payments_for_closing(start_date: str, end_date: str):
+    q = {"payment_date": {"$gte": start_date, "$lte": end_date}}
+    pmts = await db.emi_payments.find(q, {"_id": 0}).sort("payment_date", 1).to_list(5000)
+    emi_ids = list({p["emi_id"] for p in pmts if p.get("emi_id")})
+    emis_by_id = {}
+    if emi_ids:
+        es = await db.emi_records.find({"id": {"$in": emi_ids}}, {"_id": 0, "id": 1, "customer_name": 1, "vehicle_name": 1}).to_list(len(emi_ids))
+        emis_by_id = {e["id"]: e for e in es}
+    out = []
+    for p in pmts:
+        emi = emis_by_id.get(p.get("emi_id"), {})
+        out.append({
+            "date": p.get("payment_date"), "customer_name": emi.get("customer_name") or "—",
+            "vehicle_label": emi.get("vehicle_name") or "—", "amount": p.get("amount", 0) or 0,
+        })
+    return out
+
+# Styling for the extra sheets below matches the Sales Closing template's own look
+# (Arial, dark slate #1F2937 headers with white text, #F3F4F6/white row banding) so the
+# whole workbook reads as one designed report rather than one styled sheet plus plain ones.
+def _closing_sheet_styles():
+    from openpyxl.styles import Font, PatternFill, Alignment
+    return {
+        "title_font": Font(name="Arial", size=16, bold=True, color="FFFFFFFF"),
+        "title_fill": PatternFill("solid", fgColor="FF1F2937"),
+        "subtitle_font": Font(name="Arial", size=10, color="FFE5E7EB"),
+        "subtitle_fill": PatternFill("solid", fgColor="FF1F2937"),
+        "header_font": Font(name="Arial", size=10, bold=True, color="FFFFFFFF"),
+        "header_fill": PatternFill("solid", fgColor="FF1F2937"),
+        "body_font": Font(name="Arial", size=10, color="FF111827"),
+        "body_fill_odd": PatternFill("solid", fgColor="FFFFFFFF"),
+        "body_fill_even": PatternFill("solid", fgColor="FFF3F4F6"),
+        "total_font": Font(name="Arial", size=10, bold=True, color="FF111827"),
+        "total_fill": PatternFill("solid", fgColor="FFE5E7EB"),
+    }
+
+def _add_ledger_sheet(wb, sheet_name: str, title: str, subtitle: str, headers: list, rows: list,
+                       col_widths: list, money_cols: set, total_label: str = "TOTAL"):
+    import openpyxl.utils
+    from openpyxl.styles import Alignment
+    st = _closing_sheet_styles()
+    ws = wb.create_sheet(sheet_name)
+    ws.sheet_view.showGridLines = False
+    n_cols = len(headers)
+
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=n_cols)
+    ws.cell(row=1, column=1, value=title).font = st["title_font"]
+    ws.cell(row=1, column=1).fill = st["title_fill"]
+    ws.row_dimensions[1].height = 25.5
+
+    ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=n_cols)
+    ws.cell(row=2, column=1, value=subtitle).font = st["subtitle_font"]
+    ws.cell(row=2, column=1).fill = st["subtitle_fill"]
+    ws.row_dimensions[2].height = 18
+
+    for col, h in enumerate(headers, start=1):
+        c = ws.cell(row=4, column=col, value=h)
+        c.font = st["header_font"]; c.fill = st["header_fill"]
+        c.alignment = Alignment(vertical="center")
+    ws.row_dimensions[4].height = 22
+    ws.freeze_panes = "A5"
+
+    totals = [0.0] * n_cols
+    row_idx = 5
+    if not rows:
+        for col in range(1, n_cols + 1):
+            c = ws.cell(row=row_idx, column=col, value="No entries this month" if col == 1 else None)
+            c.font = st["body_font"]; c.fill = st["body_fill_odd"]
+        row_idx += 1
+    else:
+        for i, r in enumerate(rows):
+            fill = st["body_fill_odd"] if i % 2 == 0 else st["body_fill_even"]
+            for col, val in enumerate(r, start=1):
+                c = ws.cell(row=row_idx, column=col, value=val)
+                c.font = st["body_font"]; c.fill = fill
+                if col - 1 in money_cols and isinstance(val, (int, float)):
+                    c.number_format = "#,##0.00"
+                    totals[col - 1] += val
+            row_idx += 1
+
+    c = ws.cell(row=row_idx, column=1, value=total_label)
+    c.font = st["total_font"]; c.fill = st["total_fill"]
+    if n_cols > 1:
+        ws.merge_cells(start_row=row_idx, start_column=1, end_row=row_idx, end_column=n_cols - len(money_cols) if money_cols else n_cols)
+    for col_i in money_cols:
+        col = col_i + 1
+        c = ws.cell(row=row_idx, column=col, value=round(totals[col_i], 2) if rows else 0)
+        c.font = st["total_font"]; c.fill = st["total_fill"]; c.number_format = "#,##0.00"
+
+    for i, w in enumerate(col_widths, start=1):
+        ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = w
+    return ws
+
+def _add_summary_sheet(wb, title: str, subtitle: str, sections: list):
+    """sections: list of (section_title, [(label, value_or_None), ...]) — value None renders
+    a spacer row. Values are pre-formatted strings so mixed units (Rs., %, counts) read cleanly."""
+    from openpyxl.styles import Font, Alignment
+    st = _closing_sheet_styles()
+    ws = wb.create_sheet(title[:31] if len(title) <= 31 else "Summary")
+    ws.sheet_view.showGridLines = False
+
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=3)
+    ws.cell(row=1, column=1, value=title).font = st["title_font"]
+    ws.cell(row=1, column=1).fill = st["title_fill"]
+    ws.row_dimensions[1].height = 25.5
+    ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=3)
+    ws.cell(row=2, column=1, value=subtitle).font = st["subtitle_font"]
+    ws.cell(row=2, column=1).fill = st["subtitle_fill"]
+    ws.row_dimensions[2].height = 18
+
+    row = 4
+    section_font = Font(name="Arial", size=11, bold=True, color="FF1F2937")
+    for section_title, items in sections:
+        ws.cell(row=row, column=1, value=section_title).font = section_font
+        row += 1
+        for label, value in items:
+            lc = ws.cell(row=row, column=1, value=label)
+            lc.font = st["body_font"]
+            vc = ws.cell(row=row, column=2, value=value)
+            vc.font = Font(name="Arial", size=10, bold=True, color="FF111827")
+            vc.alignment = Alignment(horizontal="right")
+            row += 1
+        row += 1  # blank spacer between sections
+
+    ws.column_dimensions["A"].width = 34
+    ws.column_dimensions["B"].width = 20
+    return ws
+
+def _build_closing_report_xlsx(rows: list, month_label: str, prepared_by: str, business_name: str = "Auto Stock Manager",
+                                expense_rows: list = None, vendor_payment_rows: list = None, emi_payment_rows: list = None) -> bytes:
     import openpyxl
     from openpyxl.styles import PatternFill
 
@@ -3558,16 +3737,80 @@ def _build_closing_report_xlsx(rows: list, month_label: str, prepared_by: str, b
     ws.cell(row=note_row, column=1).fill = RETURNED_FILL
     ws.merge_cells(start_row=note_row, start_column=1, end_row=note_row, end_column=10)
 
+    subtitle = f"Report Month:  {month_label}        Prepared By:  {prepared_by or '________'}        Date Prepared:  {today}"
+    expense_rows = expense_rows or []
+    vendor_payment_rows = vendor_payment_rows or []
+    emi_payment_rows = emi_payment_rows or []
+
+    _add_ledger_sheet(
+        wb, "Expenses", f"{business_name} – Expenses Recorded for the Month of {month_label}", subtitle,
+        ["Date", "Vehicle", "Category", "Description", "Amount (Rs.)"],
+        [[e["date"], e["vehicle_label"], e["category_label"], e["description"], e["amount"]] for e in expense_rows],
+        [13, 32, 20, 32, 16], {4},
+    )
+    _add_ledger_sheet(
+        wb, "Vendor Payments", f"{business_name} – Vendor Payments Made for the Month of {month_label}", subtitle,
+        ["Date", "Vendor", "Notes", "Amount (Rs.)"],
+        [[p["date"], p["vendor_name"], p["notes"], p["amount"]] for p in vendor_payment_rows],
+        [13, 28, 32, 16], {3},
+    )
+    _add_ledger_sheet(
+        wb, "EMI Collections", f"{business_name} – EMI Collections for the Month of {month_label}", subtitle,
+        ["Date", "Customer", "Vehicle", "Amount (Rs.)"],
+        [[p["date"], p["customer_name"], p["vehicle_label"], p["amount"]] for p in emi_payment_rows],
+        [13, 24, 28, 16], {3},
+    )
+
+    # Summary ties the other sheets together on a cash/accrual basis kept deliberately
+    # separate per line — see the doc comment on _enriched_sales_for_closing for why
+    # "investment" (used for Gross Profit here) already folds repair cost into COGS for
+    # SOLD vehicles, while the Expenses sheet/total below is broader: every expense dated
+    # this month regardless of whether that vehicle has sold yet. Mixing the two into one
+    # number would misstate either the vehicle-level margin or the month's actual cash out.
+    revenue = sum((s["retained_amount"] or 0) if s["returned"] else s["sale_price"] for s in rows)
+    investment = sum(s["investment"] for s in rows)
+    gross_profit = revenue - investment
+    margin_pct = round((gross_profit / revenue) * 100, 1) if revenue else 0
+    outstanding_due = sum((0 if s["returned"] else (s["due_amount"] or 0)) for s in rows)
+    total_expenses = sum(e["amount"] for e in expense_rows)
+    total_vendor_paid = sum(p["amount"] for p in vendor_payment_rows)
+    total_emi_collected = sum(p["amount"] for p in emi_payment_rows)
+
+    _add_summary_sheet(
+        wb, f"{business_name} – Closing Summary for the Month of {month_label}", subtitle,
+        [
+            ("Sales (from Sales Closing sheet)", [
+                ("Vehicles Sold", str(sum(1 for s in rows if not s["returned"]))),
+                ("Sales Revenue (Realized)", f"Rs. {revenue:,.2f}"),
+                ("Cost of Vehicles Sold (Investment)", f"Rs. {investment:,.2f}"),
+                ("Gross Profit", f"Rs. {gross_profit:,.2f}"),
+                ("Gross Margin", f"{margin_pct}%"),
+                ("Outstanding Dues on This Month's Sales", f"Rs. {outstanding_due:,.2f}"),
+            ]),
+            ("Cash Movement This Month", [
+                ("Total Expenses Recorded (see Expenses sheet)", f"Rs. {total_expenses:,.2f}"),
+                ("Vendor Payments Made (see Vendor Payments sheet)", f"Rs. {total_vendor_paid:,.2f}"),
+                ("EMI Collections Received (see EMI Collections sheet)", f"Rs. {total_emi_collected:,.2f}"),
+            ]),
+        ],
+    )
+
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue()
 
 @api_router.get("/reports/monthly-closing-export")
 async def monthly_closing_export(start_date: str, end_date: str, label: str, cu: dict = Depends(admin_only)):
-    rows = await _enriched_sales_for_closing(start_date, end_date)
+    rows, expense_rows, vendor_payment_rows, emi_payment_rows = await asyncio.gather(
+        _enriched_sales_for_closing(start_date, end_date),
+        _expenses_for_closing(start_date, end_date),
+        _vendor_payments_for_closing(start_date, end_date),
+        _emi_payments_for_closing(start_date, end_date),
+    )
     settings = await db.settings.find_one({}, {"_id": 0}) or {}
     business_name = settings.get("business_name") or "Auto Stock Manager"
-    xlsx_bytes = _build_closing_report_xlsx(rows, label, cu.get("username", ""), business_name)
+    xlsx_bytes = _build_closing_report_xlsx(rows, label, cu.get("username", ""), business_name,
+                                             expense_rows, vendor_payment_rows, emi_payment_rows)
     safe_label = re.sub(r"[^A-Za-z0-9]+", "_", label).strip("_")
     filename = f"Closing_Report_{safe_label}.xlsx"
     return StreamingResponse(
