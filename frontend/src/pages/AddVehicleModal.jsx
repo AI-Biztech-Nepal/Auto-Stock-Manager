@@ -7,15 +7,17 @@ import BSDatePicker from "../components/BSDatePicker";
 import CustomerVendorPicker from "../components/CustomerVendorPicker";
 import { BRANDS, SOURCES, CONDITIONS, FUEL_TYPES, VEHICLE_STATUS_OPTIONS, OWNERSHIP_OPTIONS } from "../utils/helpers";
 import { Field, inp, sel } from "./VehicleModals";
+import { PhotoCropperModal } from "../components/PhotoCropperModal";
+import { usePhotoCropQueue } from "../hooks/usePhotoCropQueue";
 
 export function AddVehicleModal({ form, setForm, onClose, onSubmit, saving, photos, setPhotos }) {
   const [selected, setSelected] = useState(() => new Set());
   const [previewPhoto, setPreviewPhoto] = useState(null);
 
-  const addPhotos = (files) => {
-    const staged = Array.from(files).map(file => ({ file, previewUrl: URL.createObjectURL(file) }));
-    setPhotos(prev => [...prev, ...staged]);
+  const stageCroppedPhoto = (file) => {
+    setPhotos(prev => [...prev, { file, previewUrl: URL.createObjectURL(file) }]);
   };
+  const { activeSrc, enqueueFiles, cancelActive, confirmActive } = usePhotoCropQueue(stageCroppedPhoto);
 
   const toggleSelected = (idx) => {
     setSelected(prev => {
@@ -189,7 +191,7 @@ export function AddVehicleModal({ form, setForm, onClose, onSubmit, saving, phot
                   <Plus size={12} /> Add Photo
                   <input
                     type="file" accept="image/*" multiple className="hidden"
-                    onChange={e => { if (e.target.files.length) addPhotos(e.target.files); e.target.value = ""; }}
+                    onChange={e => { if (e.target.files.length) enqueueFiles(e.target.files); e.target.value = ""; }}
                   />
                 </label>
               </div>
@@ -202,7 +204,7 @@ export function AddVehicleModal({ form, setForm, onClose, onSubmit, saving, phot
             ) : (
               <div className="grid grid-cols-3 sm:grid-cols-5 gap-3">
                 {photos.map((p, idx) => (
-                  <div key={idx} className="relative rounded-xl overflow-hidden aspect-square bg-slate-100">
+                  <div key={idx} className="relative rounded-xl overflow-hidden aspect-[4/3] bg-slate-100">
                     <button type="button" onClick={() => setPreviewPhoto(p.previewUrl)} className="block w-full h-full">
                       <img src={p.previewUrl} alt="Vehicle" className="w-full h-full object-cover" />
                     </button>
@@ -257,6 +259,8 @@ export function AddVehicleModal({ form, setForm, onClose, onSubmit, saving, phot
           <img src={previewPhoto} alt="Vehicle full size" className="max-w-full max-h-full object-contain rounded-lg" onClick={e => e.stopPropagation()} />
         </div>
       )}
+
+      <PhotoCropperModal imageSrc={activeSrc} onCancel={cancelActive} onConfirm={confirmActive} />
     </div>
   );
 }

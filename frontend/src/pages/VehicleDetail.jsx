@@ -10,6 +10,8 @@ import BSDatePicker from "../components/BSDatePicker";
 import CustomerVendorPicker from "../components/CustomerVendorPicker";
 import { useAuth } from "../context/AuthContext";
 import { hasFullVehicleAccess, PARTS_ALLOWED_VEHICLE_STATUSES } from "../utils/permissions";
+import { PhotoCropperModal } from "../components/PhotoCropperModal";
+import { usePhotoCropQueue } from "../hooks/usePhotoCropQueue";
 
 const DocCard = ({ label, status }) => {
   const s = getDocStyle(status);
@@ -195,29 +197,29 @@ export function VehicleDetailModal({ id, onClose }) {
     catch (err) { console.error("Failed to load documents:", err); }
   }, [id]);
 
-  // Shows each picked/dropped file instantly as a local blob-URL preview (a "pending"
+  // Shows the picked/dropped file instantly as a local blob-URL preview (a "pending"
   // photo entry), then uploads it in the background and swaps the preview for the real
-  // server copy the moment that single upload resolves — so the UI never waits on the
+  // server copy the moment that upload resolves — so the UI never waits on the
   // network, and a slow photo doesn't hold up the others finishing first. A pending
   // count is exposed so the close button can warn before an in-flight upload is lost.
-  const uploadPhotos = (files) => {
-    const fileList = Array.from(files);
-    if (fileList.length === 0) return;
-    fileList.forEach(file => {
-      const tempId = `pending-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      const previewUrl = URL.createObjectURL(file);
-      setPhotos(prev => [...prev, { id: tempId, url: previewUrl, pending: true }]);
+  const uploadCroppedPhoto = (file) => {
+    const tempId = `pending-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const previewUrl = URL.createObjectURL(file);
+    setPhotos(prev => [...prev, { id: tempId, url: previewUrl, pending: true }]);
 
-      const fd = new FormData(); fd.append("file", file);
-      api.post(`/vehicles/${id}/photos`, fd, { headers: { "Content-Type": "multipart/form-data" } })
-        .then(r => setPhotos(prev => prev.map(p => (p.id === tempId ? r.data : p))))
-        .catch(err => {
-          setPhotos(prev => prev.filter(p => p.id !== tempId));
-          toast.error(describeUploadError(err));
-        })
-        .finally(() => URL.revokeObjectURL(previewUrl));
-    });
+    const fd = new FormData(); fd.append("file", file);
+    api.post(`/vehicles/${id}/photos`, fd, { headers: { "Content-Type": "multipart/form-data" } })
+      .then(r => setPhotos(prev => prev.map(p => (p.id === tempId ? r.data : p))))
+      .catch(err => {
+        setPhotos(prev => prev.filter(p => p.id !== tempId));
+        toast.error(describeUploadError(err));
+      })
+      .finally(() => URL.revokeObjectURL(previewUrl));
   };
+  // Every picked/dropped file is routed through the crop dialog (one at a time)
+  // before it reaches uploadCroppedPhoto, so staff centre the bike in a 4:3
+  // frame instead of the storefront silently object-fit cropping it later.
+  const { activeSrc: activeCropSrc, enqueueFiles: uploadPhotos, cancelActive: cancelCrop, confirmActive: confirmCrop } = usePhotoCropQueue(uploadCroppedPhoto);
 
   const onPhotoDragOver = (e) => { e.preventDefault(); setIsDraggingPhoto(true); };
   const onPhotoDragLeave = () => setIsDraggingPhoto(false);
@@ -684,7 +686,7 @@ export function VehicleDetailModal({ id, onClose }) {
             ) : (
               <div className="grid grid-cols-3 sm:grid-cols-5 gap-3">
                 {photos.map(photo => (
-                  <div key={photo.id} className="relative rounded-xl overflow-hidden aspect-square bg-slate-100" data-testid="vehicle-photo">
+                  <div key={photo.id} className="relative rounded-xl overflow-hidden aspect-[4/3] bg-slate-100" data-testid="vehicle-photo">
                     <button type="button" onClick={() => !photo.pending && setPreviewPhoto(photo.url)} className="block w-full h-full">
                       <img src={photo.url} alt="Vehicle" className={`w-full h-full object-cover transition-opacity ${photo.pending ? "opacity-50" : ""}`} />
                     </button>
@@ -711,7 +713,7 @@ export function VehicleDetailModal({ id, onClose }) {
                   onDragOver={onPhotoDragOver}
                   onDragLeave={onPhotoDragLeave}
                   onDrop={onPhotoDrop}
-                  className={`border-2 border-dashed rounded-xl aspect-square flex flex-col items-center justify-center cursor-pointer transition-colors ${isDraggingPhoto ? "border-blue-400 bg-blue-50 text-blue-500" : "border-slate-200 text-slate-400 hover:border-blue-400 hover:text-blue-500"}`}
+                  className={`border-2 border-dashed rounded-xl aspect-[4/3] flex flex-col items-center justify-center cursor-pointer transition-colors ${isDraggingPhoto ? "border-blue-400 bg-blue-50 text-blue-500" : "border-slate-200 text-slate-400 hover:border-blue-400 hover:text-blue-500"}`}
                 >
                   <Plus size={20} />
                   <span className="text-xs mt-1">Add</span>
@@ -839,6 +841,8 @@ export function VehicleDetailModal({ id, onClose }) {
           <img src={previewPhoto} alt="Vehicle full size" className="max-w-full max-h-full object-contain rounded-lg" onClick={e => e.stopPropagation()} />
         </div>
       )}
+
+      <PhotoCropperModal imageSrc={activeCropSrc} onCancel={cancelCrop} onConfirm={confirmCrop} />
 
       {previewDoc && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-4" onClick={() => setPreviewDoc(null)}>
