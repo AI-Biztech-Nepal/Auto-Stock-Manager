@@ -12,6 +12,7 @@ on:
   pull_request:
     paths:
       - "backend/**"
+  workflow_dispatch: {}
 
 jobs:
   tenant-isolation:
