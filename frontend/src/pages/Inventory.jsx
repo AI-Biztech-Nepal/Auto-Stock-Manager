@@ -365,7 +365,7 @@ export default function Inventory() {
     setFiltered(result);
   }, [vehicles, search, statusFilter, brandFilter, agingFilter, dateFilter, periodFilter, photoFilter]); // eslint-disable-line react-hooks/exhaustive-deps -- periodRange is derived fresh from periodFilter each render (a new object every time), so depending on periodFilter itself is the stable, correct trigger
 
-  const handleSave = async (e) => {
+  const handleSave = async (e, confirmReusedRegistration = false) => {
     e.preventDefault();
     if (!form.brand || !form.model || !form.purchase_price || !form.purchase_date || !form.purchase_source || !form.registration_number) {
       toast.error("Please fill all required fields"); return;
@@ -378,7 +378,8 @@ export default function Inventory() {
         selling_price: form.selling_price ? Number(form.selling_price) : null,
         year: Number(form.year),
         engine_cc: Number(form.engine_cc),
-        ownership_number: form.ownership_number ? Number(form.ownership_number) : null
+        ownership_number: form.ownership_number ? Number(form.ownership_number) : null,
+        confirm_reused_registration: confirmReusedRegistration
       });
       if (photos.length > 0) {
         const results = await Promise.allSettled(photos.map(p => {
@@ -392,8 +393,21 @@ export default function Inventory() {
       setForm(EMPTY);
       clearStagedPhotos();
       fetchVehicles();
-    } catch (err) { toast.error(err.response?.data?.detail || "Failed to save"); }
-    finally { setSaving(false); }
+      setSaving(false);
+    } catch (err) {
+      setSaving(false);
+      const detail = err.response?.data?.detail;
+      // The backend only asks this when the plate's existing record is already closed out
+      // (sold/scrapped) — genuinely ambiguous between a buyback and a typo — so confirming
+      // here re-submits the exact same form, just flagged as intentional. No `finally` here:
+      // the recursive confirmed re-submit manages its own `saving` state, and a shared
+      // finally would race it and flip the button back on mid-save.
+      if (err.response?.status === 409 && detail?.code === "duplicate_registration_closed") {
+        if (window.confirm(detail.message)) handleSave(e, true);
+        return;
+      }
+      toast.error(typeof detail === "string" ? detail : "Failed to save");
+    }
   };
 
   const handleDelete = async (id, e) => {

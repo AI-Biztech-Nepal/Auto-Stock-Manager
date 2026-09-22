@@ -949,6 +949,10 @@ class VehicleCreate(BaseModel):
     # separate from transfer_status above (which is the transfer-paperwork doc status while
     # the vehicle is still in inventory) — different thing, different lifecycle stage.
     ownership_transfer_status: str = "pending"
+    # True once the user has confirmed, via the duplicate-registration prompt, that reusing a
+    # sold/scrapped vehicle's plate on this new record is intentional (a buyback/trade-in) and
+    # not a fat-fingered re-entry of the same vehicle. Never persisted — see create_vehicle.
+    confirm_reused_registration: bool = False
 
 class VehicleUpdate(BaseModel):
     brand: Optional[str] = None; model: Optional[str] = None
@@ -974,6 +978,7 @@ class VehicleUpdate(BaseModel):
     tax_clearance_status: Optional[str] = None; transfer_status: Optional[str] = None
     ownership_termination_status: Optional[str] = None
     ownership_transfer_status: Optional[str] = None
+    confirm_reused_registration: bool = False
 
 class VehicleStatusUpdate(BaseModel):
     status: str
@@ -1436,18 +1441,25 @@ async def get_vehicles(status: Optional[str] = None, brand: Optional[str] = None
 
 @api_router.post("/vehicles")
 async def create_vehicle(vehicle: VehicleCreate, cu: dict = Depends(require("vehicles", "create"))):
-    # Only an active (still-in-stock) vehicle blocks re-adding this plate — a vehicle that
-    # was sold or scrapped has left inventory, so buying it back later (trade-in, buyback,
-    # repurchase from a former customer) needs to register as a fresh stock entry under the
-    # same registration number without touching its old, already-closed record.
     existing = await db.vehicles.find_one(
-        {"registration_number": {"$regex": f"^{re.escape(vehicle.registration_number.strip())}$", "$options": "i"},
-         "status": {"$nin": ["sold", "scrap"]}},
-        {"_id": 0, "id": 1},
+        {"registration_number": {"$regex": f"^{re.escape(vehicle.registration_number.strip())}$", "$options": "i"}},
+        {"_id": 0, "id": 1, "status": 1, "brand": 1, "model": 1, "year": 1, "sold_date": 1},
     )
     if existing:
-        raise HTTPException(400, f"Registration number '{vehicle.registration_number}' is already in stock")
-    v = vehicle.model_dump()
+        if existing.get("status") not in ("sold", "scrap"):
+            # Still actively in stock under this plate — always a mistake, never bypassable.
+            raise HTTPException(400, f"Registration number '{vehicle.registration_number}' is already in stock")
+        if not vehicle.confirm_reused_registration:
+            # Closed out (sold/scrapped), so the plate is free to reuse for a genuine
+            # buyback/trade-in — but reg-number reuse is rare enough that a fat-fingered
+            # re-entry of the same vehicle is just as likely a cause. Ask before creating a
+            # second record under this plate instead of silently allowing or blocking it.
+            when = f" on {existing['sold_date']}" if existing.get("sold_date") else ""
+            raise HTTPException(409, {
+                "code": "duplicate_registration_closed",
+                "message": f"'{vehicle.registration_number}' already exists as {existing.get('brand', '')} {existing.get('model', '')} {existing.get('year', '')} — marked {existing['status']}{when}. Add it anyway as a new stock entry (e.g. bought back)?",
+            })
+    v = vehicle.model_dump(exclude={"confirm_reused_registration"})
     v["id"] = str(uuid.uuid4())
     v["created_at"] = datetime.now(timezone.utc).isoformat()
     v["updated_at"] = datetime.now(timezone.utc).isoformat()
@@ -1605,10 +1617,13 @@ async def import_vehicles(file: UploadFile = File(...), confirm: bool = False, c
 
     # Duplicate registration_number check — both within the sheet itself and against
     # vehicles already in stock (case-insensitive, since dealers key inventory off this number).
-    # Sold/scrapped vehicles are excluded — those plates have left inventory and are free
-    # to be re-added (buyback, trade-in, repurchase from a former customer).
+    # Unlike the single-vehicle create/update endpoints, this always blocks on ANY existing
+    # match (even sold/scrapped) — a batch import has no per-row human to ask "is this a
+    # genuine buyback or a typo?", so the safe default is to make them fix/remove the row and
+    # re-upload; a real buyback can still be added individually through the Add Vehicle form,
+    # which does prompt for confirmation.
     ok_indices = [i for i, r in enumerate(row_results) if r["status"] == "ok"]
-    existing_regs_lower = {d["registration_number"].strip().lower() for d in await db.vehicles.find({"status": {"$nin": ["sold", "scrap"]}}, {"_id": 0, "registration_number": 1}).to_list(100000) if d.get("registration_number")}
+    existing_regs_lower = {d["registration_number"].strip().lower() for d in await db.vehicles.find({}, {"_id": 0, "registration_number": 1}).to_list(100000) if d.get("registration_number")}
     seen_in_sheet = {}
     kept_docs = []
     for doc, ri in zip(docs, ok_indices):
@@ -2081,18 +2096,23 @@ async def get_vehicle(vid: str, cu: dict = Depends(require("vehicles", "view")))
 async def update_vehicle(vid: str, vehicle: VehicleUpdate, cu: dict = Depends(require("vehicles", "edit"))):
     existing = await db.vehicles.find_one({"id": vid}, {"_id": 0})
     if not existing: raise HTTPException(404, "Vehicle not found")
-    upd = {k: val for k, val in vehicle.model_dump().items() if val is not None}
+    confirm_reused_registration = vehicle.confirm_reused_registration
+    upd = {k: val for k, val in vehicle.model_dump(exclude={"confirm_reused_registration"}).items() if val is not None}
     if upd.get("registration_number") and upd["registration_number"].strip().lower() != (existing.get("registration_number") or "").strip().lower():
-        # Same "sold/scrap don't block" rule as create_vehicle — an old closed-out record
-        # under this plate shouldn't stop editing a different, currently-active vehicle
-        # into the same registration number.
+        # Same "ask before reusing a closed-out plate" rule as create_vehicle.
         dup = await db.vehicles.find_one(
-            {"id": {"$ne": vid}, "registration_number": {"$regex": f"^{re.escape(upd['registration_number'].strip())}$", "$options": "i"},
-             "status": {"$nin": ["sold", "scrap"]}},
-            {"_id": 0, "id": 1},
+            {"id": {"$ne": vid}, "registration_number": {"$regex": f"^{re.escape(upd['registration_number'].strip())}$", "$options": "i"}},
+            {"_id": 0, "id": 1, "status": 1, "brand": 1, "model": 1, "year": 1, "sold_date": 1},
         )
         if dup:
-            raise HTTPException(400, f"Registration number '{upd['registration_number']}' is already in stock")
+            if dup.get("status") not in ("sold", "scrap"):
+                raise HTTPException(400, f"Registration number '{upd['registration_number']}' is already in stock")
+            if not confirm_reused_registration:
+                when = f" on {dup['sold_date']}" if dup.get("sold_date") else ""
+                raise HTTPException(409, {
+                    "code": "duplicate_registration_closed",
+                    "message": f"'{upd['registration_number']}' already exists as {dup.get('brand', '')} {dup.get('model', '')} {dup.get('year', '')} — marked {dup['status']}{when}. Reuse it on this vehicle anyway?",
+                })
     upd["updated_at"] = datetime.now(timezone.utc).isoformat()
     # Same pre_repair_status bookkeeping as PATCH /vehicles/{vid}/status — keep the edit form
     # and the quick status control in sync so a completed job card knows where to send the

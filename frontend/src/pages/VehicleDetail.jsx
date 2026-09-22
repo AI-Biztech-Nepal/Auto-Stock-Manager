@@ -162,18 +162,29 @@ export function VehicleDetailModal({ id, onClose }) {
     finally { setReturning(false); }
   };
 
-  const saveEdit = async (e) => {
+  const saveEdit = async (e, confirmReusedRegistration = false) => {
     e.preventDefault();
     if (!editForm.registration_number) { toast.error("Registration Number is required"); return; }
     if (!isFrontDesk && !editForm.purchase_price) { toast.error("Purchase Price is required"); return; }
     setSaving(true);
     try {
-      const payload = { ...editForm, selling_price: editForm.selling_price ? Number(editForm.selling_price) : null, year: Number(editForm.year), engine_cc: Number(editForm.engine_cc), ownership_number: Number(editForm.ownership_number) };
+      const payload = { ...editForm, selling_price: editForm.selling_price ? Number(editForm.selling_price) : null, year: Number(editForm.year), engine_cc: Number(editForm.engine_cc), ownership_number: Number(editForm.ownership_number), confirm_reused_registration: confirmReusedRegistration };
       if (isFrontDesk) { delete payload.purchase_price; delete payload.minimum_selling_price; delete payload.accessories_cost; }
       else { payload.purchase_price = Number(editForm.purchase_price); payload.minimum_selling_price = editForm.minimum_selling_price ? Number(editForm.minimum_selling_price) : null; }
       await api.put(`/vehicles/${id}`, payload);
       toast.success("Vehicle updated"); setIsEditing(false); fetchVehicle();
-    } catch { toast.error("Failed to update"); } finally { setSaving(false); }
+      setSaving(false);
+    } catch (err) {
+      setSaving(false);
+      const detail = err.response?.data?.detail;
+      // Same buyback-vs-typo confirmation as Add Vehicle — no shared `finally` so the
+      // recursive confirmed re-submit isn't raced by this call's own cleanup.
+      if (err.response?.status === 409 && detail?.code === "duplicate_registration_closed") {
+        if (window.confirm(detail.message)) saveEdit(e, true);
+        return;
+      }
+      toast.error(typeof detail === "string" ? detail : "Failed to update");
+    }
   };
 
   const cancelEdit = () => { setEditForm(vehicle); setIsEditing(false); };
