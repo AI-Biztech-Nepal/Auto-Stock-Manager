@@ -1436,8 +1436,13 @@ async def get_vehicles(status: Optional[str] = None, brand: Optional[str] = None
 
 @api_router.post("/vehicles")
 async def create_vehicle(vehicle: VehicleCreate, cu: dict = Depends(require("vehicles", "create"))):
+    # Only an active (still-in-stock) vehicle blocks re-adding this plate — a vehicle that
+    # was sold or scrapped has left inventory, so buying it back later (trade-in, buyback,
+    # repurchase from a former customer) needs to register as a fresh stock entry under the
+    # same registration number without touching its old, already-closed record.
     existing = await db.vehicles.find_one(
-        {"registration_number": {"$regex": f"^{re.escape(vehicle.registration_number.strip())}$", "$options": "i"}},
+        {"registration_number": {"$regex": f"^{re.escape(vehicle.registration_number.strip())}$", "$options": "i"},
+         "status": {"$nin": ["sold", "scrap"]}},
         {"_id": 0, "id": 1},
     )
     if existing:
@@ -1600,8 +1605,10 @@ async def import_vehicles(file: UploadFile = File(...), confirm: bool = False, c
 
     # Duplicate registration_number check — both within the sheet itself and against
     # vehicles already in stock (case-insensitive, since dealers key inventory off this number).
+    # Sold/scrapped vehicles are excluded — those plates have left inventory and are free
+    # to be re-added (buyback, trade-in, repurchase from a former customer).
     ok_indices = [i for i, r in enumerate(row_results) if r["status"] == "ok"]
-    existing_regs_lower = {d["registration_number"].strip().lower() for d in await db.vehicles.find({}, {"_id": 0, "registration_number": 1}).to_list(100000) if d.get("registration_number")}
+    existing_regs_lower = {d["registration_number"].strip().lower() for d in await db.vehicles.find({"status": {"$nin": ["sold", "scrap"]}}, {"_id": 0, "registration_number": 1}).to_list(100000) if d.get("registration_number")}
     seen_in_sheet = {}
     kept_docs = []
     for doc, ri in zip(docs, ok_indices):
@@ -2076,8 +2083,12 @@ async def update_vehicle(vid: str, vehicle: VehicleUpdate, cu: dict = Depends(re
     if not existing: raise HTTPException(404, "Vehicle not found")
     upd = {k: val for k, val in vehicle.model_dump().items() if val is not None}
     if upd.get("registration_number") and upd["registration_number"].strip().lower() != (existing.get("registration_number") or "").strip().lower():
+        # Same "sold/scrap don't block" rule as create_vehicle — an old closed-out record
+        # under this plate shouldn't stop editing a different, currently-active vehicle
+        # into the same registration number.
         dup = await db.vehicles.find_one(
-            {"id": {"$ne": vid}, "registration_number": {"$regex": f"^{re.escape(upd['registration_number'].strip())}$", "$options": "i"}},
+            {"id": {"$ne": vid}, "registration_number": {"$regex": f"^{re.escape(upd['registration_number'].strip())}$", "$options": "i"},
+             "status": {"$nin": ["sold", "scrap"]}},
             {"_id": 0, "id": 1},
         )
         if dup:
