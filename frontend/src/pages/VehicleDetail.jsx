@@ -408,8 +408,11 @@ export function VehicleDetailModal({ id, onClose }) {
             </div>
 
             <div className="p-5">
-              {/* Overview Tab */}
-              {activeTab === "overview" && (isEditing ? (
+              {/* Overview Tab — stays mounted (hidden via CSS) instead of unmounting on tab
+                 switch, so in-progress edits survive, including uncommitted state inside
+                 child pickers like CustomerVendorPicker's "add new" form. */}
+              <div className={activeTab === "overview" ? "" : "hidden"}>
+              {isEditing ? (
                 /* Edit form — mirrors the Add Vehicle form field-for-field so nothing entered
                    at creation time is missing from editing. */
                 <div className="space-y-4">
@@ -571,10 +574,11 @@ export function VehicleDetailModal({ id, onClose }) {
                     </div>
                   )}
                 </div>
-              ))}
+              )}
+              </div>
 
-              {/* Expenses Tab */}
-              {activeTab === "expenses" && (
+              {/* Expenses Tab — also kept mounted, hidden via CSS when inactive. */}
+              <div className={activeTab === "expenses" ? "" : "hidden"}>
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
                     <span className="text-sm text-slate-500">Total: <strong className="text-slate-900">{formatNPR(vehicle.total_expenses)}</strong></span>
@@ -656,7 +660,7 @@ export function VehicleDetailModal({ id, onClose }) {
                     </div>
                   )}
                 </div>
-              )}
+              </div>
             </div>
           </div>
 

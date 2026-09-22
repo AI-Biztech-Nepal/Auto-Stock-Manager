@@ -367,11 +367,13 @@ export default function AIAssistant() {
         ))}
       </div>
 
-      {/* Tab Content */}
-      {activeTab === "chatbot"  && <ChatbotTab />}
-      {activeTab === "pricing"  && <PricingTab />}
-      {activeTab === "festival" && <FestivalTab />}
-      {activeTab === "suggest"  && <AdvisorTab />}
+      {/* Tab Content — all four stay mounted (hidden via CSS) instead of unmounting on
+         switch, so an in-progress pricing form, chat conversation, or advisor note isn't
+         wiped out just by hopping to another tab and back. */}
+      <div className={activeTab === "chatbot" ? "" : "hidden"}><ChatbotTab /></div>
+      <div className={activeTab === "pricing" ? "" : "hidden"}><PricingTab /></div>
+      <div className={activeTab === "festival" ? "" : "hidden"}><FestivalTab /></div>
+      <div className={activeTab === "suggest" ? "" : "hidden"}><AdvisorTab /></div>
     </div>
   );
 }
