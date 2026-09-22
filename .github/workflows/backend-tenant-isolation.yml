@@ -16,6 +16,12 @@ on:
 jobs:
   tenant-isolation:
     runs-on: ubuntu-latest
+    # No `options: --health-cmd=...` on this service — GitHub Actions gates job startup on
+    # that health check reaching "healthy" before running any step, and on hosted runners
+    # this mariadb image has been reliably reported "unhealthy" well past the point its own
+    # log says "ready for connections" (every run of this workflow failed here since it was
+    # added, never once reaching the actual tests). We wait for readiness ourselves instead,
+    # in the "Wait for MariaDB" step below, which isn't subject to that gating.
     services:
       mariadb:
         image: mariadb:11
@@ -24,9 +30,6 @@ jobs:
           MARIADB_DATABASE: auto_stock_ci
         ports:
           - 3306:3306
-        options: >-
-          --health-cmd="mysqladmin ping -uroot -pci_test_root_pw"
-          --health-interval=5s --health-timeout=5s --health-retries=15
 
     env:
       DB_BACKEND: mysql
@@ -49,6 +52,15 @@ jobs:
         run: |
           pip install -r backend/requirements.txt
           pip install pytest requests
+
+      - name: Wait for MariaDB
+        run: |
+          for i in $(seq 1 60); do
+            mysqladmin ping -h127.0.0.1 -P3306 -uroot -pci_test_root_pw --silent && break
+            echo "MariaDB not ready yet (attempt $i/60)..."
+            sleep 2
+          done
+          mysqladmin ping -h127.0.0.1 -P3306 -uroot -pci_test_root_pw
 
       - name: Load schema (includes the NOT NULL + FK hardening)
         run: |
