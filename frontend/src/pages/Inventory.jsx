@@ -142,15 +142,33 @@ export default function Inventory() {
   // reverse: a real vehicle never got its own record because it was saved under a duplicate).
   // Compared with spaces/dashes/slashes/case stripped out, so "BA 2 PA 1234" and "BA-2-PA-1234"
   // are still caught as the same plate even though they don't match as exact strings.
+  // A vehicle sold 30+ days ago that came back is re-entered as new stock under the same
+  // plate, so its old sold record is skipped here (same rule as the backend).
   const duplicateRegGroups = useMemo(() => {
+    const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
     const byReg = {};
     for (const v of vehicles) {
+      if (v.status === "sold" && v.sold_date && String(v.sold_date).slice(0, 10) < cutoff) continue;
       const norm = v.registration_number?.trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
       if (!norm) continue;
       (byReg[norm] ??= []).push(v);
     }
     return Object.values(byReg).filter(list => list.length > 1);
   }, [vehicles]);
+
+  // Pairs the user has reviewed and dismissed from the banner (remembered in this browser).
+  // Keyed by the group's vehicle ids, so a new vehicle joining a plate shows the banner again.
+  const [dismissedDupKeys, setDismissedDupKeys] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("dismissedDupRegGroups") || "[]"); } catch { return []; }
+  });
+  const dupGroupKey = (vs) => vs.map(v => v.id).sort().join("|");
+  const visibleDupGroups = duplicateRegGroups.filter(vs => !dismissedDupKeys.includes(dupGroupKey(vs)));
+  const dismissDupBanner = () => {
+    if (!window.confirm("Remove this warning? These vehicles won't be flagged again.")) return;
+    const next = [...new Set([...dismissedDupKeys, ...visibleDupGroups.map(dupGroupKey)])];
+    setDismissedDupKeys(next);
+    try { localStorage.setItem("dismissedDupRegGroups", JSON.stringify(next)); } catch { /* storage unavailable */ }
+  };
 
   // Vehicles with no registration number at all can't be checked for duplicates above, but
   // still occupy a slot in the stock count — worth a quick look when a count won't reconcile.
@@ -478,18 +496,18 @@ export default function Inventory() {
       </div>
 
       {/* Duplicate Registration Number Alert */}
-      {canManageStock && duplicateRegGroups.length > 0 && (
+      {canManageStock && visibleDupGroups.length > 0 && (
         <div className="flex items-start gap-3 px-4 py-3 rounded-xl border border-red-200 bg-red-50" data-testid="duplicate-reg-banner">
           <AlertTriangle size={18} className="text-red-600 mt-0.5 shrink-0" />
           <div className="flex-1 min-w-0">
             <p className="text-sm font-semibold text-red-700">
-              {duplicateRegGroups.length} registration number{duplicateRegGroups.length !== 1 ? "s" : ""} used on more than one vehicle
+              {visibleDupGroups.length} registration number{visibleDupGroups.length !== 1 ? "s" : ""} used on more than one vehicle
             </p>
             <p className="text-xs text-red-600 mt-0.5">
               Same vehicle logged twice, or a typo reusing another plate — a likely cause of the stock count not matching what's on hand. Matched even when spacing/dashes/case differ, so a plate typed two different ways still shows up here. Review each pair below.
             </p>
             <div className="mt-2.5 space-y-2">
-              {duplicateRegGroups.map(vs => (
+              {visibleDupGroups.map(vs => (
                 <div key={vs.map(v => v.id).join("-")} className="flex items-center gap-2 flex-wrap">
                   {vs.map(v => (
                     <button
@@ -507,6 +525,14 @@ export default function Inventory() {
               ))}
             </div>
           </div>
+          <button
+            onClick={dismissDupBanner}
+            title="Remove this warning"
+            data-testid="duplicate-reg-dismiss"
+            className="p-1 rounded-lg text-red-400 hover:text-red-700 hover:bg-red-100 transition-colors shrink-0"
+          >
+            <X size={16} />
+          </button>
         </div>
       )}
 

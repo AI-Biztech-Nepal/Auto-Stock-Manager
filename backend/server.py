@@ -1439,12 +1439,19 @@ async def get_vehicles(status: Optional[str] = None, brand: Optional[str] = None
     role = cu.get("role", "admin")
     return [_hide_financials_for_role(enrich_with_expenses(v, exps_by_vehicle.get(v["id"], []), jobs_by_vehicle.get(v["id"], [])), role) for v in vehicles]
 
+# A vehicle sold more than 30 days ago that comes back is entered as brand-new stock under
+# its same plate — its old sold record no longer counts as a duplicate anywhere.
+def _sold_over_30_days(v: dict) -> bool:
+    cutoff = (datetime.now(timezone.utc).date() - timedelta(days=30)).isoformat()
+    return v.get("status") == "sold" and bool(v.get("sold_date")) and str(v["sold_date"])[:10] < cutoff
+
 @api_router.post("/vehicles")
 async def create_vehicle(vehicle: VehicleCreate, cu: dict = Depends(require("vehicles", "create"))):
-    existing = await db.vehicles.find_one(
+    matches = await db.vehicles.find(
         {"registration_number": {"$regex": f"^{re.escape(vehicle.registration_number.strip())}$", "$options": "i"}},
         {"_id": 0, "id": 1, "status": 1, "brand": 1, "model": 1, "year": 1, "sold_date": 1},
-    )
+    ).to_list(100)
+    existing = next((m for m in matches if not _sold_over_30_days(m)), None)
     if existing:
         if existing.get("status") not in ("sold", "scrap"):
             # Still actively in stock under this plate — always a mistake, never bypassable.
@@ -1621,9 +1628,10 @@ async def import_vehicles(file: UploadFile = File(...), confirm: bool = False, c
     # match (even sold/scrapped) — a batch import has no per-row human to ask "is this a
     # genuine buyback or a typo?", so the safe default is to make them fix/remove the row and
     # re-upload; a real buyback can still be added individually through the Add Vehicle form,
-    # which does prompt for confirmation.
+    # which does prompt for confirmation. Vehicles sold 30+ days ago don't count (see
+    # _sold_over_30_days).
     ok_indices = [i for i, r in enumerate(row_results) if r["status"] == "ok"]
-    existing_regs_lower = {d["registration_number"].strip().lower() for d in await db.vehicles.find({}, {"_id": 0, "registration_number": 1}).to_list(100000) if d.get("registration_number")}
+    existing_regs_lower = {d["registration_number"].strip().lower() for d in await db.vehicles.find({}, {"_id": 0, "registration_number": 1, "status": 1, "sold_date": 1}).to_list(100000) if d.get("registration_number") and not _sold_over_30_days(d)}
     seen_in_sheet = {}
     kept_docs = []
     for doc, ri in zip(docs, ok_indices):
@@ -2100,10 +2108,11 @@ async def update_vehicle(vid: str, vehicle: VehicleUpdate, cu: dict = Depends(re
     upd = {k: val for k, val in vehicle.model_dump(exclude={"confirm_reused_registration"}).items() if val is not None}
     if upd.get("registration_number") and upd["registration_number"].strip().lower() != (existing.get("registration_number") or "").strip().lower():
         # Same "ask before reusing a closed-out plate" rule as create_vehicle.
-        dup = await db.vehicles.find_one(
+        dup_matches = await db.vehicles.find(
             {"id": {"$ne": vid}, "registration_number": {"$regex": f"^{re.escape(upd['registration_number'].strip())}$", "$options": "i"}},
             {"_id": 0, "id": 1, "status": 1, "brand": 1, "model": 1, "year": 1, "sold_date": 1},
-        )
+        ).to_list(100)
+        dup = next((m for m in dup_matches if not _sold_over_30_days(m)), None)
         if dup:
             if dup.get("status") not in ("sold", "scrap"):
                 raise HTTPException(400, f"Registration number '{upd['registration_number']}' is already in stock")
