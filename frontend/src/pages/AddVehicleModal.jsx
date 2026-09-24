@@ -10,7 +10,9 @@ import { Field, inp, sel } from "./VehicleModals";
 import { PhotoCropperModal } from "../components/PhotoCropperModal";
 import { usePhotoCropQueue } from "../hooks/usePhotoCropQueue";
 
-export function AddVehicleModal({ form, setForm, onClose, onSubmit, saving, photos, setPhotos }) {
+// basicOnly: Social Media accounts add basic details + photos only -- purchase, pricing,
+// status, source, notes and paperwork fields are hidden (the backend drops them anyway).
+export function AddVehicleModal({ form, setForm, onClose, onSubmit, saving, photos, setPhotos, basicOnly = false }) {
   const [selected, setSelected] = useState(() => new Set());
   const [previewPhoto, setPreviewPhoto] = useState(null);
 
@@ -94,51 +96,53 @@ export function AddVehicleModal({ form, setForm, onClose, onSubmit, saving, phot
                 {OWNERSHIP_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
               </select>
             </Field>
-            <Field label="Purchase Price (NPR)" required>
-              <input
-                data-testid="purchase-price-input"
-                type="text" inputMode="numeric" pattern="[0-9]*"
-                value={form.purchase_price}
-                onChange={e => setForm({ ...form, purchase_price: e.target.value })}
-                placeholder="e.g. 150000"
-                className={inp}
-              />
-            </Field>
-            <Field label="Selling Price (NPR)">
-              <input
-                type="text" inputMode="numeric" pattern="[0-9]*"
-                value={form.selling_price}
-                onChange={e => setForm({ ...form, selling_price: e.target.value })}
-                placeholder="e.g. 185000"
-                className={inp}
-              />
-            </Field>
-            <Field label="Status">
-              <select data-testid="add-status-select" value={form.status} onChange={e => setForm({ ...form, status: e.target.value })} className={sel}>
-                {VEHICLE_STATUS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-              </select>
-            </Field>
-            <Field label="Purchase Date (BS)" required full>
-              <BSDatePicker
-                data-testid="purchase-date-input"
-                value={form.purchase_date}
-                onChange={val => setForm({ ...form, purchase_date: val })}
-                required
-              />
-            </Field>
-            <Field label="Purchase Source" required>
-              <select data-testid="source-select" value={form.purchase_source} onChange={e => setForm({ ...form, purchase_source: e.target.value })} className={sel}>
-                <option value="">Select Source</option>
-                {SOURCES.map(s => <option key={s}>{s}</option>)}
-              </select>
-            </Field>
-            <Field label="Name of Source (Customer/Vendor)">
-              <CustomerVendorPicker
-                value={{ type: form.linked_contact_type || "vendor", id: form.linked_contact_id || null, name: form.linked_contact_name || "" }}
-                onChange={next => setForm({ ...form, linked_contact_type: next.type, linked_contact_id: next.id, linked_contact_name: next.name })}
-                vendorType="vehicles"
-              />
-            </Field>
+            {!basicOnly && (<>
+              <Field label="Purchase Price (NPR)" required>
+                <input
+                  data-testid="purchase-price-input"
+                  type="text" inputMode="numeric" pattern="[0-9]*"
+                  value={form.purchase_price}
+                  onChange={e => setForm({ ...form, purchase_price: e.target.value })}
+                  placeholder="e.g. 150000"
+                  className={inp}
+                />
+              </Field>
+              <Field label="Selling Price (NPR)">
+                <input
+                  type="text" inputMode="numeric" pattern="[0-9]*"
+                  value={form.selling_price}
+                  onChange={e => setForm({ ...form, selling_price: e.target.value })}
+                  placeholder="e.g. 185000"
+                  className={inp}
+                />
+              </Field>
+              <Field label="Status">
+                <select data-testid="add-status-select" value={form.status} onChange={e => setForm({ ...form, status: e.target.value })} className={sel}>
+                  {VEHICLE_STATUS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </select>
+              </Field>
+              <Field label="Purchase Date (BS)" required full>
+                <BSDatePicker
+                  data-testid="purchase-date-input"
+                  value={form.purchase_date}
+                  onChange={val => setForm({ ...form, purchase_date: val })}
+                  required
+                />
+              </Field>
+              <Field label="Purchase Source" required>
+                <select data-testid="source-select" value={form.purchase_source} onChange={e => setForm({ ...form, purchase_source: e.target.value })} className={sel}>
+                  <option value="">Select Source</option>
+                  {SOURCES.map(s => <option key={s}>{s}</option>)}
+                </select>
+              </Field>
+              <Field label="Name of Source (Customer/Vendor)">
+                <CustomerVendorPicker
+                  value={{ type: form.linked_contact_type || "vendor", id: form.linked_contact_id || null, name: form.linked_contact_name || "" }}
+                  onChange={next => setForm({ ...form, linked_contact_type: next.type, linked_contact_id: next.id, linked_contact_name: next.name })}
+                  vendorType="vehicles"
+                />
+              </Field>
+            </>)}
             <Field label="Condition">
               <select value={form.condition} onChange={e => setForm({ ...form, condition: e.target.value })} className={sel}>
                 {CONDITIONS.map(c => <option key={c}>{c}</option>)}
@@ -163,16 +167,18 @@ export function AddVehicleModal({ form, setForm, onClose, onSubmit, saving, phot
             </Field>
           </div>
 
-          <div>
-            <label className="block text-xs font-medium text-slate-600 mb-1">Notes</label>
-            <textarea
-              value={form.notes}
-              onChange={e => setForm({ ...form, notes: e.target.value })}
-              placeholder="Additional notes..."
-              rows={2}
-              className="w-full px-3 py-2 text-base sm:text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
-            />
-          </div>
+          {!basicOnly && (
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Notes</label>
+              <textarea
+                value={form.notes}
+                onChange={e => setForm({ ...form, notes: e.target.value })}
+                placeholder="Additional notes..."
+                rows={2}
+                className="w-full px-3 py-2 text-base sm:text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+              />
+            </div>
+          )}
 
           <div className="border-t border-slate-100 pt-4">
             <div className="flex items-center justify-between mb-3">
@@ -222,20 +228,22 @@ export function AddVehicleModal({ form, setForm, onClose, onSubmit, saving, phot
             )}
           </div>
 
-          <div className="border-t border-slate-100 pt-4">
-            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Document Status</p>
-            <div className="grid grid-cols-2 gap-3">
-              {[["bluebook_status", "Bluebook"], ["tax_clearance_status", "Tax Clearance"], ["transfer_status", "Transfer"]].map(([key, label]) => (
-                <Field key={key} label={label}>
-                  <select value={form[key]} onChange={e => setForm({ ...form, [key]: e.target.value })} className={sel}>
-                    <option value="pending">Pending</option>
-                    <option value="ok">OK</option>
-                    <option value="missing">Missing</option>
-                  </select>
-                </Field>
-              ))}
+          {!basicOnly && (
+            <div className="border-t border-slate-100 pt-4">
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Document Status</p>
+              <div className="grid grid-cols-2 gap-3">
+                {[["bluebook_status", "Bluebook"], ["tax_clearance_status", "Tax Clearance"], ["transfer_status", "Transfer"]].map(([key, label]) => (
+                  <Field key={key} label={label}>
+                    <select value={form[key]} onChange={e => setForm({ ...form, [key]: e.target.value })} className={sel}>
+                      <option value="pending">Pending</option>
+                      <option value="ok">OK</option>
+                      <option value="missing">Missing</option>
+                    </select>
+                  </Field>
+                ))}
+              </div>
             </div>
-          </div>
+          )}
 
           <div className="flex flex-col-reverse sm:flex-row gap-3 pt-4 sm:pt-2 sticky bottom-0 sm:static -mx-4 sm:mx-0 px-4 sm:px-0 pb-4 sm:pb-0 bg-white border-t sm:border-t-0 border-slate-100">
             <button type="button" onClick={onClose} className="flex-1 h-14 sm:h-11 border border-slate-200 text-slate-700 rounded-lg text-base sm:text-sm font-semibold hover:bg-slate-50 transition-colors">

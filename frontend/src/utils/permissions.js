@@ -7,6 +7,8 @@ export const ROLE_NAV_PATHS = {
   // Parts department gets read-only inventory browsing plus the ability to flip a vehicle's
   // pipeline status (Available <-> In Repair, or Scrap) — see PARTS_ALLOWED_STATUSES in server.py.
   parts_supervisor: ["/spare-parts", "/vendors", "/jobs", "/inventory", "/team", "/settings"],
+  // Social Media adds new stock (basic details only) and manages vehicle photos -- nothing else.
+  social_media: ["/inventory", "/settings"],
   // Cross-company visibility only -- no company_id of its own, so it must never reach any
   // of the regular per-company pages (they'd have nothing scoped to show it anyway).
   platform_owner: ["/platform"],
@@ -15,6 +17,7 @@ export const ROLE_NAV_PATHS = {
 export const ROLE_DEFAULT_PATH = {
   stock_supervisor: "/inventory",
   parts_supervisor: "/spare-parts",
+  social_media: "/inventory",
   platform_owner: "/platform",
 };
 
@@ -45,4 +48,23 @@ export const PARTS_ALLOWED_VEHICLE_STATUSES = ["available", "in_repair", "scrap"
 // kind (not even status changes), so only admin gets full vehicle access.
 export function hasFullVehicleAccess(role) {
   return !role || role === "admin";
+}
+
+// Mirrors ROLE_PERMISSIONS["social_media"] in server.py: can add a vehicle with basic
+// details only (no purchase/pricing/status fields) and add/remove its photos.
+export function isBasicStockRole(role) {
+  return role === "social_media";
+}
+
+export function canAddVehicle(role) {
+  return hasFullVehicleAccess(role) || isBasicStockRole(role);
+}
+
+export function canManageVehiclePhotos(role) {
+  return hasFullVehicleAccess(role) || isBasicStockRole(role);
+}
+
+// Roles that never see any vehicle pricing (selling / minimum selling price included).
+export function hidesVehiclePricing(role) {
+  return role === "parts_supervisor" || role === "social_media";
 }

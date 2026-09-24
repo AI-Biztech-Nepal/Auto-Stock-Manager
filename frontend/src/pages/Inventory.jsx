@@ -14,7 +14,7 @@ import ViewToggle, { useViewMode } from "../components/ViewToggle";
 import ListRow from "../components/ListRow";
 import { formatBSDate, getCurrentBSMonthRange, getCurrentWeekRange, getTodayAD } from "../utils/nepali-date";
 import { useAuth } from "../context/AuthContext";
-import { hasFullVehicleAccess } from "../utils/permissions";
+import { hasFullVehicleAccess, canAddVehicle, isBasicStockRole, hidesVehiclePricing } from "../utils/permissions";
 
 // Sold vehicles get their own archive (Sold Stock page) rather than sitting in the active
 // pipeline grid, so "sold" is left out of this page's status filter entirely. Scrap has no
@@ -56,8 +56,10 @@ export default function Inventory() {
   const { user } = useAuth();
   const isAdmin = !user?.role || user.role === "admin";
   const isFrontDesk = user?.role === "stock_supervisor";
-  const isPartsOnly = user?.role === "parts_supervisor";
-  const hideFinancials = isFrontDesk || isPartsOnly;
+  const isSocialMedia = isBasicStockRole(user?.role);
+  // Parts department and Social Media never see any pricing, selling price included.
+  const hidePricing = hidesVehiclePricing(user?.role);
+  const hideFinancials = isFrontDesk || hidePricing;
   const canManageStock = hasFullVehicleAccess(user?.role);
   const [searchParams, setSearchParams] = useSearchParams();
   const [vehicles, setVehicles] = useState([]);
@@ -198,7 +200,7 @@ export default function Inventory() {
   // Same permission split the per-card finance row already uses — reused so the "Total
   // Vehicles" popup (the one summary tile parts_supervisor can actually reach) doesn't
   // leak investment/selling figures to a role the other three tiles are already hidden from.
-  const showFinRow = !hideFinancials || !isPartsOnly;
+  const showFinRow = !hideFinancials || !hidePricing;
 
   // Dedicated report popup for each summary tile above — null | "all" | "investment" | "locked" | "selling".
   const [summaryModalView, setSummaryModalView] = useState(null);
@@ -385,7 +387,9 @@ export default function Inventory() {
 
   const handleSave = async (e, confirmReusedRegistration = false) => {
     e.preventDefault();
-    if (!form.brand || !form.model || !form.purchase_price || !form.purchase_date || !form.purchase_source || !form.registration_number) {
+    // Social Media adds basic details only -- purchase info is left for an admin to fill in.
+    const needsPurchaseInfo = !isSocialMedia;
+    if (!form.brand || !form.model || !form.registration_number || (needsPurchaseInfo && (!form.purchase_price || !form.purchase_date || !form.purchase_source))) {
       toast.error("Please fill all required fields"); return;
     }
     setSaving(true);
@@ -449,7 +453,7 @@ export default function Inventory() {
         <div className="flex items-center gap-2 flex-wrap">
           <PeriodToggle period={periodFilter} onChange={p => { setPeriodFilter(p); setDateFilter(""); }} testid="inventory-period-toggle" allowOff />
           <ViewToggle view={view} onChange={setView} testid="inventory-view-toggle" />
-          {!isFrontDesk && (
+          {!isFrontDesk && !isSocialMedia && (
             <button
               onClick={exportStock}
               disabled={exportingStock}
@@ -483,7 +487,7 @@ export default function Inventory() {
               <EyeOff size={16} /> {hidingUnpriced ? "Moving..." : `Move ${unpricedVisible.length} With No Price To Unlisted`}
             </button>
           )}
-          {canManageStock && !isFrontDesk && (
+          {canAddVehicle(user?.role) && (
             <button
               onClick={() => { setForm(EMPTY); setShowModal(true); }}
               data-testid="add-vehicle-button"
@@ -709,7 +713,7 @@ export default function Inventory() {
             { label: "Total Vehicles", value: filtered.length, icon: Package, color: "bg-blue-500", view: "all" },
             !hideFinancials && { label: "Total Investment", value: formatNPR(totalInvestment), icon: Wallet, color: "bg-indigo-500", view: "investment" },
             !hideFinancials && { label: "Locked Capital", value: formatNPR(lockedCapital), icon: Lock, color: "bg-purple-500", view: "locked" },
-            !isPartsOnly && { label: "Total Selling Price", value: formatNPR(totalSellingPrice), icon: DollarSign, color: "bg-green-500", view: "selling" },
+            !hidePricing && { label: "Total Selling Price", value: formatNPR(totalSellingPrice), icon: DollarSign, color: "bg-green-500", view: "selling" },
           ].filter(Boolean).map(c => (
             <div
               key={c.label}
@@ -823,7 +827,7 @@ export default function Inventory() {
                 meta={!hideFinancials && (
                   <div>
                     <div className="font-semibold text-slate-800">{formatNPR(v.total_investment)}</div>
-                    {!isPartsOnly && <div className="text-slate-400">{v.selling_price ? formatNPR(v.selling_price) : "—"} selling</div>}
+                    {!hidePricing && <div className="text-slate-400">{v.selling_price ? formatNPR(v.selling_price) : "—"} selling</div>}
                   </div>
                 )}
                 pills={<>
@@ -850,7 +854,7 @@ export default function Inventory() {
             const ag = getAgingStyle(v.aging?.category);
             const st = getStatusStyle(v.status);
             const tm = getTerminationStyle(v.ownership_termination_status);
-            const showFinRow = !hideFinancials || !isPartsOnly;
+            const showFinRow = !hideFinancials || !hidePricing;
             const isDND = v.status === "scrap";
             return (
               <div
@@ -912,13 +916,13 @@ export default function Inventory() {
                         <div className="font-semibold text-slate-800">{formatNPR(v.total_investment)}</div>
                       </div>
                     )}
-                    {!isPartsOnly && (
+                    {!hidePricing && (
                       <div>
                         <div className="text-slate-400">Selling</div>
                         <div className="font-semibold text-slate-800">{v.selling_price ? formatNPR(v.selling_price) : "—"}</div>
                       </div>
                     )}
-                    {!isPartsOnly && (
+                    {!hidePricing && (
                       <div>
                         <div className="text-slate-400">Min. Selling</div>
                         <div className="font-semibold text-slate-800">{v.minimum_selling_price ? formatNPR(v.minimum_selling_price) : "—"}</div>
@@ -1002,6 +1006,7 @@ export default function Inventory() {
           saving={saving}
           photos={photos}
           setPhotos={setPhotos}
+          basicOnly={isSocialMedia}
         />
       )}
 
@@ -1095,7 +1100,7 @@ export default function Inventory() {
                         {summaryModalView === "all" && showFinRow && (
                           <>
                             {!hideFinancials && <div className="text-sm font-bold text-indigo-700">{formatNPR(v.total_investment)}</div>}
-                            {!isPartsOnly && v.selling_price ? <div className="text-xs text-green-700 mt-0.5">{formatNPR(v.selling_price)}</div> : null}
+                            {!hidePricing && v.selling_price ? <div className="text-xs text-green-700 mt-0.5">{formatNPR(v.selling_price)}</div> : null}
                           </>
                         )}
                       </div>

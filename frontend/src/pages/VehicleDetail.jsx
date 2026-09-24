@@ -9,7 +9,7 @@ import HoverADDate from "../components/HoverADDate";
 import BSDatePicker from "../components/BSDatePicker";
 import CustomerVendorPicker from "../components/CustomerVendorPicker";
 import { useAuth } from "../context/AuthContext";
-import { hasFullVehicleAccess, PARTS_ALLOWED_VEHICLE_STATUSES } from "../utils/permissions";
+import { hasFullVehicleAccess, canManageVehiclePhotos, hidesVehiclePricing, isBasicStockRole, PARTS_ALLOWED_VEHICLE_STATUSES } from "../utils/permissions";
 import { PhotoCropperModal } from "../components/PhotoCropperModal";
 import { usePhotoCropQueue } from "../hooks/usePhotoCropQueue";
 
@@ -55,14 +55,18 @@ export function VehicleDetailModal({ id, onClose }) {
   const isAdmin = user?.role === "admin";
   const isFrontDesk = user?.role === "stock_supervisor";
   const isPartsOnly = user?.role === "parts_supervisor";
-  const hideFinancials = isFrontDesk || isPartsOnly;
+  const hidePricing = hidesVehiclePricing(user?.role);
+  const hideFinancials = isFrontDesk || hidePricing;
   const canManageStock = hasFullVehicleAccess(user?.role);
+  const canManagePhotos = canManageVehiclePhotos(user?.role);
+  // Social Media sees no costs at all -- the backend strips expenses/job cards for this role too.
+  const hideExpenses = isBasicStockRole(user?.role);
   // Deep links from Sales/Sold Stock (and elsewhere) can land here with a specific tab
   // requested via navigation state, e.g. navigate(`/inventory/${id}`, { state: { openTab: "expenses" } }).
   const location = useLocation();
   const [vehicle, setVehicle] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState(location.state?.openTab || "overview");
+  const [activeTab, setActiveTab] = useState((!hideExpenses && location.state?.openTab) || "overview");
   const [showExpenseModal, setShowExpenseModal] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [expForm, setExpForm] = useState({ category: "servicing", amount: "", description: "", date: "" });
@@ -276,7 +280,7 @@ export function VehicleDetailModal({ id, onClose }) {
   };
 
   const financialCards = useMemo(() => {
-    if (!vehicle) return [];
+    if (!vehicle || hideExpenses) return [];
     if (hideFinancials) {
       return [{ label: "Total Expenses", value: formatNPR(vehicle.total_expenses), bold: false, highlight: false }];
     }
@@ -291,7 +295,7 @@ export function VehicleDetailModal({ id, onClose }) {
         highlight: vehicle.profit_margin !== null,
       },
     ];
-  }, [vehicle, hideFinancials]);
+  }, [vehicle, hideFinancials, hideExpenses]);
 
   const pendingPhotoCount = photos.filter(p => p.pending).length;
   const handleClose = () => {
@@ -374,7 +378,7 @@ export function VehicleDetailModal({ id, onClose }) {
             {isAdmin && vehicle.status === "sold" && !isEditing && (
               <button onClick={openReturnModal} className="flex items-center gap-1.5 px-3 py-3 border border-amber-200 text-amber-700 rounded-lg text-sm font-medium hover:bg-amber-50 transition-colors" data-testid="record-return-btn"><Undo2 size={14} /> Record Return</button>
             )}
-            {!isEditing && (
+            {!isEditing && !hideExpenses && (
               <button onClick={loadQR} className="flex items-center gap-1.5 px-3 py-3 border border-slate-200 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors" data-testid="qr-btn"><QrCode size={14} /> QR Label</button>
             )}
           </div>
@@ -409,7 +413,7 @@ export function VehicleDetailModal({ id, onClose }) {
           {/* Tabs */}
           <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
             <div className="flex border-b border-slate-100">
-              {["overview", "expenses"].map(tab => (
+              {(hideExpenses ? ["overview"] : ["overview", "expenses"]).map(tab => (
                 <button key={tab} onClick={() => setActiveTab(tab)} data-testid={`tab-${tab}`}
                   className={`px-5 py-3.5 text-sm font-medium capitalize transition-colors ${activeTab === tab ? "border-b-2 border-blue-600 text-blue-600" : "text-slate-500 hover:text-slate-700"}`}>
                   {tab.charAt(0).toUpperCase() + tab.slice(1)}
@@ -464,7 +468,7 @@ export function VehicleDetailModal({ id, onClose }) {
                         <input data-testid="edit-purchase-price-input" type="text" inputMode="numeric" pattern="[0-9]*" value={editForm.purchase_price ?? ""} onChange={e => setEditForm({ ...editForm, purchase_price: e.target.value })} placeholder="e.g. 150000" className={inp} />
                       </Field>
                     )}
-                    {!isPartsOnly && (
+                    {!hidePricing && (
                       <Field label="Selling Price (NPR)">
                         <input data-testid="edit-selling-price-input" type="text" inputMode="numeric" pattern="[0-9]*" value={editForm.selling_price ?? ""} onChange={e => setEditForm({ ...editForm, selling_price: e.target.value })} placeholder="e.g. 185000" className={inp} />
                       </Field>
@@ -575,7 +579,7 @@ export function VehicleDetailModal({ id, onClose }) {
                   </Row>
                   <Row label="Purchase Date"><span className="text-sm font-medium text-slate-900 sm:text-right"><HoverADDate date={vehicle.purchase_date} /></span></Row>
                   {!hideFinancials && <Row label="Purchase Price"><span className="text-sm font-medium text-slate-900 sm:text-right">{formatNPR(vehicle.purchase_price)}</span></Row>}
-                  {!isPartsOnly && <Row label="Selling Price"><span className="text-sm font-medium text-slate-900 sm:text-right">{vehicle.selling_price ? formatNPR(vehicle.selling_price) : "Not set"}</span></Row>}
+                  {!hidePricing && <Row label="Selling Price"><span className="text-sm font-medium text-slate-900 sm:text-right">{vehicle.selling_price ? formatNPR(vehicle.selling_price) : "Not set"}</span></Row>}
                   {!hideFinancials && <Row label="Minimum Selling Price"><span className="text-sm font-medium text-slate-900 sm:text-right">{vehicle.minimum_selling_price ? formatNPR(vehicle.minimum_selling_price) : "Not set"}</span></Row>}
                   <Row label="Sold Date"><span className="text-sm font-medium text-slate-900 sm:text-right">{vehicle.sold_date ? <HoverADDate date={vehicle.sold_date} /> : "—"}</span></Row>
                   {vehicle.notes && (
@@ -681,7 +685,7 @@ export function VehicleDetailModal({ id, onClose }) {
               <h2 className="text-sm font-bold text-slate-900" style={{ fontFamily: "Manrope" }}>Vehicle Photos</h2>
             </div>
             {photos.length === 0 ? (
-              canManageStock ? (
+              canManagePhotos ? (
                 <label
                   onDragOver={onPhotoDragOver}
                   onDragLeave={onPhotoDragLeave}
@@ -710,7 +714,7 @@ export function VehicleDetailModal({ id, onClose }) {
                         <div className="animate-spin w-5 h-5 border-2 border-white border-t-transparent rounded-full" />
                       </div>
                     )}
-                    {canManageStock && !photo.pending && (
+                    {canManagePhotos && !photo.pending && (
                       <button
                         type="button"
                         onClick={() => deletePhoto(photo.id)}
@@ -723,7 +727,7 @@ export function VehicleDetailModal({ id, onClose }) {
                     )}
                   </div>
                 ))}
-                {canManageStock && (
+                {canManagePhotos && (
                 <label
                   onDragOver={onPhotoDragOver}
                   onDragLeave={onPhotoDragLeave}

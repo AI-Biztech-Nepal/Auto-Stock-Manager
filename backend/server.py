@@ -333,6 +333,7 @@ ROLE_PERMISSIONS = {
         # jobs/customers/sales at all -- those pages were pulled from their nav to match.
         "vehicles": {"view"},
         "vehicle_media": {"view"},  # read-only, so opening a vehicle's detail page doesn't 403 loading photos/documents
+        "vehicle_photos": {"view"},
         "expenses": {"view"},
         "team": {"view", "create", "edit", "delete"},
         "vendor_lookup": {"view", "create"},  # vendor picker + inline "add new vendor" when picking a vehicle's purchase source
@@ -342,10 +343,27 @@ ROLE_PERMISSIONS = {
         "jobs": {"view", "create", "edit", "delete"},
         "vehicles": {"view", "edit_status"},  # read-only vehicle data, plus limited pipeline-status changes (see PARTS_ALLOWED_STATUSES)
         "vehicle_media": {"view"},  # read-only, so opening a vehicle's detail page doesn't 403 loading photos/documents
+        "vehicle_photos": {"view"},
         "vendor_lookup": {"view", "create"},  # supplier picker + inline "add new vendor" on a part
         "vendors": {"view", "edit", "delete", "manage_payments"},  # full Vendor Management tab access
         "team": {"view", "create", "edit", "delete"},
     },
+    "social_media": {  # Social Media -- adds new stock (basic details only) and manages photos, nothing else
+        # "create_basic", not "create": create_vehicle strips everything but SOCIAL_MEDIA_VEHICLE_FIELDS
+        # and parks the vehicle as Unlisted until an admin fills in purchase/pricing details.
+        "vehicles": {"view", "create_basic"},
+        "vehicle_photos": {"view", "create", "delete"},
+        # Legal documents stay admin-only -- view only so the vehicle detail page loads cleanly.
+        "vehicle_media": {"view"},
+    },
+}
+
+# The only fields a social_media account may set when adding a vehicle -- no purchase,
+# pricing, sourcing, status, or paperwork fields.
+SOCIAL_MEDIA_VEHICLE_FIELDS = {
+    "brand", "model", "variant", "year", "engine_cc", "fuel_type", "vehicle_type",
+    "ownership_number", "kilometer_run", "condition", "condition_rating", "color",
+    "registration_number", "confirm_reused_registration",
 }
 
 # parts_supervisor's "edit_status" permission is intentionally narrower than full vehicle "edit":
@@ -415,12 +433,18 @@ FRONT_DESK_HIDDEN_VEHICLE_FIELDS = {
 # fields they also never see the selling price or minimum selling price.
 PARTS_HIDDEN_VEHICLE_FIELDS = FRONT_DESK_HIDDEN_VEHICLE_FIELDS | {"selling_price", "minimum_selling_price"}
 
+# Social Media only handles listings and photos -- no pricing, and no expense/job-card costs.
+SOCIAL_MEDIA_HIDDEN_VEHICLE_FIELDS = PARTS_HIDDEN_VEHICLE_FIELDS | {"total_expenses", "expenses", "job_cards"}
+
 def _hide_financials_for_role(v: dict, role: str) -> dict:
     if role == "stock_supervisor":
         for f in FRONT_DESK_HIDDEN_VEHICLE_FIELDS:
             v.pop(f, None)
     elif role == "parts_supervisor":
         for f in PARTS_HIDDEN_VEHICLE_FIELDS:
+            v.pop(f, None)
+    elif role == "social_media":
+        for f in SOCIAL_MEDIA_HIDDEN_VEHICLE_FIELDS:
             v.pop(f, None)
     return v
 
@@ -924,10 +948,12 @@ class VehicleCreate(BaseModel):
     condition_rating: int = 7
     color: Optional[str] = None
     registration_number: str
-    purchase_price: float
+    # Required for every role except social_media (enforced in create_vehicle), which adds
+    # stock with basic details only and leaves purchase info for an admin to fill in later.
+    purchase_price: Optional[float] = None
     accessories_cost: float = 0
-    purchase_date: str
-    purchase_source: str
+    purchase_date: Optional[str] = None
+    purchase_source: Optional[str] = None
     vendor_id: Optional[str] = None
     purchase_from: Optional[str] = None
     # Optional link to an existing/newly-created Customer or Vendor record, independent of
@@ -1446,7 +1472,18 @@ def _sold_over_30_days(v: dict) -> bool:
     return v.get("status") == "sold" and bool(v.get("sold_date")) and str(v["sold_date"])[:10] < cutoff
 
 @api_router.post("/vehicles")
-async def create_vehicle(vehicle: VehicleCreate, cu: dict = Depends(require("vehicles", "create"))):
+async def create_vehicle(vehicle: VehicleCreate, cu: dict = Depends(require_any("vehicles", {"create", "create_basic"}))):
+    role = cu.get("role", "admin")
+    basic_only = role != "admin" and "create" not in ROLE_PERMISSIONS.get(role, {}).get("vehicles", set())
+    if basic_only:
+        # Rebuild from defaults so nothing outside the allowed basic fields can be smuggled in.
+        vehicle = VehicleCreate(**vehicle.model_dump(include=SOCIAL_MEDIA_VEHICLE_FIELDS))
+        vehicle.purchase_price = 0
+        vehicle.purchase_date = datetime.now(timezone.utc).date().isoformat()
+        vehicle.purchase_source = ""
+        vehicle.status = "unlisted"  # hidden from the storefront until an admin prices it
+    elif vehicle.purchase_price is None or not vehicle.purchase_date or not vehicle.purchase_source:
+        raise HTTPException(422, "Purchase price, purchase date and purchase source are required")
     matches = await db.vehicles.find(
         {"registration_number": {"$regex": f"^{re.escape(vehicle.registration_number.strip())}$", "$options": "i"}},
         {"_id": 0, "id": 1, "status": 1, "brand": 1, "model": 1, "year": 1, "sold_date": 1},
@@ -1480,7 +1517,7 @@ async def create_vehicle(vehicle: VehicleCreate, cu: dict = Depends(require("veh
     await db.vehicles.insert_one(v)
     v.pop("_id", None)
     asyncio.create_task(_notify_storefront())
-    return v
+    return _hide_financials_for_role(v, role)
 
 # ── Bulk Import (xlsx/csv) ─────────────────────────────────────────────
 IMPORT_REQUIRED_FIELDS = ["brand", "model", "year", "purchase_price", "purchase_date", "purchase_source", "registration_number"]
@@ -3992,6 +4029,8 @@ def _build_inventory_pipeline_xlsx(vehicles: list, prepared_by: str, business_na
 
 @api_router.get("/reports/inventory-pipeline-export")
 async def inventory_pipeline_export(cu: dict = Depends(require("vehicles", "view"))):
+    if cu.get("role") == "social_media":
+        raise HTTPException(403, "You do not have permission to perform this action")
     vehicles = await db.vehicles.find({"status": {"$ne": "scrap"}}, {"_id": 0}).to_list(5000)
     order = {s: i for i, s in enumerate(_INVENTORY_PIPELINE_STATUSES)}
     vehicles.sort(key=lambda v: (order.get(v.get("status"), 99), v.get("purchase_date") or ""))
@@ -4472,7 +4511,7 @@ async def _compress_oversized_photos():
     logger.info(f"Photo compression sweep done: {succeeded}/{len(oversized_ids)} shrunk.")
 
 @api_router.get("/vehicles/{vid}/photos")
-async def get_vehicle_photos(vid: str, cu: dict = Depends(require("vehicle_media", "view"))):
+async def get_vehicle_photos(vid: str, cu: dict = Depends(require("vehicle_photos", "view"))):
     v = await db.vehicles.find_one({"id": vid}, {"_id": 0, "id": 1})
     if not v: raise HTTPException(404, "Vehicle not found")
     photos = await db.vehicle_photos.find({"vehicle_id": vid}, {"_id": 0}).sort("uploaded_at", 1).to_list(200)
@@ -4490,7 +4529,7 @@ async def get_vehicle_photo_file(photo_id: str):
                      headers={"Cache-Control": "public, max-age=31536000, immutable"})
 
 @api_router.post("/vehicles/{vid}/photos")
-async def upload_vehicle_photo(vid: str, file: UploadFile = File(...), cu: dict = Depends(require("vehicle_media", "create"))):
+async def upload_vehicle_photo(vid: str, file: UploadFile = File(...), cu: dict = Depends(require("vehicle_photos", "create"))):
     v = await db.vehicles.find_one({"id": vid})
     if not v: raise HTTPException(404, "Vehicle not found")
     if not _upload_type_ok(file, ALLOWED_IMAGE_TYPES, IMAGE_EXTENSIONS):
@@ -4521,7 +4560,7 @@ async def upload_vehicle_photo(vid: str, file: UploadFile = File(...), cu: dict 
     return _photo_out(photo)
 
 @api_router.delete("/vehicles/{vid}/photos/{photo_id}")
-async def delete_vehicle_photo(vid: str, photo_id: str, cu: dict = Depends(require("vehicle_media", "delete"))):
+async def delete_vehicle_photo(vid: str, photo_id: str, cu: dict = Depends(require("vehicle_photos", "delete"))):
     r = await db.vehicle_photos.delete_one({"id": photo_id, "vehicle_id": vid})
     if r.deleted_count == 0: raise HTTPException(404, "Photo not found")
     _evict_photo_cache(photo_id)

@@ -166,7 +166,7 @@ export default function Settings() {
     }
   };
 
-  const ROLE_LABELS = { admin: "Admin", stock_supervisor: "Front Desk", parts_supervisor: "Parts Department" };
+  const ROLE_LABELS = { admin: "Admin", stock_supervisor: "Front Desk", parts_supervisor: "Parts Department", social_media: "Social Media" };
 
   const inp = "w-full h-10 px-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500";
 
@@ -418,6 +418,7 @@ export default function Settings() {
                 <select value={newUserForm.role} onChange={e => setNewUserForm({ ...newUserForm, role: e.target.value })} className={inp} data-testid="new-user-role">
                   <option value="stock_supervisor">Front Desk</option>
                   <option value="parts_supervisor">Parts Department</option>
+                  <option value="social_media">Social Media</option>
                   <option value="admin">Admin</option>
                 </select>
               </div>
@@ -455,6 +456,7 @@ export default function Settings() {
                 <select value={editUserForm.role} onChange={e => setEditUserForm({ ...editUserForm, role: e.target.value })} className={inp} data-testid="edit-user-role">
                   <option value="stock_supervisor">Front Desk</option>
                   <option value="parts_supervisor">Parts Department</option>
+                  <option value="social_media">Social Media</option>
                   <option value="admin">Admin</option>
                 </select>
               </div>
