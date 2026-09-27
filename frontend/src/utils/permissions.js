@@ -3,7 +3,9 @@
 export const ROLE_NAV_PATHS = {
   // Sales, Sold Stock, Job Cards, and Customers were pulled from Front Desk -- they only get
   // Inventory (view/edit, no create) plus Team and Settings now.
-  stock_supervisor: ["/inventory", "/team", "/settings"],
+  // Warranty tracker: they follow up on sold vehicles and void a warranty when the customer
+  // serviced elsewhere (restoring one or changing its length stays admin-only).
+  stock_supervisor: ["/inventory", "/warranty", "/team", "/settings"],
   // Parts department gets read-only inventory browsing plus the ability to flip a vehicle's
   // pipeline status (Available <-> In Repair, or Scrap) — see PARTS_ALLOWED_STATUSES in server.py.
   parts_supervisor: ["/spare-parts", "/vendors", "/jobs", "/inventory", "/team", "/settings"],
@@ -67,4 +69,14 @@ export function canManageVehiclePhotos(role) {
 // Roles that never see any vehicle pricing (selling / minimum selling price included).
 export function hidesVehiclePricing(role) {
   return role === "parts_supervisor" || role === "social_media";
+}
+
+// Mirrors ROLE_PERMISSIONS["stock_supervisor"]["warranty"] in server.py: front desk can void a
+// warranty (customer serviced elsewhere); restoring it or changing its length is admin-only.
+export function canVoidWarranty(role) {
+  return !role || role === "admin" || role === "stock_supervisor";
+}
+
+export function canManageWarranty(role) {
+  return !role || role === "admin";
 }

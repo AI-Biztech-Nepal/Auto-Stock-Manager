@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
-import { Fingerprint, UserPlus, Shield, Edit, Trash2 } from "lucide-react";
+import { Fingerprint, UserPlus, Shield, ShieldCheck, Edit, Trash2 } from "lucide-react";
+import WarrantyLengthInput from "../components/WarrantyLengthInput";
 import { useAuth } from "../context/AuthContext";
 import api from "../utils/api";
 import { isNative, isBiometricAvailable, hasSavedCredentials, saveCredentials, deleteCredentials, verifyIdentity } from "../utils/biometric";
@@ -29,6 +30,8 @@ export default function Settings() {
   const [pwForm, setPwForm] = useState({ current_password: "", new_password: "", confirm: "" });
   const [saving, setSaving] = useState(false);
   const [siteForm, setSiteForm] = useState(null);
+  const [warrantyDays, setWarrantyDays] = useState(182);
+  const [savingWarranty, setSavingWarranty] = useState(false);
   const [savingSite, setSavingSite] = useState(false);
   const [storage, setStorage] = useState(null);
   const [bioSupported, setBioSupported] = useState(false);
@@ -49,7 +52,7 @@ export default function Settings() {
 
   useEffect(() => {
     if (!isAdmin) return;
-    api.get("/settings").then(r => setSiteForm(r.data || {})).catch(() => toast.error("Failed to load storefront settings"));
+    api.get("/settings").then(r => { setSiteForm(r.data || {}); setWarrantyDays(r.data?.warranty_days_default || 182); }).catch(() => toast.error("Failed to load storefront settings"));
     api.get("/admin/storage-usage").then(r => setStorage(r.data)).catch(() => {});
     fetchCompanyUsers();
   }, [isAdmin]);
@@ -96,6 +99,17 @@ export default function Settings() {
       setSiteForm(r.data);
       toast.success("Storefront settings updated!");
     } catch { toast.error("Failed to save"); } finally { setSavingSite(false); }
+  };
+
+  const saveWarrantyDefault = async (e) => {
+    e.preventDefault();
+    if (!warrantyDays) { toast.error("Enter a warranty length"); return; }
+    setSavingWarranty(true);
+    try {
+      const r = await api.put("/settings", { warranty_days_default: warrantyDays });
+      setSiteForm(r.data);
+      toast.success("Default warranty length saved");
+    } catch { toast.error("Failed to save"); } finally { setSavingWarranty(false); }
   };
 
   const changePassword = async (e) => {
@@ -259,6 +273,29 @@ export default function Settings() {
               </button>
             </form>
           )}
+        </div>
+      )}
+
+      {/* Warranty (Admin only) */}
+      {isAdmin && siteForm && (
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
+          <div className="flex items-center gap-2 mb-1">
+            <ShieldCheck size={18} className="text-teal-600" />
+            <h2 className="text-base font-bold text-slate-900" style={{ fontFamily: "Manrope" }}>Warranty</h2>
+          </div>
+          <p className="text-xs text-slate-500 mb-4">
+            Default warranty length for every sold vehicle, counted from its sale date. You can still change it for one vehicle on the Warranty page.
+            Labour is free on warranty services; the customer pays for parts. Servicing outside the shop voids the warranty.
+          </p>
+          <form onSubmit={saveWarrantyDefault} className="flex flex-wrap items-end gap-3">
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1.5">Default warranty length</label>
+              <WarrantyLengthInput days={siteForm.warranty_days_default || 182} onChange={setWarrantyDays} />
+            </div>
+            <button type="submit" disabled={savingWarranty} data-testid="save-warranty-default-btn" className="h-10 px-6 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-semibold disabled:opacity-60 transition-all active:scale-95">
+              {savingWarranty ? "Saving..." : "Save Warranty Length"}
+            </button>
+          </form>
         </div>
       )}
 

@@ -337,6 +337,9 @@ ROLE_PERMISSIONS = {
         "expenses": {"view"},
         "team": {"view", "create", "edit", "delete"},
         "vendor_lookup": {"view", "create"},  # vendor picker + inline "add new vendor" when picking a vehicle's purchase source
+        # Warranty tracker: follow up on sold vehicles and void a warranty when the customer
+        # serviced elsewhere. Restoring a voided warranty or changing its length is admin-only.
+        "warranty": {"view", "edit"},
     },
     "parts_supervisor": {  # Parts department
         "spare_parts": {"view", "create", "edit", "delete"},
@@ -453,7 +456,7 @@ def _hide_financials_for_role(v: dict, role: str) -> dict:
 # invisible from the vehicle's expense total until someone closes it out.
 def _job_card_cost(jc: dict) -> float:
     ac = jc.get("actual_cost")
-    return ac if ac is not None else jc.get("estimated_cost", 0)
+    return (ac if ac is not None else jc.get("estimated_cost", 0)) + (jc.get("sanakhat_cost") or 0)
 
 async def enrich_vehicle(v: dict) -> dict:
     v["aging"] = stock_aging(v.get("purchase_date", ""))
@@ -471,18 +474,39 @@ async def enrich_vehicle(v: dict) -> dict:
         v["expected_profit"] = None; v["profit_margin"] = None; v["low_margin"] = False
     return v
 
-# Sold vehicles carry a 6-month warranty — a job card can still be opened against
-# one after sale, as long as it's within that window from sold_date.
+# Sold vehicles carry a warranty — a job card can still be opened against one after sale
+# (labour free, parts charged) while it's active. Its length is the company default from
+# Settings (warranty_days_default, falling back to VEHICLE_WARRANTY_DAYS), unless an admin
+# set a per-vehicle override (vehicles.warranty_days). Servicing the vehicle anywhere other
+# than this shop voids it — front desk records that from the Warranty tracker.
 VEHICLE_WARRANTY_DAYS = 182  # ~6 months
 
-def _within_warranty(vehicle: dict) -> bool:
+async def _default_warranty_days() -> int:
+    s = await db.settings.find_one({}, {"_id": 0, "warranty_days_default": 1})
+    return int((s or {}).get("warranty_days_default") or VEHICLE_WARRANTY_DAYS)
+
+def _warranty_info(vehicle: dict, default_days: int) -> dict:
+    """status: "active" | "expired" | "void" | "none" (not sold / no sold_date)."""
+    days = int(vehicle.get("warranty_days") or default_days)
+    info = {"days": days, "start": None, "end": None, "days_left": None, "status": "none",
+            "custom_length": bool(vehicle.get("warranty_days")),
+            "void_reason": vehicle.get("warranty_void_reason"),
+            "voided_at": vehicle.get("warranty_voided_at"), "voided_by": vehicle.get("warranty_voided_by")}
     sold_date = vehicle.get("sold_date")
-    if not sold_date: return False
+    if vehicle.get("status") != "sold" or not sold_date:
+        return info
     try:
-        d = datetime.strptime(str(sold_date)[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        start = datetime.strptime(str(sold_date)[:10], "%Y-%m-%d").date()
     except (ValueError, TypeError):
-        return False
-    return 0 <= (datetime.now(timezone.utc) - d).days <= VEHICLE_WARRANTY_DAYS
+        return info
+    end = start + timedelta(days=days)
+    info.update(start=start.isoformat(), end=end.isoformat(),
+                days_left=(end - datetime.now(timezone.utc).date()).days)
+    if vehicle.get("warranty_void"):
+        info["status"] = "void"
+    else:
+        info["status"] = "active" if info["days_left"] >= 0 else "expired"
+    return info
 
 # ── Helper: compute total investment for a vehicle ────────────────────
 async def _vehicle_investment(vehicle_id: str, vehicle: dict) -> float:
@@ -1028,12 +1052,14 @@ class JobCardCreate(BaseModel):
     work_description: str
     mechanic_id: Optional[str] = None; mechanic_name: str
     estimated_cost: float; notes: Optional[str] = None
+    sanakhat_cost: Optional[float] = None  # added on top of estimated/actual cost (see _job_card_cost)
     coupon_no: int; job_date: str
     parts: List[dict] = []
 
 class JobCardUpdate(BaseModel):
     work_description: Optional[str] = None; mechanic_name: Optional[str] = None
     estimated_cost: Optional[float] = None; actual_cost: Optional[float] = None
+    sanakhat_cost: Optional[float] = None
     status: Optional[str] = None; notes: Optional[str] = None
     parts: Optional[List[dict]] = None
 
@@ -1145,6 +1171,13 @@ class SettingsUpdate(BaseModel):
     address: Optional[str] = None
     hero_image_url: Optional[str] = None
     service_image_url: Optional[str] = None
+    warranty_days_default: Optional[int] = Field(None, ge=1, le=3650)
+
+class WarrantyVoid(BaseModel):
+    reason: str = Field(..., min_length=1, max_length=500)
+
+class WarrantyLength(BaseModel):
+    warranty_days: Optional[int] = Field(None, ge=1, le=3650)  # None = back to the company default
 
 # ── AUTH ──────────────────────────────────────────────────────────────
 @api_router.post("/auth/signup")
@@ -1463,6 +1496,11 @@ async def get_vehicles(status: Optional[str] = None, brand: Optional[str] = None
         ]
         return v
     role = cu.get("role", "admin")
+    if any(v.get("status") == "sold" for v in vehicles):
+        default_days = await _default_warranty_days()
+        for v in vehicles:
+            if v.get("status") == "sold":
+                v["warranty"] = _warranty_info(v, default_days)
     return [_hide_financials_for_role(enrich_with_expenses(v, exps_by_vehicle.get(v["id"], []), jobs_by_vehicle.get(v["id"], [])), role) for v in vehicles]
 
 # A vehicle sold more than 30 days ago that comes back is entered as brand-new stock under
@@ -2506,9 +2544,13 @@ async def create_job(job: JobCardCreate, cu: dict = Depends(require("jobs", "cre
         v = await db.vehicles.find_one({"id": job.vehicle_id}, {"_id": 0})
         if not v: raise HTTPException(404, "Vehicle not found")
         if v.get("status") == "sold":
-            if not _within_warranty(v):
-                raise HTTPException(400, "This vehicle's 6-month warranty period has expired")
+            w = _warranty_info(v, await _default_warranty_days())
+            if w["status"] == "void":
+                raise HTTPException(400, f"This vehicle's warranty was voided: {w['void_reason'] or 'serviced outside the shop'}")
+            if w["status"] != "active":
+                raise HTTPException(400, f"This vehicle's warranty ended on {w['end'] or 'its expiry date'}")
             jc["is_warranty"] = True
+            jc["labour_charge"] = 0  # warranty service: labour is free, the customer pays for parts only
         elif v.get("status") not in ("available", "in_repair"):
             raise HTTPException(400, "Job cards can only be created for Available or In Repair vehicles, or sold vehicles still under warranty")
         jc["vehicle_brand"] = v.get("brand"); jc["vehicle_model"] = v.get("model")
@@ -2649,6 +2691,86 @@ async def delete_job(jid: str, cu: dict = Depends(require("jobs", "delete"))):
     r = await db.job_cards.delete_one({"id": jid})
     if r.deleted_count == 0: raise HTTPException(404, "Job not found")
     return {"message": "Deleted"}
+
+# ── WARRANTY TRACKER ──────────────────────────────────────────────────
+@api_router.get("/warranties")
+async def get_warranties(cu: dict = Depends(require("warranty", "view"))):
+    """Every sold vehicle with its warranty window, the buyer's contact, and its in-shop
+    warranty service history (warranty job cards), so front desk can follow up."""
+    default_days = await _default_warranty_days()
+    vehicles = await db.vehicles.find(
+        {"status": "sold"},
+        {"_id": 0, "id": 1, "brand": 1, "model": 1, "variant": 1, "year": 1, "registration_number": 1,
+         "status": 1, "sold_date": 1, "customer_id": 1, "warranty_days": 1, "warranty_void": 1,
+         "warranty_void_reason": 1, "warranty_voided_at": 1, "warranty_voided_by": 1},
+    ).to_list(5000)
+    if not vehicles:
+        return {"default_days": default_days, "warranties": []}
+    ids = [v["id"] for v in vehicles]
+    cust_ids = list({v["customer_id"] for v in vehicles if v.get("customer_id")})
+    customers = {c["id"]: c for c in (await db.customers.find(
+        {"id": {"$in": cust_ids}}, {"_id": 0, "id": 1, "name": 1, "contact_number": 1}).to_list(5000) if cust_ids else [])}
+    jobs_by_vehicle: dict = {}
+    for j in await db.job_cards.find(
+            {"vehicle_id": {"$in": ids}, "is_warranty": True},
+            {"_id": 0, "vehicle_id": 1, "job_number": 1, "job_date": 1, "created_at": 1, "status": 1, "work_description": 1}).to_list(20000):
+        jobs_by_vehicle.setdefault(j["vehicle_id"], []).append(j)
+    out = []
+    for v in vehicles:
+        w = _warranty_info(v, default_days)
+        if w["status"] == "none":
+            continue
+        c = customers.get(v.get("customer_id")) or {}
+        services = sorted(jobs_by_vehicle.get(v["id"], []), key=lambda j: j.get("job_date") or j.get("created_at") or "", reverse=True)
+        out.append({
+            "vehicle_id": v["id"], "brand": v.get("brand"), "model": v.get("model"), "variant": v.get("variant"),
+            "year": v.get("year"), "registration_number": v.get("registration_number"), "sold_date": v.get("sold_date"),
+            "customer_name": c.get("name"), "customer_contact": c.get("contact_number"),
+            "warranty": w, "services": services,
+        })
+    # Active first (soonest to expire on top), then expired and void (most recent first).
+    order = {"active": 0, "expired": 1, "void": 2}
+    out.sort(key=lambda r: (order[r["warranty"]["status"]],
+                            r["warranty"]["days_left"] if r["warranty"]["status"] == "active" else -r["warranty"]["days_left"]))
+    return {"default_days": default_days, "warranties": out}
+
+async def _sold_vehicle_or_404(vid: str) -> dict:
+    v = await db.vehicles.find_one({"id": vid}, {"_id": 0})
+    if not v: raise HTTPException(404, "Vehicle not found")
+    if v.get("status") != "sold": raise HTTPException(400, "Only sold vehicles have a warranty")
+    return v
+
+async def _warranty_audit(vid: str, cu: dict, details: str):
+    await db.audit_logs.insert_one({"action": "warranty_updated", "vehicle_id": vid, "user": cu["username"],
+        "timestamp": datetime.now(timezone.utc).isoformat(), "details": details})
+
+@api_router.post("/warranties/{vid}/void")
+async def void_warranty(vid: str, body: WarrantyVoid, cu: dict = Depends(require("warranty", "edit"))):
+    """Front desk records that the customer had the vehicle serviced outside the shop."""
+    await _sold_vehicle_or_404(vid)
+    now = datetime.now(timezone.utc).isoformat()
+    await db.vehicles.update_one({"id": vid}, {"$set": {
+        "warranty_void": True, "warranty_void_reason": body.reason.strip(),
+        "warranty_voided_at": now, "warranty_voided_by": cu["username"], "updated_at": now}})
+    await _warranty_audit(vid, cu, f"Warranty voided: {body.reason.strip()}")
+    return {"message": "Warranty voided"}
+
+@api_router.post("/warranties/{vid}/restore")
+async def restore_warranty(vid: str, cu: dict = Depends(admin_only)):
+    await _sold_vehicle_or_404(vid)
+    await db.vehicles.update_one({"id": vid}, {"$set": {
+        "warranty_void": False, "warranty_void_reason": None, "warranty_voided_at": None,
+        "warranty_voided_by": None, "updated_at": datetime.now(timezone.utc).isoformat()}})
+    await _warranty_audit(vid, cu, "Warranty restored")
+    return {"message": "Warranty restored"}
+
+@api_router.put("/warranties/{vid}/length")
+async def set_warranty_length(vid: str, body: WarrantyLength, cu: dict = Depends(admin_only)):
+    await _sold_vehicle_or_404(vid)
+    await db.vehicles.update_one({"id": vid}, {"$set": {
+        "warranty_days": body.warranty_days, "updated_at": datetime.now(timezone.utc).isoformat()}})
+    await _warranty_audit(vid, cu, f"Warranty length set to {body.warranty_days} days" if body.warranty_days else "Warranty length reset to company default")
+    return {"message": "Warranty length updated"}
 
 # ── CUSTOMERS ─────────────────────────────────────────────────────────
 @api_router.get("/customers")
@@ -4304,6 +4426,14 @@ async def _run_startup_tasks():
             ("sales", "review_note", "VARCHAR(500)"),
             ("sales", "reviewed_by", "VARCHAR(100)"),
             ("sales", "reviewed_at", "VARCHAR(40)"),
+            ("job_cards", "sanakhat_cost", "DOUBLE"),
+            ("job_cards", "labour_charge", "DOUBLE"),
+            ("vehicles", "warranty_days", "INT"),
+            ("vehicles", "warranty_void", "TINYINT(1) DEFAULT 0"),
+            ("vehicles", "warranty_void_reason", "VARCHAR(500)"),
+            ("vehicles", "warranty_voided_at", "VARCHAR(40)"),
+            ("vehicles", "warranty_voided_by", "VARCHAR(100)"),
+            ("settings", "warranty_days_default", "INT"),
         ]
         for _tbl, _col, _type in _post_schema_cols:
             try:

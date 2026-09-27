@@ -135,3 +135,21 @@ export const formatDateDual = (adDateStr) => {
     return `${adStr} · ${bsYear} BS`;
   } catch { return adDateStr?.slice(0, 10) || "—"; }
 };
+
+// Warranty lengths are stored in days (backend: warranty_days / warranty_days_default) but
+// entered and shown in whichever unit reads naturally. 6 months = 182 days, matching the
+// backend's VEHICLE_WARRANTY_DAYS default.
+export const WARRANTY_UNITS = { days: 1, months: 30.4, years: 365 };
+export const warrantyToDays = (amount, unit) => Math.round(Number(amount) * WARRANTY_UNITS[unit]);
+export const splitWarrantyDays = (days) => {
+  if (!days) return { amount: "", unit: "months" };
+  if (days % 365 === 0) return { amount: String(days / 365), unit: "years" };
+  const months = Math.round(days / WARRANTY_UNITS.months);
+  if (months > 0 && warrantyToDays(months, "months") === days) return { amount: String(months), unit: "months" };
+  return { amount: String(days), unit: "days" };
+};
+export const formatWarrantyLength = (days) => {
+  const { amount, unit } = splitWarrantyDays(days);
+  if (!amount) return "—";
+  return `${amount} ${amount === "1" ? unit.slice(0, -1) : unit}`;
+};

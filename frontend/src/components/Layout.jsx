@@ -7,7 +7,7 @@ import {
   LayoutDashboard, Bike, Wrench, Users, UsersRound,
   BarChart3, Handshake, Sparkles, Settings, LogOut, Menu, X, Bell,
   Store, Wallet, Megaphone, CreditCard, Boxes, ShoppingBag, Inbox, Archive, Building2,
-  ImageOff, FileWarning
+  ImageOff, FileWarning, ShieldCheck
 } from "lucide-react";
 
 // A vehicle needs at least this many photos before it's considered adequately
@@ -25,6 +25,7 @@ const navItems = [
   { path: "/spare-parts",  label: "Spare Parts",  icon: Boxes },
   { path: "/vendors",      label: "Vendors",      icon: Store },
   { path: "/jobs",         label: "Job Cards",    icon: Wrench },
+  { path: "/warranty",     label: "Warranty",     icon: ShieldCheck },
   { path: "/customers",    label: "Customers",    icon: Users },
   { path: "/team",         label: "Team",         icon: UsersRound },
   { path: "/finance",      label: "Finance",      icon: Wallet },

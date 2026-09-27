@@ -199,6 +199,11 @@ CREATE TABLE IF NOT EXISTS vehicles (
   salesperson_name VARCHAR(255),
   discount DOUBLE,
   created_by VARCHAR(100),
+  warranty_days INT,
+  warranty_void TINYINT(1) DEFAULT 0,
+  warranty_void_reason VARCHAR(500),
+  warranty_voided_at VARCHAR(40),
+  warranty_voided_by VARCHAR(100),
   INDEX idx_vehicles_status (status),
   INDEX idx_vehicles_registration_number (registration_number),
   INDEX idx_vehicles_brand (brand),
@@ -370,6 +375,8 @@ CREATE TABLE IF NOT EXISTS job_cards (
   completed_at VARCHAR(40),
   created_by VARCHAR(100),
   is_warranty TINYINT(1) DEFAULT 0,
+  sanakhat_cost DOUBLE,
+  labour_charge DOUBLE,
   updated_at VARCHAR(40),
   INDEX idx_job_cards_status (status),
   INDEX idx_job_cards_vehicle_id (vehicle_id),
@@ -527,6 +534,7 @@ CREATE TABLE IF NOT EXISTS settings (
   address VARCHAR(500),
   hero_image_url VARCHAR(1000),
   service_image_url VARCHAR(1000),
+  warranty_days_default INT,
   CONSTRAINT fk_settings_company FOREIGN KEY (company_id) REFERENCES companies(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 

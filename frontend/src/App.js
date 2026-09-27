@@ -20,6 +20,7 @@ const Dashboard = lazy(() => import("./pages/Dashboard"));
 const Inventory = lazy(() => import("./pages/Inventory"));
 const VehicleDetail = lazy(() => import("./pages/VehicleDetail"));
 const JobCards = lazy(() => import("./pages/JobCards"));
+const Warranty = lazy(() => import("./pages/Warranty"));
 const Customers = lazy(() => import("./pages/Customers"));
 const Team = lazy(() => import("./pages/Team"));
 const Reports = lazy(() => import("./pages/Reports"));
@@ -88,6 +89,7 @@ function AppRoutes() {
           <Route path="inventory/:id" element={<RoleRoute path="/inventory/detail"><VehicleDetail /></RoleRoute>} />
           <Route path="import-stock" element={<RoleRoute path="/import-stock"><ImportStock /></RoleRoute>} />
           <Route path="jobs" element={<RoleRoute path="/jobs"><JobCards /></RoleRoute>} />
+          <Route path="warranty" element={<RoleRoute path="/warranty"><Warranty /></RoleRoute>} />
           <Route path="customers" element={<RoleRoute path="/customers"><Customers /></RoleRoute>} />
           <Route path="team" element={<RoleRoute path="/team"><Team /></RoleRoute>} />
           <Route path="reports" element={<RoleRoute path="/reports"><Reports /></RoleRoute>} />
