@@ -1,11 +1,12 @@
 import { useEffect, useState, useCallback } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
-import { ArrowLeft, Undo2, ExternalLink, Lock, Store, User, Pencil, Trash2 } from "lucide-react";
+import { ArrowLeft, Undo2, ExternalLink, Lock, Store, User, Pencil, Trash2, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
-import { formatNPR, formatOwnership, TRANSFER_STATUS_OPTIONS, getTransferStatusStyle } from "../utils/helpers";
+import { formatNPR, formatOwnership, TRANSFER_STATUS_OPTIONS, getTransferStatusStyle, formatWarrantyLength } from "../utils/helpers";
 import { ReturnModal } from "./VehicleModals";
 import HoverADDate from "../components/HoverADDate";
+import WarrantyBadge from "../components/WarrantyBadge";
 import { useAuth } from "../context/AuthContext";
 
 const daysToSell = (v) => {
@@ -215,6 +216,53 @@ export default function SoldStockDetail() {
           </Row>
         </div>
       </div>
+
+      {/* Warranty + full job card (service / sanakhat) history */}
+      {vehicle.warranty && (
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5" data-testid="sold-warranty-history">
+          <div className="flex items-center justify-between gap-2 flex-wrap mb-1">
+            <h3 className="text-sm font-bold text-slate-900 flex items-center gap-1.5"><ShieldCheck size={15} className="text-teal-600" /> Warranty &amp; Service History</h3>
+            <WarrantyBadge warranty={vehicle.warranty} />
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8">
+            <div>
+              <Row label="Warranty Length"><span className="text-sm font-medium text-slate-900 sm:text-right">{formatWarrantyLength(vehicle.warranty.days)}{vehicle.warranty.custom_length ? " (custom)" : ""}</span></Row>
+              <Row label="Starts"><span className="text-sm font-medium text-slate-900 sm:text-right"><HoverADDate date={vehicle.warranty.start} /></span></Row>
+              <Row label="Ends"><span className="text-sm font-medium text-slate-900 sm:text-right"><HoverADDate date={vehicle.warranty.end} /></span></Row>
+            </div>
+            <div>
+              <Row label="Warranty Services"><span className="text-sm font-medium text-slate-900 sm:text-right">{(vehicle.service_history || []).filter(j => j.is_warranty).length}</span></Row>
+              <Row label="Total Job Cards"><span className="text-sm font-medium text-slate-900 sm:text-right">{(vehicle.service_history || []).length}</span></Row>
+              <Row label="Total Sanakhat"><span className="text-sm font-medium text-slate-900 sm:text-right">{formatNPR(vehicle.sanakhat_total)}</span></Row>
+            </div>
+          </div>
+          {vehicle.warranty.status === "void" && (
+            <div className="mt-3 text-xs bg-red-50 border border-red-100 text-red-700 rounded-lg px-3 py-2">
+              <span className="font-semibold">Voided (serviced elsewhere):</span> {vehicle.warranty.void_reason}
+              <span className="text-red-400"> · by {vehicle.warranty.voided_by} on <HoverADDate date={vehicle.warranty.voided_at?.slice(0, 10)} /></span>
+            </div>
+          )}
+          <div className="mt-4">
+            <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Job Cards</div>
+            {(vehicle.service_history || []).length === 0 ? (
+              <p className="text-xs text-slate-400">No job cards on this vehicle.</p>
+            ) : (
+              <div className="divide-y divide-slate-100 border border-slate-100 rounded-lg">
+                {(vehicle.service_history || []).map(j => (
+                  <div key={j.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 text-xs" data-testid="sold-service-row">
+                    <span className="font-mono text-slate-400 shrink-0">{j.job_number}</span>
+                    <span className="shrink-0 text-slate-600"><HoverADDate date={j.job_date} /></span>
+                    {j.is_warranty && <span className="px-1.5 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide bg-teal-100 text-teal-700">Warranty</span>}
+                    <span className="text-slate-700 flex-1 min-w-[8rem] truncate">{j.work_description}</span>
+                    <span className="shrink-0 text-slate-500">Sanakhat: <span className="font-medium text-slate-700">{j.sanakhat_cost > 0 ? formatNPR(j.sanakhat_cost) : "—"}</span></span>
+                    <span className="shrink-0 capitalize text-slate-400 w-20 text-right">{j.status?.replace("_", " ")}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {vehicle.notes && (
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">

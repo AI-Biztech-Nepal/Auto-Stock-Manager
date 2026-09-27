@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import api from "../utils/api";
 import { formatNPR, formatOwnership, getStatusStyle, getTransferStatusStyle } from "../utils/helpers";
 import HoverADDate from "../components/HoverADDate";
+import WarrantyBadge from "../components/WarrantyBadge";
 import BSDatePicker from "../components/BSDatePicker";
 import { useAuth } from "../context/AuthContext";
 import { adToBsDate, BS_MONTHS, formatBSDate, getCurrentBSMonthRange, getCurrentWeekRange, getTodayAD } from "../utils/nepali-date";
@@ -300,6 +301,19 @@ export default function SoldStock() {
                                 {v.year} · {formatOwnership(v.ownership_number)}
                                 {v.registration_number && <span className="font-mono"> · {v.registration_number}</span>}
                               </div>
+                              {(v.warranty || v.service_history?.length > 0) && (
+                                <div className="flex items-center gap-x-2 gap-y-1 flex-wrap mt-1 text-[11px] text-slate-500" data-testid="sold-row-warranty-summary">
+                                  <WarrantyBadge warranty={v.warranty} />
+                                  {v.warranty?.end && v.warranty.status !== "void" && <span>ends <HoverADDate date={v.warranty.end} /></span>}
+                                  {v.service_history?.length > 0 && (
+                                    <span>
+                                      {v.service_history.length} job{v.service_history.length === 1 ? "" : "s"}
+                                      {v.service_history.some(j => j.is_warranty) && ` (${v.service_history.filter(j => j.is_warranty).length} warranty)`}
+                                    </span>
+                                  )}
+                                  {v.sanakhat_total > 0 && <span>Sanakhat {formatNPR(v.sanakhat_total)}</span>}
+                                </div>
+                              )}
                             </div>
                             <div className="flex items-center gap-4 flex-wrap sm:flex-nowrap sm:shrink-0">
                               <div className="text-xs text-slate-500 sm:text-right shrink-0">

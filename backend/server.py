@@ -437,7 +437,7 @@ FRONT_DESK_HIDDEN_VEHICLE_FIELDS = {
 PARTS_HIDDEN_VEHICLE_FIELDS = FRONT_DESK_HIDDEN_VEHICLE_FIELDS | {"selling_price", "minimum_selling_price"}
 
 # Social Media only handles listings and photos -- no pricing, and no expense/job-card costs.
-SOCIAL_MEDIA_HIDDEN_VEHICLE_FIELDS = PARTS_HIDDEN_VEHICLE_FIELDS | {"total_expenses", "expenses", "job_cards"}
+SOCIAL_MEDIA_HIDDEN_VEHICLE_FIELDS = PARTS_HIDDEN_VEHICLE_FIELDS | {"total_expenses", "expenses", "job_cards", "service_history", "sanakhat_total"}
 
 def _hide_financials_for_role(v: dict, role: str) -> dict:
     if role == "stock_supervisor":
@@ -480,6 +480,15 @@ async def enrich_vehicle(v: dict) -> dict:
 # set a per-vehicle override (vehicles.warranty_days). Servicing the vehicle anywhere other
 # than this shop voids it — front desk records that from the Warranty tracker.
 VEHICLE_WARRANTY_DAYS = 182  # ~6 months
+
+# Compact per-vehicle job card history for the Sold Stock cards: every job (warranty or not),
+# newest first, with its sanakhat cost — so a sold vehicle's full service and sanakhat record
+# is visible without opening the job cards page.
+def _service_history(jobs: list) -> list:
+    out = [{"id": j.get("id"), "job_number": j.get("job_number"), "job_date": j.get("job_date") or (j.get("created_at") or "")[:10],
+            "work_description": j.get("work_description"), "status": j.get("status"),
+            "is_warranty": bool(j.get("is_warranty")), "sanakhat_cost": j.get("sanakhat_cost") or 0} for j in jobs]
+    return sorted(out, key=lambda j: j["job_date"] or "", reverse=True)
 
 async def _default_warranty_days() -> int:
     s = await db.settings.find_one({}, {"_id": 0, "warranty_days_default": 1})
@@ -1501,6 +1510,8 @@ async def get_vehicles(status: Optional[str] = None, brand: Optional[str] = None
         for v in vehicles:
             if v.get("status") == "sold":
                 v["warranty"] = _warranty_info(v, default_days)
+                v["service_history"] = _service_history(jobs_by_vehicle.get(v["id"], []))
+                v["sanakhat_total"] = sum(j["sanakhat_cost"] for j in v["service_history"])
     return [_hide_financials_for_role(enrich_with_expenses(v, exps_by_vehicle.get(v["id"], []), jobs_by_vehicle.get(v["id"], [])), role) for v in vehicles]
 
 # A vehicle sold more than 30 days ago that comes back is entered as brand-new stock under
@@ -2177,6 +2188,10 @@ async def get_vehicle(vid: str, cu: dict = Depends(require("vehicles", "view")))
     v = await enrich_vehicle(v)
     v["expenses"] = await db.expenses.find({"vehicle_id": vid}, {"_id": 0}).to_list(200)
     v["job_cards"] = await db.job_cards.find({"vehicle_id": vid}, {"_id": 0}).to_list(100)
+    if v.get("status") == "sold":
+        v["warranty"] = _warranty_info(v, await _default_warranty_days())
+        v["service_history"] = _service_history(v["job_cards"])
+        v["sanakhat_total"] = sum(j["sanakhat_cost"] for j in v["service_history"])
     return _hide_financials_for_role(v, cu.get("role", "admin"))
 
 @api_router.put("/vehicles/{vid}")
