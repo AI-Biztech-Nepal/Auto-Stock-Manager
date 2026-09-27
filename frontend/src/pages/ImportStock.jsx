@@ -216,7 +216,7 @@ export default function ImportStock() {
             <span key={c} className="text-xs font-mono bg-slate-50 text-slate-600 border border-slate-100 px-2 py-1 rounded-md">{c}</span>
           ))}
         </div>
-        <p className="text-xs text-slate-400 mt-3">* required column. The file is checked first — if any row fails, nothing is imported until every row in the sheet passes. Vehicles are imported as Available unless a valid <span className="font-mono text-xs bg-slate-100 px-1 py-0.5 rounded">status</span> column (available, reserved, sold, unlisted, scrap, or in_repair) is provided.</p>
+        <p className="text-xs text-slate-400 mt-3">* required column. The file is checked first — if any row fails, nothing is imported until every row in the sheet passes. Vehicles are imported as Available unless a valid <span className="font-mono text-xs bg-slate-100 px-1 py-0.5 rounded">status</span> column (available, reserved, sold, unlisted, scrap, or in_repair) is provided. Rows with no selling price are imported as Unlisted so they stay off the website until priced.</p>
       </div>
     </div>
   );

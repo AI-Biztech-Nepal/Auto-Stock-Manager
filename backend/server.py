@@ -1484,6 +1484,8 @@ async def create_vehicle(vehicle: VehicleCreate, cu: dict = Depends(require_any(
         vehicle.status = "unlisted"  # hidden from the storefront until an admin prices it
     elif vehicle.purchase_price is None or not vehicle.purchase_date or not vehicle.purchase_source:
         raise HTTPException(422, "Purchase price, purchase date and purchase source are required")
+    if vehicle.status == "available" and not vehicle.selling_price:
+        vehicle.status = "unlisted"  # no price yet — adding one later relists it (see update_vehicle)
     matches = await db.vehicles.find(
         {"registration_number": {"$regex": f"^{re.escape(vehicle.registration_number.strip())}$", "$options": "i"}},
         {"_id": 0, "id": 1, "status": 1, "brand": 1, "model": 1, "year": 1, "sold_date": 1},
@@ -1609,6 +1611,8 @@ def _parse_vehicle_import_rows(content: bytes, filename: str, created_by: str):
                 status_val = "unlisted"  # legacy alias, pre-rename data
             if status_val not in ("available", "reserved", "sold", "unlisted", "scrap", "in_repair"):
                 status_val = "available"
+            if status_val == "available" and not selling_price:
+                status_val = "unlisted"  # same rule as create_vehicle: no price, not on the storefront
             doc = {
                 "id": str(uuid.uuid4()),
                 "brand": _import_cell_str(record, "brand"),
@@ -5143,7 +5147,7 @@ async def export_for_website(cu: dict = Depends(admin_only)):
     contact_parts = [p for p in [business_name, settings.get("address"), settings.get("contact_phone")] if p]
     contact = " · ".join(contact_parts)
     source = re.sub(r"[^a-z0-9]+", "_", business_name.lower()).strip("_") or "auto_stock_manager"
-    vehicles = await db.vehicles.find({"status": "available"}, {"_id": 0}).to_list(200)
+    vehicles = await db.vehicles.find(STOREFRONT_LISTED, {"_id": 0}).to_list(200)
     vehicle_ids = [v["id"] for v in vehicles]
     photos_by_vehicle: dict = {}
     if vehicle_ids:
@@ -5184,6 +5188,9 @@ async def push_to_website(cu: dict = Depends(admin_only)):
 
 # ══════════════════════════════════════════════════════════════════════
 # ── PUBLIC SHOP API (no auth — safe for an external storefront site) ──
+# Available AND priced — an Available vehicle with no selling price would otherwise show
+# up on the storefront as "NPR 0".
+STOREFRONT_LISTED = {"status": "available", "selling_price": {"$gt": 0}}
 # Read-only. Only ever returns the explicit allowlist below — never spread
 # a raw vehicle dict here. Fields intentionally EXCLUDED as internal/
 # sensitive: purchase_price, accessories_cost, minimum_selling_price,
@@ -5247,7 +5254,7 @@ async def public_list_vehicles(request: Request):
     """Public, unauthenticated listing of available vehicles for an external shop frontend.
     Returns one cover photo URL per vehicle (the first uploaded) to keep the payload light —
     use /public/vehicles/{id} for the full photo gallery of a single vehicle."""
-    vehicles = await db.vehicles.find({"status": "available"}, {"_id": 0}).sort("created_at", -1).to_list(200)
+    vehicles = await db.vehicles.find(STOREFRONT_LISTED, {"_id": 0}).sort("created_at", -1).to_list(200)
     vehicle_ids = [v["id"] for v in vehicles]
     # One batched fetch (id/vehicle_id/uploaded_at only — never the base64 `data`) instead of
     # a per-vehicle find_one, then keep the earliest photo per vehicle as its cover.
@@ -5272,7 +5279,7 @@ async def public_list_vehicles(request: Request):
 @api_router.get("/public/vehicles/{vid}", dependencies=[Depends(_scope_to_default_company)])
 async def public_get_vehicle(vid: str, request: Request):
     """Public, unauthenticated single-vehicle detail with the full photo gallery."""
-    v = await db.vehicles.find_one({"id": vid, "status": "available"}, {"_id": 0})
+    v = await db.vehicles.find_one({"id": vid, **STOREFRONT_LISTED}, {"_id": 0})
     if not v: raise HTTPException(404, "Vehicle not found or not available")
     item = _public_vehicle_fields(v)
     photos = await db.vehicle_photos.find({"vehicle_id": vid}, {"_id": 0}).sort("uploaded_at", 1).to_list(50)
