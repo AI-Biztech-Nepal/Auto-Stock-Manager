@@ -122,7 +122,7 @@ def _unescape_anchored_literal(pattern: str) -> Optional[str]:
 
 def build_where(filt: dict):
     """Translates a Mongo-style filter dict into a SQL WHERE fragment + params.
-    Supports exactly the operators server.py uses: equality, $gte, $lte, $ne,
+    Supports exactly the operators server.py uses: equality, $gt, $gte, $lt, $lte, $ne,
     $in, $or, $exists, and the anchored $regex/$options case described above."""
     if not filt:
         return "1=1", []
@@ -144,6 +144,10 @@ def build_where(filt: dict):
                     clauses.append(f"{_quote(key)} >= %s"); params.append(opval)
                 elif op == "$lte":
                     clauses.append(f"{_quote(key)} <= %s"); params.append(opval)
+                elif op == "$gt":
+                    clauses.append(f"{_quote(key)} > %s"); params.append(opval)
+                elif op == "$lt":
+                    clauses.append(f"{_quote(key)} < %s"); params.append(opval)
                 elif op == "$ne":
                     # SQL's three-valued logic means `col != %s` is NULL (not true) when col
                     # IS NULL, silently excluding those rows — but Mongo's $ne treats a
