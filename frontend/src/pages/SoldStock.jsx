@@ -296,22 +296,24 @@ export default function SoldStock() {
                               <div className="flex items-center gap-1.5 flex-wrap">
                                 <span className="font-semibold text-slate-900 text-sm truncate">{v.brand} {v.model}</span>
                                 <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide ${tr.bg} ${tr.text}`} data-testid="sold-row-transfer" title="Ownership transfer status">Transfer {tr.label}</span>
+                                <WarrantyBadge warranty={v.warranty} />
+                                {v.sanakhat_total > 0 && (
+                                  <span className="px-1.5 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide whitespace-nowrap bg-violet-100 text-violet-700" data-testid="sold-row-sanakhat">Sanakhat {formatNPR(v.sanakhat_total)}</span>
+                                )}
                               </div>
                               <div className="text-xs text-slate-500 mt-0.5">
                                 {v.year} · {formatOwnership(v.ownership_number)}
                                 {v.registration_number && <span className="font-mono"> · {v.registration_number}</span>}
                               </div>
-                              {(v.warranty || v.service_history?.length > 0) && (
+                              {((v.warranty?.end && v.warranty.status !== "void") || v.service_history?.length > 0) && (
                                 <div className="flex items-center gap-x-2 gap-y-1 flex-wrap mt-1 text-[11px] text-slate-500" data-testid="sold-row-warranty-summary">
-                                  <WarrantyBadge warranty={v.warranty} />
-                                  {v.warranty?.end && v.warranty.status !== "void" && <span>ends <HoverADDate date={v.warranty.end} /></span>}
+                                  {v.warranty?.end && v.warranty.status !== "void" && <span>Warranty ends <HoverADDate date={v.warranty.end} /></span>}
                                   {v.service_history?.length > 0 && (
                                     <span>
                                       {v.service_history.length} job{v.service_history.length === 1 ? "" : "s"}
                                       {v.service_history.some(j => j.is_warranty) && ` (${v.service_history.filter(j => j.is_warranty).length} warranty)`}
                                     </span>
                                   )}
-                                  {v.sanakhat_total > 0 && <span>Sanakhat {formatNPR(v.sanakhat_total)}</span>}
                                 </div>
                               )}
                             </div>
