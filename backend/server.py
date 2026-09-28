@@ -437,7 +437,7 @@ FRONT_DESK_HIDDEN_VEHICLE_FIELDS = {
 PARTS_HIDDEN_VEHICLE_FIELDS = FRONT_DESK_HIDDEN_VEHICLE_FIELDS | {"selling_price", "minimum_selling_price"}
 
 # Social Media only handles listings and photos -- no pricing, and no expense/job-card costs.
-SOCIAL_MEDIA_HIDDEN_VEHICLE_FIELDS = PARTS_HIDDEN_VEHICLE_FIELDS | {"total_expenses", "expenses", "job_cards", "service_history", "sanakhat_total"}
+SOCIAL_MEDIA_HIDDEN_VEHICLE_FIELDS = PARTS_HIDDEN_VEHICLE_FIELDS | {"total_expenses", "expenses", "job_cards", "service_history", "sanakhat_total", "resanakhat_total"}
 
 def _hide_financials_for_role(v: dict, role: str) -> dict:
     if role == "stock_supervisor":
@@ -454,9 +454,14 @@ def _hide_financials_for_role(v: dict, role: str) -> dict:
 # A job card's contribution to vehicle cost — the settled actual_cost once the job is
 # marked complete, or its estimate while still pending/in progress so the work isn't
 # invisible from the vehicle's expense total until someone closes it out.
+# A paid service on a sold vehicle after its warranty (after_sale, not is_warranty) is billed
+# to the customer, so it isn't a cost of the vehicle at all.
 def _job_card_cost(jc: dict) -> float:
+    if jc.get("after_sale") and not jc.get("is_warranty"):
+        return 0
     ac = jc.get("actual_cost")
-    return (ac if ac is not None else jc.get("estimated_cost", 0)) + (jc.get("sanakhat_cost") or 0)
+    return ((ac if ac is not None else jc.get("estimated_cost", 0))
+            + (jc.get("sanakhat_cost") or 0) + (jc.get("resanakhat_cost") or 0))
 
 async def enrich_vehicle(v: dict) -> dict:
     v["aging"] = stock_aging(v.get("purchase_date", ""))
@@ -481,24 +486,50 @@ async def enrich_vehicle(v: dict) -> dict:
 # than this shop voids it — front desk records that from the Warranty tracker.
 VEHICLE_WARRANTY_DAYS = 182  # ~6 months
 
-# Compact per-vehicle job card history for the Sold Stock cards: every job (warranty or not),
-# newest first, with its sanakhat cost — so a sold vehicle's full service and sanakhat record
-# is visible without opening the job cards page.
-def _service_history(jobs: list) -> list:
-    out = [{"id": j.get("id"), "job_number": j.get("job_number"), "job_date": j.get("job_date") or (j.get("created_at") or "")[:10],
+def _job_day(j: dict) -> str:
+    return (j.get("job_date") or j.get("created_at") or "")[:10]
+
+# Job cards opened on a vehicle after its (latest) sale, oldest first: the 1st service, 2nd
+# service and so on. Warranty jobs (is_warranty) and paid post-warranty jobs (after_sale) are
+# only ever created while the vehicle is Sold; the date check drops ones from an earlier sale
+# if the vehicle was returned and sold again.
+def _post_sale_jobs(vehicle: dict, jobs: list) -> list:
+    sold = str(vehicle.get("sold_date") or "")[:10]
+    if vehicle.get("status") != "sold" or not sold:
+        return []
+    return sorted((j for j in jobs if (j.get("is_warranty") or j.get("after_sale")) and _job_day(j) >= sold), key=_job_day)
+
+def _service_numbers(vehicle: dict, jobs: list) -> dict:
+    return {j["id"]: i + 1 for i, j in enumerate(_post_sale_jobs(vehicle, jobs))}
+
+# Compact per-vehicle job card history for the Sold Stock cards: every job, newest first, with
+# its sanakhat / re-sanakhat cost and, for jobs after the sale, its service number.
+def _service_history(vehicle: dict, jobs: list) -> list:
+    nums = _service_numbers(vehicle, jobs)
+    out = [{"id": j.get("id"), "job_number": j.get("job_number"), "job_date": _job_day(j),
             "work_description": j.get("work_description"), "status": j.get("status"),
-            "is_warranty": bool(j.get("is_warranty")), "sanakhat_cost": j.get("sanakhat_cost") or 0} for j in jobs]
+            "is_warranty": bool(j.get("is_warranty")), "service_no": nums.get(j.get("id")),
+            "sanakhat_cost": j.get("sanakhat_cost") or 0, "resanakhat_cost": j.get("resanakhat_cost") or 0} for j in jobs]
     return sorted(out, key=lambda j: j["job_date"] or "", reverse=True)
+
+def _attach_service_history(v: dict, jobs: list, default_days: int) -> None:
+    v["warranty"] = _warranty_info(v, default_days, jobs)
+    v["service_history"] = _service_history(v, jobs)
+    v["sanakhat_total"] = sum(j["sanakhat_cost"] for j in v["service_history"])
+    v["resanakhat_total"] = sum(j["resanakhat_cost"] for j in v["service_history"])
 
 async def _default_warranty_days() -> int:
     s = await db.settings.find_one({}, {"_id": 0, "warranty_days_default": 1})
     return int((s or {}).get("warranty_days_default") or VEHICLE_WARRANTY_DAYS)
 
-def _warranty_info(vehicle: dict, default_days: int) -> dict:
-    """status: "active" | "expired" | "void" | "none" (not sold / no sold_date)."""
+def _warranty_info(vehicle: dict, default_days: int, jobs: list) -> dict:
+    """status: "awaiting" (sold, no service at the shop yet) | "active" (1st service done) |
+    "expired" | "void" | "none" (not sold / no sold_date). The window always runs from the sale
+    date; it only turns active once the vehicle comes in for its 1st service after the sale."""
     days = int(vehicle.get("warranty_days") or default_days)
+    services = len(_post_sale_jobs(vehicle, jobs))
     info = {"days": days, "start": None, "end": None, "days_left": None, "status": "none",
-            "custom_length": bool(vehicle.get("warranty_days")),
+            "services": services, "custom_length": bool(vehicle.get("warranty_days")),
             "void_reason": vehicle.get("warranty_void_reason"),
             "voided_at": vehicle.get("warranty_voided_at"), "voided_by": vehicle.get("warranty_voided_by")}
     sold_date = vehicle.get("sold_date")
@@ -513,8 +544,10 @@ def _warranty_info(vehicle: dict, default_days: int) -> dict:
                 days_left=(end - datetime.now(timezone.utc).date()).days)
     if vehicle.get("warranty_void"):
         info["status"] = "void"
+    elif info["days_left"] < 0:
+        info["status"] = "expired"
     else:
-        info["status"] = "active" if info["days_left"] >= 0 else "expired"
+        info["status"] = "active" if services else "awaiting"
     return info
 
 # ── Helper: compute total investment for a vehicle ────────────────────
@@ -1062,13 +1095,14 @@ class JobCardCreate(BaseModel):
     mechanic_id: Optional[str] = None; mechanic_name: str
     estimated_cost: float; notes: Optional[str] = None
     sanakhat_cost: Optional[float] = None  # added on top of estimated/actual cost (see _job_card_cost)
+    resanakhat_cost: Optional[float] = None  # same, for a repeat sanakhat
     coupon_no: int; job_date: str
     parts: List[dict] = []
 
 class JobCardUpdate(BaseModel):
     work_description: Optional[str] = None; mechanic_name: Optional[str] = None
     estimated_cost: Optional[float] = None; actual_cost: Optional[float] = None
-    sanakhat_cost: Optional[float] = None
+    sanakhat_cost: Optional[float] = None; resanakhat_cost: Optional[float] = None
     status: Optional[str] = None; notes: Optional[str] = None
     parts: Optional[List[dict]] = None
 
@@ -1469,7 +1503,7 @@ async def get_vehicles(status: Optional[str] = None, brand: Optional[str] = None
     # the browser could otherwise cache via a stable URL (see _public_photo_url).
     photo_docs = await db.vehicle_photos.find(
         {"vehicle_id": {"$in": vehicle_ids}}, {"_id": 0, "id": 1, "vehicle_id": 1, "uploaded_at": 1}
-    ).sort("uploaded_at", 1).to_list(10000)
+    ).sort(PHOTO_ORDER).to_list(10000)
     photos_by_vehicle: dict = {}
     for p in photo_docs:
         photos_by_vehicle.setdefault(p["vehicle_id"], []).append(p)
@@ -1509,9 +1543,7 @@ async def get_vehicles(status: Optional[str] = None, brand: Optional[str] = None
         default_days = await _default_warranty_days()
         for v in vehicles:
             if v.get("status") == "sold":
-                v["warranty"] = _warranty_info(v, default_days)
-                v["service_history"] = _service_history(jobs_by_vehicle.get(v["id"], []))
-                v["sanakhat_total"] = sum(j["sanakhat_cost"] for j in v["service_history"])
+                _attach_service_history(v, jobs_by_vehicle.get(v["id"], []), default_days)
     return [_hide_financials_for_role(enrich_with_expenses(v, exps_by_vehicle.get(v["id"], []), jobs_by_vehicle.get(v["id"], [])), role) for v in vehicles]
 
 # A vehicle sold more than 30 days ago that comes back is entered as brand-new stock under
@@ -2189,9 +2221,7 @@ async def get_vehicle(vid: str, cu: dict = Depends(require("vehicles", "view")))
     v["expenses"] = await db.expenses.find({"vehicle_id": vid}, {"_id": 0}).to_list(200)
     v["job_cards"] = await db.job_cards.find({"vehicle_id": vid}, {"_id": 0}).to_list(100)
     if v.get("status") == "sold":
-        v["warranty"] = _warranty_info(v, await _default_warranty_days())
-        v["service_history"] = _service_history(v["job_cards"])
-        v["sanakhat_total"] = sum(j["sanakhat_cost"] for j in v["service_history"])
+        _attach_service_history(v, v["job_cards"], await _default_warranty_days())
     return _hide_financials_for_role(v, cu.get("role", "admin"))
 
 @api_router.put("/vehicles/{vid}")
@@ -2511,11 +2541,24 @@ async def get_jobs(status: Optional[str] = None, vehicle_id: Optional[str] = Non
     # by the vehicle's live pipeline stage (available/sold/in_repair/...) alongside the job's own status.
     ids = list({j["vehicle_id"] for j in jobs if j.get("vehicle_id")})
     status_by_vehicle: dict = {}
+    service_no: dict = {}
     if ids:
-        vs = await db.vehicles.find({"id": {"$in": ids}}, {"_id": 0, "id": 1, "status": 1}).to_list(10000)
+        vs = await db.vehicles.find({"id": {"$in": ids}}, {"_id": 0, "id": 1, "status": 1, "sold_date": 1}).to_list(10000)
         status_by_vehicle = {v["id"]: v.get("status") for v in vs}
+        # 1st / 2nd / ... service after the sale, numbered over all of the vehicle's job cards
+        # (not just this filtered page) so the number doesn't shift with the filter.
+        sold = [v for v in vs if v.get("status") == "sold"]
+        if sold:
+            sold_jobs: dict = {}
+            for j in await db.job_cards.find(
+                    {"vehicle_id": {"$in": [v["id"] for v in sold]}},
+                    {"_id": 0, "id": 1, "vehicle_id": 1, "job_date": 1, "created_at": 1, "is_warranty": 1, "after_sale": 1}).to_list(20000):
+                sold_jobs.setdefault(j["vehicle_id"], []).append(j)
+            for v in sold:
+                service_no.update(_service_numbers(v, sold_jobs.get(v["id"], [])))
     for j in jobs:
         j["vehicle_status"] = status_by_vehicle.get(j.get("vehicle_id"))
+        j["service_no"] = service_no.get(j["id"])
     if vehicle_status and vehicle_status != "all":
         jobs = [j for j in jobs if j.get("vehicle_status") == vehicle_status]
     return jobs
@@ -2559,15 +2602,17 @@ async def create_job(job: JobCardCreate, cu: dict = Depends(require("jobs", "cre
         v = await db.vehicles.find_one({"id": job.vehicle_id}, {"_id": 0})
         if not v: raise HTTPException(404, "Vehicle not found")
         if v.get("status") == "sold":
-            w = _warranty_info(v, await _default_warranty_days())
-            if w["status"] == "void":
-                raise HTTPException(400, f"This vehicle's warranty was voided: {w['void_reason'] or 'serviced outside the shop'}")
-            if w["status"] != "active":
-                raise HTTPException(400, f"This vehicle's warranty ended on {w['end'] or 'its expiry date'}")
-            jc["is_warranty"] = True
-            jc["labour_charge"] = 0  # warranty service: labour is free, the customer pays for parts only
+            # Every job card after the sale is tracked as the vehicle's next service. While the
+            # warranty is awaiting its 1st service or active it's a warranty job (labour free,
+            # parts charged); once it has expired or been voided it's a normal paid service.
+            prior = await db.job_cards.find({"vehicle_id": v["id"]}, {"_id": 0}).to_list(200)
+            w = _warranty_info(v, await _default_warranty_days(), prior)
+            jc["after_sale"] = True
+            if w["status"] in ("awaiting", "active"):
+                jc["is_warranty"] = True
+                jc["labour_charge"] = 0
         elif v.get("status") not in ("available", "in_repair"):
-            raise HTTPException(400, "Job cards can only be created for Available or In Repair vehicles, or sold vehicles still under warranty")
+            raise HTTPException(400, "Job cards can only be created for Available, In Repair or Sold vehicles")
         jc["vehicle_brand"] = v.get("brand"); jc["vehicle_model"] = v.get("model")
         jc["vehicle_year"] = v.get("year"); jc["registration_number"] = v.get("registration_number")
     await db.job_cards.insert_one(jc)
@@ -2727,26 +2772,30 @@ async def get_warranties(cu: dict = Depends(require("warranty", "view"))):
         {"id": {"$in": cust_ids}}, {"_id": 0, "id": 1, "name": 1, "contact_number": 1}).to_list(5000) if cust_ids else [])}
     jobs_by_vehicle: dict = {}
     for j in await db.job_cards.find(
-            {"vehicle_id": {"$in": ids}, "is_warranty": True},
-            {"_id": 0, "vehicle_id": 1, "job_number": 1, "job_date": 1, "created_at": 1, "status": 1, "work_description": 1}).to_list(20000):
+            {"vehicle_id": {"$in": ids}},
+            {"_id": 0, "id": 1, "vehicle_id": 1, "job_number": 1, "job_date": 1, "created_at": 1, "status": 1,
+             "work_description": 1, "is_warranty": 1, "after_sale": 1}).to_list(20000):
         jobs_by_vehicle.setdefault(j["vehicle_id"], []).append(j)
     out = []
     for v in vehicles:
-        w = _warranty_info(v, default_days)
+        jobs = jobs_by_vehicle.get(v["id"], [])
+        w = _warranty_info(v, default_days, jobs)
         if w["status"] == "none":
             continue
         c = customers.get(v.get("customer_id")) or {}
-        services = sorted(jobs_by_vehicle.get(v["id"], []), key=lambda j: j.get("job_date") or j.get("created_at") or "", reverse=True)
+        # Every service at the shop since the sale, newest first, numbered 1st, 2nd, ...
+        services = [{**j, "service_no": i + 1, "is_warranty": bool(j.get("is_warranty"))}
+                    for i, j in enumerate(_post_sale_jobs(v, jobs))][::-1]
         out.append({
             "vehicle_id": v["id"], "brand": v.get("brand"), "model": v.get("model"), "variant": v.get("variant"),
             "year": v.get("year"), "registration_number": v.get("registration_number"), "sold_date": v.get("sold_date"),
             "customer_name": c.get("name"), "customer_contact": c.get("contact_number"),
             "warranty": w, "services": services,
         })
-    # Active first (soonest to expire on top), then expired and void (most recent first).
-    order = {"active": 0, "expired": 1, "void": 2}
+    # Active, then awaiting 1st service (soonest to expire on top), then expired and void (most recent first).
+    order = {"active": 0, "awaiting": 1, "expired": 2, "void": 3}
     out.sort(key=lambda r: (order[r["warranty"]["status"]],
-                            r["warranty"]["days_left"] if r["warranty"]["status"] == "active" else -r["warranty"]["days_left"]))
+                            r["warranty"]["days_left"] if r["warranty"]["status"] in ("active", "awaiting") else -r["warranty"]["days_left"]))
     return {"default_days": default_days, "warranties": out}
 
 async def _sold_vehicle_or_404(vid: str) -> dict:
@@ -4443,12 +4492,15 @@ async def _run_startup_tasks():
             ("sales", "reviewed_at", "VARCHAR(40)"),
             ("job_cards", "sanakhat_cost", "DOUBLE"),
             ("job_cards", "labour_charge", "DOUBLE"),
+            ("job_cards", "resanakhat_cost", "DOUBLE"),
+            ("job_cards", "after_sale", "TINYINT(1) DEFAULT 0"),
             ("vehicles", "warranty_days", "INT"),
             ("vehicles", "warranty_void", "TINYINT(1) DEFAULT 0"),
             ("vehicles", "warranty_void_reason", "VARCHAR(500)"),
             ("vehicles", "warranty_voided_at", "VARCHAR(40)"),
             ("vehicles", "warranty_voided_by", "VARCHAR(100)"),
             ("settings", "warranty_days_default", "INT"),
+            ("vehicle_photos", "sort_order", "INT"),
         ]
         for _tbl, _col, _type in _post_schema_cols:
             try:
@@ -4659,11 +4711,29 @@ async def _compress_oversized_photos():
         succeeded += 1
     logger.info(f"Photo compression sweep done: {succeeded}/{len(oversized_ids)} shrunk.")
 
+# Photo order is set by staff (drag to reorder on the vehicle page); the first photo is the
+# storefront cover. sort_order is NULL on photos never reordered (MySQL sorts NULL first),
+# so those keep their upload order, and a new upload is numbered to land after the rest.
+PHOTO_ORDER = [("sort_order", 1), ("uploaded_at", 1)]
+
+class PhotoOrder(BaseModel):
+    photo_ids: List[str]
+
+@api_router.put("/vehicles/{vid}/photos/order")
+async def reorder_vehicle_photos(vid: str, body: PhotoOrder, cu: dict = Depends(require("vehicle_photos", "create"))):
+    existing = {p["id"] for p in await db.vehicle_photos.find({"vehicle_id": vid}, {"_id": 0, "id": 1}).to_list(500)}
+    if set(body.photo_ids) != existing or len(body.photo_ids) != len(existing):
+        raise HTTPException(400, "Photo list is out of date, reload the page and try again")
+    for i, pid in enumerate(body.photo_ids):
+        await db.vehicle_photos.update_one({"id": pid, "vehicle_id": vid}, {"$set": {"sort_order": i}})
+    asyncio.create_task(_notify_storefront())
+    return {"message": "Photo order saved"}
+
 @api_router.get("/vehicles/{vid}/photos")
 async def get_vehicle_photos(vid: str, cu: dict = Depends(require("vehicle_photos", "view"))):
     v = await db.vehicles.find_one({"id": vid}, {"_id": 0, "id": 1})
     if not v: raise HTTPException(404, "Vehicle not found")
-    photos = await db.vehicle_photos.find({"vehicle_id": vid}, {"_id": 0}).sort("uploaded_at", 1).to_list(200)
+    photos = await db.vehicle_photos.find({"vehicle_id": vid}, {"_id": 0}).sort(PHOTO_ORDER).to_list(200)
     return [_photo_out(p) for p in photos]
 
 @api_router.get("/vehicle-photos/{photo_id}/file")
@@ -4703,6 +4773,7 @@ async def upload_vehicle_photo(vid: str, file: UploadFile = File(...), cu: dict 
         "id": photo_id, "vehicle_id": vid, "filename": file.filename or f"{photo_id}.jpg",
         "content_type": content_type, "data": base64.b64encode(content).decode("ascii"),
         "uploaded_at": datetime.now(timezone.utc).isoformat(), "size": len(content),
+        "sort_order": await db.vehicle_photos.count_documents({"vehicle_id": vid}),
     }
     await db.vehicle_photos.insert_one(photo)
     asyncio.create_task(_notify_storefront())
@@ -4917,6 +4988,7 @@ async def upload_legal_document(vid: str, file: UploadFile = File(...), doc_type
         "content_type": content_type, "data": base64.b64encode(content).decode("ascii"),
         "doc_type": doc_type, "original_name": file.filename,
         "uploaded_at": datetime.now(timezone.utc).isoformat(), "size": len(content),
+        "sort_order": await db.vehicle_photos.count_documents({"vehicle_id": vid}),
     }
     await db.legal_documents.insert_one(doc)
     # Update status field
@@ -5296,7 +5368,7 @@ async def export_for_website(cu: dict = Depends(admin_only)):
     vehicle_ids = [v["id"] for v in vehicles]
     photos_by_vehicle: dict = {}
     if vehicle_ids:
-        all_photos = await db.vehicle_photos.find({"vehicle_id": {"$in": vehicle_ids}}, {"_id": 0}).sort("uploaded_at", 1).to_list(5000)
+        all_photos = await db.vehicle_photos.find({"vehicle_id": {"$in": vehicle_ids}}, {"_id": 0}).sort(PHOTO_ORDER).to_list(5000)
         for p in all_photos:
             photos_by_vehicle.setdefault(p["vehicle_id"], []).append(p)
     listings = []
@@ -5406,7 +5478,7 @@ async def public_list_vehicles(request: Request):
     all_photos = (
         await db.vehicle_photos.find(
             {"vehicle_id": {"$in": vehicle_ids}}, {"_id": 0, "id": 1, "vehicle_id": 1, "uploaded_at": 1}
-        ).sort("uploaded_at", 1).to_list(20000)
+        ).sort(PHOTO_ORDER).to_list(20000)
         if vehicle_ids else []
     )
     cover_by_vehicle = {}
@@ -5427,7 +5499,7 @@ async def public_get_vehicle(vid: str, request: Request):
     v = await db.vehicles.find_one({"id": vid, **STOREFRONT_LISTED}, {"_id": 0})
     if not v: raise HTTPException(404, "Vehicle not found or not available")
     item = _public_vehicle_fields(v)
-    photos = await db.vehicle_photos.find({"vehicle_id": vid}, {"_id": 0}).sort("uploaded_at", 1).to_list(50)
+    photos = await db.vehicle_photos.find({"vehicle_id": vid}, {"_id": 0}).sort(PHOTO_ORDER).to_list(50)
     item["image_urls"] = [_public_photo_url(request, vid, p["id"]) for p in photos]
     item["photos"] = item["image_urls"]  # kept for backwards compatibility with earlier consumers
     return item

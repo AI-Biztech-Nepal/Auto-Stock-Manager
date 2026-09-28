@@ -300,6 +300,9 @@ export default function SoldStock() {
                                 {v.sanakhat_total > 0 && (
                                   <span className="px-1.5 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide whitespace-nowrap bg-violet-100 text-violet-700" data-testid="sold-row-sanakhat">Sanakhat {formatNPR(v.sanakhat_total)}</span>
                                 )}
+                                {v.resanakhat_total > 0 && (
+                                  <span className="px-1.5 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide whitespace-nowrap bg-fuchsia-100 text-fuchsia-700" data-testid="sold-row-resanakhat">Re-Sanakhat {formatNPR(v.resanakhat_total)}</span>
+                                )}
                               </div>
                               <div className="text-xs text-slate-500 mt-0.5">
                                 {v.year} · {formatOwnership(v.ownership_number)}
@@ -308,11 +311,8 @@ export default function SoldStock() {
                               {((v.warranty?.end && v.warranty.status !== "void") || v.service_history?.length > 0) && (
                                 <div className="flex items-center gap-x-2 gap-y-1 flex-wrap mt-1 text-[11px] text-slate-500" data-testid="sold-row-warranty-summary">
                                   {v.warranty?.end && v.warranty.status !== "void" && <span>Warranty ends <HoverADDate date={v.warranty.end} /></span>}
-                                  {v.service_history?.length > 0 && (
-                                    <span>
-                                      {v.service_history.length} job{v.service_history.length === 1 ? "" : "s"}
-                                      {v.service_history.some(j => j.is_warranty) && ` (${v.service_history.filter(j => j.is_warranty).length} warranty)`}
-                                    </span>
+                                  {v.warranty?.services > 0 && (
+                                    <span>{v.warranty.services} service{v.warranty.services === 1 ? "" : "s"} since sale</span>
                                   )}
                                 </div>
                               )}

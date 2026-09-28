@@ -6,7 +6,7 @@ import api from "../utils/api";
 import { formatNPR, formatOwnership, TRANSFER_STATUS_OPTIONS, getTransferStatusStyle, formatWarrantyLength } from "../utils/helpers";
 import { ReturnModal } from "./VehicleModals";
 import HoverADDate from "../components/HoverADDate";
-import WarrantyBadge from "../components/WarrantyBadge";
+import WarrantyBadge, { serviceLabel } from "../components/WarrantyBadge";
 import { useAuth } from "../context/AuthContext";
 import { canVoidWarranty, canManageWarranty } from "../utils/permissions";
 
@@ -175,7 +175,7 @@ export default function SoldStockDetail() {
             <h3 className="text-sm font-bold text-slate-900 flex items-center gap-1.5"><ShieldCheck size={15} className="text-teal-600" /> Warranty &amp; Service History</h3>
             <div className="flex items-center gap-2 flex-wrap">
               <WarrantyBadge warranty={vehicle.warranty} />
-              {canVoid && vehicle.warranty?.status === "active" && (
+              {canVoid && ["active", "awaiting"].includes(vehicle.warranty?.status) && (
                 <button onClick={() => { setVoidReason(""); setVoiding(true); }} data-testid="void-warranty-btn" className="flex items-center gap-1.5 px-2.5 py-1 bg-red-50 text-red-700 border border-red-200 text-xs font-semibold rounded-lg hover:bg-red-100 transition-colors">
                   <ShieldOff size={13} /> Void warranty
                 </button>
@@ -197,9 +197,10 @@ export default function SoldStockDetail() {
               <Row label="Ends"><span className="text-sm font-medium text-slate-900 sm:text-right"><HoverADDate date={vehicle.warranty.end} /></span></Row>
             </div>}
             <div>
-              <Row label="Warranty Services"><span className="text-sm font-medium text-slate-900 sm:text-right">{(vehicle.service_history || []).filter(j => j.is_warranty).length}</span></Row>
+              <Row label="Services Since Sale"><span className="text-sm font-medium text-slate-900 sm:text-right">{vehicle.warranty?.services ?? 0}</span></Row>
               <Row label="Total Job Cards"><span className="text-sm font-medium text-slate-900 sm:text-right">{(vehicle.service_history || []).length}</span></Row>
               <Row label="Total Sanakhat"><span className="text-sm font-medium text-slate-900 sm:text-right">{formatNPR(vehicle.sanakhat_total)}</span></Row>
+              <Row label="Total Re-Sanakhat"><span className="text-sm font-medium text-slate-900 sm:text-right">{formatNPR(vehicle.resanakhat_total)}</span></Row>
             </div>
           </div>
           {vehicle.warranty?.status === "void" && (
@@ -218,9 +219,13 @@ export default function SoldStockDetail() {
                   <div key={j.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 text-xs" data-testid="sold-service-row">
                     <span className="font-mono text-slate-400 shrink-0">{j.job_number}</span>
                     <span className="shrink-0 text-slate-600"><HoverADDate date={j.job_date} /></span>
+                    {j.service_no
+                      ? <span className="px-1.5 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide bg-indigo-100 text-indigo-700">{serviceLabel(j.service_no)}</span>
+                      : <span className="px-1.5 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide bg-slate-100 text-slate-500">Before sale</span>}
                     {j.is_warranty && <span className="px-1.5 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide bg-teal-100 text-teal-700">Warranty</span>}
                     <span className="text-slate-700 flex-1 min-w-[8rem] truncate">{j.work_description}</span>
                     <span className="shrink-0 text-slate-500">Sanakhat: <span className="font-medium text-slate-700">{j.sanakhat_cost > 0 ? formatNPR(j.sanakhat_cost) : "—"}</span></span>
+                    <span className="shrink-0 text-slate-500">Re-Sanakhat: <span className="font-medium text-slate-700">{j.resanakhat_cost > 0 ? formatNPR(j.resanakhat_cost) : "—"}</span></span>
                     <span className="shrink-0 capitalize text-slate-400 w-20 text-right">{j.status?.replace("_", " ")}</span>
                   </div>
                 ))}

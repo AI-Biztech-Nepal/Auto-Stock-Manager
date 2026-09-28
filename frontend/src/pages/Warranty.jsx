@@ -2,7 +2,8 @@
  * Warranty.jsx — warranty tracker for sold vehicles.
  *
  * Every sold vehicle's warranty runs from its sale date for the company default length
- * (Settings) or a per-vehicle override. Front desk follows up with customers from here and,
+ * (Settings) or a per-vehicle override. It shows "Awaiting 1st service" until the vehicle's first
+ * job card after the sale, and only turns Active once that 1st service is done at the shop. Front desk follows up with customers from here and,
  * if a customer had the vehicle serviced anywhere other than this shop, voids the warranty
  * ("Serviced elsewhere"). Warranty services themselves are job cards opened against the sold
  * vehicle — labour free, parts charged — and show up here as its service history.
@@ -13,6 +14,7 @@ import { toast } from "sonner";
 import api from "../utils/api";
 import { formatWarrantyLength } from "../utils/helpers";
 import HoverADDate from "../components/HoverADDate";
+import { serviceLabel } from "../components/WarrantyBadge";
 import WarrantyLengthInput from "../components/WarrantyLengthInput";
 import { useAuth } from "../context/AuthContext";
 import { canVoidWarranty, canManageWarranty } from "../utils/permissions";
@@ -21,11 +23,12 @@ const EXPIRING_SOON_DAYS = 30;
 
 const STATUS_STYLES = {
   active:  { label: "Active",  pill: "bg-teal-100 text-teal-700" },
+  awaiting: { label: "Awaiting 1st service", pill: "bg-sky-100 text-sky-700" },
   expired: { label: "Expired", pill: "bg-slate-200 text-slate-600" },
   void:    { label: "Void",    pill: "bg-red-100 text-red-700" },
 };
 
-const isExpiringSoon = (w) => w.status === "active" && w.days_left <= EXPIRING_SOON_DAYS;
+const isExpiringSoon = (w) => (w.status === "active" || w.status === "awaiting") && w.days_left <= EXPIRING_SOON_DAYS;
 
 function getErrMsg(err) {
   const detail = err.response?.data?.detail;
@@ -66,6 +69,7 @@ export default function Warranty() {
 
   const counts = useMemo(() => ({
     active: rows.filter(r => r.warranty.status === "active").length,
+    awaiting: rows.filter(r => r.warranty.status === "awaiting").length,
     expiring: rows.filter(r => isExpiringSoon(r.warranty)).length,
     expired: rows.filter(r => r.warranty.status === "expired").length,
     void: rows.filter(r => r.warranty.status === "void").length,
@@ -121,7 +125,8 @@ export default function Warranty() {
   };
 
   const tiles = [
-    ["active", "Active", counts.active, "text-teal-700"],
+    ["active", "Active (1st service done)", counts.active, "text-teal-700"],
+    ["awaiting", "Awaiting 1st service", counts.awaiting, "text-sky-700"],
     ["expiring", `Ending in ${EXPIRING_SOON_DAYS} days`, counts.expiring, "text-amber-600"],
     ["expired", "Expired", counts.expired, "text-slate-600"],
     ["void", "Void (serviced elsewhere)", counts.void, "text-red-600"],
@@ -151,7 +156,7 @@ export default function Warranty() {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
         {tiles.map(([key, label, count, color]) => (
           <button
             key={key}
@@ -206,7 +211,7 @@ export default function Warranty() {
                       <div className="text-slate-400">{formatWarrantyLength(w.days)}{w.custom_length && " · custom"}</div>
                     </div>
                     <div>
-                      <div className="text-slate-400">Shop services</div>
+                      <div className="text-slate-400">Services since sale</div>
                       <div className="font-medium text-slate-700">{r.services.length}</div>
                       {lastService && <div className="text-slate-400">last <HoverADDate date={(lastService.job_date || lastService.created_at)?.slice(0, 10)} /></div>}
                     </div>
@@ -229,16 +234,18 @@ export default function Warranty() {
                       </div>
                     )}
                     <div>
-                      <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Warranty service history (at Hamro G&amp;G)</div>
+                      <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Service history since sale (at Hamro G&amp;G)</div>
                       {r.services.length === 0 ? (
-                        <div className="text-xs text-slate-400">No warranty services yet.</div>
+                        <div className="text-xs text-slate-400">Not serviced yet. The warranty activates at its 1st service.</div>
                       ) : (
                         <div className="space-y-1">
                           {r.services.map(s => (
                             <div key={s.job_number} className="flex gap-3 text-xs text-slate-600">
+                              <span className="shrink-0 font-semibold text-indigo-700 w-20">{serviceLabel(s.service_no)}</span>
                               <span className="font-mono text-slate-400 shrink-0">{s.job_number}</span>
                               <span className="shrink-0"><HoverADDate date={(s.job_date || s.created_at)?.slice(0, 10)} /></span>
                               <span className="truncate">{s.work_description}</span>
+                              {!s.is_warranty && <span className="shrink-0 text-slate-400">paid</span>}
                               <span className="ml-auto shrink-0 capitalize text-slate-400">{s.status?.replace("_", " ")}</span>
                             </div>
                           ))}
@@ -246,7 +253,7 @@ export default function Warranty() {
                       )}
                     </div>
                     <div className="flex flex-wrap gap-2">
-                      {canVoid && w.status === "active" && (
+                      {canVoid && (w.status === "active" || w.status === "awaiting") && (
                         <button onClick={() => { setVoidReason(""); setVoiding(r); }} data-testid="void-warranty-btn" className="flex items-center gap-1.5 px-3 py-1.5 bg-red-50 text-red-700 border border-red-200 text-xs font-semibold rounded-lg hover:bg-red-100 transition-colors">
                           <ShieldOff size={13} /> Serviced elsewhere (void warranty)
                         </button>

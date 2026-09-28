@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
-import { Plus, Trash2, Edit, CheckCircle, AlertCircle, Clock, QrCode, Undo2, Store, User, Download, FileText, Package } from "lucide-react";
+import { Plus, Trash2, Edit, CheckCircle, AlertCircle, Clock, QrCode, Undo2, Store, User, Download, FileText, Package, ChevronLeft, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
 import { formatNPR, getAgingStyle, getStatusStyle, getDocStyle, EXPENSE_CATEGORIES, VEHICLE_STATUS_OPTIONS, CONDITIONS, SOURCES, BRANDS, FUEL_TYPES, OWNERSHIP_OPTIONS, formatOwnership } from "../utils/helpers";
@@ -242,6 +242,29 @@ export function VehicleDetailModal({ id, onClose }) {
     e.preventDefault();
     setIsDraggingPhoto(false);
     if (e.dataTransfer.files?.length) uploadPhotos(e.dataTransfer.files);
+  };
+
+  // Photo order = storefront order; the first photo is the cover. Dragged with the mouse, or
+  // nudged with the arrow buttons on touch screens. Saved optimistically, reverted on failure.
+  const [dragPhotoId, setDragPhotoId] = useState(null);
+  const savePhotoOrder = async (next, prev) => {
+    setPhotos(next);
+    try {
+      await api.put(`/vehicles/${id}/photos/order`, { photo_ids: next.map(p => p.id) });
+      toast.success("Photo order saved");
+    } catch (err) {
+      setPhotos(prev);
+      toast.error(err.response?.data?.detail || "Couldn't save photo order");
+    }
+  };
+  const movePhoto = (fromId, toIndex) => {
+    const from = photos.findIndex(p => p.id === fromId);
+    if (from < 0 || toIndex < 0 || toIndex >= photos.length || from === toIndex) return;
+    if (photos.some(p => p.pending)) { toast.error("Wait for uploads to finish before reordering"); return; }
+    const next = [...photos];
+    const [moved] = next.splice(from, 1);
+    next.splice(toIndex, 0, moved);
+    savePhotoOrder(next, photos);
   };
 
   const deletePhoto = async (photoId) => {
@@ -683,6 +706,7 @@ export function VehicleDetailModal({ id, onClose }) {
           <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5" data-testid="photos-section">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-sm font-bold text-slate-900" style={{ fontFamily: "Manrope" }}>Vehicle Photos</h2>
+              {canManagePhotos && photos.length > 1 && <span className="text-xs text-slate-400">Drag to reorder · first photo is the storefront cover</span>}
             </div>
             {photos.length === 0 ? (
               canManagePhotos ? (
@@ -704,14 +728,32 @@ export function VehicleDetailModal({ id, onClose }) {
               )
             ) : (
               <div className="grid grid-cols-3 sm:grid-cols-5 gap-3">
-                {photos.map(photo => (
-                  <div key={photo.id} className="relative rounded-xl overflow-hidden aspect-[4/3] bg-slate-100" data-testid="vehicle-photo">
+                {photos.map((photo, idx) => (
+                  <div
+                    key={photo.id}
+                    draggable={canManagePhotos && !photo.pending}
+                    onDragStart={e => { setDragPhotoId(photo.id); e.dataTransfer.effectAllowed = "move"; }}
+                    onDragOver={e => { if (dragPhotoId) { e.preventDefault(); e.dataTransfer.dropEffect = "move"; } }}
+                    onDrop={e => { if (dragPhotoId) { e.preventDefault(); movePhoto(dragPhotoId, idx); setDragPhotoId(null); } }}
+                    onDragEnd={() => setDragPhotoId(null)}
+                    className={`relative rounded-xl overflow-hidden aspect-[4/3] bg-slate-100 ${canManagePhotos && !photo.pending ? "cursor-grab active:cursor-grabbing" : ""} ${dragPhotoId === photo.id ? "opacity-40" : ""} ${dragPhotoId && dragPhotoId !== photo.id ? "ring-2 ring-blue-200" : ""}`}
+                    data-testid="vehicle-photo"
+                  >
                     <button type="button" onClick={() => !photo.pending && setPreviewPhoto(photo.url)} className="block w-full h-full">
                       <img src={photo.url} alt="Vehicle" className={`w-full h-full object-cover transition-opacity ${photo.pending ? "opacity-50" : ""}`} />
                     </button>
                     {photo.pending && (
                       <div className="absolute inset-0 flex items-center justify-center bg-black/10 pointer-events-none">
                         <div className="animate-spin w-5 h-5 border-2 border-white border-t-transparent rounded-full" />
+                      </div>
+                    )}
+                    {idx === 0 && !photo.pending && (
+                      <span className="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded-md bg-blue-600 text-white text-[10px] font-semibold uppercase tracking-wide pointer-events-none" data-testid="cover-photo-badge">Cover</span>
+                    )}
+                    {canManagePhotos && !photo.pending && photos.length > 1 && (
+                      <div className="absolute bottom-1.5 inset-x-1.5 flex justify-between">
+                        <button type="button" onClick={() => movePhoto(photo.id, idx - 1)} disabled={idx === 0} title="Move left" data-testid="photo-move-left" className="w-6 h-6 rounded-md bg-black/50 hover:bg-black/70 text-white flex items-center justify-center disabled:invisible"><ChevronLeft size={14} /></button>
+                        <button type="button" onClick={() => movePhoto(photo.id, idx + 1)} disabled={idx === photos.length - 1} title="Move right" data-testid="photo-move-right" className="w-6 h-6 rounded-md bg-black/50 hover:bg-black/70 text-white flex items-center justify-center disabled:invisible"><ChevronRight size={14} /></button>
                       </div>
                     )}
                     {canManagePhotos && !photo.pending && (

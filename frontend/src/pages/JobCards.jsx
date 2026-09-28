@@ -7,6 +7,7 @@ import { formatBSDate, getCurrentBSMonthRange, getCurrentWeekRange, getTodayAD }
 import VehicleComboBox from "../components/VehicleComboBox";
 import BSDatePicker from "../components/BSDatePicker";
 import HoverADDate from "../components/HoverADDate";
+import { serviceLabel } from "../components/WarrantyBadge";
 import PeriodToggle from "../components/PeriodToggle";
 import ViewToggle, { useViewMode } from "../components/ViewToggle";
 import ListRow from "../components/ListRow";
@@ -23,7 +24,7 @@ const EMPTY_FORM = {
   vehicle_id: "", is_external: false,
   vehicle_brand: "", vehicle_model: "", vehicle_year: "", registration_number: "",
   customer_name: "", customer_contact: "",
-  work_description: "", mechanic_id: "", mechanic_name: "", estimated_cost: "", sanakhat_cost: "", notes: "", coupon_no: "", job_date: "",
+  work_description: "", mechanic_id: "", mechanic_name: "", estimated_cost: "", sanakhat_cost: "", resanakhat_cost: "", notes: "", coupon_no: "", job_date: "",
 };
 
 const makeKey = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`);
@@ -94,8 +95,9 @@ export default function JobCards() {
       api.get("/vehicles?status=in_repair,available"),
       api.get("/vehicles?status=sold"),
     ]).then(([active, sold]) => {
-      const underWarranty = sold.data.filter(v => v.warranty?.status === "active");
-      setVehicles([...active.data, ...underWarranty]);
+      // Every sold vehicle can get a job card: it's tracked as its next service after the sale
+      // (a free-labour warranty job while the warranty is awaiting/active, paid after that).
+      setVehicles([...active.data, ...sold.data]);
     }).catch(() => {});
     api.get("/spare-parts").then(r => setSpareParts(r.data)).catch(() => {});
     api.get("/team").then(r => setMechanics(r.data.filter(m => m.role === "mechanic"))).catch(() => {});
@@ -133,8 +135,11 @@ export default function JobCards() {
 
   const partsTotalCost = jobParts.reduce((s, p) => s + p.quantity * p.unit_cost, 0);
   // Warranty service (a job card on a sold vehicle): labour is free, the customer pays for parts only.
+  const formVehicle = !form.is_external ? vehicles.find(v => v.id === form.vehicle_id) : null;
   const isWarrantyForm = editingJob ? !!editingJob.is_warranty
-    : !form.is_external && vehicles.find(v => v.id === form.vehicle_id)?.status === "sold";
+    : formVehicle?.status === "sold" && ["awaiting", "active"].includes(formVehicle.warranty?.status);
+  const isPaidServiceForm = !editingJob && formVehicle?.status === "sold" && !isWarrantyForm;
+  const nextServiceNo = !editingJob && formVehicle?.status === "sold" ? (formVehicle.warranty?.services || 0) + 1 : null;
 
   const filteredSpareParts = spareParts.filter(p =>
     partSearch.length > 0 &&
@@ -226,6 +231,7 @@ export default function JobCards() {
       mechanic_name: job.mechanic_name || "",
       estimated_cost: job.estimated_cost != null ? String(job.estimated_cost) : "",
       sanakhat_cost: job.sanakhat_cost ? String(job.sanakhat_cost) : "",
+      resanakhat_cost: job.resanakhat_cost ? String(job.resanakhat_cost) : "",
       notes: job.notes || "",
       coupon_no: job.coupon_no != null ? String(job.coupon_no) : "",
       job_date: job.job_date || "",
@@ -267,6 +273,7 @@ export default function JobCards() {
           mechanic_name: form.mechanic_name,
           estimated_cost: Number(form.estimated_cost),
           sanakhat_cost: Number(form.sanakhat_cost) || 0,
+          resanakhat_cost: Number(form.resanakhat_cost) || 0,
           notes: form.notes,
           parts: jobParts.map(p => ({ part_id: p.part_id, component_name: p.component_name || null, part_name: p.part_name, quantity: Math.max(1, parseInt(p.quantity, 10) || 1), unit_cost: p.unit_cost, external: !!p.external })),
         });
@@ -290,6 +297,7 @@ export default function JobCards() {
         vehicle_year: form.vehicle_year ? Number(form.vehicle_year) : null,
         estimated_cost: Number(form.estimated_cost),
         sanakhat_cost: Number(form.sanakhat_cost) || 0,
+          resanakhat_cost: Number(form.resanakhat_cost) || 0,
         coupon_no: Number(form.coupon_no),
         parts: jobParts.map(p => ({ part_id: p.part_id, component_name: p.component_name || null, part_name: p.part_name, quantity: Math.max(1, parseInt(p.quantity, 10) || 1), unit_cost: p.unit_cost, external: !!p.external })),
       });
@@ -444,11 +452,13 @@ export default function JobCards() {
                     <div className={`font-semibold ${overBudget ? "text-red-600" : "text-slate-800"}`}>{formatNPR(job.actual_cost ?? job.estimated_cost)}</div>
                     {job.actual_cost != null && <div className="text-slate-400">est. {formatNPR(job.estimated_cost)}</div>}
                     {job.sanakhat_cost > 0 && <div className="text-slate-400">+ sanakhat {formatNPR(job.sanakhat_cost)}</div>}
+                    {job.resanakhat_cost > 0 && <div className="text-slate-400">+ re-sanakhat {formatNPR(job.resanakhat_cost)}</div>}
                   </div>
                 }
                 pills={<>
                   {!job.vehicle_id && <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold uppercase tracking-wide bg-orange-100 text-orange-700">External</span>}
                   {job.is_warranty && <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold uppercase tracking-wide bg-teal-100 text-teal-700">Warranty</span>}
+                  {job.service_no && <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold uppercase tracking-wide bg-indigo-100 text-indigo-700" data-testid="job-service-no">{serviceLabel(job.service_no)}</span>}
                   <span className={`px-2 py-0.5 rounded-full text-[11px] font-semibold uppercase tracking-wide ${js.bg} ${js.text}`}>{js.label}</span>
                 </>}
                 actions={<>
@@ -492,6 +502,9 @@ export default function JobCards() {
                       {job.is_warranty && (
                         <span className="px-1.5 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide bg-teal-100 text-teal-700">Warranty</span>
                       )}
+                      {job.service_no && (
+                        <span className="px-1.5 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide bg-indigo-100 text-indigo-700">{serviceLabel(job.service_no)}</span>
+                      )}
                       {vs && (
                         <span data-testid="job-vehicle-status-badge" className={`px-1.5 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide ${vs.bg} ${vs.text}`}>{vs.label}</span>
                       )}
@@ -514,6 +527,7 @@ export default function JobCards() {
                   <div>Est: <span className="font-medium text-slate-700">{formatNPR(job.estimated_cost)}</span></div>
                   {job.actual_cost != null && <div className={overBudget ? "text-red-600 font-medium" : ""}>Actual: <span className="font-medium">{formatNPR(job.actual_cost)}</span></div>}
                   {job.sanakhat_cost > 0 && <div>Sanakhat: <span className="font-medium text-slate-700">{formatNPR(job.sanakhat_cost)}</span></div>}
+                  {job.resanakhat_cost > 0 && <div>Re-Sanakhat: <span className="font-medium text-slate-700">{formatNPR(job.resanakhat_cost)}</span></div>}
                   <div>Created: <span className="font-medium text-slate-700"><HoverADDate date={job.created_at?.slice(0, 10)} /></span></div>
                 </div>
 
@@ -706,6 +720,10 @@ export default function JobCards() {
                 <label className="block text-xs font-medium text-slate-600 mb-1">Sanakhat Cost (NPR) <span className="text-slate-400 font-normal">(optional)</span></label>
                 <input type="number" min="0" value={form.sanakhat_cost} onChange={e => setForm({...form, sanakhat_cost: e.target.value})} placeholder="e.g. 500" className={inp} data-testid="job-sanakhat-cost-input" />
               </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Re-Sanakhat Cost (NPR) <span className="text-slate-400 font-normal">(optional)</span></label>
+                <input type="number" min="0" value={form.resanakhat_cost} onChange={e => setForm({...form, resanakhat_cost: e.target.value})} placeholder="e.g. 500" className={inp} data-testid="job-resanakhat-cost-input" />
+              </div>
 
               {/* Spare Parts Section */}
               <div>
@@ -854,7 +872,13 @@ export default function JobCards() {
 
               {isWarrantyForm && (
                 <div className="text-xs bg-teal-50 border border-teal-100 text-teal-800 rounded-lg px-3 py-2" data-testid="warranty-billing-note">
-                  <span className="font-semibold">Warranty service:</span> labour is free. The customer pays only for parts: <span className="font-semibold">{formatNPR(partsTotalCost)}</span>
+                  <span className="font-semibold">{nextServiceNo ? `Warranty · ${serviceLabel(nextServiceNo)}:` : "Warranty service:"}</span> labour is free. The customer pays only for parts: <span className="font-semibold">{formatNPR(partsTotalCost)}</span>
+                  {formVehicle?.warranty?.status === "awaiting" && <div className="mt-1">This 1st service activates the vehicle's warranty.</div>}
+                </div>
+              )}
+              {isPaidServiceForm && (
+                <div className="text-xs bg-slate-50 border border-slate-200 text-slate-700 rounded-lg px-3 py-2" data-testid="paid-service-note">
+                  <span className="font-semibold">Paid service · {serviceLabel(nextServiceNo)}:</span> this vehicle's warranty is {formVehicle.warranty?.status === "void" ? "void" : "expired"}, so labour and parts are charged as normal.
                 </div>
               )}
 
