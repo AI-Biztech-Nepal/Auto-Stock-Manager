@@ -1,6 +1,6 @@
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
-import { Plus, Trash2, Edit, CheckCircle, AlertCircle, Clock, QrCode, Undo2, Store, User, Download, FileText, Package, ChevronLeft, ChevronRight } from "lucide-react";
+import { Plus, Trash2, Edit, CheckCircle, AlertCircle, Clock, QrCode, Undo2, Store, User, Download, FileText, Package, ChevronLeft, ChevronRight, GripVertical } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
 import { formatNPR, getAgingStyle, getStatusStyle, getDocStyle, EXPENSE_CATEGORIES, VEHICLE_STATUS_OPTIONS, CONDITIONS, SOURCES, BRANDS, FUEL_TYPES, OWNERSHIP_OPTIONS, formatOwnership } from "../utils/helpers";
@@ -244,9 +244,49 @@ export function VehicleDetailModal({ id, onClose }) {
     if (e.dataTransfer.files?.length) uploadPhotos(e.dataTransfer.files);
   };
 
-  // Photo order = storefront order; the first photo is the cover. Dragged with the mouse, or
-  // nudged with the arrow buttons on touch screens. Saved optimistically, reverted on failure.
+  // Photo order = storefront order; the first photo is the cover. Saved optimistically,
+  // reverted on failure. Reordered by dragging (pointer events rather than HTML5 drag-and-drop,
+  // which never fires on touch screens): a mouse drags from anywhere on the tile, a finger from
+  // the grip handle (so swiping over photos still scrolls the page), or use the arrow buttons.
   const [dragPhotoId, setDragPhotoId] = useState(null);
+  const [dragOverIdx, setDragOverIdx] = useState(null);
+  const suppressPhotoClick = useRef(false);  // a finished drag mustn't also open the preview
+  const photoIdxAt = (x, y) => {
+    const el = document.elementFromPoint(x, y)?.closest("[data-photo-idx]");
+    return el ? Number(el.dataset.photoIdx) : null;
+  };
+  const onPhotoPointerDown = (e, photo) => {
+    if (!canManagePhotos || photo.pending || e.button !== 0 || photos.length < 2) return;
+    if (e.target.closest("button[title]")) return;  // arrow / delete buttons
+    if (e.pointerType !== "mouse" && !e.target.closest("[data-drag-handle]")) return;
+    const start = { x: e.clientX, y: e.clientY };
+    let active = false;
+    const move = (ev) => {
+      if (!active) {
+        if (Math.hypot(ev.clientX - start.x, ev.clientY - start.y) < 6) return;
+        active = true;
+        setDragPhotoId(photo.id);
+      }
+      ev.preventDefault();
+      setDragOverIdx(photoIdxAt(ev.clientX, ev.clientY));
+    };
+    const end = (ev) => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", end);
+      window.removeEventListener("pointercancel", end);
+      if (active) {
+        suppressPhotoClick.current = true;
+        setTimeout(() => { suppressPhotoClick.current = false; }, 0);
+        const to = ev.type === "pointerup" ? photoIdxAt(ev.clientX, ev.clientY) : null;
+        if (to !== null) movePhoto(photo.id, to);
+      }
+      setDragPhotoId(null);
+      setDragOverIdx(null);
+    };
+    window.addEventListener("pointermove", move, { passive: false });
+    window.addEventListener("pointerup", end);
+    window.addEventListener("pointercancel", end);
+  };
   const savePhotoOrder = async (next, prev) => {
     setPhotos(next);
     try {
@@ -731,16 +771,13 @@ export function VehicleDetailModal({ id, onClose }) {
                 {photos.map((photo, idx) => (
                   <div
                     key={photo.id}
-                    draggable={canManagePhotos && !photo.pending}
-                    onDragStart={e => { setDragPhotoId(photo.id); e.dataTransfer.effectAllowed = "move"; }}
-                    onDragOver={e => { if (dragPhotoId) { e.preventDefault(); e.dataTransfer.dropEffect = "move"; } }}
-                    onDrop={e => { if (dragPhotoId) { e.preventDefault(); movePhoto(dragPhotoId, idx); setDragPhotoId(null); } }}
-                    onDragEnd={() => setDragPhotoId(null)}
-                    className={`relative rounded-xl overflow-hidden aspect-[4/3] bg-slate-100 ${canManagePhotos && !photo.pending ? "cursor-grab active:cursor-grabbing" : ""} ${dragPhotoId === photo.id ? "opacity-40" : ""} ${dragPhotoId && dragPhotoId !== photo.id ? "ring-2 ring-blue-200" : ""}`}
+                    data-photo-idx={idx}
+                    onPointerDown={e => onPhotoPointerDown(e, photo)}
+                    className={`relative rounded-xl overflow-hidden aspect-[4/3] bg-slate-100 select-none ${canManagePhotos && !photo.pending ? "cursor-grab" : ""} ${dragPhotoId === photo.id ? "opacity-40 cursor-grabbing" : ""} ${dragPhotoId && dragOverIdx === idx && dragPhotoId !== photo.id ? "ring-4 ring-blue-500" : ""}`}
                     data-testid="vehicle-photo"
                   >
-                    <button type="button" onClick={() => !photo.pending && setPreviewPhoto(photo.url)} className="block w-full h-full">
-                      <img src={photo.url} alt="Vehicle" className={`w-full h-full object-cover transition-opacity ${photo.pending ? "opacity-50" : ""}`} />
+                    <button type="button" onClick={() => !photo.pending && !suppressPhotoClick.current && setPreviewPhoto(photo.url)} className="block w-full h-full">
+                      <img src={photo.url} alt="Vehicle" draggable={false} className={`w-full h-full object-cover transition-opacity ${photo.pending ? "opacity-50" : ""}`} />
                     </button>
                     {photo.pending && (
                       <div className="absolute inset-0 flex items-center justify-center bg-black/10 pointer-events-none">
@@ -753,6 +790,7 @@ export function VehicleDetailModal({ id, onClose }) {
                     {canManagePhotos && !photo.pending && photos.length > 1 && (
                       <div className="absolute bottom-1.5 inset-x-1.5 flex justify-between">
                         <button type="button" onClick={() => movePhoto(photo.id, idx - 1)} disabled={idx === 0} title="Move left" data-testid="photo-move-left" className="w-6 h-6 rounded-md bg-black/50 hover:bg-black/70 text-white flex items-center justify-center disabled:invisible"><ChevronLeft size={14} /></button>
+                        <span data-drag-handle title="Drag to reorder" className="w-6 h-6 rounded-md bg-black/50 text-white flex items-center justify-center cursor-grab" style={{ touchAction: "none" }}><GripVertical size={14} /></span>
                         <button type="button" onClick={() => movePhoto(photo.id, idx + 1)} disabled={idx === photos.length - 1} title="Move right" data-testid="photo-move-right" className="w-6 h-6 rounded-md bg-black/50 hover:bg-black/70 text-white flex items-center justify-center disabled:invisible"><ChevronRight size={14} /></button>
                       </div>
                     )}
