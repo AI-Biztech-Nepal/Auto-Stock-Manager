@@ -3,7 +3,7 @@ import { useParams, useNavigate, Link } from "react-router-dom";
 import { ArrowLeft, Undo2, ExternalLink, Lock, Store, User, Pencil, Trash2, ShieldCheck, ShieldOff, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
-import { formatNPR, formatOwnership, TRANSFER_STATUS_OPTIONS, getTransferStatusStyle, formatWarrantyLength } from "../utils/helpers";
+import { formatNPR, formatOwnership, TRANSFER_STATUS_OPTIONS, getTransferStatusStyle, formatWarrantyLength, splitSanakhatExpenses } from "../utils/helpers";
 import { ReturnModal } from "./VehicleModals";
 import HoverADDate from "../components/HoverADDate";
 import WarrantyBadge, { serviceLabel } from "../components/WarrantyBadge";
@@ -50,7 +50,7 @@ export default function SoldStockDetail() {
     try {
       const r = await api.get(`/vehicles/${id}`);
       setVehicle(r.data);
-    } catch { toast.error("Vehicle not found"); navigate("/sold-stock"); }
+    } catch { toast.error("Vehicle not found"); navigate("/sales"); }
     finally { setLoading(false); }
   }, [id, navigate]);
 
@@ -68,7 +68,7 @@ export default function SoldStockDetail() {
     try {
       await api.delete(`/sales/${activeSale.id}`);
       toast.success("Sale deleted, vehicle restored");
-      navigate("/sold-stock");
+      navigate("/sales");
     } catch (err) { toast.error(err.response?.data?.detail || "Failed to delete sale"); }
   };
 
@@ -135,10 +135,13 @@ export default function SoldStockDetail() {
       });
       toast.success("Return recorded — vehicle back in stock");
       setShowReturnModal(false);
-      navigate("/sold-stock");
+      navigate("/sales");
     } catch (err) { toast.error(err.response?.data?.detail || "Failed to record return"); }
     finally { setReturning(false); }
   };
+
+  // Sanakhat / re-sanakhat are entered on the sale as extra-expense lines.
+  const saleSanakhat = splitSanakhatExpenses(activeSale?.extra_expenses || []);
 
   if (loading) return <div className="flex items-center justify-center h-64"><div className="animate-spin w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full" /></div>;
   if (!vehicle) return null;
@@ -148,7 +151,7 @@ export default function SoldStockDetail() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
         <div className="flex items-center gap-3">
-          <button onClick={() => navigate("/sold-stock")} className="w-11 h-11 flex items-center justify-center hover:bg-slate-100 rounded-lg transition-colors text-slate-500"><ArrowLeft size={18} /></button>
+          <button onClick={() => navigate("/sales")} className="w-11 h-11 flex items-center justify-center hover:bg-slate-100 rounded-lg transition-colors text-slate-500"><ArrowLeft size={18} /></button>
           <div>
             <h1 className="text-2xl font-bold text-slate-900">{vehicle.brand} {vehicle.model}</h1>
             <p className="text-sm text-slate-500">{vehicle.year} · {vehicle.engine_cc}cc · {vehicle.fuel_type}{vehicle.registration_number ? ` · ${vehicle.registration_number}` : ""}</p>
@@ -199,8 +202,8 @@ export default function SoldStockDetail() {
             <div>
               <Row label="Services Since Sale"><span className="text-sm font-medium text-slate-900 sm:text-right">{vehicle.warranty?.services ?? 0}</span></Row>
               <Row label="Total Job Cards"><span className="text-sm font-medium text-slate-900 sm:text-right">{(vehicle.service_history || []).length}</span></Row>
-              <Row label="Total Sanakhat"><span className="text-sm font-medium text-slate-900 sm:text-right">{formatNPR(vehicle.sanakhat_total)}</span></Row>
-              <Row label="Total Re-Sanakhat"><span className="text-sm font-medium text-slate-900 sm:text-right">{formatNPR(vehicle.resanakhat_total)}</span></Row>
+              <Row label="Sanakhat"><span className="text-sm font-medium text-slate-900 sm:text-right">{formatNPR(saleSanakhat.sanakhat)}</span></Row>
+              <Row label="Re-Sanakhat"><span className="text-sm font-medium text-slate-900 sm:text-right">{formatNPR(saleSanakhat.resanakhat)}</span></Row>
             </div>
           </div>
           {vehicle.warranty?.status === "void" && (
@@ -224,8 +227,6 @@ export default function SoldStockDetail() {
                       : <span className="px-1.5 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide bg-slate-100 text-slate-500">Before sale</span>}
                     {j.is_warranty && <span className="px-1.5 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide bg-teal-100 text-teal-700">Warranty</span>}
                     <span className="text-slate-700 flex-1 min-w-[8rem] truncate">{j.work_description}</span>
-                    <span className="shrink-0 text-slate-500">Sanakhat: <span className="font-medium text-slate-700">{j.sanakhat_cost > 0 ? formatNPR(j.sanakhat_cost) : "—"}</span></span>
-                    <span className="shrink-0 text-slate-500">Re-Sanakhat: <span className="font-medium text-slate-700">{j.resanakhat_cost > 0 ? formatNPR(j.resanakhat_cost) : "—"}</span></span>
                     <span className="shrink-0 capitalize text-slate-400 w-20 text-right">{j.status?.replace("_", " ")}</span>
                   </div>
                 ))}

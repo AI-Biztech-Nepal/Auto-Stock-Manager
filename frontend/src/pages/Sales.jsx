@@ -1,13 +1,15 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { Plus, Search, Trash2, Eye, TrendingUp, DollarSign, Calendar, ShoppingBag, X, ChevronDown, ChevronUp, UserPlus, AlertTriangle, UploadCloud, FileSpreadsheet, CheckCircle2 } from "lucide-react";
+import { Plus, Search, Trash2, Eye, TrendingUp, DollarSign, Calendar, ShoppingBag, X, ChevronDown, ChevronUp, UserPlus, AlertTriangle, UploadCloud, FileSpreadsheet, CheckCircle2, Undo2 } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
-import { formatNPR } from "../utils/helpers";
+import { formatNPR, getTransferStatusStyle, splitSanakhatExpenses, withSanakhatExpenses } from "../utils/helpers";
 import { getCurrentBSMonthRange, getCurrentWeekRange, getTodayAD } from "../utils/nepali-date";
 import { useAuth } from "../context/AuthContext";
 import VehicleComboBox from "../components/VehicleComboBox";
 import BSDatePicker from "../components/BSDatePicker";
+import HoverADDate from "../components/HoverADDate";
+import WarrantyBadge from "../components/WarrantyBadge";
 import PeriodToggle, { PERIOD_OPTIONS } from "../components/PeriodToggle";
 
 const PRESET_EXPENSES = [
@@ -55,6 +57,7 @@ const EMPTY_FORM = {
   vehicle_id: "", customer_id: "", sale_price: "",
   payment_method: "Cash", paid_cash: "", paid_bank: "", advance_payment: "",
   due_amount: "", due_date: "", sale_date: "", ownership_transfer_date: "", notes: "",
+  sanakhat_cost: "", resanakhat_cost: "",
   witness_name: "", witness_address: "", witness_phone: "", witness_id_number: "",
 };
 
@@ -69,17 +72,82 @@ const DEED_ROWS = [
   { label: "Licence / Citizenship No.", ph: "Licence / citizenship no.", bkey: "id_number", wkey: "witness_id_number" },
 ];
 
+// Status tags from the sold vehicle's own record (what the old Sold Stock tab showed):
+// returned marker, name-transfer status and warranty. Sanakhat has its own columns.
+function SaleTags({ sale, vehicle }) {
+  if (sale.returned) {
+    return (
+      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide bg-amber-100 text-amber-700" data-testid="sale-returned-tag">
+        <Undo2 size={9} /> Returned <HoverADDate date={sale.returned_at?.slice(0, 10)} />
+      </span>
+    );
+  }
+  if (!vehicle) return null;
+  const tr = getTransferStatusStyle(vehicle.ownership_transfer_status);
+  return (
+    <>
+      <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide whitespace-nowrap ${tr.bg} ${tr.text}`} title="Ownership transfer status" data-testid="sale-transfer-tag">Transfer {tr.label}</span>
+      <WarrantyBadge warranty={vehicle.warranty} />
+    </>
+  );
+}
+
+// Sanakhat cost = sanakhat + re-sanakhat entered on the sale. Both are extra expenses, so
+// they're also inside the Extra Expenses column's total.
+function sanakhatOf(sale) {
+  const { sanakhat, resanakhat } = splitSanakhatExpenses(sale.extra_expenses);
+  return { total: sanakhat + resanakhat, resanakhat };
+}
+
+const SANAKHAT_STYLE = {
+  done: "bg-green-100 text-green-800",
+  pending: "bg-amber-100 text-amber-800",
+};
+
+// Pending / Done. Admins flip it right in the row; everyone else just sees the pill.
+function SanakhatStatus({ vehicle, editable, onChange }) {
+  if (!vehicle) return <span className="text-slate-400">—</span>;
+  const status = vehicle.sanakhat_status === "done" ? "done" : "pending";
+  if (!editable) {
+    return <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${SANAKHAT_STYLE[status]}`}>{status === "done" ? "Done" : "Pending"}</span>;
+  }
+  return (
+    <select
+      value={status}
+      onClick={e => e.stopPropagation()}
+      onChange={e => onChange(vehicle, e.target.value)}
+      aria-label="Sanakhat status"
+      data-testid="sanakhat-status-select"
+      className={`h-7 pl-2 pr-6 rounded-full text-xs font-semibold border-0 cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500 ${SANAKHAT_STYLE[status]}`}
+    >
+      <option value="pending">Pending</option>
+      <option value="done">Done</option>
+    </select>
+  );
+}
+
+// Profit on the sale: the vehicle's realized margin, or — once returned — what was kept.
+function marginOf(sale, vehicle) {
+  if (sale.returned) return sale.retained_amount ?? null;
+  return vehicle?.expected_profit ?? null;
+}
+
 export default function Sales() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
   const [sales, setSales] = useState([]);
+  // Sold vehicles, keyed by id below — adds the old Sold Stock details (transfer, warranty,
+  // margin, sanakhat) onto each sale row.
+  const [soldVehicles, setSoldVehicles] = useState([]);
   const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   // Set via the Today/This Week/This Month toggle in the header — "all" (default) shows
   // every sale; otherwise restricts the list below to sale_date falling in that range.
   const [periodFilter, setPeriodFilter] = useState("all");
+  const [dateFilter, setDateFilter] = useState(""); // AD "YYYY-MM-DD" — exact sale date; mutually exclusive with periodFilter
+  const [statusFilter, setStatusFilter] = useState("all"); // "all" | "sold" | "returned"
   const [showModal, setShowModal] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -108,14 +176,14 @@ export default function Sales() {
   const [newExpAmt, setNewExpAmt] = useState("");
   const [showPresets, setShowPresets] = useState(true);
 
-  // Admin-only diagnostic: sales whose linked vehicle no longer has status "sold" —
-  // the usual cause of this tab's total drifting from the Sold Stock count.
+  // Admin-only diagnostic: sales whose linked vehicle no longer has status "sold", or a
+  // vehicle marked sold with no sale behind it.
   const [mismatches, setMismatches] = useState([]);
 
   const fetchAll = useCallback(async () => {
     try {
-      const [s, sm] = await Promise.all([api.get("/sales"), api.get("/sales/summary")]);
-      setSales(s.data); setSummary(sm.data);
+      const [s, sm, v] = await Promise.all([api.get("/sales"), api.get("/sales/summary"), api.get("/vehicles?status=sold")]);
+      setSales(s.data); setSummary(sm.data); setSoldVehicles(v.data);
     } catch { toast.error("Failed to load sales"); }
     finally { setLoading(false); }
   }, []);
@@ -126,6 +194,26 @@ export default function Sales() {
     if (!isAdmin) return;
     api.get("/sales/reconcile").then(r => setMismatches(r.data.mismatches)).catch(() => {});
   }, [isAdmin, sales]);
+
+  const vehicleById = useMemo(() => Object.fromEntries(soldVehicles.map(v => [v.id, v])), [soldVehicles]);
+
+  // Optimistic: flip the pill straight away, roll back if the save fails.
+  const updateSanakhat = async (vehicle, status) => {
+    const prev = vehicle.sanakhat_status;
+    const set = (val) => setSoldVehicles(vs => vs.map(v => v.id === vehicle.id ? { ...v, sanakhat_status: val } : v));
+    set(status);
+    try {
+      await api.put(`/vehicles/${vehicle.id}`, { sanakhat_status: status });
+      toast.success(`Sanakhat marked ${status === "done" ? "done" : "pending"}`);
+    } catch {
+      set(prev);
+      toast.error("Couldn't update sanakhat status");
+    }
+  };
+
+  // A live sale opens its sold-vehicle record (warranty, service history, transfer, return);
+  // a returned sale only exists as the sale itself.
+  const openSale = (s) => navigate(!s.returned && s.vehicle_id && vehicleById[s.vehicle_id] ? `/sales/vehicle/${s.vehicle_id}` : `/sales/${s.id}`);
 
   const openModal = async () => {
     setForm(EMPTY_FORM);
@@ -163,8 +251,9 @@ export default function Sales() {
     finally { setAddingCust(false); }
   };
 
-  // Compute total extra expenses
-  const extraExpenses = expenseItems;
+  // Compute total extra expenses — sanakhat / re-sanakhat are extra expenses too, entered in
+  // their own fields and saved as named lines alongside the others.
+  const extraExpenses = withSanakhatExpenses(expenseItems, form.sanakhat_cost, form.resanakhat_cost);
   const expensesTotal = extraExpenses.reduce((s, e) => s + Number(e.amount || 0), 0);
   const grandTotal = (Number(form.sale_price) || 0) + expensesTotal;
   const amountPaid = (Number(form.paid_cash) || 0) + (Number(form.paid_bank) || 0) + (Number(form.advance_payment) || 0);
@@ -295,14 +384,21 @@ export default function Sales() {
     ? sales.filter(s => s.sale_date >= periodRange.start && s.sale_date <= periodRange.end).length
     : thisMonthSalesCount;
 
+  const returnedCount = sales.filter(s => s.returned).length;
+
   const filtered = sales.filter(s => {
+    if (statusFilter === "sold" && s.returned) return false;
+    if (statusFilter === "returned" && !s.returned) return false;
     if (periodRange && !(s.sale_date >= periodRange.start && s.sale_date <= periodRange.end)) return false;
+    if (dateFilter && s.sale_date?.slice(0, 10) !== dateFilter) return false;
     if (!search) return true;
     const q = search.toLowerCase();
     return (s.vehicle_info || "").toLowerCase().includes(q) ||
       (s.customer_name || "").toLowerCase().includes(q) ||
+      (s.registration_number || "").toLowerCase().includes(q) ||
       (s.payment_method || "").toLowerCase().includes(q);
   });
+  const anyFilter = periodFilter !== "all" || search || dateFilter || statusFilter !== "all";
 
   if (loading) return <div className="flex items-center justify-center h-64"><div className="animate-spin w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full" /></div>;
 
@@ -312,10 +408,13 @@ export default function Sales() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Sales</h1>
-          <p className="text-sm text-slate-500">{periodFilter !== "all" ? `${filtered.length} sales ${PERIOD_OPTIONS.find(p => p.key === periodFilter)?.label.toLowerCase()}` : `${sales.length} sales recorded`}</p>
+          <p className="text-sm text-slate-500">
+            {periodFilter !== "all" ? `${filtered.length} sales ${PERIOD_OPTIONS.find(p => p.key === periodFilter)?.label.toLowerCase()}` : `${sales.length} sales recorded`}
+            {returnedCount > 0 && ` · ${returnedCount} returned`}
+          </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          <PeriodToggle period={periodFilter} onChange={setPeriodFilter} testid="sales-period-toggle" allowOff />
+          <PeriodToggle period={periodFilter} onChange={p => { setPeriodFilter(p); setDateFilter(""); }} testid="sales-period-toggle" allowOff />
           {isAdmin && (
             <button onClick={() => setShowImport(true)} data-testid="import-sales-btn" className="flex items-center gap-2 border border-slate-200 text-slate-700 text-sm font-medium px-4 py-3 rounded-lg hover:bg-slate-50 transition-all active:scale-95">
               <UploadCloud size={16} /> Import Sheet
@@ -360,34 +459,14 @@ export default function Sales() {
         </div>
       )}
 
-      {sales.filter(s => s.due_amount > 0).length > 0 && (
-        <div className="bg-red-50 border border-red-200 rounded-xl p-4" data-testid="due-alert-banner">
-          <div className="flex items-center gap-2 text-red-700 font-semibold text-sm mb-2">
-            <AlertTriangle size={16} />
-            Due Payments ({sales.filter(s => s.due_amount > 0).length})
-          </div>
-          <div className="space-y-1.5">
-            {sales.filter(s => s.due_amount > 0).map(s => {
-              const isOverdue = s.due_date && s.due_date < new Date().toISOString().slice(0, 10);
-              return (
-                <div key={s.id} onClick={() => navigate(`/sold-stock/${s.vehicle_id}`)} className={`flex items-center justify-between text-sm px-3 py-2 rounded-lg cursor-pointer transition-colors ${isOverdue ? "bg-red-100 hover:bg-red-200" : "bg-white hover:bg-red-50"}`}>
-                  <div className="text-slate-700">{s.customer_name} — {s.vehicle_info}</div>
-                  <div className={`font-semibold ${isOverdue ? "text-red-700" : "text-orange-600"}`}>{formatNPR(s.due_amount)}{s.due_date ? ` due ${s.due_date}` : ""}{isOverdue ? " (OVERDUE)" : ""}</div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
       {isAdmin && mismatches.length > 0 && (
         <div className="bg-amber-50 border border-amber-200 rounded-xl p-4" data-testid="mismatch-alert-banner">
           <div className="flex items-center gap-2 text-amber-700 font-semibold text-sm mb-2">
             <AlertTriangle size={16} />
-            Out of Sync with Sold Stock ({mismatches.length})
+            Sale Records Out of Sync ({mismatches.length})
           </div>
           <p className="text-xs text-amber-700 mb-2">
-            Either a sale's vehicle no longer has status "Sold" (edited or deleted directly from Inventory), or a vehicle is marked "Sold" with no sale record behind it — either way it counts on one tab but not the other. Open each and reconcile: restore the vehicle's status, delete the stray sale, or record the missing sale.
+            Either a sale's vehicle no longer has status "Sold" (edited or deleted directly from Inventory), or a vehicle is marked "Sold" with no sale record behind it. Open each and reconcile: restore the vehicle's status, delete the stray sale, or record the missing sale.
           </p>
           <div className="space-y-1.5">
             {mismatches.map(m => (
@@ -408,12 +487,31 @@ export default function Sales() {
         </div>
       )}
 
-      {/* Search — sticky so it stays reachable while scrolling a long list */}
-      <div className="sticky top-0 z-20 bg-white rounded-xl border border-slate-200 shadow-sm p-4">
-        <div className="relative max-w-sm">
+      {/* Search + filters — sticky so they stay reachable while scrolling a long list */}
+      <div className="sticky top-0 z-20 bg-white rounded-xl border border-slate-200 shadow-sm p-4 flex flex-wrap items-start gap-3">
+        <div className="relative flex-1 min-w-[14rem] max-w-sm">
           <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search vehicle, customer..." className="w-full h-9 pl-9 pr-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" data-testid="sales-search" />
+          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search vehicle, reg#, customer..." className="w-full h-9 pl-9 pr-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" data-testid="sales-search" />
         </div>
+        <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className="h-9 px-3 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500" data-testid="sales-status-filter" aria-label="Show sold or returned">
+          <option value="all">All sales</option>
+          <option value="sold">Sold only</option>
+          <option value="returned">Returned only{returnedCount ? ` (${returnedCount})` : ""}</option>
+        </select>
+        <div className="w-44" data-testid="sales-date-filter-input">
+          <BSDatePicker value={dateFilter} onChange={val => { setDateFilter(val); setPeriodFilter("all"); }} />
+        </div>
+        {dateFilter && (
+          <button
+            onClick={() => setDateFilter("")}
+            data-testid="clear-sales-date-filter"
+            className="flex items-center justify-center w-9 h-9 text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
+            title="Clear date filter"
+            aria-label="Clear date filter"
+          >
+            <X size={14} />
+          </button>
+        )}
       </div>
 
       {/* Sales Table */}
@@ -421,48 +519,64 @@ export default function Sales() {
         {filtered.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-40 text-slate-500">
             <ShoppingBag size={32} className="mb-2 opacity-30" />
-            <p className="font-medium">{periodFilter !== "all" || search ? "No sales match this filter" : "No sales recorded yet"}</p>
-            <p className="text-xs mt-1 text-slate-400">{periodFilter !== "all" || search ? "Try clearing the search or period filter" : 'Click "Record Sale" to add one'}</p>
+            <p className="font-medium">{anyFilter ? "No sales match this filter" : "No sales recorded yet"}</p>
+            <p className="text-xs mt-1 text-slate-400">{anyFilter ? "Try clearing the search or filters" : 'Click "Record Sale" to add one'}</p>
           </div>
         ) : (
           <>
-            {/* Card list — phones only, avoids squeezing an 8-column table into a narrow viewport */}
+            {/* Card list — phones only, avoids squeezing a wide table into a narrow viewport */}
             <div className="sm:hidden divide-y divide-slate-100">
-              {filtered.map(s => (
-                <div
-                  key={s.id}
-                  data-testid="sale-row-mobile"
-                  onClick={() => navigate(`/sales/${s.id}`)}
-                  className="p-4 active:bg-slate-50 cursor-pointer"
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <div className="font-semibold text-slate-900 text-sm truncate">{s.vehicle_info || "—"}
-                        {s.needs_review && <span className="ml-1.5 inline-flex items-center gap-0.5 align-middle text-[10px] font-semibold text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded-full"><AlertTriangle size={9} /> Review</span>}
+              {filtered.map(s => {
+                const v = vehicleById[s.vehicle_id];
+                const margin = marginOf(s, v);
+                return (
+                  <div
+                    key={s.id}
+                    data-testid="sale-row-mobile"
+                    onClick={() => openSale(s)}
+                    className="p-4 active:bg-slate-50 cursor-pointer"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="font-semibold text-slate-900 text-sm truncate">{s.vehicle_info || "—"}
+                          {s.needs_review && <span className="ml-1.5 inline-flex items-center gap-0.5 align-middle text-[10px] font-semibold text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded-full"><AlertTriangle size={9} /> Review</span>}
+                        </div>
+                        <div className="text-xs text-slate-500 mt-0.5 truncate">{s.customer_name}{s.customer_contact ? ` · ${s.customer_contact}` : ""}</div>
+                        <div className="flex items-center gap-1 flex-wrap mt-1.5"><SaleTags sale={s} vehicle={v} /></div>
                       </div>
-                      <div className="text-xs text-slate-500 mt-0.5 truncate">{s.customer_name}{s.customer_contact ? ` · ${s.customer_contact}` : ""}</div>
+                      {isAdmin && (
+                        <button onClick={e => { e.stopPropagation(); handleDelete(s.id); }} className="w-11 h-11 -mr-2.5 -mt-2.5 shrink-0 flex items-center justify-center hover:bg-red-50 rounded-lg transition-colors" data-testid="delete-sale-btn-mobile">
+                          <Trash2 size={14} className="text-red-400" />
+                        </button>
+                      )}
                     </div>
-                    {isAdmin && (
-                      <button onClick={e => { e.stopPropagation(); handleDelete(s.id); }} className="w-11 h-11 -mr-2.5 -mt-2.5 shrink-0 flex items-center justify-center hover:bg-red-50 rounded-lg transition-colors" data-testid="delete-sale-btn-mobile">
-                        <Trash2 size={14} className="text-red-400" />
-                      </button>
+                    <div className="flex items-center justify-between mt-2">
+                      <span className="text-sm font-bold text-green-700">{formatNPR(s.total_amount)}</span>
+                      {s.returned
+                        ? <span className="text-xs text-amber-700">Refunded {formatNPR(s.refund_amount || 0)}</span>
+                        : <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-700">{s.payment_method}</span>}
+                    </div>
+                    {((s.expenses_total || 0) + (s.job_card_cost || 0)) > 0 && (
+                      <div className="mt-1 text-xs text-orange-600 font-medium">+{formatNPR((s.expenses_total || 0) + (s.job_card_cost || 0))} extra expenses{s.extra_expenses?.length > 0 ? ` (${s.extra_expenses.length})` : ""}</div>
                     )}
+                    {!s.returned && v && (
+                      <div className="mt-1.5 flex items-center gap-2 text-xs text-slate-500" data-testid="sale-sanakhat-mobile">
+                        Sanakhat <SanakhatStatus vehicle={v} editable={isAdmin} onChange={updateSanakhat} />
+                        {sanakhatOf(s).total > 0 && <span className="text-orange-600 font-medium">{formatNPR(sanakhatOf(s).total)}</span>}
+                      </div>
+                    )}
+                    {!s.returned && (s.due_amount > 0 ? (
+                      <div className="mt-1 text-xs font-semibold text-red-600" data-testid="due-badge">Due: {formatNPR(s.due_amount)}{s.due_date && <> (by <HoverADDate date={s.due_date} />)</>}</div>
+                    ) : (
+                      <div className="mt-1 text-xs text-green-600">Fully Paid</div>
+                    ))}
+                    <div className="mt-1.5 flex items-center justify-between text-xs text-slate-400">
+                      <HoverADDate date={s.sale_date} />
+                      {margin != null && <span className={margin < 0 || v?.low_margin ? "text-red-600 font-semibold" : "text-green-700 font-semibold"}>{s.returned ? "Kept" : "Margin"} {formatNPR(margin)}</span>}
+                    </div>
                   </div>
-                  <div className="flex items-center justify-between mt-2">
-                    <span className="text-sm font-bold text-green-700">{formatNPR(s.total_amount)}</span>
-                    <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-700">{s.payment_method}</span>
-                  </div>
-                  {((s.expenses_total || 0) + (s.job_card_cost || 0)) > 0 && (
-                    <div className="mt-1 text-xs text-orange-600 font-medium">+{formatNPR((s.expenses_total || 0) + (s.job_card_cost || 0))} extra expenses{s.extra_expenses?.length > 0 ? ` (${s.extra_expenses.length})` : ""}</div>
-                  )}
-                  {s.due_amount > 0 ? (
-                    <div className="mt-1 text-xs font-semibold text-red-600" data-testid="due-badge">Due: {formatNPR(s.due_amount)}{s.due_date ? ` (by ${s.due_date})` : ""}</div>
-                  ) : (
-                    <div className="mt-1 text-xs text-green-600">Fully Paid</div>
-                  )}
-                  <div className="mt-1.5 text-xs text-slate-400">{s.sale_date}</div>
-                </div>
-              ))}
+                );
+              })}
             </div>
 
             {/* Table — sm and up */}
@@ -470,62 +584,90 @@ export default function Sales() {
               <table className="w-full">
                 <thead>
                   <tr className="border-b border-slate-100">
-                    {["Vehicle", "Customer", "Sale Price", "Extra Expenses", "Total", "Payment", "Date", ""].map(h => (
+                    {["Vehicle", "Customer", "Sale Price", "Extra Expenses", "Sanakhat Cost", "Sanakhat", "Total", "Margin", "Payment", "Date", ""].map(h => (
                       <th key={h} className="text-left text-xs font-semibold uppercase tracking-wider text-slate-500 px-4 py-3 whitespace-nowrap">{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50">
-                  {filtered.map(s => (
-                    <tr
-                      key={s.id}
-                      data-testid="sale-row"
-                      onClick={() => navigate(`/sales/${s.id}`)}
-                      className="table-row-hover cursor-pointer transition-colors"
-                    >
-                      <td className="px-4 py-3">
-                        <div className="font-semibold text-slate-900 text-sm flex items-center gap-1.5">
-                          {s.vehicle_info || "—"}
-                          {s.needs_review && <span className="inline-flex items-center gap-0.5 text-[10px] font-semibold text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded-full" title={s.review_note || "Imported — might need attention"}><AlertTriangle size={9} /> Review</span>}
-                        </div>
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="text-sm text-slate-700">{s.customer_name}</div>
-                        {s.customer_contact && <div className="text-xs text-slate-400">{s.customer_contact}</div>}
-                      </td>
-                      <td className="px-4 py-3 text-sm font-medium text-slate-800 whitespace-nowrap">{formatNPR(s.sale_price)}</td>
-                      <td className="px-4 py-3 text-sm text-slate-600 whitespace-nowrap">
-                        {((s.expenses_total || 0) + (s.job_card_cost || 0)) > 0 ? (
-                          <span className="text-orange-600 font-medium">
-                            {formatNPR((s.expenses_total || 0) + (s.job_card_cost || 0))}
-                            {s.extra_expenses?.length > 0 ? ` (${s.extra_expenses.length} items)` : ""}
-                          </span>
-                        ) : <span className="text-slate-400">—</span>}
-                      </td>
-                      <td className="px-4 py-3 text-sm font-bold text-green-700 whitespace-nowrap">{formatNPR(s.total_amount)}</td>
-                      <td className="px-4 py-3">
-                        <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-700">{s.payment_method}</span>
-                    {s.due_amount > 0 ? (
-                      <div className="mt-1 text-xs font-semibold text-red-600" data-testid="due-badge">Due: {formatNPR(s.due_amount)}{s.due_date ? ` (by ${s.due_date})` : ""}</div>
-                    ) : (
-                      <div className="mt-1 text-xs text-green-600">Fully Paid</div>
-                    )}
-                      </td>
-                      <td className="px-4 py-3 text-sm text-slate-500 whitespace-nowrap">{s.sale_date}</td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-1">
-                          <button onClick={e => { e.stopPropagation(); navigate(`/sales/${s.id}`); }} className="p-1.5 hover:bg-slate-100 rounded-lg transition-colors" data-testid="view-sale-btn">
-                            <Eye size={14} className="text-slate-500" />
-                          </button>
-                          {isAdmin && (
-                            <button onClick={e => { e.stopPropagation(); handleDelete(s.id); }} className="p-1.5 hover:bg-red-50 rounded-lg transition-colors" data-testid="delete-sale-btn">
-                              <Trash2 size={14} className="text-red-400" />
-                            </button>
+                  {filtered.map(s => {
+                    const v = vehicleById[s.vehicle_id];
+                    const margin = marginOf(s, v);
+                    const sanakhat = sanakhatOf(s);
+                    return (
+                      <tr
+                        key={s.id}
+                        data-testid="sale-row"
+                        onClick={() => openSale(s)}
+                        className="table-row-hover cursor-pointer transition-colors"
+                      >
+                        <td className="px-4 py-3">
+                          <div className="font-semibold text-slate-900 text-sm flex items-center gap-1.5">
+                            {s.vehicle_info || "—"}
+                            {s.needs_review && <span className="inline-flex items-center gap-0.5 text-[10px] font-semibold text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded-full" title={s.review_note || "Imported — might need attention"}><AlertTriangle size={9} /> Review</span>}
+                          </div>
+                          <div className="flex items-center gap-1 flex-wrap mt-1"><SaleTags sale={s} vehicle={v} /></div>
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="text-sm text-slate-700">{s.customer_name}</div>
+                          {s.customer_contact && <div className="text-xs text-slate-400">{s.customer_contact}</div>}
+                        </td>
+                        <td className="px-4 py-3 text-sm font-medium text-slate-800 whitespace-nowrap">{formatNPR(s.sale_price)}</td>
+                        <td className="px-4 py-3 text-sm text-slate-600 whitespace-nowrap">
+                          {((s.expenses_total || 0) + (s.job_card_cost || 0)) > 0 ? (
+                            <span className="text-orange-600 font-medium">
+                              {formatNPR((s.expenses_total || 0) + (s.job_card_cost || 0))}
+                              {s.extra_expenses?.length > 0 ? ` (${s.extra_expenses.length} items)` : ""}
+                            </span>
+                          ) : <span className="text-slate-400">—</span>}
+                        </td>
+                        <td className="px-4 py-3 text-sm whitespace-nowrap" title="Sanakhat + re-sanakhat entered on this sale — part of its extra expenses">
+                          {sanakhat.total > 0 ? (
+                            <>
+                              <div className="text-orange-600 font-medium">{formatNPR(sanakhat.total)}</div>
+                              {sanakhat.resanakhat > 0 && <div className="text-[11px] text-slate-400">incl. re-sanakhat {formatNPR(sanakhat.resanakhat)}</div>}
+                            </>
+                          ) : <span className="text-slate-400">—</span>}
+                        </td>
+                        <td className="px-4 py-3 whitespace-nowrap">
+                          {s.returned ? <span className="text-slate-400">—</span> : <SanakhatStatus vehicle={v} editable={isAdmin} onChange={updateSanakhat} />}
+                        </td>
+                        <td className="px-4 py-3 text-sm font-bold text-green-700 whitespace-nowrap">{formatNPR(s.total_amount)}</td>
+                        <td className="px-4 py-3 text-sm font-semibold whitespace-nowrap">
+                          {margin == null
+                            ? <span className="text-slate-400">—</span>
+                            : <span className={margin < 0 || v?.low_margin ? "text-red-600" : "text-green-600"} title={s.returned ? "Kept after refund" : "Realized margin"}>{formatNPR(margin)}</span>}
+                        </td>
+                        <td className="px-4 py-3">
+                          {s.returned ? (
+                            <div className="text-xs text-amber-700 whitespace-nowrap">Refunded {formatNPR(s.refund_amount || 0)}</div>
+                          ) : (
+                            <>
+                              <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-700">{s.payment_method}</span>
+                              {s.due_amount > 0 ? (
+                                <div className="mt-1 text-xs font-semibold text-red-600 whitespace-nowrap" data-testid="due-badge">Due: {formatNPR(s.due_amount)}{s.due_date && <> (by <HoverADDate date={s.due_date} />)</>}</div>
+                              ) : (
+                                <div className="mt-1 text-xs text-green-600">Fully Paid</div>
+                              )}
+                            </>
                           )}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                        </td>
+                        <td className="px-4 py-3 text-sm text-slate-500 whitespace-nowrap"><HoverADDate date={s.sale_date} /></td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-1">
+                            <button onClick={e => { e.stopPropagation(); navigate(`/sales/${s.id}`); }} className="p-1.5 hover:bg-slate-100 rounded-lg transition-colors" title="View / edit sale" data-testid="view-sale-btn">
+                              <Eye size={14} className="text-slate-500" />
+                            </button>
+                            {isAdmin && (
+                              <button onClick={e => { e.stopPropagation(); handleDelete(s.id); }} className="p-1.5 hover:bg-red-50 rounded-lg transition-colors" title="Delete sale" data-testid="delete-sale-btn">
+                                <Trash2 size={14} className="text-red-400" />
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -652,8 +794,19 @@ export default function Sales() {
 
                 {showPresets && (
                   <div className="p-4 space-y-3">
+                    {/* Sanakhat / re-sanakhat — always-there fields rather than presets, since
+                        nearly every sale has them and the amount varies */}
+                    <div className="grid grid-cols-2 gap-3">
+                      <Field label="Sanakhat Cost (NPR)">
+                        <input type="text" inputMode="numeric" value={form.sanakhat_cost} onChange={e => setForm({...form, sanakhat_cost: e.target.value})} placeholder="0" className={inp} data-testid="sale-sanakhat-cost-input" />
+                      </Field>
+                      <Field label="Re-Sanakhat Cost (NPR)">
+                        <input type="text" inputMode="numeric" value={form.resanakhat_cost} onChange={e => setForm({...form, resanakhat_cost: e.target.value})} placeholder="0" className={inp} data-testid="sale-resanakhat-cost-input" />
+                      </Field>
+                    </div>
+
                     {/* Preset dropdown - select to add one by one */}
-                    <div>
+                    <div className="border-t border-slate-100 pt-3">
                       <p className="text-xs text-slate-500 font-medium mb-2">Add Preset Fee</p>
                       <select
                         value={presetToAdd}

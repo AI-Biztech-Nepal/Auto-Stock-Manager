@@ -132,12 +132,8 @@ export default function Team() {
   };
 
   return (
-    <div className="space-y-6 animate-fade-in">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-900">Team Management</h1>
-          <p className="text-sm text-slate-500">{members.length} team members</p>
-        </div>
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-center justify-end gap-3">
         <div className="flex items-center gap-2">
           <ViewToggle view={view} onChange={setView} testid="team-view-toggle" />
           <button onClick={openAdd} data-testid="add-member-button" className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-3 rounded-lg transition-all active:scale-95 shadow-sm">
@@ -166,7 +162,7 @@ export default function Team() {
         <>
           {groupedByRole.map(({ role, meta, members: roleMembers }) => (
             <div key={role}>
-              <h2 className="text-base font-bold text-slate-900 mb-3 flex items-center gap-2" style={{ fontFamily: "Manrope" }}><meta.Icon size={17} className={meta.statText} />{meta.label}</h2>
+              <h3 className="text-base font-bold text-slate-900 mb-3 flex items-center gap-2" style={{ fontFamily: "Manrope" }}><meta.Icon size={17} className={meta.statText} />{meta.label}</h3>
               {view === "list" ? (
                 <div className="space-y-2">
                   {roleMembers.map(m => <MemberRow key={m.id} member={m} />)}

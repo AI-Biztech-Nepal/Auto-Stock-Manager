@@ -6,7 +6,7 @@ from starlette.middleware.cors import CORSMiddleware
 from starlette.middleware.gzip import GZipMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from passlib.context import CryptContext
-from typing import Optional, List
+from typing import Optional, List, Literal
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 import os, logging, jwt, uuid, json, base64, io, asyncio, re, copy, contextvars, secrets, hashlib
@@ -429,7 +429,7 @@ def stock_aging(purchase_date_str: str) -> dict:
 # minimum_selling_price, though — they need the negotiation floor to work a sale.
 FRONT_DESK_HIDDEN_VEHICLE_FIELDS = {
     "purchase_price", "total_investment", "expected_profit", "profit_margin",
-    "low_margin", "accessories_cost",
+    "low_margin", "accessories_cost", "sanakhat_cost",
 }
 
 # Parts department doesn't handle pricing or sales at all, so on top of the front-desk-hidden
@@ -1041,6 +1041,11 @@ class VehicleCreate(BaseModel):
     # separate from transfer_status above (which is the transfer-paperwork doc status while
     # the vehicle is still in inventory) — different thing, different lifecycle stage.
     ownership_transfer_status: str = "pending"
+    # Post-sale sanakhat (ownership verification) — "pending" or "done", tracked from the
+    # Sales list. Its cost is entered on the sale, as "Sanakhat" / "Re-Sanakhat" extra_expenses lines.
+    sanakhat_status: str = "pending"
+    # Sanaakhat (ownership termination) — the date it reaches the shop, set by hand, and what it cost.
+    sanakhat_date: Optional[str] = None; sanakhat_cost: Optional[float] = None
     # True once the user has confirmed, via the duplicate-registration prompt, that reusing a
     # sold/scrapped vehicle's plate on this new record is intentional (a buyback/trade-in) and
     # not a fat-fingered re-entry of the same vehicle. Never persisted — see create_vehicle.
@@ -1070,6 +1075,8 @@ class VehicleUpdate(BaseModel):
     tax_clearance_status: Optional[str] = None; transfer_status: Optional[str] = None
     ownership_termination_status: Optional[str] = None
     ownership_transfer_status: Optional[str] = None
+    sanakhat_status: Optional[Literal["pending", "done"]] = None
+    sanakhat_date: Optional[str] = None; sanakhat_cost: Optional[float] = None
     confirm_reused_registration: bool = False
 
 class VehicleStatusUpdate(BaseModel):
@@ -1094,15 +1101,13 @@ class JobCardCreate(BaseModel):
     work_description: str
     mechanic_id: Optional[str] = None; mechanic_name: str
     estimated_cost: float; notes: Optional[str] = None
-    sanakhat_cost: Optional[float] = None  # added on top of estimated/actual cost (see _job_card_cost)
-    resanakhat_cost: Optional[float] = None  # same, for a repeat sanakhat
+    # Sanakhat / re-sanakhat aren't job card work — they're entered on the sale as extra expenses.
     coupon_no: int; job_date: str
     parts: List[dict] = []
 
 class JobCardUpdate(BaseModel):
     work_description: Optional[str] = None; mechanic_name: Optional[str] = None
     estimated_cost: Optional[float] = None; actual_cost: Optional[float] = None
-    sanakhat_cost: Optional[float] = None; resanakhat_cost: Optional[float] = None
     status: Optional[str] = None; notes: Optional[str] = None
     parts: Optional[List[dict]] = None
 
@@ -4499,6 +4504,9 @@ async def _run_startup_tasks():
             ("vehicles", "warranty_void_reason", "VARCHAR(500)"),
             ("vehicles", "warranty_voided_at", "VARCHAR(40)"),
             ("vehicles", "warranty_voided_by", "VARCHAR(100)"),
+            ("vehicles", "sanakhat_status", "VARCHAR(20) DEFAULT 'pending'"),
+            ("vehicles", "sanakhat_date", "VARCHAR(20)"),
+            ("vehicles", "sanakhat_cost", "DOUBLE"),
             ("settings", "warranty_days_default", "INT"),
             ("vehicle_photos", "sort_order", "INT"),
         ]

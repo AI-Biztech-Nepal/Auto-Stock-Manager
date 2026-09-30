@@ -187,13 +187,6 @@ export default function Reports() {
               <div className="text-xs text-emerald-600 font-semibold uppercase mb-1">Total Realized Profit</div>
               <div className="text-2xl font-bold text-emerald-700" style={{ fontFamily: "Manrope" }}>{formatNPR(financial.total_profit)}</div>
             </div>
-            {financial.partner_shares?.map(p => (
-              <div key={p.name} className="bg-blue-50 border border-blue-100 rounded-xl p-4 text-center" data-testid="partner-profit-share">
-                <div className="text-xs text-blue-600 font-semibold uppercase mb-1">{p.name} ({p.stake}%)</div>
-                <div className="text-xl font-bold text-blue-700" style={{ fontFamily: "Manrope" }}>{formatNPR(p.profit_share)}</div>
-                <div className="text-xs text-blue-500 mt-0.5">Capital: {formatNPR(p.capital)}</div>
-              </div>
-            ))}
           </div>
 
           {monthlyData.length > 0 && (

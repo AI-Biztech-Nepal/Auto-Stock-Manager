@@ -295,7 +295,7 @@ function AccountingSummary({ period }) {
               return (
                 <div
                   key={s.id}
-                  onClick={() => navigate(`/sold-stock/${s.vehicle_id}`)}
+                  onClick={() => navigate(`/sales/vehicle/${s.vehicle_id}`)}
                   data-testid="recent-sale-card"
                   className="shrink-0 w-56 bg-white rounded-lg border border-green-100 shadow-sm p-3 cursor-pointer hover:shadow-md hover:border-green-300 transition-all"
                 >
@@ -382,7 +382,7 @@ function AccountingSummary({ period }) {
                   return (
                     <div
                       key={s.id}
-                      onClick={() => { setSalesModalView(null); navigate(`/sold-stock/${s.vehicle_id}`); }}
+                      onClick={() => { setSalesModalView(null); navigate(`/sales/vehicle/${s.vehicle_id}`); }}
                       data-testid="period-sales-modal-row"
                       className="px-4 sm:px-5 py-3 cursor-pointer hover:bg-slate-50 transition-colors"
                     >

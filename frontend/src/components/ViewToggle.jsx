@@ -8,7 +8,7 @@ const VIEW_STORAGE_KEY = "view_mode";
 
 export function useViewMode() {
   const [view, setViewState] = useState(() => {
-    try { return localStorage.getItem(VIEW_STORAGE_KEY) === "list" ? "list" : "card"; } catch { return "card"; }
+    try { return localStorage.getItem(VIEW_STORAGE_KEY) === "card" ? "card" : "list"; } catch { return "list"; }
   });
   const setView = (v) => {
     setViewState(v);

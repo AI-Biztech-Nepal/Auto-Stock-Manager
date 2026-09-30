@@ -24,7 +24,7 @@ const EMPTY_FORM = {
   vehicle_id: "", is_external: false,
   vehicle_brand: "", vehicle_model: "", vehicle_year: "", registration_number: "",
   customer_name: "", customer_contact: "",
-  work_description: "", mechanic_id: "", mechanic_name: "", estimated_cost: "", sanakhat_cost: "", resanakhat_cost: "", notes: "", coupon_no: "", job_date: "",
+  work_description: "", mechanic_id: "", mechanic_name: "", estimated_cost: "", notes: "", coupon_no: "", job_date: "",
 };
 
 const makeKey = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`);
@@ -230,8 +230,6 @@ export default function JobCards() {
       mechanic_id: job.mechanic_id || "",
       mechanic_name: job.mechanic_name || "",
       estimated_cost: job.estimated_cost != null ? String(job.estimated_cost) : "",
-      sanakhat_cost: job.sanakhat_cost ? String(job.sanakhat_cost) : "",
-      resanakhat_cost: job.resanakhat_cost ? String(job.resanakhat_cost) : "",
       notes: job.notes || "",
       coupon_no: job.coupon_no != null ? String(job.coupon_no) : "",
       job_date: job.job_date || "",
@@ -272,8 +270,6 @@ export default function JobCards() {
           work_description: form.work_description,
           mechanic_name: form.mechanic_name,
           estimated_cost: Number(form.estimated_cost),
-          sanakhat_cost: Number(form.sanakhat_cost) || 0,
-          resanakhat_cost: Number(form.resanakhat_cost) || 0,
           notes: form.notes,
           parts: jobParts.map(p => ({ part_id: p.part_id, component_name: p.component_name || null, part_name: p.part_name, quantity: Math.max(1, parseInt(p.quantity, 10) || 1), unit_cost: p.unit_cost, external: !!p.external })),
         });
@@ -296,8 +292,6 @@ export default function JobCards() {
         vehicle_id: form.is_external ? null : form.vehicle_id,
         vehicle_year: form.vehicle_year ? Number(form.vehicle_year) : null,
         estimated_cost: Number(form.estimated_cost),
-        sanakhat_cost: Number(form.sanakhat_cost) || 0,
-          resanakhat_cost: Number(form.resanakhat_cost) || 0,
         coupon_no: Number(form.coupon_no),
         parts: jobParts.map(p => ({ part_id: p.part_id, component_name: p.component_name || null, part_name: p.part_name, quantity: Math.max(1, parseInt(p.quantity, 10) || 1), unit_cost: p.unit_cost, external: !!p.external })),
       });
@@ -451,8 +445,6 @@ export default function JobCards() {
                   <div>
                     <div className={`font-semibold ${overBudget ? "text-red-600" : "text-slate-800"}`}>{formatNPR(job.actual_cost ?? job.estimated_cost)}</div>
                     {job.actual_cost != null && <div className="text-slate-400">est. {formatNPR(job.estimated_cost)}</div>}
-                    {job.sanakhat_cost > 0 && <div className="text-slate-400">+ sanakhat {formatNPR(job.sanakhat_cost)}</div>}
-                    {job.resanakhat_cost > 0 && <div className="text-slate-400">+ re-sanakhat {formatNPR(job.resanakhat_cost)}</div>}
                   </div>
                 }
                 pills={<>
@@ -526,8 +518,6 @@ export default function JobCards() {
                   <div>Mechanic: <span className="font-medium text-slate-700">{job.mechanic_name}</span></div>
                   <div>Est: <span className="font-medium text-slate-700">{formatNPR(job.estimated_cost)}</span></div>
                   {job.actual_cost != null && <div className={overBudget ? "text-red-600 font-medium" : ""}>Actual: <span className="font-medium">{formatNPR(job.actual_cost)}</span></div>}
-                  {job.sanakhat_cost > 0 && <div>Sanakhat: <span className="font-medium text-slate-700">{formatNPR(job.sanakhat_cost)}</span></div>}
-                  {job.resanakhat_cost > 0 && <div>Re-Sanakhat: <span className="font-medium text-slate-700">{formatNPR(job.resanakhat_cost)}</span></div>}
                   <div>Created: <span className="font-medium text-slate-700"><HoverADDate date={job.created_at?.slice(0, 10)} /></span></div>
                 </div>
 
@@ -716,15 +706,6 @@ export default function JobCards() {
                 <label className="block text-xs font-medium text-slate-600 mb-1">Estimated Cost (NPR) <span className="text-red-500">*</span></label>
                 <input type="number" value={form.estimated_cost} onChange={e => setForm({...form, estimated_cost: e.target.value})} placeholder="e.g. 3000" className={inp} />
               </div>
-              <div>
-                <label className="block text-xs font-medium text-slate-600 mb-1">Sanakhat Cost (NPR) <span className="text-slate-400 font-normal">(optional)</span></label>
-                <input type="number" min="0" value={form.sanakhat_cost} onChange={e => setForm({...form, sanakhat_cost: e.target.value})} placeholder="e.g. 500" className={inp} data-testid="job-sanakhat-cost-input" />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-slate-600 mb-1">Re-Sanakhat Cost (NPR) <span className="text-slate-400 font-normal">(optional)</span></label>
-                <input type="number" min="0" value={form.resanakhat_cost} onChange={e => setForm({...form, resanakhat_cost: e.target.value})} placeholder="e.g. 500" className={inp} data-testid="job-resanakhat-cost-input" />
-              </div>
-
               {/* Spare Parts Section */}
               <div>
                 <label className="flex items-center gap-1.5 text-xs font-medium text-slate-600 mb-2">

@@ -172,7 +172,7 @@ export function VehicleDetailModal({ id, onClose }) {
     if (!isFrontDesk && !editForm.purchase_price) { toast.error("Purchase Price is required"); return; }
     setSaving(true);
     try {
-      const payload = { ...editForm, selling_price: editForm.selling_price ? Number(editForm.selling_price) : null, year: Number(editForm.year), engine_cc: Number(editForm.engine_cc), ownership_number: Number(editForm.ownership_number), confirm_reused_registration: confirmReusedRegistration };
+      const payload = { ...editForm, selling_price: editForm.selling_price ? Number(editForm.selling_price) : null, sanakhat_cost: editForm.sanakhat_cost !== "" && editForm.sanakhat_cost != null ? Number(editForm.sanakhat_cost) : null, year: Number(editForm.year), engine_cc: Number(editForm.engine_cc), ownership_number: Number(editForm.ownership_number), confirm_reused_registration: confirmReusedRegistration };
       if (isFrontDesk) { delete payload.purchase_price; delete payload.minimum_selling_price; delete payload.accessories_cost; }
       else { payload.purchase_price = Number(editForm.purchase_price); payload.minimum_selling_price = editForm.minimum_selling_price ? Number(editForm.minimum_selling_price) : null; }
       await api.put(`/vehicles/${id}`, payload);
@@ -553,6 +553,14 @@ export function VehicleDetailModal({ id, onClose }) {
                         <option value="no">No</option>
                       </select>
                     </Field>
+                    <Field label="Sanaakhat Date (BS)">
+                      <BSDatePicker value={editForm.sanakhat_date || ""} onChange={val => setEditForm({ ...editForm, sanakhat_date: val })} />
+                    </Field>
+                    {!hideFinancials && (
+                      <Field label="Sanaakhat Cost (NPR)">
+                        <input data-testid="edit-sanakhat-cost-input" type="text" inputMode="numeric" pattern="[0-9]*" value={editForm.sanakhat_cost ?? ""} onChange={e => setEditForm({ ...editForm, sanakhat_cost: e.target.value })} placeholder="0" className={inp} />
+                      </Field>
+                    )}
                     <Field label="Purchase Date (BS)" required full>
                       <BSDatePicker value={editForm.purchase_date || ""} onChange={val => setEditForm({ ...editForm, purchase_date: val })} required />
                     </Field>
@@ -640,6 +648,8 @@ export function VehicleDetailModal({ id, onClose }) {
                       <span className="text-sm font-medium text-slate-900 sm:text-right capitalize">{vehicle.ownership_termination_status || "pending"}</span>
                     )}
                   </Row>
+                  <Row label="Sanaakhat Date"><span className="text-sm font-medium text-slate-900 sm:text-right">{vehicle.sanakhat_date ? <HoverADDate date={vehicle.sanakhat_date} /> : "Not received yet"}</span></Row>
+                  {!hideFinancials && <Row label="Sanaakhat Cost"><span className="text-sm font-medium text-slate-900 sm:text-right">{vehicle.sanakhat_cost ? formatNPR(vehicle.sanakhat_cost) : "—"}</span></Row>}
                   <Row label="Purchase Date"><span className="text-sm font-medium text-slate-900 sm:text-right"><HoverADDate date={vehicle.purchase_date} /></span></Row>
                   {!hideFinancials && <Row label="Purchase Price"><span className="text-sm font-medium text-slate-900 sm:text-right">{formatNPR(vehicle.purchase_price)}</span></Row>}
                   {!hidePricing && <Row label="Selling Price"><span className="text-sm font-medium text-slate-900 sm:text-right">{vehicle.selling_price ? formatNPR(vehicle.selling_price) : "Not set"}</span></Row>}

@@ -57,7 +57,7 @@ TABLES = {
                               "ownership_transfer_status", "created_at", "updated_at", "sold_date",
                               "customer_id", "salesperson_id", "salesperson_name", "discount", "created_by",
                               "warranty_days", "warranty_void", "warranty_void_reason", "warranty_voided_at",
-                              "warranty_voided_by"},
+                              "warranty_voided_by", "sanakhat_status", "sanakhat_date", "sanakhat_cost"},
                   "bool_cols": {"warranty_void"}},
     "sales": {"columns": {"id", "company_id", "vehicle_id", "customer_id", "sale_price", "extra_expenses", "expenses_total",
                            "total_amount", "payment_method", "paid_cash", "paid_bank", "advance_payment", "due_amount", "due_date",

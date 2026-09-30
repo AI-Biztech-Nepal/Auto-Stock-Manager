@@ -4,7 +4,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { Plus, Search, Eye, Trash2, Filter, X, UploadCloud, Download, EyeOff, Package, Wallet, DollarSign, Lock, Moon, Archive, Sparkles, Store, User, Wrench, Clock, CheckCircle2, AlertTriangle, ImageOff, ChevronDown } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
-import { formatNPR, getAgingStyle, getStatusStyle, getTerminationStyle, BRANDS, VEHICLE_STATUS_OPTIONS, formatOwnership } from "../utils/helpers";
+import { formatNPR, getAgingStyle, getStatusStyle, getTerminationStyle, isSanakhatOverdue, sanakhatPendingDays, SANAKHAT_WARN_DAYS, BRANDS, VEHICLE_STATUS_OPTIONS, formatOwnership } from "../utils/helpers";
 import { AddVehicleModal } from "./AddVehicleModal";
 import { VehicleDetailModal } from "./VehicleDetail";
 import HoverADDate from "../components/HoverADDate";
@@ -16,7 +16,7 @@ import { formatBSDate, getCurrentBSMonthRange, getCurrentWeekRange, getTodayAD }
 import { useAuth } from "../context/AuthContext";
 import { hasFullVehicleAccess, canAddVehicle, isBasicStockRole, hidesVehiclePricing } from "../utils/permissions";
 
-// Sold vehicles get their own archive (Sold Stock page) rather than sitting in the active
+// Sold vehicles get their own archive (the Sold list on the Sales page) rather than sitting in the active
 // pipeline grid, so "sold" is left out of this page's status filter entirely. Scrap has no
 // dedicated toggle either — it's a do-not-disturb terminal stage, not something staff need
 // to quick-filter to day to day; it's still reachable via "All Status".
@@ -360,7 +360,7 @@ export default function Inventory() {
   };
 
   useEffect(() => {
-    // Sold vehicles live in the Sold Stock archive, not the active inventory grid.
+    // Sold vehicles live in the Sales page's Sold list, not the active inventory grid.
     let result = vehicles.filter(v => v.status !== "sold");
 
     if (statusFilter !== "all") result = result.filter(v => v.status === statusFilter);
@@ -442,6 +442,8 @@ export default function Inventory() {
     } catch { toast.error("Failed to delete"); }
   };
 
+  const sanakhatOverdue = vehicles.filter(isSanakhatOverdue).sort((a, b) => sanakhatPendingDays(b) - sanakhatPendingDays(a));
+
   return (
     <div className="space-y-5 animate-fade-in">
       {/* Header */}
@@ -470,7 +472,7 @@ export default function Inventory() {
           )}
           {canManageStock && !isFrontDesk && (
             <button
-              onClick={() => navigate("/sold-stock")}
+              onClick={() => navigate("/sales")}
               data-testid="sold-stock-link"
               className="flex items-center gap-2 border border-slate-200 text-slate-700 text-sm font-medium px-4 py-3 rounded-lg hover:bg-slate-50 transition-all active:scale-95"
             >
@@ -498,6 +500,25 @@ export default function Inventory() {
           )}
         </div>
       </div>
+
+      {/* Sanaakhat pending past 30 days */}
+      {canManageStock && sanakhatOverdue.length > 0 && (
+        <div className="flex items-start gap-3 px-4 py-3 rounded-xl border border-amber-200 bg-amber-50" data-testid="sanakhat-overdue-banner">
+          <AlertTriangle size={18} className="text-amber-600 mt-0.5 shrink-0" />
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-amber-800">
+              {sanakhatOverdue.length} vehicle{sanakhatOverdue.length !== 1 ? "s" : ""} with Sanaakhat pending over {SANAKHAT_WARN_DAYS} days
+            </p>
+            <div className="flex flex-wrap gap-1.5 mt-2">
+              {sanakhatOverdue.map(v => (
+                <button key={v.id} type="button" onClick={() => setSelectedVehicleId(v.id)} className="px-2 py-1 rounded-full bg-white border border-amber-200 text-xs text-amber-900 hover:bg-amber-100 transition-colors">
+                  {v.brand} {v.model}{v.registration_number ? ` · ${v.registration_number}` : ""} · {sanakhatPendingDays(v)}d
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Duplicate Registration Number Alert */}
       {canManageStock && visibleDupGroups.length > 0 && (
@@ -832,6 +853,20 @@ export default function Inventory() {
                 )}
                 pills={<>
                   <span className={`px-2 py-0.5 rounded-full text-[11px] font-semibold uppercase tracking-wide ${st.bg} ${st.text}`}>{st.label}</span>
+                  {(() => {
+                    const tm = getTerminationStyle(v.ownership_termination_status);
+                    const late = isSanakhatOverdue(v);
+                    const days = sanakhatPendingDays(v);
+                    return (
+                      <span
+                        className={`px-2 py-0.5 rounded-full text-[11px] font-semibold uppercase tracking-wide ${late ? "bg-red-100 text-red-800" : `${tm.bg} ${tm.text}`}`}
+                        title={late ? `Sanaakhat pending for ${days} days` : undefined}
+                        data-testid="vehicle-row-termination"
+                      >
+                        {tm.label}{late && ` · ${days}d`}
+                      </span>
+                    );
+                  })()}
                   <span className={`px-2 py-0.5 rounded-full text-[11px] font-semibold uppercase tracking-wide ${ag.bg} ${ag.text}`}>{v.aging?.days}d</span>
                 </>}
                 actions={<>
@@ -878,11 +913,11 @@ export default function Inventory() {
                       <button
                         type="button"
                         onClick={e => { e.stopPropagation(); cycleTermination(v); }}
-                        className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wide cursor-pointer transition hover:brightness-95 active:scale-95 ${tm.bg} ${tm.text}`}
+                        className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wide cursor-pointer transition hover:brightness-95 active:scale-95 ${isSanakhatOverdue(v) ? "bg-red-100 text-red-800" : `${tm.bg} ${tm.text}`}`}
                         title="Click to change Sanaakhat (Pending → Yes → No)"
                         data-testid="vehicle-card-termination"
                       >
-                        {tm.label}
+                        {tm.label}{isSanakhatOverdue(v) && ` · ${sanakhatPendingDays(v)}d`}
                       </button>
                     ) : (
                       <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wide ${tm.bg} ${tm.text}`} data-testid="vehicle-card-termination">

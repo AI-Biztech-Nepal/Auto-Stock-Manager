@@ -1,6 +1,6 @@
 import "@/App.css";
 import { Suspense, lazy, useEffect } from "react";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useParams } from "react-router-dom";
 import { Toaster } from "sonner";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import { canAccessPath, ROLE_DEFAULT_PATH } from "./utils/permissions";
@@ -21,23 +21,16 @@ const Inventory = lazy(() => import("./pages/Inventory"));
 const VehicleDetail = lazy(() => import("./pages/VehicleDetail"));
 const JobCards = lazy(() => import("./pages/JobCards"));
 const Warranty = lazy(() => import("./pages/Warranty"));
-const Customers = lazy(() => import("./pages/Customers"));
-const Team = lazy(() => import("./pages/Team"));
 const Reports = lazy(() => import("./pages/Reports"));
-const Partners = lazy(() => import("./pages/Partners"));
 const AIAssistant = lazy(() => import("./pages/AIAssistant"));
 const Settings = lazy(() => import("./pages/Settings"));
-const Vendors = lazy(() => import("./pages/Vendors"));
+const Ledger = lazy(() => import("./pages/Ledger"));
 const Finance = lazy(() => import("./pages/Finance"));
-const Marketing = lazy(() => import("./pages/Marketing"));
-const EMI = lazy(() => import("./pages/EMI"));
 const SpareParts = lazy(() => import("./pages/SpareParts"));
 const Sales = lazy(() => import("./pages/Sales"));
 const SaleDetail = lazy(() => import("./pages/SaleDetail"));
-const SoldStock = lazy(() => import("./pages/SoldStock"));
 const SoldStockDetail = lazy(() => import("./pages/SoldStockDetail"));
 const ImportStock = lazy(() => import("./pages/ImportStock"));
-const Leads = lazy(() => import("./pages/Leads"));
 const Platform = lazy(() => import("./pages/Platform"));
 
 const RouteFallback = () => (
@@ -66,6 +59,12 @@ const RoleRoute = ({ path, children }) => {
   return children;
 };
 
+// Old Sold Stock detail links (bookmarks, other tabs) -> the vehicle view under Sales.
+const SoldStockRedirect = () => {
+  const { id } = useParams();
+  return <Navigate to={`/sales/vehicle/${id}`} replace />;
+};
+
 const HomeRoute = () => {
   const { user } = useAuth();
   if (user?.role && user.role !== "admin") {
@@ -90,20 +89,20 @@ function AppRoutes() {
           <Route path="import-stock" element={<RoleRoute path="/import-stock"><ImportStock /></RoleRoute>} />
           <Route path="jobs" element={<RoleRoute path="/jobs"><JobCards /></RoleRoute>} />
           <Route path="warranty" element={<RoleRoute path="/warranty"><Warranty /></RoleRoute>} />
-          <Route path="customers" element={<RoleRoute path="/customers"><Customers /></RoleRoute>} />
-          <Route path="team" element={<RoleRoute path="/team"><Team /></RoleRoute>} />
+          <Route path="ledger" element={<RoleRoute path="/ledger"><Ledger /></RoleRoute>} />
+          {/* Customers, Vendors and Team were folded into the Ledger tab. */}
+          <Route path="customers" element={<Navigate to="/ledger?tab=customers" replace />} />
+          <Route path="vendors" element={<Navigate to="/ledger?tab=vendors" replace />} />
+          <Route path="team" element={<Navigate to="/ledger?tab=staff" replace />} />
           <Route path="reports" element={<RoleRoute path="/reports"><Reports /></RoleRoute>} />
-          <Route path="partners" element={<RoleRoute path="/partners"><Partners /></RoleRoute>} />
-          <Route path="vendors" element={<RoleRoute path="/vendors"><Vendors /></RoleRoute>} />
-          <Route path="leads" element={<RoleRoute path="/leads"><Leads /></RoleRoute>} />
           <Route path="finance" element={<RoleRoute path="/finance"><Finance /></RoleRoute>} />
-          <Route path="marketing" element={<RoleRoute path="/marketing"><Marketing /></RoleRoute>} />
-          <Route path="emi" element={<RoleRoute path="/emi"><EMI /></RoleRoute>} />
           <Route path="spare-parts" element={<RoleRoute path="/spare-parts"><SpareParts /></RoleRoute>} />
           <Route path="sales" element={<RoleRoute path="/sales"><Sales /></RoleRoute>} />
           <Route path="sales/:id" element={<RoleRoute path="/sales/detail"><SaleDetail /></RoleRoute>} />
-          <Route path="sold-stock" element={<RoleRoute path="/sold-stock"><SoldStock /></RoleRoute>} />
-          <Route path="sold-stock/:id" element={<RoleRoute path="/sold-stock/detail"><SoldStockDetail /></RoleRoute>} />
+          <Route path="sales/vehicle/:id" element={<RoleRoute path="/sales/vehicle"><SoldStockDetail /></RoleRoute>} />
+          {/* Sold Stock was merged into Sales. */}
+          <Route path="sold-stock" element={<Navigate to="/sales" replace />} />
+          <Route path="sold-stock/:id" element={<SoldStockRedirect />} />
           <Route path="ai" element={<RoleRoute path="/ai"><AIAssistant /></RoleRoute>} />
           <Route path="settings" element={<Settings />} />
           <Route path="platform" element={<RoleRoute path="/platform"><Platform /></RoleRoute>} />

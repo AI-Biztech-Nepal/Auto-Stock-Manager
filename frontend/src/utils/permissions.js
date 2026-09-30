@@ -5,10 +5,12 @@ export const ROLE_NAV_PATHS = {
   // Inventory (view/edit, no create) plus Team and Settings now.
   // Warranty tracker: they follow up on sold vehicles and void a warranty when the customer
   // serviced elsewhere (restoring one or changing its length stays admin-only).
-  stock_supervisor: ["/inventory", "/warranty", "/team", "/settings"],
+  // Ledger: Staff tab only (see LEDGER_TABS below).
+  stock_supervisor: ["/inventory", "/warranty", "/ledger", "/settings"],
   // Parts department gets read-only inventory browsing plus the ability to flip a vehicle's
   // pipeline status (Available <-> In Repair, or Scrap) — see PARTS_ALLOWED_STATUSES in server.py.
-  parts_supervisor: ["/spare-parts", "/vendors", "/jobs", "/inventory", "/team", "/settings"],
+  // Ledger: Vendors + Staff tabs (see LEDGER_TABS below).
+  parts_supervisor: ["/spare-parts", "/ledger", "/jobs", "/inventory", "/settings"],
   // Social Media adds new stock (basic details only) and manages vehicle photos -- nothing else.
   social_media: ["/inventory", "/settings"],
   // Cross-company visibility only -- no company_id of its own, so it must never reach any
@@ -22,6 +24,18 @@ export const ROLE_DEFAULT_PATH = {
   social_media: "/inventory",
   platform_owner: "/platform",
 };
+
+// Which Ledger tabs each role sees -- mirrors the backend's "customers" / "vendors" / "team"
+// resources in ROLE_PERMISSIONS. Admin gets all three.
+const LEDGER_TABS = {
+  stock_supervisor: ["staff"],
+  parts_supervisor: ["vendors", "staff"],
+};
+
+export function ledgerTabsFor(role) {
+  if (!role || role === "admin") return ["customers", "vendors", "staff"];
+  return LEDGER_TABS[role] || [];
+}
 
 export function canAccessPath(role, path) {
   // /platform is cross-company (platform_owner only) -- never covered by admin's normal

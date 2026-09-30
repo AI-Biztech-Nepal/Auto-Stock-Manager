@@ -102,6 +102,18 @@ export const getTerminationStyle = (status) => {
   return map[status] || map.pending;
 };
 
+// Sanaakhat is timed from sanakhat_date, which staff set by hand once it reaches the shop.
+// No date yet = not running. Past SANAKHAT_WARN_DAYS still pending, the vehicle is overdue.
+export const SANAKHAT_WARN_DAYS = 30;
+export const sanakhatPendingDays = (v) => {
+  if (!v || v.status === "sold" || v.status === "scrap") return null;
+  if ((v.ownership_termination_status || "pending") !== "pending") return null;
+  const start = new Date((v.sanakhat_date || "").slice(0, 10));
+  if (isNaN(start)) return null;
+  return Math.max(0, Math.floor((Date.now() - start.getTime()) / 86400000));
+};
+export const isSanakhatOverdue = (v) => (sanakhatPendingDays(v) ?? -1) > SANAKHAT_WARN_DAYS;
+
 export const BRANDS = ["Honda", "Yamaha", "TVS", "Bajaj", "Suzuki", "Hero", "KTM", "Royal Enfield", "Lifan", "Other"];
 export const SOURCES = ["Direct Owner", "Auction", "Exchange", "Dealer", "Other"];
 export const CONDITIONS = ["Excellent", "Good", "Fair", "Poor"];
@@ -153,3 +165,24 @@ export const formatWarrantyLength = (days) => {
   if (!amount) return "—";
   return `${amount} ${amount === "1" ? unit.slice(0, -1) : unit}`;
 };
+
+// Sanakhat and re-sanakhat are entered on the sale (Record / Edit Sale) and stored as named
+// lines in its extra_expenses, so they count toward the expense total, grand total and due
+// like any other fee. These split them back out for their own form fields and table column.
+export const SANAKHAT_EXPENSE = "Sanakhat";
+export const RESANAKHAT_EXPENSE = "Re-Sanakhat";
+
+export const splitSanakhatExpenses = (items = []) => {
+  const amountOf = (name) => items.filter(e => e.name === name).reduce((s, e) => s + (Number(e.amount) || 0), 0);
+  return {
+    sanakhat: amountOf(SANAKHAT_EXPENSE),
+    resanakhat: amountOf(RESANAKHAT_EXPENSE),
+    others: items.filter(e => e.name !== SANAKHAT_EXPENSE && e.name !== RESANAKHAT_EXPENSE),
+  };
+};
+
+export const withSanakhatExpenses = (others, sanakhat, resanakhat) => [
+  ...others,
+  ...(Number(sanakhat) > 0 ? [{ name: SANAKHAT_EXPENSE, amount: Number(sanakhat) }] : []),
+  ...(Number(resanakhat) > 0 ? [{ name: RESANAKHAT_EXPENSE, amount: Number(resanakhat) }] : []),
+];

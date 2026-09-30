@@ -3,7 +3,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { ArrowLeft, Pencil, Trash2, X, ChevronDown, ChevronUp, UserPlus, Lock, Undo2, AlertTriangle, CheckCircle2 } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
-import { formatNPR } from "../utils/helpers";
+import { formatNPR, splitSanakhatExpenses, withSanakhatExpenses } from "../utils/helpers";
 import HoverADDate from "../components/HoverADDate";
 import BSDatePicker from "../components/BSDatePicker";
 import VehicleComboBox from "../components/VehicleComboBox";
@@ -90,7 +90,10 @@ export default function SaleDetail() {
   useEffect(() => { fetchSale(); }, [fetchSale]);
 
   const startEdit = async () => {
+    const { sanakhat, resanakhat, others } = splitSanakhatExpenses(sale.extra_expenses || []);
     setEditForm({
+      sanakhat_cost: sanakhat || "",
+      resanakhat_cost: resanakhat || "",
       vehicle_id: sale.vehicle_id,
       customer_id: sale.customer_id || "",
       sale_price: sale.sale_price,
@@ -103,7 +106,7 @@ export default function SaleDetail() {
       ownership_transfer_date: sale.ownership_transfer_date || "",
       notes: sale.notes || "",
     });
-    setExpenseItems(sale.extra_expenses?.length > 0 ? sale.extra_expenses : []);
+    setExpenseItems(others);
     setPresetToAdd(""); setNewExpName(""); setNewExpAmt("");
     setShowAddCust(false);
     setNewCust({ name: "", contact_number: "", address: "" });
@@ -130,7 +133,9 @@ export default function SaleDetail() {
     finally { setAddingCust(false); }
   };
 
-  const expensesTotal = expenseItems.reduce((s, e) => s + Number(e.amount || 0), 0);
+  // Sanakhat / re-sanakhat have their own fields but save as extra-expense lines.
+  const allExpenses = withSanakhatExpenses(expenseItems, editForm.sanakhat_cost, editForm.resanakhat_cost);
+  const expensesTotal = allExpenses.reduce((s, e) => s + Number(e.amount || 0), 0);
   const grandTotal = (Number(editForm.sale_price) || 0) + expensesTotal;
   const amountPaid = (Number(editForm.paid_cash) || 0) + (Number(editForm.paid_bank) || 0) + (Number(editForm.advance_payment) || 0);
   const autoDue = Math.max(Number((grandTotal - amountPaid).toFixed(2)), 0);
@@ -166,7 +171,7 @@ export default function SaleDetail() {
         vehicle_id: editForm.vehicle_id,
         customer_id: editForm.customer_id || null,
         sale_price: Number(editForm.sale_price),
-        extra_expenses: expenseItems.map(e => ({ name: e.name, amount: Number(e.amount) || 0 })),
+        extra_expenses: allExpenses.map(e => ({ name: e.name, amount: Number(e.amount) || 0 })),
         payment_method: pmParts.length ? pmParts.join(" + ") : "Due",
         paid_cash: Number(editForm.paid_cash) || 0,
         paid_bank: Number(editForm.paid_bank) || 0,
@@ -345,13 +350,21 @@ export default function SaleDetail() {
               <button type="button" onClick={() => setShowPresets(!showPresets)} className="w-full flex items-center justify-between px-4 py-3 bg-slate-50 text-sm font-semibold text-slate-700 hover:bg-slate-100 transition-colors">
                 <span>Extra Expenses</span>
                 <div className="flex items-center gap-2">
-                  {expenseItems.length > 0 && <span className="text-xs bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full font-medium">{expenseItems.length} added · {formatNPR(expensesTotal)}</span>}
+                  {allExpenses.length > 0 && <span className="text-xs bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full font-medium">{allExpenses.length} added · {formatNPR(expensesTotal)}</span>}
                   {showPresets ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
                 </div>
               </button>
               {showPresets && (
                 <div className="p-4 space-y-3">
-                  <div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <Field label="Sanakhat Cost (NPR)">
+                      <input type="text" inputMode="numeric" value={editForm.sanakhat_cost} onChange={e => setEditForm({...editForm, sanakhat_cost: e.target.value})} placeholder="0" className={inp} data-testid="edit-sanakhat-cost-input" />
+                    </Field>
+                    <Field label="Re-Sanakhat Cost (NPR)">
+                      <input type="text" inputMode="numeric" value={editForm.resanakhat_cost} onChange={e => setEditForm({...editForm, resanakhat_cost: e.target.value})} placeholder="0" className={inp} data-testid="edit-resanakhat-cost-input" />
+                    </Field>
+                  </div>
+                  <div className="border-t border-slate-100 pt-3">
                     <p className="text-xs text-slate-500 font-medium mb-2">Add Preset Fee</p>
                     <select value={presetToAdd} onChange={e => addPresetExpense(e.target.value)} className={sel} disabled={availablePresets.length === 0}>
                       <option value="">{availablePresets.length === 0 ? "All preset fees added" : "Select a fee to add..."}</option>

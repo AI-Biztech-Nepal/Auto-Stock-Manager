@@ -3,11 +3,10 @@ import { Outlet, NavLink, useNavigate } from "react-router-dom";
 import api from "../utils/api";
 import { useAuth } from "../context/AuthContext";
 import { canAccessPath } from "../utils/permissions";
+import { isSanakhatOverdue, sanakhatPendingDays } from "../utils/helpers";
 import {
-  LayoutDashboard, Bike, Wrench, Users, UsersRound,
-  BarChart3, Handshake, Sparkles, Settings, LogOut, Menu, X, Bell,
-  Store, Wallet, Megaphone, CreditCard, Boxes, ShoppingBag, Inbox, Archive, Building2,
-  ImageOff, FileWarning, ShieldCheck
+  LayoutDashboard, Bike, Wrench, BarChart3, Sparkles, Settings, LogOut, Menu, X, Bell,
+  BookOpen, Wallet, Boxes, ShoppingBag, Building2, ImageOff, FileWarning, ShieldCheck
 } from "lucide-react";
 
 // A vehicle needs at least this many photos before it's considered adequately
@@ -20,18 +19,11 @@ const navItems = [
   { path: "/platform",     label: "Companies",    icon: Building2 },
   { path: "/inventory",    label: "Inventory",    icon: Bike },
   { path: "/sales",        label: "Sales",        icon: ShoppingBag },
-  { path: "/sold-stock",   label: "Sold Stock",   icon: Archive },
-  { path: "/leads",        label: "Leads",        icon: Inbox },
   { path: "/spare-parts",  label: "Spare Parts",  icon: Boxes },
-  { path: "/vendors",      label: "Vendors",      icon: Store },
+  { path: "/ledger",       label: "Ledger",       icon: BookOpen },
   { path: "/jobs",         label: "Job Cards",    icon: Wrench },
   { path: "/warranty",     label: "Warranty",     icon: ShieldCheck },
-  { path: "/customers",    label: "Customers",    icon: Users },
-  { path: "/team",         label: "Team",         icon: UsersRound },
   { path: "/finance",      label: "Finance",      icon: Wallet },
-  { path: "/emi",          label: "EMI",          icon: CreditCard },
-  { path: "/marketing",    label: "Marketing",    icon: Megaphone },
-  { path: "/partners",     label: "Partners",     icon: Handshake },
   { path: "/reports",      label: "Reports",      icon: BarChart3 },
   { path: "/ai",           label: "AI Assistant", icon: Sparkles },
   { path: "/settings",     label: "Settings",     icon: Settings },
@@ -198,7 +190,7 @@ export default function Layout() {
                 onClick={() => setNotifOpen(o => !o)}
                 className="relative w-11 h-11 rounded-lg border border-slate-200 flex items-center justify-center text-slate-500 hover:bg-slate-50 transition-colors"
                 data-testid="notif-bell-btn"
-                title="Vehicles with missing data"
+                title="Vehicles needing attention"
               >
                 <Bell size={17} />
                 {missingDataVehicles.length > 0 && (
@@ -214,14 +206,14 @@ export default function Layout() {
                   data-testid="notif-panel"
                 >
                   <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
-                    <span className="text-sm font-semibold text-slate-800">Missing Vehicle Data</span>
+                    <span className="text-sm font-semibold text-slate-800">Needs Attention</span>
                     {missingDataVehicles.length > 0 && (
                       <span className="text-xs font-medium text-red-600 bg-red-50 px-2 py-0.5 rounded-full">{missingDataVehicles.length}</span>
                     )}
                   </div>
                   <div className="max-h-80 overflow-y-auto divide-y divide-slate-50">
                     {missingDataVehicles.length === 0 ? (
-                      <div className="px-4 py-6 text-center text-sm text-slate-400">All active stock has photos & reg. numbers ✅</div>
+                      <div className="px-4 py-6 text-center text-sm text-slate-400">Nothing needs attention ✅</div>
                     ) : (
                       missingDataVehicles.map(v => (
                         <button
@@ -235,6 +227,11 @@ export default function Layout() {
                             {v.issues.includes("No reg. number") && (
                               <span className="inline-flex items-center gap-1 text-[11px] font-medium text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded-full">
                                 <FileWarning size={10} /> No reg. number
+                              </span>
+                            )}
+                            {v.issues.includes("Sanaakhat overdue") && (
+                              <span className="inline-flex items-center gap-1 text-[11px] font-medium text-red-700 bg-red-50 px-1.5 py-0.5 rounded-full">
+                                <FileWarning size={10} /> Sanaakhat pending {sanakhatPendingDays(v)}d
                               </span>
                             )}
                             {(v.issues.includes("No photos") || v.issues.includes("Needs more photos")) && (
