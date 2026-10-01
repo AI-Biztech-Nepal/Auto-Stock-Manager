@@ -1,15 +1,21 @@
 import { useEffect, useState, useMemo } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend } from "recharts";
-import { DollarSign, AlertTriangle, CreditCard, Users, ShoppingCart, UserPlus, ArrowDownCircle, ArrowUpCircle, PlusSquare, FileText, Download, TrendingUp, Package } from "lucide-react";
+import { DollarSign, AlertTriangle, CreditCard, ShoppingCart, UserPlus, ArrowDownCircle, ArrowUpCircle, PlusSquare, FileText, Download, TrendingUp } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
 import { formatNPR } from "../utils/helpers";
 import { adToBsDate, BS_MONTHS, getBSMonthRange } from "../utils/nepali-date";
 import { useAuth } from "../context/AuthContext";
 
-const KCard = ({ title, value, sub, color, icon: Icon }) => (
-  <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 hover:shadow-md transition-shadow">
+const KCard = ({ title, value, sub, color, icon: Icon, onClick }) => (
+  <div
+    onClick={onClick}
+    role={onClick ? "button" : undefined}
+    tabIndex={onClick ? 0 : undefined}
+    onKeyDown={onClick ? (e) => { if (e.key === "Enter" || e.key === " ") onClick(); } : undefined}
+    className={`bg-white rounded-xl border border-slate-200 shadow-sm p-5 hover:shadow-md transition-shadow ${onClick ? "cursor-pointer hover:border-blue-300" : ""}`}
+  >
     <div className="flex items-start justify-between gap-2">
       <div className="min-w-0">
         <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1 truncate">{title}</p>
@@ -33,16 +39,27 @@ export default function Finance() {
   const [tab, setTab] = useState(searchParams.get("tab") === "monthly" ? "monthly" : "overview");
   const [bsSales, setBsSales] = useState([]);
   const [downloadingMonth, setDownloadingMonth] = useState(null);
+  const [vendors, setVendors] = useState([]);
+  const [showOwed, setShowOwed] = useState(false);
 
   useEffect(() => {
     Promise.all([
       api.get("/finance/summary"),
       api.get("/reports/monthly-breakdown-bs"),
       api.get("/reports/dashboard"),
-    ]).then(([s, bs, d]) => {
-      setSummary(s.data); setBsSales(bs.data); setDash(d.data);
+      api.get("/vendors"),
+    ]).then(([s, bs, d, vs]) => {
+      setSummary(s.data); setBsSales(bs.data); setDash(d.data); setVendors(vs.data);
     }).catch(console.error).finally(() => setLoading(false));
   }, []);
+
+  // What we still owe each vendor: everything bought from them minus what we have paid them.
+  // Same figures as the Vendors page, so the two always agree.
+  const owedVendors = useMemo(
+    () => vendors.filter(v => (v.remaining_due || 0) > 0).sort((a, b) => b.remaining_due - a.remaining_due),
+    [vendors]
+  );
+  const totalOwed = owedVendors.reduce((sum, v) => sum + v.remaining_due, 0);
 
   const switchTab = (t) => {
     setTab(t);
@@ -118,7 +135,7 @@ export default function Finance() {
         <div className="space-y-5">
           <div className="grid grid-cols-2 lg:grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-4">
             <KCard title="Gross Profit" value={formatNPR(summary.gross_profit)} sub={`${summary.profit_margin_pct}% margin`} icon={DollarSign} color="bg-emerald-500" />
-            <KCard title="Vendor Payables" value={formatNPR(summary.vendor_payables)} icon={CreditCard} color="bg-red-500" />
+            <KCard title="Due Payments" value={formatNPR(totalOwed)} sub={owedVendors.length ? `${owedVendors.length} vendor${owedVendors.length === 1 ? "" : "s"} to pay · tap for details` : "Nothing to pay"} icon={CreditCard} color="bg-red-500" onClick={() => setShowOwed(true)} />
           </div>
 
           {/* Lifetime totals — moved off the dashboard, which is now period-scoped */}
@@ -129,9 +146,6 @@ export default function Finance() {
                 <KCard title="Total Revenue" value={formatNPR(dash.total_revenue)} icon={TrendingUp} color="bg-blue-500" />
                 <KCard title="Cost of Goods" value={formatNPR(dash.total_cogs)} icon={AlertTriangle} color="bg-orange-500" />
                 <KCard title="Realized Profit" value={formatNPR(dash.total_realized_profit)} sub="From sold vehicles" icon={DollarSign} color="bg-emerald-500" />
-                <KCard title="Vehicles Sold" value={dash.sold} sub="All time" icon={ShoppingCart} color="bg-green-500" />
-                <KCard title="Total Vehicles" value={dash.total_vehicles} sub="All time" icon={Package} color="bg-slate-500" />
-                <KCard title="Customers" value={dash.total_customers} sub="All time" icon={Users} color="bg-teal-600" />
               </div>
             </div>
           )}
@@ -254,6 +268,58 @@ export default function Finance() {
               <p>No sales data yet. Mark vehicles as sold to see monthly reports.</p>
             </div>
           )}
+        </div>
+      )}
+      {showOwed && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 sm:p-4" onClick={() => setShowOwed(false)}>
+          <div className="bg-white sm:rounded-2xl shadow-2xl w-full h-full sm:h-auto sm:max-w-2xl sm:max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between p-4 sm:p-5 border-b border-slate-100">
+              <div>
+                <h2 className="text-lg font-bold text-slate-900" style={{ fontFamily: "Manrope, sans-serif" }}>Due payments</h2>
+                <p className="text-sm text-slate-500">Bought from them, minus what you have already paid</p>
+              </div>
+              <button onClick={() => setShowOwed(false)} className="w-10 h-10 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500 shrink-0">✕</button>
+            </div>
+            <div className="overflow-y-auto flex-1">
+              {owedVendors.length === 0 ? (
+                <p className="p-8 text-center text-sm text-slate-500">You do not owe any vendor right now.</p>
+              ) : (
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-slate-100">
+                      {["Vendor", "Bought", "Paid", "You owe"].map((h, i) => (
+                        <th key={h} className={`text-xs font-semibold uppercase tracking-wider text-slate-500 px-4 py-3 ${i === 0 ? "text-left" : "text-right"}`}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-50">
+                    {owedVendors.map(v => (
+                      <tr key={v.id}>
+                        <td className="px-4 py-3">
+                          <p className="font-medium text-slate-900">{v.name}</p>
+                          {v.phone && <p className="text-xs text-slate-500">{v.phone}</p>}
+                        </td>
+                        <td className="px-4 py-3 text-right text-slate-600">{formatNPR(v.total_purchased)}</td>
+                        <td className="px-4 py-3 text-right text-slate-600">{formatNPR(v.total_paid)}</td>
+                        <td className="px-4 py-3 text-right font-bold text-red-600">{formatNPR(v.remaining_due)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr className="border-t border-slate-200 bg-slate-50 font-bold">
+                      <td className="px-4 py-3" colSpan={3}>Total you owe</td>
+                      <td className="px-4 py-3 text-right text-red-600">{formatNPR(totalOwed)}</td>
+                    </tr>
+                  </tfoot>
+                </table>
+              )}
+            </div>
+            <div className="p-4 border-t border-slate-100">
+              <button onClick={() => navigate("/ledger?tab=vendors")} className="w-full h-11 border border-slate-200 rounded-lg text-sm font-semibold text-slate-700 hover:bg-slate-50">
+                Open vendors to record a payment
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
