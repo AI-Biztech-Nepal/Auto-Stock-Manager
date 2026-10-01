@@ -129,6 +129,22 @@ export function AddVehicleModal({ form, setForm, onClose, onSubmit, saving, phot
                   required
                 />
               </Field>
+              <Field label="Sanaakhat Date (BS)">
+                <BSDatePicker
+                  value={form.sanakhat_date || ""}
+                  onChange={val => setForm({ ...form, sanakhat_date: val })}
+                />
+              </Field>
+              <Field label="Sanaakhat Cost (NPR)">
+                <input
+                  data-testid="sanakhat-cost-input"
+                  type="text" inputMode="numeric" pattern="[0-9]*"
+                  value={form.sanakhat_cost ?? ""}
+                  onChange={e => setForm({ ...form, sanakhat_cost: e.target.value })}
+                  placeholder="0"
+                  className={inp}
+                />
+              </Field>
               <Field label="Purchase Source" required>
                 <select data-testid="source-select" value={form.purchase_source} onChange={e => setForm({ ...form, purchase_source: e.target.value })} className={sel}>
                   <option value="">Select Source</option>

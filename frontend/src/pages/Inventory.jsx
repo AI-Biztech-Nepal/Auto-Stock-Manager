@@ -398,6 +398,8 @@ export default function Inventory() {
         ...form,
         purchase_price: Number(form.purchase_price),
         selling_price: form.selling_price ? Number(form.selling_price) : null,
+        sanakhat_date: form.sanakhat_date || null,
+        sanakhat_cost: form.sanakhat_cost ? Number(form.sanakhat_cost) : null,
         year: Number(form.year),
         engine_cc: Number(form.engine_cc),
         ownership_number: form.ownership_number ? Number(form.ownership_number) : null,
