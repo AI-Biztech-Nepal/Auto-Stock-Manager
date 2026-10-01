@@ -7,6 +7,7 @@ import api from "../utils/api";
 import { formatNPR } from "../utils/helpers";
 import { adToBsDate, BS_MONTHS, getBSMonthRange } from "../utils/nepali-date";
 import { useAuth } from "../context/AuthContext";
+import VendorStatement from "../components/VendorStatement";
 
 const KCard = ({ title, value, sub, color, icon: Icon, onClick }) => (
   <div
@@ -41,6 +42,7 @@ export default function Finance() {
   const [downloadingMonth, setDownloadingMonth] = useState(null);
   const [vendors, setVendors] = useState([]);
   const [showOwed, setShowOwed] = useState(false);
+  const [openVendor, setOpenVendor] = useState(null); // vendor whose "why" breakdown is showing
 
   useEffect(() => {
     Promise.all([
@@ -135,7 +137,7 @@ export default function Finance() {
         <div className="space-y-5">
           <div className="grid grid-cols-2 lg:grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-4">
             <KCard title="Gross Profit" value={formatNPR(summary.gross_profit)} sub={`${summary.profit_margin_pct}% margin`} icon={DollarSign} color="bg-emerald-500" />
-            <KCard title="Due Payments" value={formatNPR(totalOwed)} sub={owedVendors.length ? `${owedVendors.length} vendor${owedVendors.length === 1 ? "" : "s"} to pay · tap for details` : "Nothing to pay"} icon={CreditCard} color="bg-red-500" onClick={() => setShowOwed(true)} />
+            <KCard title="Due Payments" value={formatNPR(totalOwed)} sub={owedVendors.length ? `${owedVendors.length} vendor${owedVendors.length === 1 ? "" : "s"} to pay · tap for details` : "Nothing to pay"} icon={CreditCard} color="bg-red-500" onClick={() => { setOpenVendor(null); setShowOwed(true); }} />
           </div>
 
           {/* Lifetime totals — moved off the dashboard, which is now period-scoped */}
@@ -271,17 +273,29 @@ export default function Finance() {
         </div>
       )}
       {showOwed && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 sm:p-4" onClick={() => setShowOwed(false)}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 sm:p-4" onClick={() => { setShowOwed(false); setOpenVendor(null); }}>
           <div className="bg-white sm:rounded-2xl shadow-2xl w-full h-full sm:h-auto sm:max-w-2xl sm:max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between p-4 sm:p-5 border-b border-slate-100">
-              <div>
-                <h2 className="text-lg font-bold text-slate-900" style={{ fontFamily: "Manrope, sans-serif" }}>Due payments</h2>
-                <p className="text-sm text-slate-500">Bought from them, minus what you have already paid</p>
+              <div className="min-w-0">
+                {openVendor && (
+                  <button onClick={() => setOpenVendor(null)} className="text-xs font-semibold text-blue-600 hover:text-blue-800 mb-1">← All due payments</button>
+                )}
+                <h2 className="text-lg font-bold text-slate-900 truncate" style={{ fontFamily: "Manrope, sans-serif" }}>{openVendor ? openVendor.name : "Due payments"}</h2>
+                <p className="text-sm text-slate-500">{openVendor ? "Why you owe this amount" : "Tap a vendor to see why you owe them"}</p>
               </div>
-              <button onClick={() => setShowOwed(false)} className="w-10 h-10 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500 shrink-0">✕</button>
+              <button onClick={() => { setShowOwed(false); setOpenVendor(null); }} className="w-10 h-10 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500 shrink-0">✕</button>
             </div>
             <div className="overflow-y-auto flex-1">
-              {owedVendors.length === 0 ? (
+              {openVendor ? (
+                <div className="p-4 sm:p-5 space-y-5">
+                  <div className="grid grid-cols-3 gap-2 text-center">
+                    <div className="rounded-lg bg-slate-50 p-3"><p className="text-[11px] uppercase tracking-wider text-slate-500">Bought</p><p className="font-bold text-slate-900">{formatNPR(openVendor.total_purchased)}</p></div>
+                    <div className="rounded-lg bg-slate-50 p-3"><p className="text-[11px] uppercase tracking-wider text-slate-500">Paid</p><p className="font-bold text-emerald-600">{formatNPR(openVendor.total_paid)}</p></div>
+                    <div className="rounded-lg bg-red-50 p-3"><p className="text-[11px] uppercase tracking-wider text-red-500">You owe</p><p className="font-bold text-red-600">{formatNPR(openVendor.remaining_due)}</p></div>
+                  </div>
+                  <VendorStatement vendor={openVendor} />
+                </div>
+              ) : owedVendors.length === 0 ? (
                 <p className="p-8 text-center text-sm text-slate-500">You do not owe any vendor right now.</p>
               ) : (
                 <table className="w-full text-sm">
@@ -294,14 +308,14 @@ export default function Finance() {
                   </thead>
                   <tbody className="divide-y divide-slate-50">
                     {owedVendors.map(v => (
-                      <tr key={v.id}>
+                      <tr key={v.id} onClick={() => setOpenVendor(v)} className="cursor-pointer hover:bg-slate-50" data-testid="due-vendor-row">
                         <td className="px-4 py-3">
                           <p className="font-medium text-slate-900">{v.name}</p>
                           {v.phone && <p className="text-xs text-slate-500">{v.phone}</p>}
                         </td>
                         <td className="px-4 py-3 text-right text-slate-600">{formatNPR(v.total_purchased)}</td>
                         <td className="px-4 py-3 text-right text-slate-600">{formatNPR(v.total_paid)}</td>
-                        <td className="px-4 py-3 text-right font-bold text-red-600">{formatNPR(v.remaining_due)}</td>
+                        <td className="px-4 py-3 text-right font-bold text-red-600">{formatNPR(v.remaining_due)} <span className="text-slate-300 font-normal">›</span></td>
                       </tr>
                     ))}
                   </tbody>
