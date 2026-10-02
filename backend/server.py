@@ -1,6 +1,6 @@
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, UploadFile, File, Form, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from fastapi.responses import StreamingResponse, Response
+from fastapi.responses import StreamingResponse, Response, HTMLResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from starlette.middleware.gzip import GZipMiddleware
@@ -9,7 +9,7 @@ from passlib.context import CryptContext
 from typing import Optional, List, Literal
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
-import os, logging, jwt, uuid, json, base64, io, asyncio, re, copy, contextvars, secrets, hashlib
+import os, logging, jwt, uuid, hmac, html, json, base64, io, asyncio, re, copy, contextvars, secrets, hashlib
 from concurrent.futures import ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 from pydantic import BaseModel, Field, EmailStr
@@ -958,6 +958,75 @@ async def share_profile(cu: dict = Depends(require("vehicles", "view"))):
     every role that can open Share needs these to sign off a post."""
     s = await db.settings.find_one({}, {"_id": 0}) or {}
     return {k: s.get(k) for k in ("business_name", "contact_phone", "address")}
+
+def _client_base(request: Request) -> str:
+    """scheme://host as the client sees it (see _public_photo_url for why request.base_url isn't used)."""
+    scheme = request.headers.get("x-forwarded-proto", request.url.scheme).split(",")[0].strip()
+    host = (request.headers.get("x-forwarded-host") or request.headers.get("host") or request.url.netloc).split(",")[0].strip()
+    return f"{scheme}://{host}"
+
+def _share_sig(vid: str, show_price: str) -> str:
+    # Keyed off JWT_SECRET but through a different derived key, so a share link can never be
+    # replayed as (or confused with) a login token.
+    key = hashlib.sha256(f"{JWT_SECRET}:share".encode()).digest()
+    return hmac.new(key, f"{vid}:{show_price}".encode(), hashlib.sha256).hexdigest()[:20]
+
+@api_router.get("/share/link/{vid}")
+async def share_link(vid: str, request: Request, cu: dict = Depends(require("vehicles", "view"))):
+    """Public link to a vehicle's share page. Facebook's share dialog only takes a URL and builds
+    the post preview (photo, title, description) from that page's Open Graph tags, so each
+    vehicle needs a public page. The link is signed so the price flag can't be flipped by
+    editing the URL (roles without pricing access get a price-free page)."""
+    v = await db.vehicles.find_one({"id": vid}, {"_id": 0, "id": 1})
+    if not v: raise HTTPException(404, "Vehicle not found")
+    p = "0" if cu.get("role") in ("parts_supervisor", "social_media") else "1"
+    return {"url": f"{_client_base(request)}/api/public/share/{vid}?p={p}&s={_share_sig(vid, p)}"}
+
+@api_router.get("/public/share/{vid}", response_class=HTMLResponse)
+async def public_share_page(vid: str, request: Request, p: str = "0", s: str = ""):
+    """The page Facebook (or anyone with the link) opens. Unauthenticated and unscoped, looked
+    up by the vehicle's unguessable id like get_vehicle_qr; shows only the customer-facing
+    allowlist from _public_vehicle_fields, and only while the vehicle is still available."""
+    if p not in ("0", "1") or not hmac.compare_digest(s, _share_sig(vid, p)):
+        raise HTTPException(404, "Not found")
+    v = await db.vehicles.find_one({"id": vid, "status": "available"}, {"_id": 0})
+    if not v: raise HTTPException(404, "This vehicle is no longer available")
+    st = await db.settings.find_one({"company_id": v.get("company_id")}, {"_id": 0}) or {}
+    photos = await db.vehicle_photos.find({"vehicle_id": vid}, {"_id": 0, "id": 1, "uploaded_at": 1}).sort(PHOTO_ORDER).to_list(20)
+    base = _client_base(request)
+    photo_urls = [f"{base}/api/vehicle-photos/{ph['id']}/file" for ph in photos]
+    f = _public_vehicle_fields(v)
+    price = f"NPR {int(f['price']):,}" if p == "1" and f.get("price") else None
+    e = html.escape
+    specs = [x for x in (
+        f.get("year") and str(f["year"]),
+        f.get("kilometer_run") is not None and f"{int(f['kilometer_run']):,} km",
+        f.get("engine_cc") and f"{f['engine_cc']}cc",
+        f.get("fuel_type"), f.get("color"),
+        f.get("ownership_number") and (f"Owner #{f['ownership_number']}" if f["ownership_number"] <= 90 else "Transcript"),
+        f.get("condition"),
+    ) if x]
+    contact = " · ".join(x for x in (st.get("business_name"), st.get("contact_phone")) if x)
+    title = f["title"] + (f" - {price}" if price else "")
+    desc = " · ".join(specs + ([contact] if contact else []))
+    page_url = str(request.url)
+    og = [("og:type", "website"), ("og:title", title), ("og:description", desc), ("og:url", page_url)]
+    if photo_urls: og.append(("og:image", photo_urls[0]))
+    meta = "".join(f'<meta property="{k}" content="{e(val)}">' for k, val in og)
+    gallery = "".join(f'<img src="{e(u)}" alt="">' for u in photo_urls)
+    body = (
+        f"<h1>{e(f['title'])}</h1>" + (f'<p class="price">{e(price)}</p>' if price else "")
+        + f"<p>{e(' · '.join(specs))}</p>" + (f'<p class="contact">{e(contact)}</p>' if contact else "")
+        + (f"<p>{e(st['address'])}</p>" if st.get("address") else "") + gallery
+    )
+    return HTMLResponse(
+        '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
+        f"<title>{e(title)}</title>{meta}"
+        "<style>body{font-family:system-ui,sans-serif;max-width:640px;margin:0 auto;padding:16px;color:#0f172a}"
+        "img{width:100%;border-radius:12px;margin:8px 0}.price{font-size:1.5rem;font-weight:700;color:#15803d}"
+        ".contact{font-weight:600}</style></head><body>" + body + "</body></html>",
+        headers={"Cache-Control": "public, max-age=300"},
+    )
 
 @api_router.post("/share/captions")
 async def share_captions(req: ShareCaptionRequest, cu: dict = Depends(require("vehicles", "view"))):

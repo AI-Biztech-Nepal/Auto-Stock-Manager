@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Search, Copy, Share2, MessageCircle, Download, Sparkles, Package, RotateCcw, Check } from "lucide-react";
+import { Search, Copy, Share2, Facebook, MessageCircle, Download, Sparkles, Package, RotateCcw, Check } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
 import { formatNPR } from "../utils/helpers";
@@ -20,6 +20,16 @@ const loadTemplate = () => {
   try { return localStorage.getItem(TEMPLATE_KEY) || DEFAULT_TEMPLATE; } catch { return DEFAULT_TEMPLATE; }
 };
 
+// Chrome only accepts PNG on the clipboard, and photos are stored as JPEG/HEIC-derived files.
+const toPng = async (blob) => {
+  if (blob.type === "image/png") return blob;
+  const bmp = await createImageBitmap(blob);
+  const c = document.createElement("canvas");
+  c.width = bmp.width; c.height = bmp.height;
+  c.getContext("2d").drawImage(bmp, 0, 0);
+  return new Promise((res, rej) => c.toBlob(b => (b ? res(b) : rej(new Error("png"))), "image/png"));
+};
+
 const photoFiles = async (vehicleId) => {
   const { data } = await api.get(`/vehicles/${vehicleId}/photos`);
   const files = await Promise.all(data.slice(0, MAX_SHARE_PHOTOS).map(async (p, i) => {
@@ -34,9 +44,43 @@ const photoFiles = async (vehicleId) => {
 function PostCard({ vehicle, text, onChange, aiBadge }) {
   const [busy, setBusy] = useState(false);
 
+  // One clipboard entry holding both the caption and the first photo, so pasting into a chat
+  // (WhatsApp Web, Messenger, ...) brings the photo too. Falls back to caption-only where the
+  // browser can't write images, or the vehicle has no photo.
   const copy = async () => {
-    try { await navigator.clipboard.writeText(text); toast.success("Caption copied. Paste it into your post"); }
-    catch { toast.error("Could not copy. Select the text and copy it manually."); }
+    const first = vehicle.thumb_photos?.[0];
+    if (first && navigator.clipboard?.write && window.ClipboardItem) {
+      try {
+        const png = fetch(absoluteUrl(api, first.url)).then(r => r.blob()).then(toPng);
+        await navigator.clipboard.write([new window.ClipboardItem({
+          "text/plain": new Blob([text], { type: "text/plain" }),
+          "image/png": png,
+        })]);
+        toast.success("Caption and photo copied. Paste it into your post or chat");
+        return true;
+      } catch { /* fall through to caption-only */ }
+    }
+    try { await navigator.clipboard.writeText(text); toast.success("Caption copied. Paste it into your post"); return true; }
+    catch { toast.error("Could not copy. Select the text and copy it manually."); return false; }
+  };
+
+  // Facebook's share dialog takes only a URL and builds the preview (photo, title, details)
+  // from that page's Open Graph tags -- there is no way to prefill the post text via URL any
+  // more -- so we open it with this vehicle's public share link and put the caption on the
+  // clipboard to paste into the post box.
+  const facebook = async () => {
+    const win = window.open("about:blank", "fb-share", "width=700,height=720"); // opened inside the click, before any await, so it isn't popup-blocked
+    setBusy(true);
+    try {
+      const [{ data }] = await Promise.all([api.get(`/share/link/${vehicle.id}`), copy()]);
+      const quote = encodeURIComponent(text);
+      const url = `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(data.url)}${quote.length < 1500 ? `&quote=${quote}` : ""}`;
+      if (win) win.location.href = url; else window.open(url, "_blank", "noopener");
+      toast.info("In the Facebook window, paste your caption (Ctrl+V) into the post box if it isn't already there");
+    } catch {
+      win?.close();
+      toast.error("Could not open Facebook");
+    } finally { setBusy(false); }
   };
 
   const share = async () => {
@@ -87,6 +131,7 @@ function PostCard({ vehicle, text, onChange, aiBadge }) {
       </div>
       <textarea value={text} onChange={e => onChange(e.target.value)} rows={12} className="w-full border border-slate-200 rounded-lg p-3 text-sm" />
       <div className="flex flex-wrap gap-2">
+        <button onClick={facebook} disabled={busy} className="flex items-center gap-1.5 bg-[#1877F2] hover:bg-[#166fe0] text-white px-3 py-2 rounded-lg text-sm font-medium disabled:opacity-50" data-testid="share-facebook"><Facebook size={15} /> Facebook</button>
         <button onClick={copy} className={btn}><Copy size={15} /> Copy</button>
         <button onClick={() => window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank", "noopener")} className={btn}><MessageCircle size={15} /> WhatsApp</button>
         <button onClick={download} disabled={busy} className={btn}><Download size={15} /> Photos</button>
