@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Search, Copy, Share2, MessageCircle, Download, Sparkles, Package, RotateCcw, Check } from "lucide-react";
+import { useSearchParams } from "react-router-dom";
+import { Search, Copy, Share2, MessageCircle, Download, Sparkles, Package, RotateCcw, Check, Send } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
 import { formatNPR } from "../utils/helpers";
@@ -36,8 +37,21 @@ const photoFiles = async (vehicleId) => {
   return files.filter(Boolean);
 };
 
-function PostCard({ vehicle, text, onChange, aiBadge }) {
+function PostCard({ vehicle, text, onChange, aiBadge, fbPage }) {
   const [busy, setBusy] = useState(false);
+  const [posting, setPosting] = useState(false);
+
+  const postToPage = async () => {
+    if (!window.confirm(`Post this to ${fbPage.page_name} on Facebook now?`)) return;
+    setPosting(true);
+    try {
+      const { data } = await api.post("/facebook/post", { vehicle_id: vehicle.id, message: text }, { timeout: 180000 });
+      toast.success(`Posted to ${data.page_name} with ${data.photos} photo${data.photos === 1 ? "" : "s"}`,
+        { action: { label: "View", onClick: () => window.open(data.url, "_blank", "noopener") } });
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Posting to Facebook failed");
+    } finally { setPosting(false); }
+  };
 
   const copy = async () => {
     try { await navigator.clipboard.writeText(text); toast.success("Caption copied. Paste it into your post"); }
@@ -101,6 +115,12 @@ function PostCard({ vehicle, text, onChange, aiBadge }) {
       </div>
       <textarea value={text} onChange={e => onChange(e.target.value)} rows={12} className="w-full border border-slate-200 rounded-lg p-3 text-sm" />
       <div className="flex flex-wrap gap-2">
+        {fbPage && (
+          <button onClick={postToPage} disabled={posting || !text.trim()} data-testid="post-to-page"
+            className="flex items-center gap-1.5 bg-[#1877F2] hover:bg-[#166FE5] text-white px-3 py-2 rounded-lg text-sm font-medium disabled:opacity-50">
+            <Send size={15} /> {posting ? "Posting…" : `Post to ${fbPage.page_name}`}
+          </button>
+        )}
         <button onClick={copy} className={btn}><Copy size={15} /> Copy</button>
         <button onClick={() => window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank", "noopener")} className={btn}><MessageCircle size={15} /> WhatsApp</button>
         <button onClick={download} disabled={busy} className={btn}><Download size={15} /> Photos</button>
@@ -112,9 +132,82 @@ function PostCard({ vehicle, text, onChange, aiBadge }) {
   );
 }
 
+const FB_RESULTS = {
+  connected: ["success", "Facebook Page connected"],
+  cancelled: ["info", "Facebook connection cancelled"],
+  expired: ["error", "That Facebook sign-in took too long. Try connecting again"],
+  failed: ["error", "Couldn't connect to Facebook. Try again"],
+  nopages: ["error", "That Facebook account doesn't manage any Page it can post to"],
+};
+
+// One-click posting to the company's Facebook Page, done by the server, so it works on a
+// computer and inside the Android app, where the share sheet can't attach photos.
+function FacebookBar({ status, isAdmin, onChanged }) {
+  const [params, setParams] = useSearchParams();
+  const [pickPages, setPickPages] = useState(null);
+  const nonce = params.get("nonce");
+
+  useEffect(() => {
+    const fb = params.get("fb");
+    if (!fb) return;
+    if (fb === "pick" && nonce) {
+      api.get(`/facebook/pending/${nonce}`).then(r => setPickPages(r.data))
+        .catch(e => toast.error(e.response?.data?.detail || "Couldn't load your Pages"));
+      return;
+    }
+    const [kind, msg] = FB_RESULTS[fb] || [];
+    if (kind) toast[kind](msg);
+    if (fb === "connected") onChanged();
+    setParams({}, { replace: true });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const connect = async () => {
+    try { window.location.href = (await api.get("/facebook/connect")).data.url; }
+    catch (e) { toast.error(e.response?.data?.detail || "Couldn't start Facebook connection"); }
+  };
+  const pick = async (pageId) => {
+    try {
+      await api.post("/facebook/select", { nonce, page_id: pageId });
+      toast.success("Facebook Page connected");
+      setPickPages(null); setParams({}, { replace: true }); onChanged();
+    } catch (e) { toast.error(e.response?.data?.detail || "Couldn't connect that Page"); }
+  };
+  const disconnect = async () => {
+    if (!window.confirm(`Disconnect ${status.page.page_name}? You can connect again any time.`)) return;
+    try { await api.delete("/facebook/page"); onChanged(); }
+    catch { toast.error("Couldn't disconnect"); }
+  };
+
+  if (pickPages) return (
+    <div className="bg-white border border-blue-200 rounded-xl p-4 space-y-2">
+      <p className="text-sm font-medium text-slate-800">Which Page should vehicles be posted to?</p>
+      <div className="flex flex-wrap gap-2">
+        {pickPages.map(p => <button key={p.id} onClick={() => pick(p.id)} className="border border-slate-200 px-3 py-2 rounded-lg text-sm hover:bg-blue-50">{p.name}</button>)}
+      </div>
+    </div>
+  );
+  if (!status?.configured) return null;
+  if (status.page) return (
+    <div className="bg-blue-50 border border-blue-100 rounded-xl px-4 py-2.5 text-sm text-slate-700 flex flex-wrap items-center gap-x-3 gap-y-1">
+      <span>Posting to Facebook Page <b>{status.page.page_name}</b></span>
+      {isAdmin && <button onClick={disconnect} className="text-xs text-slate-500 hover:text-red-600">Disconnect</button>}
+    </div>
+  );
+  if (!isAdmin) return null;
+  return (
+    <div className="bg-white border border-slate-200 rounded-xl p-4 flex flex-wrap items-center gap-3 justify-between">
+      <p className="text-sm text-slate-600">Connect your Facebook Page to post photos and caption in one click, from a computer or phone.</p>
+      <button onClick={connect} className="bg-[#1877F2] hover:bg-[#166FE5] text-white px-4 py-2 rounded-lg text-sm font-medium">Connect Facebook Page</button>
+    </div>
+  );
+}
+
 export default function Share() {
   const { user } = useAuth();
   const showPrice = !hidesVehiclePricing(user?.role);
+  const role = user?.role || "admin";
+  const [fbStatus, setFbStatus] = useState(null);
+  const loadFb = () => api.get("/facebook/status").then(r => setFbStatus(r.data)).catch(() => {});
   const [vehicles, setVehicles] = useState([]);
   const [loading, setLoading] = useState(true);
   const [profile, setProfile] = useState({});
@@ -134,6 +227,7 @@ export default function Share() {
       .then(r => setVehicles(r.data)).catch(() => toast.error("Failed to load vehicles"))
       .finally(() => setLoading(false));
     api.get("/share/profile").then(r => setProfile(r.data || {})).catch(() => {});
+    loadFb();
   }, []);
 
   const shown = useMemo(() => vehicles.filter(v =>
@@ -171,6 +265,8 @@ export default function Share() {
         <h1 className="text-2xl font-bold text-slate-900">Share</h1>
         <p className="text-sm text-slate-500">Pick vehicles, get a ready-to-post caption for each, then share to Facebook, WhatsApp or anywhere else.</p>
       </div>
+
+      <FacebookBar status={fbStatus} isAdmin={role === "admin"} onChanged={loadFb} />
 
       <div className="grid lg:grid-cols-5 gap-5 items-start">
         {/* Vehicle picker */}
@@ -243,6 +339,7 @@ export default function Share() {
             <div className="bg-white border border-dashed border-slate-300 rounded-xl py-16 text-center text-slate-400 text-sm">Select one or more vehicles to get a caption</div>
           ) : chosen.map(v => (
             <PostCard key={v.id} vehicle={v} text={textFor(v)} aiBadge={!!aiTexts[v.id] && edits[v.id] === undefined}
+              fbPage={["admin", "social_media"].includes(role) ? fbStatus?.page : null}
               onChange={t => setEdits(prev => ({ ...prev, [v.id]: t }))} />
           ))}
         </div>

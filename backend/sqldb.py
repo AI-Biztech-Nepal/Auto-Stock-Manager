@@ -102,6 +102,8 @@ TABLES = {
     "sync_logs": {"columns": {"id", "company_id", "pushed_at", "count", "status", "message"}},
     "audit_logs": {"columns": {"id", "company_id", "action", "vehicle_id", "user", "timestamp", "details"}},
     "ai_chat_sessions": {"columns": {"id", "company_id", "messages", "updated_at"}, "json_cols": {"messages"}},
+    "facebook_pages": {"columns": {"id", "company_id", "page_id", "page_name", "access_token", "connected_by",
+                                    "connected_at"}},
 }
 
 

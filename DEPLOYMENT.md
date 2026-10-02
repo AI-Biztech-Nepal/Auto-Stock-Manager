@@ -201,6 +201,7 @@ the table definitions.
 | `RESEND_API_KEY` | ❌ (but see below) | Sends email-verification and password-reset emails. Without it, signup/reset still work but no email is ever sent — accounts get stuck unverified. |
 | `RESEND_FROM` | ❌ | Sender address, e.g. `Auto Stock Manager <no-reply@yourdomain.com>`. Defaults to Resend's sandbox address, which can only email your own Resend account — real users won't receive anything until you verify a domain and set this. |
 | `FRONTEND_URL` | ✅ if `RESEND_API_KEY` set | Your deployed frontend's URL (no trailing slash) — used to build the links inside verification/reset emails. Defaults to `http://localhost:3000`, which is wrong for production. |
+| `FB_APP_ID` / `FB_APP_SECRET` | ❌ | Turns on "Post to Facebook Page" on the Share tab (see **Facebook Page posting** below). Without them the button is hidden. Also needs `FRONTEND_URL`. |
 
 ### Vercel (Frontend)
 | Variable | Required | Description |
@@ -211,6 +212,26 @@ Vercel only hosts the React frontend, which calls the AI features through the ba
 `/api/ai/*` routes — it never touches `GEMINI_API_KEY` directly, so deleting/recreating
 the Vercel project cannot affect the AI Assistant. If AI features stop working, the key
 is missing (or was reset) on the **backend**, not Vercel — see the table above.
+
+### Facebook Page posting
+Lets the Share tab publish a vehicle's photos and caption straight to the business's Facebook
+Page, from a computer or phone. Facebook only allows this for Pages, not personal profiles,
+groups or Marketplace.
+
+1. Go to [developers.facebook.com/apps](https://developers.facebook.com/apps), **Create app**,
+   pick the **Business** type (or "Other", then "Business").
+2. Add the **Facebook Login for Business** product. In its settings, add this as a **Valid OAuth
+   Redirect URI**: `<FRONTEND_URL>/api/facebook/callback` (e.g.
+   `https://auto-stock-manager.vercel.app/api/facebook/callback`).
+3. Copy **App ID** and **App Secret** (App settings > Basic) into the backend env as `FB_APP_ID`
+   and `FB_APP_SECRET`, then restart the backend. (Set `FB_REDIRECT_URI` only if the redirect
+   URI above can't be built from `FRONTEND_URL`.)
+4. In the app, log in as an Admin, open **Share**, click **Connect Facebook Page** and approve.
+
+While the Meta app is in **Development** mode, only people with a role on the Meta app (you)
+can connect a Page. That's enough for your own dealership. Letting other companies on this
+platform connect their own Pages needs Meta **App Review** for `pages_manage_posts`,
+`pages_read_engagement` and `pages_show_list`, plus business verification.
 
 ---
 

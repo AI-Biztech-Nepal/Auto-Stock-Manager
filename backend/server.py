@@ -1,6 +1,6 @@
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, UploadFile, File, Form, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from fastapi.responses import StreamingResponse, Response
+from fastapi.responses import StreamingResponse, Response, RedirectResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from starlette.middleware.gzip import GZipMiddleware
@@ -75,7 +75,7 @@ TENANT_COLLECTIONS = {
     "customers", "emi_payments", "emi_records", "expenses", "job_cards", "kit_components",
     "leads", "legal_documents", "part_transactions", "partners", "sales", "spare_parts",
     "sync_logs", "team_members", "vehicle_photos", "vehicles", "vendor_payments", "vendors",
-    "audit_logs", "ai_chat_sessions", "settings",
+    "audit_logs", "ai_chat_sessions", "settings", "facebook_pages",
 }
 
 def company_scope(cu: dict) -> dict:
@@ -1010,6 +1010,164 @@ async def share_captions(req: ShareCaptionRequest, cu: dict = Depends(require("v
     if not out:
         raise HTTPException(502, "The AI returned no captions. Please try again.")
     return {"captions": out}
+
+# ── FACEBOOK PAGE POSTING ───────────────────────────────────────────────
+# Lets the Share tab publish photos + caption straight to the company's Facebook Page from any
+# device -- desktop browsers and the Android app's WebView can't hand photo files to the
+# Facebook app the way a phone's share sheet can. Facebook only allows this for Pages (never
+# personal profiles, groups or Marketplace). Optional like Resend: with FB_APP_ID/FB_APP_SECRET
+# unset the Share tab just doesn't offer it. The Page token lives in its own table, never in
+# settings -- settings rows get dumped into AI prompts and the public storefront.
+FB_APP_ID = os.environ.get("FB_APP_ID")
+FB_APP_SECRET = os.environ.get("FB_APP_SECRET")
+FB_GRAPH = "https://graph.facebook.com/v23.0"
+# Goes through the frontend's /api rewrite to this backend (see vercel.json), so it needs no
+# separate backend URL. Must exactly match a Valid OAuth Redirect URI in the Meta app.
+FB_REDIRECT_URI = os.environ.get("FB_REDIRECT_URI") or f"{FRONTEND_URL}/api/facebook/callback"
+FB_SCOPES = "pages_show_list,pages_manage_posts,pages_read_engagement"
+# Pages waiting for the admin to pick one after connecting an account that manages several.
+# In-memory is fine: single worker, and an entry only lives for the few seconds of the pick.
+_FB_PENDING: dict = {}
+
+class FacebookPageSelect(BaseModel):
+    nonce: str = Field(..., max_length=64)
+    page_id: str = Field(..., max_length=64)
+
+class FacebookPostRequest(BaseModel):
+    vehicle_id: str = Field(..., max_length=64)
+    message: str = Field(..., min_length=1, max_length=5000)
+
+def _fb_error(resp: httpx.Response, action: str) -> HTTPException:
+    try:
+        err = resp.json().get("error", {})
+    except ValueError:
+        err = {}
+    logger.warning("Facebook %s failed: %s %s", action, resp.status_code, err or resp.text[:300])
+    if err.get("code") in (102, 190, 200, 10):
+        return HTTPException(400, "Facebook connection expired or lost permission. Reconnect the Page on the Share tab.")
+    return HTTPException(502, f"Facebook couldn't {action}: {err.get('message') or 'unknown error'}")
+
+async def _fb_save_page(page: dict, username: Optional[str]):
+    await db.facebook_pages.delete_many({})
+    await db.facebook_pages.insert_one({
+        "id": str(uuid.uuid4()), "page_id": page["id"], "page_name": page["name"],
+        "access_token": page["access_token"], "connected_by": username,
+        "connected_at": datetime.now(timezone.utc).isoformat()})
+
+@api_router.get("/facebook/status")
+async def facebook_status(cu: dict = Depends(require("vehicles", "view"))):
+    page = await db.facebook_pages.find_one({}, {"_id": 0, "page_id": 1, "page_name": 1})
+    return {"configured": bool(FB_APP_ID and FB_APP_SECRET), "page": page}
+
+@api_router.get("/facebook/connect")
+async def facebook_connect(cu: dict = Depends(admin_only)):
+    if not (FB_APP_ID and FB_APP_SECRET):
+        raise HTTPException(400, "Facebook posting isn't set up on the server yet")
+    state = jwt.encode({"purpose": "fb_connect", "company_id": cu["company_id"], "username": cu.get("username"),
+                        "exp": datetime.now(timezone.utc) + timedelta(minutes=15)}, JWT_SECRET, algorithm="HS256")
+    q = httpx.QueryParams({"client_id": FB_APP_ID, "redirect_uri": FB_REDIRECT_URI, "state": state,
+                           "scope": FB_SCOPES, "response_type": "code"})
+    return {"url": f"https://www.facebook.com/v23.0/dialog/oauth?{q}"}
+
+@api_router.get("/facebook/callback")
+async def facebook_callback(state: str = "", code: str = "", error: str = ""):
+    """Facebook redirects the browser here after the admin approves (or cancels). A redirect
+    carries no bearer token, so the signed state carries the company instead."""
+    def back(result: str):
+        return RedirectResponse(f"{FRONTEND_URL}/share?fb={result}")
+    try:
+        st = jwt.decode(state, JWT_SECRET, algorithms=["HS256"])
+        if st.get("purpose") != "fb_connect":
+            raise jwt.InvalidTokenError()
+    except jwt.InvalidTokenError:
+        return back("expired")
+    if error or not code:
+        return back("cancelled")
+    current_company_id.set(st["company_id"])
+    try:
+        async with httpx.AsyncClient(timeout=20) as http:
+            r = await http.get(f"{FB_GRAPH}/oauth/access_token", params={
+                "client_id": FB_APP_ID, "client_secret": FB_APP_SECRET, "redirect_uri": FB_REDIRECT_URI, "code": code})
+            if r.status_code >= 400: raise _fb_error(r, "connect")
+            # Page tokens fetched with a long-lived user token never expire, so exchange first.
+            r = await http.get(f"{FB_GRAPH}/oauth/access_token", params={
+                "grant_type": "fb_exchange_token", "client_id": FB_APP_ID, "client_secret": FB_APP_SECRET,
+                "fb_exchange_token": r.json()["access_token"]})
+            if r.status_code >= 400: raise _fb_error(r, "connect")
+            r = await http.get(f"{FB_GRAPH}/me/accounts", params={
+                "fields": "id,name,access_token,tasks", "limit": 100, "access_token": r.json()["access_token"]})
+            if r.status_code >= 400: raise _fb_error(r, "list your Pages")
+    except (HTTPException, httpx.HTTPError):
+        return back("failed")
+    pages = [p for p in r.json().get("data", []) if "CREATE_CONTENT" in (p.get("tasks") or ["CREATE_CONTENT"])]
+    if not pages:
+        return back("nopages")
+    if len(pages) == 1:
+        await _fb_save_page(pages[0], st.get("username"))
+        return back("connected")
+    nonce = secrets.token_urlsafe(16)
+    _FB_PENDING[nonce] = {"company_id": st["company_id"], "username": st.get("username"), "pages": pages,
+                          "expires": datetime.now(timezone.utc) + timedelta(minutes=15)}
+    return back(f"pick&nonce={nonce}")
+
+def _fb_pending(nonce: str, cu: dict) -> dict:
+    now = datetime.now(timezone.utc)
+    for k in [k for k, v in _FB_PENDING.items() if v["expires"] < now]:
+        _FB_PENDING.pop(k, None)
+    p = _FB_PENDING.get(nonce)
+    if not p or p["company_id"] != cu.get("company_id"):
+        raise HTTPException(404, "That Facebook sign-in expired. Connect again.")
+    return p
+
+@api_router.get("/facebook/pending/{nonce}")
+async def facebook_pending(nonce: str, cu: dict = Depends(admin_only)):
+    return [{"id": p["id"], "name": p["name"]} for p in _fb_pending(nonce, cu)["pages"]]
+
+@api_router.post("/facebook/select")
+async def facebook_select(req: FacebookPageSelect, cu: dict = Depends(admin_only)):
+    pending = _fb_pending(req.nonce, cu)
+    page = next((p for p in pending["pages"] if p["id"] == req.page_id), None)
+    if not page:
+        raise HTTPException(404, "Page not found")
+    await _fb_save_page(page, pending["username"])
+    _FB_PENDING.pop(req.nonce, None)
+    return {"page_id": page["id"], "page_name": page["name"]}
+
+@api_router.delete("/facebook/page")
+async def facebook_disconnect(cu: dict = Depends(admin_only)):
+    await db.facebook_pages.delete_many({})
+    return {"message": "Disconnected"}
+
+@api_router.post("/facebook/post")
+async def facebook_post(req: FacebookPostRequest, cu: dict = Depends(require("vehicle_photos", "create"))):
+    """Publishes one vehicle as a single Page post: its photos (up to 10, in gallery order)
+    uploaded unpublished, then attached to one feed post carrying the caption."""
+    page = await db.facebook_pages.find_one({}, {"_id": 0})
+    if not page:
+        raise HTTPException(400, "No Facebook Page connected")
+    if not await db.vehicles.find_one({"id": req.vehicle_id}, {"_id": 0, "id": 1}):
+        raise HTTPException(404, "Vehicle not found")
+    photos = await db.vehicle_photos.find({"vehicle_id": req.vehicle_id}, {"_id": 0, "id": 1}).sort(PHOTO_ORDER).to_list(10)
+    token, pid = page["access_token"], page["page_id"]
+    try:
+        async with httpx.AsyncClient(timeout=120) as http:
+            async def upload(photo_id):
+                content, ctype = await _get_photo_bytes({"id": photo_id})
+                r = await http.post(f"{FB_GRAPH}/{pid}/photos", data={"published": "false", "access_token": token},
+                                    files={"source": (f"{photo_id}.jpg", content, ctype)})
+                if r.status_code >= 400: raise _fb_error(r, "upload a photo")
+                return r.json()["id"]
+            media = await asyncio.gather(*(upload(p["id"]) for p in photos))
+            data = {"message": req.message, "access_token": token}
+            for i, m in enumerate(media):
+                data[f"attached_media[{i}]"] = json.dumps({"media_fbid": m})
+            r = await http.post(f"{FB_GRAPH}/{pid}/feed", data=data)
+            if r.status_code >= 400: raise _fb_error(r, "publish the post")
+    except httpx.HTTPError:
+        raise HTTPException(502, "Couldn't reach Facebook. Please try again.")
+    post_id = r.json()["id"]
+    return {"post_id": post_id, "url": f"https://www.facebook.com/{post_id}", "photos": len(media),
+            "page_name": page["page_name"]}
 
 @api_router.get("/ai/festival-intelligence")
 async def ai_festival_intelligence(cu: dict = Depends(admin_only)):
@@ -4561,6 +4719,17 @@ async def _run_startup_tasks():
         # Buyer's ID and the sale-deed witness block post-date the original schema —
         # add them onto the existing tables if missing (same ADD COLUMN IF NOT EXISTS
         # pattern; the Mongo backend needs no schema step).
+        # Facebook Page connection (see FACEBOOK PAGE POSTING) post-dates schema.sql too.
+        try:
+            await db.execute_raw(
+                "CREATE TABLE IF NOT EXISTS facebook_pages (id VARCHAR(36) NOT NULL PRIMARY KEY, "
+                "company_id VARCHAR(36) NOT NULL, INDEX idx_facebook_pages_company_id (company_id), "
+                "page_id VARCHAR(64), page_name VARCHAR(255), access_token TEXT, connected_by VARCHAR(100), "
+                "connected_at VARCHAR(40), CONSTRAINT fk_facebook_pages_company FOREIGN KEY (company_id) "
+                "REFERENCES companies(id)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+            )
+        except Exception:
+            logger.warning("Could not ensure facebook_pages table", exc_info=True)
         _post_schema_cols = [
             ("customers", "id_number", "VARCHAR(100)"),
             ("sales", "witness_name", "VARCHAR(255)"),

@@ -578,4 +578,16 @@ CREATE TABLE IF NOT EXISTS ai_chat_sessions (
   CONSTRAINT fk_ai_chat_sessions_company FOREIGN KEY (company_id) REFERENCES companies(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+CREATE TABLE IF NOT EXISTS facebook_pages (
+  id VARCHAR(36) NOT NULL PRIMARY KEY,
+  company_id VARCHAR(36) NOT NULL,
+  INDEX idx_facebook_pages_company_id (company_id),
+  page_id VARCHAR(64),
+  page_name VARCHAR(255),
+  access_token TEXT,
+  connected_by VARCHAR(100),
+  connected_at VARCHAR(40),
+  CONSTRAINT fk_facebook_pages_company FOREIGN KEY (company_id) REFERENCES companies(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 SET FOREIGN_KEY_CHECKS = 1;
