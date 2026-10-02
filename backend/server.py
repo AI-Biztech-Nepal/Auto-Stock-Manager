@@ -722,13 +722,16 @@ class AISuggestionsRequest(BaseModel):
 
 MARKDOWN_NOTE = 'Format your reply as plain text with **bold** for emphasis and "- " for bullet points only — no headers, links, or tables.'
 
-async def _ai_text(system: str, contents, max_tokens: int = 1024) -> str:
+async def _ai_text(system: str, contents, max_tokens: int = 1024, json_mode: bool = False) -> str:
     if not ai_client:
         raise HTTPException(503, "AI Assistant is not configured. Set GEMINI_API_KEY on the server.")
     try:
         resp = await ai_client.aio.models.generate_content(
             model=AI_MODEL, contents=contents,
-            config=genai_types.GenerateContentConfig(system_instruction=system, max_output_tokens=max_tokens),
+            config=genai_types.GenerateContentConfig(
+                system_instruction=system, max_output_tokens=max_tokens,
+                response_mime_type="application/json" if json_mode else None,
+            ),
         )
     except genai_errors.APIError as e:
         # Previously unhandled — any Gemini-side error (rate limit, transient outage,
@@ -929,6 +932,84 @@ async def ai_price_suggestion(req: AIPriceRequest, cu: dict = Depends(admin_only
     )
     suggestion = await _ai_text(system, prompt)
     return {"suggestion": suggestion, "sold_history_count": len(similar)}
+
+# ── Share portal: social-media captions ───────────────────────────────
+class ShareCaptionRequest(BaseModel):
+    vehicle_ids: List[str] = Field(..., min_length=1, max_length=20)
+    style: str = Field("facebook_sales", max_length=40)
+    language: str = Field("english", max_length=40)
+    extra: Optional[str] = Field(None, max_length=500)
+
+SHARE_STYLES = {
+    "facebook_sales": "an eye-catching Facebook Marketplace-style sales post: attention-grabbing headline, short bullet list of the key specs, a clear call to action",
+    "short": "a short, punchy post of 3-4 lines, suitable for an Instagram or WhatsApp status",
+    "detailed": "a detailed, trustworthy post that walks through condition, ownership, documents and why it is a good buy",
+    "friendly": "a warm, conversational post, like a salesperson recommending the vehicle to a friend",
+}
+SHARE_LANGUAGES = {
+    "english": "English",
+    "nepali": "Nepali (Devanagari script)",
+    "mixed": "a natural mix of Nepali (Roman script) and English, the way Nepali dealers write on Facebook",
+}
+
+@api_router.get("/share/profile")
+async def share_profile(cu: dict = Depends(require("vehicles", "view"))):
+    """Business name / phone / address for the Share page. /settings itself is admin-only, but
+    every role that can open Share needs these to sign off a post."""
+    s = await db.settings.find_one({}, {"_id": 0}) or {}
+    return {k: s.get(k) for k in ("business_name", "contact_phone", "address")}
+
+@api_router.post("/share/captions")
+async def share_captions(req: ShareCaptionRequest, cu: dict = Depends(require("vehicles", "view"))):
+    """AI-written social-media captions, one per vehicle. Only an allowlist of customer-facing
+    fields ever reaches the model (same spirit as _public_vehicle_fields) -- never purchase
+    price, vendor, chassis/engine numbers or notes -- and selling price is dropped for roles
+    that aren't allowed to see pricing."""
+    style = SHARE_STYLES.get(req.style)
+    language = SHARE_LANGUAGES.get(req.language)
+    if not style or not language:
+        raise HTTPException(400, "Unknown caption style or language")
+    ids = list(dict.fromkeys(req.vehicle_ids))
+    vehicles = await db.vehicles.find({"id": {"$in": ids}}, {"_id": 0}).to_list(len(ids))
+    if not vehicles:
+        raise HTTPException(404, "No matching vehicles")
+    role = cu.get("role", "admin")
+    s = await db.settings.find_one({}, {"_id": 0}) or {}
+    facts = []
+    for v in vehicles:
+        v = _hide_financials_for_role(dict(v), role)
+        item = _public_vehicle_fields(v)
+        item["bluebook"] = v.get("bluebook_status")
+        item["tax_clearance"] = v.get("tax_clearance_status")
+        item["insurance"] = v.get("insurance_status")
+        if not v.get("selling_price"):
+            item.pop("price", None)
+        facts.append({k: val for k, val in item.items() if val not in (None, "", [])
+                      and k not in ("status", "created_at")})
+    contact = {k: s.get(k) for k in ("business_name", "contact_phone", "address") if s.get(k)}
+    system = (
+        "You write social-media posts for a used-vehicle dealership in Nepal. "
+        f"Write each post as {style}, in {language}. Use a few fitting emojis and relevant hashtags. "
+        "Highlight what a buyer cares about most: price, year, kilometres run, ownership (a bluebook/ownership "
+        "number above 90 means a transcript copy; mention it plainly if relevant), engine, condition, and document "
+        "status (only claim a document is clear when its value is 'ok'; never mention pending or missing ones). "
+        "Use ONLY the facts given; never invent specs, prices, offers or warranties. If no price is given, say to "
+        "call for price. Finish with the dealership's contact details when provided. Prices are in NPR. "
+        "Reply with JSON only: {\"captions\": [{\"id\": \"<vehicle id>\", \"caption\": \"<post text>\"}]}, "
+        "one entry per vehicle, with the same ids as given."
+    )
+    prompt = f"Dealership contact: {json.dumps(contact, ensure_ascii=False)}\nVehicles: {json.dumps(facts, ensure_ascii=False)}"
+    if req.extra:
+        prompt += f"\nExtra instructions from the dealer: {req.extra}"
+    raw = await _ai_text(system, prompt, max_tokens=800 * len(vehicles) + 400, json_mode=True)
+    try:
+        items = json.loads(raw)["captions"]
+        out = {i["id"]: i["caption"] for i in items if i.get("id") in ids and isinstance(i.get("caption"), str)}
+    except (ValueError, KeyError, TypeError):
+        raise HTTPException(502, "The AI returned an unreadable reply. Please try again.")
+    if not out:
+        raise HTTPException(502, "The AI returned no captions. Please try again.")
+    return {"captions": out}
 
 @api_router.get("/ai/festival-intelligence")
 async def ai_festival_intelligence(cu: dict = Depends(admin_only)):

@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback, useMemo, useRef, useLayoutEffect } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { Plus, Search, Eye, Trash2, Filter, X, UploadCloud, Download, EyeOff, Package, Wallet, DollarSign, Lock, Moon, Archive, Sparkles, Store, User, Wrench, Clock, CheckCircle2, AlertTriangle, ImageOff, ChevronDown } from "lucide-react";
+import { Plus, Search, Eye, Trash2, Filter, X, UploadCloud, Download, EyeOff, Package, Wallet, DollarSign, Lock, Moon, Archive, Sparkles, Store, User, Wrench, Clock, CheckCircle2, AlertTriangle, ImageOff, ChevronDown, Share2 } from "lucide-react";
 import { toast } from "sonner";
 import api, { postWithRetry } from "../utils/api";
 import { formatNPR, getAgingStyle, getStatusStyle, getTerminationStyle, isSanakhatOverdue, sanakhatPendingDays, SANAKHAT_WARN_DAYS, BRANDS, VEHICLE_STATUS_OPTIONS, formatOwnership } from "../utils/helpers";
@@ -457,6 +457,15 @@ export default function Inventory() {
         <div className="flex items-center gap-2 flex-wrap">
           <PeriodToggle period={periodFilter} onChange={p => { setPeriodFilter(p); setDateFilter(""); }} testid="inventory-period-toggle" allowOff />
           <ViewToggle view={view} onChange={setView} testid="inventory-view-toggle" />
+          {!isFrontDesk && (
+            <button
+              onClick={() => navigate("/share")}
+              data-testid="share-stock-button"
+              className="flex items-center gap-2 border border-slate-200 text-slate-700 text-sm font-medium px-4 py-3 rounded-lg hover:bg-slate-50 transition-all active:scale-95"
+            >
+              <Share2 size={16} /> Share Stock
+            </button>
+          )}
           {!isFrontDesk && !isSocialMedia && (
             <button
               onClick={exportStock}

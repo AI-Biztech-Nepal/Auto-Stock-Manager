@@ -12,7 +12,7 @@ export const ROLE_NAV_PATHS = {
   // Ledger: Vendors + Staff tabs (see LEDGER_TABS below).
   parts_supervisor: ["/spare-parts", "/ledger", "/jobs", "/inventory", "/settings"],
   // Social Media adds new stock (basic details only) and manages vehicle photos -- nothing else.
-  social_media: ["/inventory", "/settings"],
+  social_media: ["/inventory", "/share", "/settings"],
   // Cross-company visibility only -- no company_id of its own, so it must never reach any
   // of the regular per-company pages (they'd have nothing scoped to show it anyway).
   platform_owner: ["/platform"],

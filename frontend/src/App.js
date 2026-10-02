@@ -30,6 +30,7 @@ const SpareParts = lazy(() => import("./pages/SpareParts"));
 const Sales = lazy(() => import("./pages/Sales"));
 const SaleDetail = lazy(() => import("./pages/SaleDetail"));
 const SoldStockDetail = lazy(() => import("./pages/SoldStockDetail"));
+const Share = lazy(() => import("./pages/Share"));
 const ImportStock = lazy(() => import("./pages/ImportStock"));
 const Platform = lazy(() => import("./pages/Platform"));
 
@@ -103,6 +104,7 @@ function AppRoutes() {
           {/* Sold Stock was merged into Sales. */}
           <Route path="sold-stock" element={<Navigate to="/sales" replace />} />
           <Route path="sold-stock/:id" element={<SoldStockRedirect />} />
+          <Route path="share" element={<RoleRoute path="/share"><Share /></RoleRoute>} />
           <Route path="ai" element={<RoleRoute path="/ai"><AIAssistant /></RoleRoute>} />
           <Route path="settings" element={<Settings />} />
           <Route path="platform" element={<RoleRoute path="/platform"><Platform /></RoleRoute>} />
