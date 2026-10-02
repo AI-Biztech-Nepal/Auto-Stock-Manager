@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Search, Copy, Share2, MessageCircle, Download, Sparkles, Package, RotateCcw, Check } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
@@ -25,7 +25,12 @@ const photoFiles = async (vehicleId) => {
   const files = await Promise.all(data.slice(0, MAX_SHARE_PHOTOS).map(async (p, i) => {
     try {
       const blob = await (await fetch(absoluteUrl(api, p.url))).blob();
-      return new File([blob], p.filename || `vehicle-${i + 1}.jpg`, { type: blob.type });
+      if (!blob.type.startsWith("image/")) return null;
+      // Name by the served type, not the original upload name: uploads are re-encoded on the
+      // server, and Android's share sheet rejects every file if one name has a non-image
+      // extension (e.g. "IMG_1234.HEIC" or a gallery "blob" with none).
+      const ext = blob.type === "image/jpeg" ? "jpg" : blob.type.split("/")[1];
+      return new File([blob], `vehicle-${i + 1}.${ext}`, { type: blob.type });
     } catch { return null; }
   }));
   return files.filter(Boolean);
@@ -39,17 +44,26 @@ function PostCard({ vehicle, text, onChange, aiBadge }) {
     catch { toast.error("Could not copy. Select the text and copy it manually."); }
   };
 
+  const prepared = useRef(null);
+
   const share = async () => {
     if (!navigator.share) { await copy(); return; }
+    // Facebook drops text that comes in through the share sheet, so put the caption on the
+    // clipboard first; the user just pastes it into the post.
+    navigator.clipboard?.writeText(text).catch(() => {});
     setBusy(true);
     try {
-      const files = await photoFiles(vehicle.id);
+      const files = prepared.current || await photoFiles(vehicle.id);
+      prepared.current = files;
       const data = { text };
       if (files.length && navigator.canShare?.({ files })) data.files = files;
-      else toast.info("Photos can't be attached on this device. Sharing the caption only");
+      else toast.info(files.length ? "Photos can't be attached on this device. Sharing the caption only" : "This vehicle has no photos yet. Sharing the caption only");
       await navigator.share(data);
     } catch (e) {
-      if (e?.name !== "AbortError") toast.error("Share failed. Use Copy caption instead");
+      // Downloading the photos can outlast the tap's permission to open the share sheet;
+      // they're cached now, so a second tap opens it instantly.
+      if (e?.name === "NotAllowedError") toast.info("Photos ready. Tap Share again");
+      else if (e?.name !== "AbortError") toast.error("Share failed. Use Copy caption instead");
     } finally { setBusy(false); }
   };
 
