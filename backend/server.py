@@ -4977,8 +4977,8 @@ async def upload_legal_document(vid: str, file: UploadFile = File(...), doc_type
     if not _upload_type_ok(file, ALLOWED_DOC_TYPES, DOC_EXTENSIONS):
         raise HTTPException(400, "Only PDF/JPEG/PNG/HEIC allowed for documents.")
     content = await file.read()
-    if len(content) > 10 * 1024 * 1024:
-        raise HTTPException(400, "File too large. Max 10MB.")
+    if len(content) > RAW_UPLOAD_MAX:
+        raise HTTPException(400, "File too large. Max 25MB.")
     content_type = _resolved_content_type(file)
     if content_type.startswith("image/"):
         try:

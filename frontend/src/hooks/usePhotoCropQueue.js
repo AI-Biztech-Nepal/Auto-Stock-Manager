@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { toast } from "sonner";
 import { getCroppedFile } from "../components/PhotoCropperModal";
 
 /**
@@ -20,14 +21,32 @@ export function usePhotoCropQueue(onCropped) {
     }
   };
 
+  // Gallery picks (unlike in-browser camera captures, which the browser always hands back
+  // as a plain JPEG) can be formats the browser itself can't decode into an <img>/canvas --
+  // HEIC/HEIF from an iPhone's photo library is the common case on Chrome/Firefox/Android,
+  // which have no built-in HEIC codec. The crop <img> would then just sit broken with
+  // "Use this photo" permanently disabled (croppedAreaPixels never arrives), so uploading
+  // looked completely dead. Probe decodability first and skip straight to the raw file --
+  // the backend already decodes/compresses HEIC itself (see _compress_photo) -- instead of
+  // trapping the user in a cropper that can never confirm.
   const processNext = (files) => {
     if (files.length === 0) return;
     const [next, ...rest] = files;
-    setQueue(rest);
     const url = URL.createObjectURL(next);
-    objectUrlRef.current = url;
-    activeFileRef.current = next;
-    setActiveSrc(url);
+    const probe = new Image();
+    probe.onload = () => {
+      setQueue(rest);
+      objectUrlRef.current = url;
+      activeFileRef.current = next;
+      setActiveSrc(url);
+    };
+    probe.onerror = () => {
+      URL.revokeObjectURL(url);
+      toast.info("Couldn't preview this photo for cropping -- uploading it as-is.");
+      onCropped(next);
+      processNext(rest);
+    };
+    probe.src = url;
   };
 
   const enqueueFiles = (fileList) => {

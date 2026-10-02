@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { Plus, Trash2, Edit, CheckCircle, AlertCircle, Clock, QrCode, Undo2, Store, User, Download, FileText, Package, ChevronLeft, ChevronRight, GripVertical } from "lucide-react";
 import { toast } from "sonner";
-import api from "../utils/api";
+import api, { postWithRetry } from "../utils/api";
 import { formatNPR, getAgingStyle, getStatusStyle, getDocStyle, EXPENSE_CATEGORIES, VEHICLE_STATUS_OPTIONS, CONDITIONS, SOURCES, BRANDS, FUEL_TYPES, OWNERSHIP_OPTIONS, formatOwnership } from "../utils/helpers";
 import { ExpenseModal, QRLabelModal, ReturnModal, Field, inp, sel } from "./VehicleModals";
 import HoverADDate from "../components/HoverADDate";
@@ -12,6 +12,7 @@ import { useAuth } from "../context/AuthContext";
 import { hasFullVehicleAccess, canManageVehiclePhotos, hidesVehiclePricing, isBasicStockRole, PARTS_ALLOWED_VEHICLE_STATUSES } from "../utils/permissions";
 import { PhotoCropperModal } from "../components/PhotoCropperModal";
 import { usePhotoCropQueue } from "../hooks/usePhotoCropQueue";
+import { resizeImageFile } from "../utils/resizeImage";
 
 const DocCard = ({ label, status }) => {
   const s = getDocStyle(status);
@@ -223,7 +224,7 @@ export function VehicleDetailModal({ id, onClose }) {
     setPhotos(prev => [...prev, { id: tempId, url: previewUrl, pending: true }]);
 
     const fd = new FormData(); fd.append("file", file);
-    api.post(`/vehicles/${id}/photos`, fd, { headers: { "Content-Type": "multipart/form-data" } })
+    postWithRetry(`/vehicles/${id}/photos`, fd, { headers: { "Content-Type": "multipart/form-data" } })
       .then(r => setPhotos(prev => prev.map(p => (p.id === tempId ? r.data : p))))
       .catch(err => {
         setPhotos(prev => prev.filter(p => p.id !== tempId));
@@ -317,10 +318,15 @@ export function VehicleDetailModal({ id, onClose }) {
   };
 
   const uploadDoc = async (file, docType) => {
-    const fd = new FormData(); fd.append("file", file); fd.append("doc_type", docType);
+    // Unlike vehicle photos (resized to <=1600px by the crop step before this ever runs),
+    // a document photo is sent at the camera's full resolution -- often several MB on a modern
+    // phone, especially for a close-up, detail-heavy shot like a bluebook page. That's a lot
+    // longer to sit on the wire on a flaky mobile connection, so shrink it client-side first too.
+    const upload = file.type.startsWith("image/") ? await resizeImageFile(file) : file;
+    const fd = new FormData(); fd.append("file", upload); fd.append("doc_type", docType);
     setUploadingDoc(true);
     try {
-      await api.post(`/vehicles/${id}/legal-documents`, fd, { headers: { "Content-Type": "multipart/form-data" } });
+      await postWithRetry(`/vehicles/${id}/legal-documents`, fd, { headers: { "Content-Type": "multipart/form-data" } });
       toast.success("Document uploaded!"); loadDocs(); fetchVehicle();
     } catch (e) { toast.error(describeUploadError(e)); }
     finally { setUploadingDoc(false); }

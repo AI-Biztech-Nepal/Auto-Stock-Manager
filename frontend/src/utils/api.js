@@ -36,6 +36,10 @@ api.interceptors.response.use(
       localStorage.removeItem("gng_token");
       localStorage.removeItem("gng_user");
       window.location.href = "/login";
+    } else if (err.config?.suppressErrorToast) {
+      // A retrying call (see postWithRetry) handles its own user-facing error once it
+      // actually gives up — showing this generic toast on every attempt in between would
+      // just flash a scary message for a failure the retry is about to silently recover from.
     } else if (err.code === "ECONNABORTED") {
       // Fixed id: several requests timing out around the same time (a page firing off a few
       // parallel calls) collapses to one toast instead of stacking duplicates.
@@ -46,5 +50,21 @@ api.interceptors.response.use(
     return Promise.reject(err);
   }
 );
+
+// Uploads are the slowest requests this app makes — real file bytes over the wire, not a small
+// JSON body — and the most exposed to a flaky mobile connection dropping mid-transfer. That shows
+// up as a bare network error with no response at all (err.response is undefined), not a clean
+// rejection from our own backend. Retrying exactly that failure mode, and never a real server
+// response (which means the request was received and the server had something to say about it,
+// e.g. "file too large"), turns one dropped connection into a non-event instead of a failed upload.
+export async function postWithRetry(url, data, config = {}, retries = 2) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await api.post(url, data, { ...config, suppressErrorToast: attempt < retries });
+    } catch (err) {
+      if (attempt >= retries || err.response) throw err;
+    }
+  }
+}
 
 export default api;
