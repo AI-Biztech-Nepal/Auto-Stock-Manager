@@ -469,7 +469,7 @@ CREATE TABLE IF NOT EXISTS emi_payments (
   CONSTRAINT fk_emi_payments_company FOREIGN KEY (company_id) REFERENCES companies(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- ── Media (base64, same reason it was in Mongo: Render's disk is ephemeral) ─
+-- ── Media (base64, same reason as in Mongo: simpler backups, no disk state to sync) ─
 CREATE TABLE IF NOT EXISTS vehicle_photos (
   id VARCHAR(36) NOT NULL PRIMARY KEY,
   company_id VARCHAR(36) NOT NULL,

@@ -32,7 +32,7 @@ import certifi
 from pymongo.server_api import ServerApi
 from pymongo import ReturnDocument
 
-# Force Python SSL to use certifi CA bundle (fixes Atlas TLS on Docker/Render)
+# Force Python SSL to use certifi CA bundle (fixes Atlas TLS when the host's system CA bundle is missing/incomplete)
 os.environ["SSL_CERT_FILE"] = certifi.where()
 os.environ["REQUESTS_CA_BUNDLE"] = certifi.where()
 
@@ -4553,9 +4553,11 @@ app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 # ══════════════════════════════════════════════════════════════════════
 # ── VEHICLE PHOTO UPLOAD ──────────────────────────────────────────────
-# Stored as base64 in MongoDB (db.vehicle_photos), NOT local disk — Render's
-# free-tier filesystem is ephemeral and wipes local files on every restart,
-# which was causing uploaded photos/docs to vanish after the backend slept.
+# Stored as base64 in the DB (db.vehicle_photos), NOT local disk — this predates
+# the move to the current VPS, back when the backend ran on a host with an
+# ephemeral filesystem that wiped local files on every restart/sleep. Kept since
+# the migration because it's still simpler: one backup covers data and media
+# together, with no disk state to keep in sync with the DB.
 # ══════════════════════════════════════════════════════════════════════
 ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif", "image/heic", "image/heif"}
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".heic", ".heif"}
@@ -4648,8 +4650,8 @@ def _evict_photo_cache(photo_id: str):
 def _compress_photo(content: bytes) -> tuple[bytes, str]:
     """Downscales and re-encodes an uploaded photo as JPEG. Raw phone-camera
     uploads were routinely 2-3MB+, which meant next/image on the storefront
-    had to download the full original from Render on every cache miss just
-    to produce a ~30KB resized thumbnail — this is why the storefront felt
+    had to download the full original from the backend on every cache miss
+    just to produce a ~30KB resized thumbnail — this is why the storefront felt
     slow. Compressing once at upload time fixes it for every consumer. Quality
     is stepped down and, if that's still not enough, the image is shrunk
     further in a loop — same approach as _compress_document_image — so no

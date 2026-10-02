@@ -25,19 +25,20 @@ Build "Hamro G&G Auto OS", an advanced AI-powered automobile dealership manageme
 
 ## Tech Stack
 - Frontend: React (CRA), Tailwind CSS, shadcn/UI, Recharts
-- Backend: FastAPI (Python), MongoDB
+- Backend: FastAPI (Python), MySQL (`DB_BACKEND=mysql`, via `backend/sqldb.py`) in production;
+  MongoDB remains supported as a documented fallback (`DB_BACKEND=mongo`, the code default) for
+  spinning up a fresh environment without your own DB server — see `DEPLOYMENT.md`
 - Auth: JWT (sessionStorage)
-- AI: Emergent LLM Key (Gemini Flash via emergentintegrations)
+- AI: Google AI Studio Gemini key (`GEMINI_API_KEY`, via `google-genai`) — not the old Emergent LLM Key
 - Dates: BS (Bikram Sambat) via `@sbmdkl/nepali-date-converter`
 - QR: `qrcode.react`
 - File Uploads: python-multipart
-- Deployment: Vercel (frontend) + Render (backend, Dockerfile python:3.11-slim-bullseye)
+- Deployment: Vercel (frontend) + self-hosted VPS (backend, FastAPI under PM2 behind nginx) —
+  see `DEPLOYMENT.md`; this app no longer runs on Render
 
 ## Code Architecture
 ```
 /app/
-├── Dockerfile                 # Render Backend Deployment
-├── render.yaml
 ├── backend/
 │   ├── server.py              # FastAPI app (~1355 lines)
 │   └── requirements.txt
@@ -95,10 +96,18 @@ Build "Hamro G&G Auto OS", an advanced AI-powered automobile dealership manageme
 - Fixed `?aging=dead` route param ignored in Inventory.jsx
 - Count vs list mismatch fixed, filter banner + clickable KPI cards on Reports
 
-### Render Deployment Setup (Feb 2026)
+### Render Deployment Setup (Feb 2026) — superseded, see below
 - Dockerfile with python:3.11-slim-bullseye (OpenSSL 1.1.1 for Atlas)
 - certifi + dnspython for production DB connectivity
 - DO NOT modify MONGO_URL logic or TLS CA configuration
+
+### Migrated off Render to a self-hosted VPS
+- Production backend now runs on a VPS under PM2 (nginx reverse proxy in front), with its own
+  MySQL database (`DB_BACKEND=mysql`) — not Render, not MongoDB Atlas
+- `render.yaml` and `backend/Dockerfile` removed (both were Render-only, unused since this move)
+- MongoDB support (`DB_BACKEND=mongo`) is kept in the code as a documented fallback for a fresh
+  environment with no DB server of its own — it's just not what production runs on
+- Full setup/troubleshooting: `DEPLOYMENT.md`
 
 ### Sales Module (Jul 2026)
 - **Record Sale**: link vehicle (available only) + optional customer → auto-marks vehicle as sold
