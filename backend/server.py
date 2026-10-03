@@ -201,6 +201,8 @@ logger = logging.getLogger(__name__)
 # route right after a change so listings/photos update within seconds instead of up to
 # a minute later. Both env vars are optional — with either unset this silently no-ops,
 # so it's safe to deploy before the storefront side is configured.
+# Public address of the storefront; vehicle pages live at <STOREFRONT_URL>/inventory/<vehicle id>.
+STOREFRONT_URL = os.environ.get("STOREFRONT_URL", "https://hamroauto.com.np").rstrip("/")
 STOREFRONT_REVALIDATE_URL = os.environ.get("STOREFRONT_REVALIDATE_URL")
 STOREFRONT_REVALIDATE_SECRET = os.environ.get("STOREFRONT_REVALIDATE_SECRET")
 
@@ -955,9 +957,13 @@ SHARE_LANGUAGES = {
 @api_router.get("/share/profile")
 async def share_profile(cu: dict = Depends(require("vehicles", "view"))):
     """Business name / phone / address for the Share page. /settings itself is admin-only, but
-    every role that can open Share needs these to sign off a post."""
+    every role that can open Share needs these to sign off a post. `storefront_url` lets the
+    page link each caption to the vehicle's public page (whose Open Graph tags give Facebook
+    and WhatsApp a photo card); only the company that owns the storefront has such pages."""
     s = await db.settings.find_one({}, {"_id": 0}) or {}
-    return {k: s.get(k) for k in ("business_name", "contact_phone", "address")}
+    out = {k: s.get(k) for k in ("business_name", "contact_phone", "address")}
+    out["storefront_url"] = STOREFRONT_URL if cu.get("company_id") == await _default_company_id() else None
+    return out
 
 @api_router.post("/share/captions")
 async def share_captions(req: ShareCaptionRequest, cu: dict = Depends(require("vehicles", "view"))):
@@ -5712,6 +5718,13 @@ def _public_photo_url(request: Request, vid: str, photo_id: str) -> str:
 
 _default_company_id_cache: Optional[str] = None
 
+async def _default_company_id() -> Optional[str]:
+    global _default_company_id_cache
+    if _default_company_id_cache is None:
+        c = await db.companies.find_one({}, {"_id": 0, "id": 1}, sort=[("created_at", 1)])
+        _default_company_id_cache = c["id"] if c else None
+    return _default_company_id_cache
+
 async def _scope_to_default_company():
     """FastAPI dependency for the /public/* routes below. They're unauthenticated (no
     get_current_user, so current_company_id never gets set by a JWT) but the storefront
@@ -5720,11 +5733,7 @@ async def _scope_to_default_company():
     one public storefront. Scopes to whichever company was created first (the original,
     pre-multi-tenant business) rather than building a whole public-storefront-per-company
     routing scheme, which nothing has asked for yet."""
-    global _default_company_id_cache
-    if _default_company_id_cache is None:
-        c = await db.companies.find_one({}, {"_id": 0, "id": 1}, sort=[("created_at", 1)])
-        _default_company_id_cache = c["id"] if c else None
-    current_company_id.set(_default_company_id_cache)
+    current_company_id.set(await _default_company_id())
 
 @api_router.get("/public/vehicles", dependencies=[Depends(_scope_to_default_company)])
 async def public_list_vehicles(request: Request):

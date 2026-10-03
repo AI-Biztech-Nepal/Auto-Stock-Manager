@@ -9,6 +9,9 @@ import { hidesVehiclePricing } from "../utils/permissions";
 import { DEFAULT_TEMPLATE, TEMPLATE_KEY, PLACEHOLDERS, renderVehicle, vehicleValues, absoluteUrl } from "../utils/shareCaption";
 
 const MAX_SHARE_PHOTOS = 10;
+// Only phones have a share sheet that lists Facebook and takes photo files; a desktop browser's
+// (e.g. Windows') lists installed apps only, so there the website link is the way to share.
+const IS_MOBILE = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 const STYLES = [
   ["facebook_sales", "Facebook sales post"],
   ["short", "Short & punchy"],
@@ -37,7 +40,7 @@ const photoFiles = async (vehicleId) => {
   return files.filter(Boolean);
 };
 
-function PostCard({ vehicle, text, onChange, aiBadge, fbPage }) {
+function PostCard({ vehicle, text, link, onChange, aiBadge, fbPage }) {
   const [busy, setBusy] = useState(false);
   const [posting, setPosting] = useState(false);
 
@@ -53,9 +56,27 @@ function PostCard({ vehicle, text, onChange, aiBadge, fbPage }) {
     } finally { setPosting(false); }
   };
 
+  const writeClipboard = async (value) => {
+    try { await navigator.clipboard.writeText(value); return true; } catch { return false; }
+  };
+
   const copy = async () => {
-    try { await navigator.clipboard.writeText(text); toast.success("Caption copied. Paste it into your post"); }
-    catch { toast.error("Could not copy. Select the text and copy it manually."); }
+    if (await writeClipboard(text)) toast.success("Caption copied. Paste it into your post");
+    else toast.error("Could not copy. Select the text and copy it manually.");
+  };
+
+  // Facebook's share dialog turns the vehicle's website page into a card (cover photo, title,
+  // price) that sends visitors to the site. The caption is copied for the dialog's text box,
+  // minus the link line, which the card already carries.
+  const shareOnFacebook = async () => {
+    const caption = link ? text.split("\n").filter(l => !l.includes(link)).join("\n").replace(/\n{3,}/g, "\n\n").trim() : text;
+    const copied = await writeClipboard(caption);
+    const url = link ? `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(link)}` : "https://www.facebook.com/";
+    const win = window.open(url, "_blank");
+    if (win) win.opener = null;
+    else toast.info("Your browser blocked the Facebook window", { action: { label: "Open Facebook", onClick: () => window.open(url, "_blank", "noopener") } });
+    if (copied) toast.success("Caption copied. On Facebook, click the text box and paste it (Ctrl+V)", { duration: 15000 });
+    else toast.error("Could not copy the caption. Copy it from the box here instead.");
   };
 
   const prepared = useRef(null);
@@ -121,12 +142,18 @@ function PostCard({ vehicle, text, onChange, aiBadge, fbPage }) {
             <Send size={15} /> {posting ? "Posting…" : `Post to ${fbPage.page_name}`}
           </button>
         )}
+        <button onClick={shareOnFacebook} disabled={!text.trim()} data-testid="share-on-facebook"
+          className={fbPage ? btn : "flex items-center gap-1.5 bg-[#1877F2] hover:bg-[#166FE5] text-white px-3 py-2 rounded-lg text-sm font-medium disabled:opacity-50"}>
+          <Share2 size={15} /> {link ? "Share on Facebook" : "Open Facebook"}
+        </button>
         <button onClick={copy} className={btn}><Copy size={15} /> Copy</button>
         <button onClick={() => window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank", "noopener")} className={btn}><MessageCircle size={15} /> WhatsApp</button>
         <button onClick={download} disabled={busy} className={btn}><Download size={15} /> Photos</button>
-        <button onClick={share} disabled={busy} className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-lg text-sm font-medium disabled:opacity-50">
-          <Share2 size={15} /> {busy ? "Preparing…" : "Share with photos"}
-        </button>
+        {IS_MOBILE && (
+          <button onClick={share} disabled={busy} className={btn}>
+            <Share2 size={15} /> {busy ? "Preparing…" : "Share with photos"}
+          </button>
+        )}
       </div>
     </div>
   );
@@ -234,7 +261,19 @@ export default function Share() {
     `${v.brand} ${v.model} ${v.year} ${v.registration_number || ""}`.toLowerCase().includes(q.toLowerCase())), [vehicles, q]);
   const chosen = selected.map(id => vehicles.find(v => v.id === id)).filter(Boolean);
 
-  const textFor = (v) => edits[v.id] ?? aiTexts[v.id] ?? renderVehicle(template, vehicleValues(v, profile, showPrice));
+  // The storefront lists available vehicles that have a selling price. Roles without pricing
+  // access never receive the price, so for them every available vehicle is assumed listed.
+  const linkFor = (v) => profile.storefront_url && (!showPrice || Number(v.selling_price) > 0)
+    ? `${profile.storefront_url}/inventory/${v.id}` : null;
+
+  // Typed edits are kept as they are; any other caption gets the vehicle's website link
+  // appended, so pasting it into Facebook or WhatsApp shows the cover photo as a link card.
+  const textFor = (v) => {
+    if (edits[v.id] !== undefined) return edits[v.id];
+    const body = aiTexts[v.id] ?? renderVehicle(template, vehicleValues(v, profile, showPrice));
+    const link = linkFor(v);
+    return link ? `${body}\n\n🔗 More photos & details: ${link}` : body;
+  };
 
   const toggle = (id) => setSelected(s => s.includes(id) ? s.filter(x => x !== id) : [...s, id]);
 
@@ -338,7 +377,7 @@ export default function Share() {
           {chosen.length === 0 ? (
             <div className="bg-white border border-dashed border-slate-300 rounded-xl py-16 text-center text-slate-400 text-sm">Select one or more vehicles to get a caption</div>
           ) : chosen.map(v => (
-            <PostCard key={v.id} vehicle={v} text={textFor(v)} aiBadge={!!aiTexts[v.id] && edits[v.id] === undefined}
+            <PostCard key={v.id} vehicle={v} text={textFor(v)} link={linkFor(v)} aiBadge={!!aiTexts[v.id] && edits[v.id] === undefined}
               fbPage={["admin", "social_media"].includes(role) ? fbStatus?.page : null}
               onChange={t => setEdits(prev => ({ ...prev, [v.id]: t }))} />
           ))}
