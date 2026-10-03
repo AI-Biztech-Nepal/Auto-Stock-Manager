@@ -9,9 +9,6 @@ import { hidesVehiclePricing } from "../utils/permissions";
 import { DEFAULT_TEMPLATE, TEMPLATE_KEY, PLACEHOLDERS, renderVehicle, vehicleValues, absoluteUrl } from "../utils/shareCaption";
 
 const MAX_SHARE_PHOTOS = 10;
-// Only phones have a share sheet that lists Facebook and takes photo files; a desktop browser's
-// (e.g. Windows') lists installed apps only, so there we save the photos and open Facebook instead.
-const IS_MOBILE = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 const STYLES = [
   ["facebook_sales", "Facebook sales post"],
   ["short", "Short & punchy"],
@@ -56,13 +53,9 @@ function PostCard({ vehicle, text, onChange, aiBadge, fbPage }) {
     } finally { setPosting(false); }
   };
 
-  const writeClipboard = async () => {
-    try { await navigator.clipboard.writeText(text); return true; } catch { return false; }
-  };
-
   const copy = async () => {
-    if (await writeClipboard()) toast.success("Caption copied. Paste it into your post");
-    else toast.error("Could not copy. Select the text and copy it manually.");
+    try { await navigator.clipboard.writeText(text); toast.success("Caption copied. Paste it into your post"); }
+    catch { toast.error("Could not copy. Select the text and copy it manually."); }
   };
 
   const prepared = useRef(null);
@@ -88,40 +81,20 @@ function PostCard({ vehicle, text, onChange, aiBadge, fbPage }) {
     } finally { setBusy(false); }
   };
 
-  // Returns how many photos were saved.
   const download = async () => {
     setBusy(true);
     try {
       const files = await photoFiles(vehicle.id);
-      if (!files.length) { toast.info("This vehicle has no photos yet"); return 0; }
-      for (const [i, f] of files.entries()) {
+      if (!files.length) { toast.info("This vehicle has no photos yet"); return; }
+      files.forEach((f, i) => {
         const a = document.createElement("a");
         a.href = URL.createObjectURL(f);
         a.download = `${vehicle.brand}-${vehicle.model}-${i + 1}.${f.type.split("/")[1] || "jpg"}`;
         a.click();
         setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-        // Browsers drop back-to-back downloads; a short gap lets them all through.
-        await new Promise(r => setTimeout(r, 300));
-      }
-      return files.length;
-    } catch { toast.error("Could not download photos"); return 0; }
-    finally { setBusy(false); }
-  };
-
-  // Facebook gives websites no way to pre-fill a post with photos, so do everything up to the
-  // last step: caption on the clipboard, photos in Downloads. Facebook opens from the toast's
-  // button, not automatically, so the instructions stay visible in this tab.
-  const prepareForFacebook = async () => {
-    const copied = await writeClipboard();
-    const saved = await download();
-    if (!copied && !saved) { toast.error("Could not copy the caption. Select the text and copy it manually."); return; }
-    toast.success(
-      [copied ? "Caption copied" : null, saved ? `${saved} photo${saved === 1 ? "" : "s"} saved to Downloads` : null].filter(Boolean).join(" · "),
-      {
-        description: `On Facebook: start a post, click Photo/video, pick the photos${copied ? ", then paste the caption (Ctrl+V)" : ", and type or paste the caption"}.${saved > 1 ? " If your browser asks to allow multiple downloads, click Allow." : ""}`,
-        duration: 30000,
-        action: { label: "Open Facebook", onClick: () => window.open("https://www.facebook.com/", "_blank", "noopener") },
       });
+    } catch { toast.error("Could not download photos"); }
+    finally { setBusy(false); }
   };
 
   const thumbs = vehicle.thumb_photos || [];
@@ -151,16 +124,9 @@ function PostCard({ vehicle, text, onChange, aiBadge, fbPage }) {
         <button onClick={copy} className={btn}><Copy size={15} /> Copy</button>
         <button onClick={() => window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank", "noopener")} className={btn}><MessageCircle size={15} /> WhatsApp</button>
         <button onClick={download} disabled={busy} className={btn}><Download size={15} /> Photos</button>
-        {IS_MOBILE ? (
-          <button onClick={share} disabled={busy} className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-lg text-sm font-medium disabled:opacity-50">
-            <Share2 size={15} /> {busy ? "Preparing…" : "Share with photos"}
-          </button>
-        ) : (
-          <button onClick={prepareForFacebook} disabled={busy || !text.trim()} data-testid="prepare-facebook"
-            className={fbPage ? btn : "flex items-center gap-1.5 bg-[#1877F2] hover:bg-[#166FE5] text-white px-3 py-2 rounded-lg text-sm font-medium disabled:opacity-50"}>
-            <Share2 size={15} /> {busy ? "Preparing…" : fbPage ? "Photos + caption for Facebook" : "Post on Facebook"}
-          </button>
-        )}
+        <button onClick={share} disabled={busy} className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-lg text-sm font-medium disabled:opacity-50">
+          <Share2 size={15} /> {busy ? "Preparing…" : "Share with photos"}
+        </button>
       </div>
     </div>
   );
