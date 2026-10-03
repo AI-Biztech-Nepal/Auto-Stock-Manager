@@ -20,6 +20,23 @@ const STYLES = [
 ];
 const LANGUAGES = [["english", "English"], ["mixed", "Nepali + English"], ["nepali", "नेपाली"]];
 
+// Copies `value` to the clipboard; must be called straight from a click. The older
+// execCommand route goes first because it is synchronous and works in setups where the async
+// Clipboard API is refused or never settles (blocked site permission, unfocused window).
+const copyText = async (value) => {
+  const ta = document.createElement("textarea");
+  ta.value = value;
+  ta.setAttribute("readonly", "");
+  ta.style.cssText = "position:fixed;top:0;left:0;opacity:0";
+  document.body.appendChild(ta);
+  ta.select();
+  let ok = false;
+  try { ok = document.execCommand("copy"); } catch { /* fall through to the Clipboard API */ }
+  ta.remove();
+  if (ok) return true;
+  try { await navigator.clipboard.writeText(value); return true; } catch { return false; }
+};
+
 const loadTemplate = () => {
   try { return localStorage.getItem(TEMPLATE_KEY) || DEFAULT_TEMPLATE; } catch { return DEFAULT_TEMPLATE; }
 };
@@ -56,27 +73,36 @@ function PostCard({ vehicle, text, link, onChange, aiBadge, fbPage }) {
     } finally { setPosting(false); }
   };
 
-  const writeClipboard = async (value) => {
-    try { await navigator.clipboard.writeText(value); return true; } catch { return false; }
-  };
+  const box = useRef(null);
+
+  // Last resort when the browser refuses every copy: highlight the caption so Ctrl+C works.
+  const selectBox = () => { box.current?.focus(); box.current?.select(); };
 
   const copy = async () => {
-    if (await writeClipboard(text)) toast.success("Caption copied. Paste it into your post");
-    else toast.error("Could not copy. Select the text and copy it manually.");
+    if (await copyText(text)) toast.success("Caption copied. Paste it into your post");
+    else { selectBox(); toast.error("Your browser blocked copying. The caption is selected: press Ctrl+C."); }
   };
 
   // Facebook's share dialog turns the vehicle's website page into a card (cover photo, title,
   // price) that sends visitors to the site. The caption is copied for the dialog's text box,
-  // minus the link line, which the card already carries.
+  // minus the link line, which the card already carries. Facebook opens in front of this tab,
+  // so the result toast stays up (with Copy again) until the user is back to read it.
   const shareOnFacebook = async () => {
     const caption = link ? text.split("\n").filter(l => !l.includes(link)).join("\n").replace(/\n{3,}/g, "\n\n").trim() : text;
-    const copied = await writeClipboard(caption);
+    const copied = await copyText(caption);
     const url = link ? `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(link)}` : "https://www.facebook.com/";
     const win = window.open(url, "_blank");
     if (win) win.opener = null;
     else toast.info("Your browser blocked the Facebook window", { action: { label: "Open Facebook", onClick: () => window.open(url, "_blank", "noopener") } });
-    if (copied) toast.success("Caption copied. On Facebook, click the text box and paste it (Ctrl+V)", { duration: 15000 });
-    else toast.error("Could not copy the caption. Copy it from the box here instead.");
+    if (copied) {
+      toast.success("Caption copied. On Facebook, click the text box and paste it (Ctrl+V)", {
+        duration: 60000,
+        action: { label: "Copy again", onClick: () => { copyText(caption); } },
+      });
+    } else {
+      selectBox();
+      toast.error("Your browser blocked copying. The caption is selected: press Ctrl+C, then paste it on Facebook.", { duration: 60000 });
+    }
   };
 
   const prepared = useRef(null);
@@ -134,7 +160,7 @@ function PostCard({ vehicle, text, link, onChange, aiBadge, fbPage }) {
         </div>
         {aiBadge && <span className="text-[11px] font-semibold text-purple-700 bg-purple-50 px-2 py-0.5 rounded-full flex items-center gap-1"><Sparkles size={11} /> AI</span>}
       </div>
-      <textarea value={text} onChange={e => onChange(e.target.value)} rows={12} className="w-full border border-slate-200 rounded-lg p-3 text-sm" />
+      <textarea ref={box} value={text} onChange={e => onChange(e.target.value)} rows={12} className="w-full border border-slate-200 rounded-lg p-3 text-sm" />
       <div className="flex flex-wrap gap-2">
         {fbPage && (
           <button onClick={postToPage} disabled={posting || !text.trim()} data-testid="post-to-page"
