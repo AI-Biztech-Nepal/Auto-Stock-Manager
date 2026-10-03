@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Search, Copy, Share2, MessageCircle, Download, Sparkles, Package, RotateCcw, Check, Send } from "lucide-react";
+import { Search, Copy, Share2, MessageCircle, Download, Sparkles, Package, RotateCcw, Check, Send, ShoppingBag, ExternalLink } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
 import { formatNPR } from "../utils/helpers";
 import { useAuth } from "../context/AuthContext";
 import { hidesVehiclePricing } from "../utils/permissions";
-import { DEFAULT_TEMPLATE, TEMPLATE_KEY, PLACEHOLDERS, renderVehicle, vehicleValues, absoluteUrl } from "../utils/shareCaption";
+import { DEFAULT_TEMPLATE, TEMPLATE_KEY, PLACEHOLDERS, renderVehicle, vehicleValues, hamroBazarFields, absoluteUrl } from "../utils/shareCaption";
 
 const MAX_SHARE_PHOTOS = 10;
 // Only phones have a share sheet that lists Facebook and takes photo files; a desktop browser's
@@ -57,9 +57,11 @@ const photoFiles = async (vehicleId) => {
   return files.filter(Boolean);
 };
 
-function PostCard({ vehicle, text, link, onChange, aiBadge, fbPage }) {
+function PostCard({ vehicle, text, link, onChange, aiBadge, fbPage, showPrice }) {
   const [busy, setBusy] = useState(false);
   const [posting, setPosting] = useState(false);
+  const [showHB, setShowHB] = useState(false);
+  const hb = hamroBazarFields(vehicle, showPrice);
 
   const postToPage = async () => {
     if (!window.confirm(`Post this to ${fbPage.page_name} on Facebook now?`)) return;
@@ -133,15 +135,23 @@ function PostCard({ vehicle, text, link, onChange, aiBadge, fbPage }) {
     try {
       const files = await photoFiles(vehicle.id);
       if (!files.length) { toast.info("This vehicle has no photos yet"); return; }
-      files.forEach((f, i) => {
+      for (const [i, f] of files.entries()) {
         const a = document.createElement("a");
         a.href = URL.createObjectURL(f);
         a.download = `${vehicle.brand}-${vehicle.model}-${i + 1}.${f.type.split("/")[1] || "jpg"}`;
         a.click();
         setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-      });
+        // Browsers drop back-to-back downloads; a short gap lets them all through.
+        await new Promise(r => setTimeout(r, 300));
+      }
+      if (files.length > 1) toast.success(`${files.length} photos saved to Downloads. If your browser asked to allow multiple downloads, click Allow.`);
     } catch { toast.error("Could not download photos"); }
     finally { setBusy(false); }
+  };
+
+  const copyField = async (label, value) => {
+    if (await copyText(value)) toast.success(`${label} copied`);
+    else toast.error("Your browser blocked copying. Click the text to select it, then press Ctrl+C.");
   };
 
   const thumbs = vehicle.thumb_photos || [];
@@ -175,12 +185,33 @@ function PostCard({ vehicle, text, link, onChange, aiBadge, fbPage }) {
         <button onClick={copy} className={btn}><Copy size={15} /> Copy</button>
         <button onClick={() => window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank", "noopener")} className={btn}><MessageCircle size={15} /> WhatsApp</button>
         <button onClick={download} disabled={busy} className={btn}><Download size={15} /> Photos</button>
+        <button onClick={() => setShowHB(o => !o)} className={btn} data-testid="hamro-bazar-toggle"><ShoppingBag size={15} /> Hamro Bazar</button>
         {IS_MOBILE && (
           <button onClick={share} disabled={busy} className={btn}>
             <Share2 size={15} /> {busy ? "Preparing…" : "Share with photos"}
           </button>
         )}
       </div>
+      {showHB && (
+        <div className="border border-slate-200 rounded-lg p-3 space-y-3 bg-slate-50" data-testid="hamro-bazar-panel">
+          <p className="text-xs text-slate-500">
+            Hamro Bazar can't be posted to automatically, so copy each field into its Post Ad form and add the photos. Plain text on purpose: its rules ban prices or phone numbers in titles, hype wording, and links to other sites.
+          </p>
+          {[["Title", hb.title], ["Price (NPR)", hb.price], ["Description", hb.description]].filter(([, value]) => value).map(([label, value]) => (
+            <div key={label} className="flex items-start gap-2">
+              <div className="min-w-0 flex-1">
+                <div className="text-[11px] font-medium text-slate-500">{label}</div>
+                <div className="text-sm text-slate-800 whitespace-pre-line break-words select-all">{value}</div>
+              </div>
+              <button onClick={() => copyField(label, value)} className={btn}><Copy size={14} /> Copy</button>
+            </div>
+          ))}
+          <div className="flex flex-wrap gap-2">
+            <button onClick={download} disabled={busy} className={btn}><Download size={15} /> {busy ? "Preparing…" : "Download photos"}</button>
+            <a href="https://hamrobazaar.com/" target="_blank" rel="noopener noreferrer" className={btn}><ExternalLink size={15} /> Open Hamro Bazar</a>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -403,7 +434,7 @@ export default function Share() {
           {chosen.length === 0 ? (
             <div className="bg-white border border-dashed border-slate-300 rounded-xl py-16 text-center text-slate-400 text-sm">Select one or more vehicles to get a caption</div>
           ) : chosen.map(v => (
-            <PostCard key={v.id} vehicle={v} text={textFor(v)} link={linkFor(v)} aiBadge={!!aiTexts[v.id] && edits[v.id] === undefined}
+            <PostCard key={v.id} vehicle={v} text={textFor(v)} link={linkFor(v)} showPrice={showPrice} aiBadge={!!aiTexts[v.id] && edits[v.id] === undefined}
               fbPage={["admin", "social_media"].includes(role) ? fbStatus?.page : null}
               onChange={t => setEdits(prev => ({ ...prev, [v.id]: t }))} />
           ))}
