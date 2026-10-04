@@ -30,7 +30,7 @@ const EMPTY_FORM = {
 // What a job cost: the parts listed on it. Only older jobs with no parts fall back to a stored amount.
 const jobCost = (job) => {
   const partsTotal = job.parts?.reduce((s, p) => s + p.quantity * p.unit_cost, 0) || 0;
-  return job.actual_cost ?? (partsTotal > 0 ? partsTotal : job.estimated_cost ?? 0);
+  return partsTotal > 0 ? partsTotal : job.actual_cost ?? job.estimated_cost ?? 0;
 };
 
 const makeKey = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`);

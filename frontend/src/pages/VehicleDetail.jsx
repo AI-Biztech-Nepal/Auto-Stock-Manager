@@ -707,7 +707,7 @@ export function VehicleDetailModal({ id, onClose }) {
                          listed read-only here since they're managed from the Job Cards page, not this modal. */}
                       {vehicle.job_cards?.map(job => {
                         const partsTotal = job.parts?.reduce((s, p) => s + p.quantity * p.unit_cost, 0) || 0;
-                        const jobTotal = job.actual_cost ?? (partsTotal > 0 ? partsTotal : job.estimated_cost ?? 0);
+                        const jobTotal = partsTotal > 0 ? partsTotal : job.actual_cost ?? job.estimated_cost ?? 0;
                         return (
                           <div key={job.id} data-testid="job-card-expense-row" className="py-3">
                             <div className="flex items-center justify-between">

@@ -453,21 +453,20 @@ def _hide_financials_for_role(v: dict, role: str) -> dict:
             v.pop(f, None)
     return v
 
-# A job card's contribution to vehicle cost — the settled actual_cost once the job is
-# marked complete, or its estimate while still pending/in progress so the work isn't
-# invisible from the vehicle's expense total until someone closes it out.
+# A job card's contribution to vehicle cost — what its listed parts add up to. Only an
+# older job with no parts falls back to its stored actual_cost / estimated_cost.
 # A paid service on a sold vehicle after its warranty (after_sale, not is_warranty) is billed
 # to the customer, so it isn't a cost of the vehicle at all.
 def _job_card_cost(jc: dict) -> float:
     if jc.get("after_sale") and not jc.get("is_warranty"):
         return 0
-    ac = jc.get("actual_cost")
-    if ac is None:
-        # No settled cost yet: what the listed parts add up to is the cost; the typed
-        # estimate is only the fallback for a job with no parts listed.
-        parts_total = sum((p.get("quantity") or 0) * (p.get("unit_cost") or 0) for p in jc.get("parts") or [])
-        ac = parts_total if parts_total > 0 else jc.get("estimated_cost", 0)
-    return ac + (jc.get("sanakhat_cost") or 0) + (jc.get("resanakhat_cost") or 0)
+    parts_total = sum((p.get("quantity") or 0) * (p.get("unit_cost") or 0) for p in jc.get("parts") or [])
+    if parts_total > 0:
+        base = parts_total
+    else:
+        ac = jc.get("actual_cost")
+        base = ac if ac is not None else jc.get("estimated_cost", 0)
+    return base + (jc.get("sanakhat_cost") or 0) + (jc.get("resanakhat_cost") or 0)
 
 async def enrich_vehicle(v: dict) -> dict:
     v["aging"] = stock_aging(v.get("purchase_date", ""))
