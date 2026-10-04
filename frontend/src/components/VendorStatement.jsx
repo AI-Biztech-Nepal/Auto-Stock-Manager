@@ -91,8 +91,8 @@ export default function VendorStatement({ vendor, reloadKey }) {
                   <ul className="divide-y divide-slate-50 bg-slate-50/60">
                     {b.items?.map((it, j) => (
                       <li key={j} className="flex justify-between gap-3 px-3 py-1.5 text-xs">
-                        <span className="text-slate-600">{it.name}{it.part_number ? ` (${it.part_number})` : ""} × {it.quantity}</span>
-                        <span className="text-slate-500 tabular-nums whitespace-nowrap">{formatNPR(it.quantity * it.unit_cost)}</span>
+                        <span className="text-slate-600">{it.name}{it.part_number ? ` (${it.part_number})` : ""} × {it.bought_qty ?? it.quantity}</span>
+                        <span className="text-slate-500 tabular-nums whitespace-nowrap">{formatNPR((it.bought_qty ?? it.quantity) * it.unit_cost)}</span>
                       </li>
                     ))}
                   </ul>

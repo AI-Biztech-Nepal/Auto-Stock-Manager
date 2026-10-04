@@ -600,6 +600,39 @@ def _sale_revenue(s: dict) -> float:
 def _vendor_vehicle_filter(vendor_id: str) -> dict:
     return {"$or": [{"vendor_id": vendor_id}, {"linked_contact_type": "vendor", "linked_contact_id": vendor_id}]}
 
+# What was bought from the vendor on a spare part — NOT what's left on the shelf. A part's
+# `quantity` drops every time it's used on a job card or sold, but the bill from the vendor
+# doesn't, so the amount owed is worked out from stock on hand plus everything issued from it
+# (its stock-out / job-card transactions). Parts sent back to the supplier are left out of that
+# add-back, so they do reduce what's owed. A Set's component stock is tracked separately from the
+# set's own quantity (its transactions are labelled "<set> — <component>"), so it's skipped.
+def _part_bought_qty(part: dict, txns: list) -> int:
+    issued = 0
+    for t in txns:
+        if " — " in (t.get("part_name") or ""):
+            continue
+        if t.get("reason") in ("Return to Supplier", "Return"):
+            continue
+        issued += (t.get("quantity") or 0) if t.get("type") == "out" else -(t.get("quantity") or 0)
+    return max(0, (part.get("quantity") or 0) + issued)
+
+async def _attach_bought_qty(parts: list) -> None:
+    """Sets part["bought_qty"] on each part (see _part_bought_qty)."""
+    part_ids = [p["id"] for p in parts]
+    txns_by_part: dict = {}
+    if part_ids:
+        txns = await db.part_transactions.find(
+            {"part_id": {"$in": part_ids}},
+            {"_id": 0, "part_id": 1, "type": 1, "quantity": 1, "reason": 1, "part_name": 1},
+        ).to_list(200000)
+        for t in txns:
+            txns_by_part.setdefault(t["part_id"], []).append(t)
+    for p in parts:
+        p["bought_qty"] = _part_bought_qty(p, txns_by_part.get(p["id"], []))
+
+def _parts_owed(parts: list) -> float:
+    return sum((p.get("bought_qty") or 0) * (p.get("unit_cost") or 0) for p in parts)
+
 # ── Helper: compute total amount owed to a vendor (payable) ──────────
 async def _vendor_payable(vendor_id: str) -> float:
     """Returns max(0, total_purchased - total_paid) for a vendor."""
@@ -644,6 +677,10 @@ async def _batch_vendor_payable(vendor_ids: list) -> dict:
         vid = v.get("vendor_id") or (v.get("linked_contact_id") if v.get("linked_contact_type") == "vendor" else None)
         if vid:
             owed[vid] = owed.get(vid, 0) + v.get("purchase_price", 0)
+    parts = await db.spare_parts.find({"vendor_id": {"$in": vendor_ids}}, {"_id": 0, "id": 1, "vendor_id": 1, "quantity": 1, "unit_cost": 1}).to_list(20000)
+    await _attach_bought_qty(parts)
+    for p in parts:
+        owed[p["vendor_id"]] = owed.get(p["vendor_id"], 0) + _parts_owed([p])
     pmts = await db.vendor_payments.find({"vendor_id": {"$in": vendor_ids}}, {"_id": 0}).to_list(20000)
     paid: dict = {}
     for p in pmts:
@@ -817,9 +854,10 @@ async def _build_ai_business_snapshot() -> str:
     for v in all_vehicles:  # payable doesn't disappear once a vehicle sells
         vid = v.get("vendor_id") or (v.get("linked_contact_id") if v.get("linked_contact_type") == "vendor" else None)
         if vid: owed_by_vendor[vid] = owed_by_vendor.get(vid, 0) + v.get("purchase_price", 0)
+    await _attach_bought_qty(all_parts)
     for p in all_parts:
         if p.get("vendor_id"):
-            owed_by_vendor[p["vendor_id"]] = owed_by_vendor.get(p["vendor_id"], 0) + p.get("quantity", 0) * p.get("unit_cost", 0)
+            owed_by_vendor[p["vendor_id"]] = owed_by_vendor.get(p["vendor_id"], 0) + _parts_owed([p])
     paid_by_vendor: dict = {}
     for p in all_vendor_payments:
         paid_by_vendor[p["vendor_id"]] = paid_by_vendor.get(p["vendor_id"], 0) + p["amount"]
@@ -3598,6 +3636,7 @@ async def get_vendors(cu: dict = Depends(require("vendors", "view"))):
             if vid: vehicles_by_vendor.setdefault(vid, []).append(vh)
 
         all_parts = await db.spare_parts.find({"vendor_id": {"$in": vendor_ids}}, {"_id": 0}).to_list(20000)
+        await _attach_bought_qty(all_parts)
         for p in all_parts:
             parts_by_vendor.setdefault(p["vendor_id"], []).append(p)
 
@@ -3609,7 +3648,7 @@ async def get_vendors(cu: dict = Depends(require("vendors", "view"))):
         vehicles = vehicles_by_vendor.get(v["id"], [])
         parts = parts_by_vendor.get(v["id"], [])
         vehicle_owed = sum(vh.get("purchase_price", 0) for vh in vehicles)
-        parts_owed = sum(p.get("quantity", 0) * p.get("unit_cost", 0) for p in parts)
+        parts_owed = _parts_owed(parts)
         total_owed = vehicle_owed + parts_owed
         payments = payments_by_vendor.get(v["id"], [])
         total_paid = sum(p["amount"] for p in payments)
@@ -3657,8 +3696,9 @@ async def get_vendor_payments(vid: str, cu: dict = Depends(require("vendors", "v
     payments = await db.vendor_payments.find({"vendor_id": vid}, {"_id": 0}).sort("payment_date", -1).to_list(500)
     vehicles = await db.vehicles.find(_vendor_vehicle_filter(vid), {"_id": 0}).to_list(200)
     parts = await db.spare_parts.find({"vendor_id": vid}, {"_id": 0}).to_list(1000)
+    await _attach_bought_qty(parts)
     vehicle_owed = sum(v.get("purchase_price", 0) for v in vehicles)
-    parts_owed = sum(p.get("quantity", 0) * p.get("unit_cost", 0) for p in parts)
+    parts_owed = _parts_owed(parts)
     total_owed = vehicle_owed + parts_owed
     total_paid = sum(p["amount"] for p in payments)
     bills = {}
@@ -3666,7 +3706,7 @@ async def get_vendor_payments(vid: str, cu: dict = Depends(require("vendors", "v
         key = p.get("bill_no") or "No Bill No."
         b = bills.setdefault(key, {"bill_no": key, "entry_date": p.get("entry_date") or (p.get("created_at", "")[:10]), "items": [], "total": 0})
         b["items"].append(p)
-        b["total"] += p.get("quantity", 0) * p.get("unit_cost", 0)
+        b["total"] += _parts_owed([p])
     parts_bills = sorted(bills.values(), key=lambda b: b["entry_date"] or "", reverse=True)
     return {"payments": payments, "total_paid": total_paid,
             "total_owed": total_owed, "remaining_due": max(0, total_owed - total_paid),
