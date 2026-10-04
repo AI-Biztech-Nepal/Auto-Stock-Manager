@@ -682,10 +682,17 @@ export function VehicleDetailModal({ id, onClose }) {
                       </button>
                     )}
                   </div>
-                  {vehicle.expenses?.length === 0 && vehicle.job_cards?.length === 0 ? (
+                  {vehicle.expenses?.length === 0 && vehicle.job_cards?.length === 0 && !vehicle.sanakhat_cost ? (
                     <div className="text-center py-8 text-slate-400 text-sm">No expenses recorded yet</div>
                   ) : (
                     <div className="divide-y divide-slate-50">
+                      {/* Sanaakhat cost is entered on the vehicle itself (Edit) and counts toward the total. */}
+                      {vehicle.sanakhat_cost > 0 && (
+                        <div data-testid="sanakhat-expense-row" className="flex items-center justify-between py-3">
+                          <div className="text-sm font-medium text-slate-900">Sanaakhat</div>
+                          <span className="font-semibold text-slate-900">{formatNPR(vehicle.sanakhat_cost)}</span>
+                        </div>
+                      )}
                       {vehicle.expenses?.map(exp => {
                         const catLabel = EXPENSE_CATEGORIES.find(c => c.value === exp.category)?.label || exp.category;
                         return (

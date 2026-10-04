@@ -468,11 +468,16 @@ def _job_card_cost(jc: dict) -> float:
         base = ac if ac is not None else jc.get("estimated_cost", 0)
     return base + (jc.get("sanakhat_cost") or 0) + (jc.get("resanakhat_cost") or 0)
 
+# The vehicle's own Sanaakhat cost (entered on the vehicle) counts as an expense of it, next to
+# its hand-added expenses and its job cards' parts.
+def _vehicle_sanakhat(v: dict) -> float:
+    return v.get("sanakhat_cost") or 0
+
 async def enrich_vehicle(v: dict) -> dict:
     v["aging"] = stock_aging(v.get("purchase_date", ""))
     exps = await db.expenses.find({"vehicle_id": v["id"]}, {"_id": 0}).to_list(200)
     jobs = await db.job_cards.find({"vehicle_id": v["id"]}, {"_id": 0}).to_list(200)
-    total_exp = sum(e["amount"] for e in exps) + sum(_job_card_cost(j) for j in jobs)
+    total_exp = sum(e["amount"] for e in exps) + sum(_job_card_cost(j) for j in jobs) + _vehicle_sanakhat(v)
     v["total_expenses"] = total_exp
     v["total_investment"] = v.get("purchase_price", 0) + total_exp + v.get("accessories_cost", 0)
     sp = v.get("selling_price") or 0
@@ -560,7 +565,7 @@ async def _vehicle_investment(vehicle_id: str, vehicle: dict) -> float:
     """Returns purchase_price + accessories + all expenses + all job card costs for a vehicle."""
     exps = await db.expenses.find({"vehicle_id": vehicle_id}, {"_id": 0}).to_list(200)
     jobs = await db.job_cards.find({"vehicle_id": vehicle_id}, {"_id": 0}).to_list(200)
-    return (vehicle.get("purchase_price", 0) + vehicle.get("accessories_cost", 0)
+    return (vehicle.get("purchase_price", 0) + vehicle.get("accessories_cost", 0) + _vehicle_sanakhat(vehicle)
             + sum(e["amount"] for e in exps) + sum(_job_card_cost(j) for j in jobs))
 
 # Job card cost for a sale's Extra Expenses card — display only. Warranty job cards
@@ -621,7 +626,7 @@ async def _batch_vehicle_investment(vehicles: list) -> dict:
     for j in all_jobs:
         job_cost_by_vehicle[j["vehicle_id"]] = job_cost_by_vehicle.get(j["vehicle_id"], 0) + _job_card_cost(j)
     return {
-        v["id"]: v.get("purchase_price", 0) + v.get("accessories_cost", 0)
+        v["id"]: v.get("purchase_price", 0) + v.get("accessories_cost", 0) + _vehicle_sanakhat(v)
         + sum(e["amount"] for e in exps_by_vehicle.get(v["id"], []))
         + job_cost_by_vehicle.get(v["id"], 0)
         for v in vehicles
@@ -1763,7 +1768,7 @@ async def get_vehicles(status: Optional[str] = None, brand: Optional[str] = None
     # Enrich each vehicle using pre-loaded expenses + job cards
     def enrich_with_expenses(v: dict, exps: list, jobs: list) -> dict:
         v["aging"] = stock_aging(v.get("purchase_date", ""))
-        total_exp = sum(e["amount"] for e in exps) + sum(_job_card_cost(j) for j in jobs)
+        total_exp = sum(e["amount"] for e in exps) + sum(_job_card_cost(j) for j in jobs) + _vehicle_sanakhat(v)
         v["total_expenses"] = total_exp
         v["total_investment"] = v.get("purchase_price", 0) + total_exp + v.get("accessories_cost", 0)
         sp = v.get("selling_price") or 0
@@ -3194,7 +3199,7 @@ async def get_sales(start_date: Optional[str] = None, end_date: Optional[str] = 
     investment_by_vehicle: dict = {}
     purchase_price_by_vehicle: dict = {}
     if cu.get("role", "admin") == "admin" and vehicle_ids:
-        full_vehicles = await db.vehicles.find({"id": {"$in": vehicle_ids}}, {"_id": 0, "id": 1, "purchase_price": 1, "accessories_cost": 1}).to_list(len(vehicle_ids))
+        full_vehicles = await db.vehicles.find({"id": {"$in": vehicle_ids}}, {"_id": 0, "id": 1, "purchase_price": 1, "accessories_cost": 1, "sanakhat_cost": 1}).to_list(len(vehicle_ids))
         investment_by_vehicle = await _batch_vehicle_investment(full_vehicles)
         purchase_price_by_vehicle = {v["id"]: v.get("purchase_price", 0) for v in full_vehicles}
 
@@ -3943,7 +3948,7 @@ async def _enriched_sales_for_closing(start_date: Optional[str] = None, end_date
         c = customers_by_id.get(s.get("customer_id"))
         repair_cost = (sum(e.get("amount", 0) for e in exps_by_vehicle.get(s.get("vehicle_id"), []))
                        + sum(_job_card_cost(j) for j in jobs_by_vehicle.get(s.get("vehicle_id"), [])))
-        investment = (v.get("purchase_price", 0) + v.get("accessories_cost", 0) + repair_cost) if v else 0
+        investment = (v.get("purchase_price", 0) + v.get("accessories_cost", 0) + _vehicle_sanakhat(v) + repair_cost) if v else 0
         vehicle_label = "Vehicle removed"
         if v:
             parts = [v["brand"], v["model"]]
