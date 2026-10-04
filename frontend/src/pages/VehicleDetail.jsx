@@ -703,12 +703,11 @@ export function VehicleDetailModal({ id, onClose }) {
                           </div>
                         );
                       })}
-                      {/* Job cards contribute to the vehicle's expense total too (actual_cost once
-                         completed, otherwise the estimate) — listed read-only here since they're
-                         managed from the Job Cards page, not this modal. */}
+                      {/* Job cards contribute to the vehicle's expense total too (their parts total) —
+                         listed read-only here since they're managed from the Job Cards page, not this modal. */}
                       {vehicle.job_cards?.map(job => {
-                        const jobTotal = job.actual_cost ?? job.estimated_cost ?? 0;
                         const partsTotal = job.parts?.reduce((s, p) => s + p.quantity * p.unit_cost, 0) || 0;
+                        const jobTotal = job.actual_cost ?? (partsTotal > 0 ? partsTotal : job.estimated_cost ?? 0);
                         return (
                           <div key={job.id} data-testid="job-card-expense-row" className="py-3">
                             <div className="flex items-center justify-between">
@@ -716,9 +715,6 @@ export function VehicleDetailModal({ id, onClose }) {
                                 <div className="text-sm font-medium text-slate-900 flex items-center gap-1.5">
                                   {job.work_description}
                                   <span className="px-1.5 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide bg-purple-100 text-purple-700">Job Card</span>
-                                  {job.status !== "completed" && (
-                                    <span className="px-1.5 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide bg-amber-100 text-amber-700">Estimate</span>
-                                  )}
                                 </div>
                                 <div className="text-xs text-slate-500">{job.job_number} · {job.mechanic_name}</div>
                               </div>
@@ -729,25 +725,21 @@ export function VehicleDetailModal({ id, onClose }) {
                                 <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-500 mb-1.5">
                                   <Package size={11} /> Parts Used
                                 </div>
-                                {job.parts.map((p, i) => (
-                                  <div key={i} className="flex justify-between text-xs text-slate-600 py-0.5">
-                                    <span>{p.part_name} × {p.quantity}{(p.external || !p.part_id) && <span className="ml-1.5 text-[10px] font-semibold uppercase tracking-wide text-orange-500">External</span>}</span>
-                                    <span className="font-medium">{formatNPR(p.quantity * p.unit_cost)}</span>
-                                  </div>
-                                ))}
+                                {job.parts.map((p, i) => {
+                                  const isExternal = p.external || !p.part_id;
+                                  return (
+                                    <div key={i} className={`flex justify-between text-xs py-0.5 ${isExternal ? "bg-orange-100 text-orange-900 font-semibold -mx-1.5 px-1.5 rounded" : "text-slate-600"}`}>
+                                      <span>{p.part_name} × {p.quantity}{isExternal && <span className="ml-1.5 text-[10px] font-bold uppercase tracking-wide text-orange-600">External</span>}</span>
+                                      <span className="font-medium">{formatNPR(p.quantity * p.unit_cost)}</span>
+                                    </div>
+                                  );
+                                })}
                                 <div className="flex justify-between text-xs font-bold text-slate-800 border-t border-slate-200 mt-1 pt-1">
                                   <span>Parts Total</span>
                                   <span className="text-blue-700">{formatNPR(partsTotal)}</span>
                                 </div>
-                                {partsTotal > jobTotal ? (
-                                  <div className="text-[11px] text-amber-600 mt-1">Parts total is higher than the job's price ({formatNPR(jobTotal)}) — worth double-checking.</div>
-                                ) : partsTotal < jobTotal ? (
-                                  <div className="text-[11px] text-slate-400 mt-1">{formatNPR(jobTotal - partsTotal)} of the job's price isn't itemized above — likely paint, labor, or other items not tracked in inventory.</div>
-                                ) : null}
                               </div>
-                            ) : (
-                              <div className="mt-1 text-[11px] text-slate-400">No parts recorded — full amount entered directly against "{job.work_description}".</div>
-                            )}
+                            ) : null}
                           </div>
                         );
                       })}

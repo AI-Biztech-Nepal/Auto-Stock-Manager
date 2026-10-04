@@ -462,8 +462,12 @@ def _job_card_cost(jc: dict) -> float:
     if jc.get("after_sale") and not jc.get("is_warranty"):
         return 0
     ac = jc.get("actual_cost")
-    return ((ac if ac is not None else jc.get("estimated_cost", 0))
-            + (jc.get("sanakhat_cost") or 0) + (jc.get("resanakhat_cost") or 0))
+    if ac is None:
+        # No settled cost yet: what the listed parts add up to is the cost; the typed
+        # estimate is only the fallback for a job with no parts listed.
+        parts_total = sum((p.get("quantity") or 0) * (p.get("unit_cost") or 0) for p in jc.get("parts") or [])
+        ac = parts_total if parts_total > 0 else jc.get("estimated_cost", 0)
+    return ac + (jc.get("sanakhat_cost") or 0) + (jc.get("resanakhat_cost") or 0)
 
 async def enrich_vehicle(v: dict) -> dict:
     v["aging"] = stock_aging(v.get("purchase_date", ""))
@@ -1345,7 +1349,7 @@ class JobCardCreate(BaseModel):
     customer_name: Optional[str] = None; customer_contact: Optional[str] = None
     work_description: str
     mechanic_id: Optional[str] = None; mechanic_name: str
-    estimated_cost: float; notes: Optional[str] = None
+    estimated_cost: float = 0; notes: Optional[str] = None
     # Sanakhat / re-sanakhat aren't job card work — they're entered on the sale as extra expenses.
     coupon_no: int; job_date: str
     parts: List[dict] = []

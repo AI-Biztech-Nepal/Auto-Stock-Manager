@@ -24,7 +24,13 @@ const EMPTY_FORM = {
   vehicle_id: "", is_external: false,
   vehicle_brand: "", vehicle_model: "", vehicle_year: "", registration_number: "",
   customer_name: "", customer_contact: "",
-  work_description: "", mechanic_id: "", mechanic_name: "", estimated_cost: "", notes: "", coupon_no: "", job_date: "",
+  work_description: "", mechanic_id: "", mechanic_name: "", notes: "", coupon_no: "", job_date: "",
+};
+
+// What a job cost: the parts listed on it. Only older jobs with no parts fall back to a stored amount.
+const jobCost = (job) => {
+  const partsTotal = job.parts?.reduce((s, p) => s + p.quantity * p.unit_cost, 0) || 0;
+  return job.actual_cost ?? (partsTotal > 0 ? partsTotal : job.estimated_cost ?? 0);
 };
 
 const makeKey = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`);
@@ -229,7 +235,6 @@ export default function JobCards() {
       work_description: job.work_description || "",
       mechanic_id: job.mechanic_id || "",
       mechanic_name: job.mechanic_name || "",
-      estimated_cost: job.estimated_cost != null ? String(job.estimated_cost) : "",
       notes: job.notes || "",
       coupon_no: job.coupon_no != null ? String(job.coupon_no) : "",
       job_date: job.job_date || "",
@@ -263,13 +268,12 @@ export default function JobCards() {
   const submitJob = async (e) => {
     e.preventDefault();
     if (editingJob) {
-      if (!form.work_description || !form.mechanic_name || !form.estimated_cost) { toast.error("Fill all required fields"); return; }
+      if (!form.work_description || !form.mechanic_name) { toast.error("Fill all required fields"); return; }
       setSaving(true);
       try {
         await api.put(`/jobs/${editingJob.id}`, {
           work_description: form.work_description,
           mechanic_name: form.mechanic_name,
-          estimated_cost: Number(form.estimated_cost),
           notes: form.notes,
           parts: jobParts.map(p => ({ part_id: p.part_id, component_name: p.component_name || null, part_name: p.part_name, quantity: Math.max(1, parseInt(p.quantity, 10) || 1), unit_cost: p.unit_cost, external: !!p.external })),
         });
@@ -284,14 +288,13 @@ export default function JobCards() {
     const vehicleValid = form.is_external
       ? form.vehicle_brand && form.vehicle_model && form.registration_number
       : form.vehicle_id;
-    if (!vehicleValid || !form.work_description || !form.mechanic_name || !form.estimated_cost || !form.coupon_no || !form.job_date) { toast.error("Fill all required fields"); return; }
+    if (!vehicleValid || !form.work_description || !form.mechanic_name || !form.coupon_no || !form.job_date) { toast.error("Fill all required fields"); return; }
     setSaving(true);
     try {
       await api.post("/jobs", {
         ...form,
         vehicle_id: form.is_external ? null : form.vehicle_id,
         vehicle_year: form.vehicle_year ? Number(form.vehicle_year) : null,
-        estimated_cost: Number(form.estimated_cost),
         coupon_no: Number(form.coupon_no),
         parts: jobParts.map(p => ({ part_id: p.part_id, component_name: p.component_name || null, part_name: p.part_name, quantity: Math.max(1, parseInt(p.quantity, 10) || 1), unit_cost: p.unit_cost, external: !!p.external })),
       });
@@ -304,12 +307,10 @@ export default function JobCards() {
     finally { setSaving(false); }
   };
 
-  const updateStatus = async (jobId, newStatus, actualCost = null) => {
+  const updateStatus = async (jobId, newStatus) => {
     setUpdating(jobId);
     try {
-      const upd = { status: newStatus };
-      if (actualCost !== null) upd.actual_cost = Number(actualCost);
-      const res = await api.put(`/jobs/${jobId}`, upd);
+      const res = await api.put(`/jobs/${jobId}`, { status: newStatus });
       const vsc = res.data?.vehicle_status_change;
       if (vsc?.flipped_to) {
         toast.success(`Job completed — vehicle moved back to ${getStatusStyle(vsc.flipped_to).label}`);
@@ -433,7 +434,6 @@ export default function JobCards() {
           {filtered.map(job => {
             const js = getJobStyle(job.status);
             const vs = job.vehicle_id ? getStatusStyle(job.vehicle_status) : null;
-            const overBudget = job.actual_cost && job.actual_cost > job.estimated_cost;
             return (
               <ListRow
                 key={job.id}
@@ -441,12 +441,7 @@ export default function JobCards() {
                 thumb={<Wrench size={15} className="text-slate-300" />}
                 title={job.vehicle_id ? `${job.vehicle_brand} ${job.vehicle_model} ${job.vehicle_year || ""}` : (job.customer_name || "External job")}
                 subtitle={`#${job.job_number} · ${job.mechanic_name}${job.registration_number ? ` · ${job.registration_number}` : ""}`}
-                meta={
-                  <div>
-                    <div className={`font-semibold ${overBudget ? "text-red-600" : "text-slate-800"}`}>{formatNPR(job.actual_cost ?? job.estimated_cost)}</div>
-                    {job.actual_cost != null && <div className="text-slate-400">est. {formatNPR(job.estimated_cost)}</div>}
-                  </div>
-                }
+                meta={<div className="font-semibold text-slate-800">{formatNPR(jobCost(job))}</div>}
                 pills={<>
                   {!job.vehicle_id && <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold uppercase tracking-wide bg-orange-100 text-orange-700">External</span>}
                   {job.is_warranty && <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold uppercase tracking-wide bg-teal-100 text-teal-700">Warranty</span>}
@@ -460,7 +455,7 @@ export default function JobCards() {
                     </button>
                   )}
                   {canEdit && job.status === "in_progress" && (
-                    <button onClick={() => { const cost = window.prompt("Enter actual cost (NPR):"); if (cost !== null) updateStatus(job.id, "completed", cost || job.estimated_cost); }} disabled={updating === job.id} className="px-2.5 py-1.5 bg-green-100 text-green-700 text-xs font-medium rounded-lg hover:bg-green-200 transition-colors disabled:opacity-60 whitespace-nowrap">
+                    <button onClick={() => updateStatus(job.id, "completed")} disabled={updating === job.id} className="px-2.5 py-1.5 bg-green-100 text-green-700 text-xs font-medium rounded-lg hover:bg-green-200 transition-colors disabled:opacity-60 whitespace-nowrap">
                       Complete
                     </button>
                   )}
@@ -480,10 +475,9 @@ export default function JobCards() {
           {filtered.map(job => {
             const js = getJobStyle(job.status);
             const vs = job.vehicle_id ? getStatusStyle(job.vehicle_status) : null;
-            const overBudget = job.actual_cost && job.actual_cost > job.estimated_cost;
             const partsTotal = job.parts?.reduce((s, p) => s + p.quantity * p.unit_cost, 0) || 0;
             return (
-              <div key={job.id} data-testid="job-card" className={`flex flex-col bg-white rounded-xl border ${overBudget ? "border-red-200" : "border-slate-200"} shadow-sm p-5 hover:shadow-md transition-shadow`}>
+              <div key={job.id} data-testid="job-card" className="flex flex-col bg-white rounded-xl border border-slate-200 shadow-sm p-5 hover:shadow-md transition-shadow">
                 <div className="flex items-start justify-between mb-3">
                   <div>
                     <div className="flex items-center gap-1.5">
@@ -516,8 +510,7 @@ export default function JobCards() {
                   {job.coupon_no != null && <div>Coupon: <span className="font-medium text-slate-700">#{job.coupon_no}</span></div>}
                   {job.job_date && <div>Job Date: <span className="font-medium text-slate-700">{formatBSDate(job.job_date)} BS</span></div>}
                   <div>Mechanic: <span className="font-medium text-slate-700">{job.mechanic_name}</span></div>
-                  <div>Est: <span className="font-medium text-slate-700">{formatNPR(job.estimated_cost)}</span></div>
-                  {job.actual_cost != null && <div className={overBudget ? "text-red-600 font-medium" : ""}>Actual: <span className="font-medium">{formatNPR(job.actual_cost)}</span></div>}
+                  <div>Cost: <span className="font-medium text-slate-700">{formatNPR(jobCost(job))}</span></div>
                   <div>Created: <span className="font-medium text-slate-700"><HoverADDate date={job.created_at?.slice(0, 10)} /></span></div>
                 </div>
 
@@ -528,12 +521,15 @@ export default function JobCards() {
                       <Package size={11} /> Parts Used
                     </div>
                     <div className="max-h-40 overflow-y-auto pr-0.5">
-                      {job.parts.map((p, i) => (
-                        <div key={i} className="flex justify-between text-xs text-slate-600 py-0.5">
-                          <span>{p.part_name} × {p.quantity}{(p.external || !p.part_id) && <span className="ml-1.5 text-[10px] font-semibold uppercase tracking-wide text-orange-500">External</span>}</span>
-                          <span className="font-medium">{formatNPR(p.quantity * p.unit_cost)}</span>
-                        </div>
-                      ))}
+                      {job.parts.map((p, i) => {
+                        const isExternal = p.external || !p.part_id;
+                        return (
+                          <div key={i} className={`flex justify-between text-xs py-0.5 ${isExternal ? "bg-orange-100 text-orange-900 font-semibold -mx-1.5 px-1.5 rounded" : "text-slate-600"}`}>
+                            <span>{p.part_name} × {p.quantity}{isExternal && <span className="ml-1.5 text-[10px] font-bold uppercase tracking-wide text-orange-600">External</span>}</span>
+                            <span className="font-medium">{formatNPR(p.quantity * p.unit_cost)}</span>
+                          </div>
+                        );
+                      })}
                     </div>
                     <div className="flex justify-between text-xs font-bold text-slate-800 border-t border-slate-200 mt-1 pt-1">
                       <span>Parts Total</span>
@@ -548,8 +544,6 @@ export default function JobCards() {
                   </div>
                 )}
 
-                {overBudget && <div className="text-xs text-red-600 font-medium mb-3">Over budget by {formatNPR(job.actual_cost - job.estimated_cost)}</div>}
-
                 <div className="mt-auto flex items-center gap-2 flex-wrap pt-1">
                   {canEdit && job.status === "pending" && (
                     <button onClick={() => updateStatus(job.id, "in_progress")} disabled={updating === job.id} className="px-2.5 py-1.5 bg-blue-100 text-blue-700 text-xs font-medium rounded-lg hover:bg-blue-200 transition-colors disabled:opacity-60">
@@ -557,7 +551,7 @@ export default function JobCards() {
                     </button>
                   )}
                   {canEdit && job.status === "in_progress" && (
-                    <button onClick={() => { const cost = window.prompt("Enter actual cost (NPR):"); if (cost !== null) updateStatus(job.id, "completed", cost || job.estimated_cost); }} disabled={updating === job.id} className="px-2.5 py-1.5 bg-green-100 text-green-700 text-xs font-medium rounded-lg hover:bg-green-200 transition-colors disabled:opacity-60">
+                    <button onClick={() => updateStatus(job.id, "completed")} disabled={updating === job.id} className="px-2.5 py-1.5 bg-green-100 text-green-700 text-xs font-medium rounded-lg hover:bg-green-200 transition-colors disabled:opacity-60">
                       Mark Complete
                     </button>
                   )}
@@ -701,10 +695,6 @@ export default function JobCards() {
                     <option key={m.id} value={m.id}>{m.name}</option>
                   ))}
                 </select>
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-slate-600 mb-1">Estimated Cost (NPR) <span className="text-red-500">*</span></label>
-                <input type="number" value={form.estimated_cost} onChange={e => setForm({...form, estimated_cost: e.target.value})} placeholder="e.g. 3000" className={inp} />
               </div>
               {/* Spare Parts Section */}
               <div>
