@@ -1,12 +1,13 @@
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { Plus, Pencil, Undo2, Trash2, BookmarkCheck, ArrowRight } from "lucide-react";
+import { Plus, Pencil, Undo2, Trash2, BookmarkCheck, ArrowRight, Wallet, Clock } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
 import { formatNPR } from "../utils/helpers";
 import VehicleComboBox from "../components/VehicleComboBox";
 import BSDatePicker from "../components/BSDatePicker";
 import HoverADDate from "../components/HoverADDate";
+import { useAuth } from "../context/AuthContext";
 
 const inp = "w-full h-9 px-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500";
 const sel = `${inp} bg-white`;
@@ -42,10 +43,24 @@ const EMPTY_BOOKING = {
 };
 
 // Bookings: deposits taken before a sale. Not sales — they only become one when the customer
-// pays the balance ("Record Sale", which opens the normal sale form via onRecordSale).
-export default function BookingsPanel({ bookings, isAdmin, onRecordSale, onChanged }) {
+// pays the balance ("Record Sale" hands the booking to the Sales page, which opens the normal
+// sale form pre-filled from it).
+export default function Bookings() {
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const isAdmin = user?.role === "admin";
+  const [bookings, setBookings] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState("active");
+
+  const onChanged = useCallback(async () => {
+    try { setBookings((await api.get("/bookings")).data); }
+    catch { toast.error("Failed to load bookings"); }
+    finally { setLoading(false); }
+  }, []);
+  useEffect(() => { onChanged(); }, [onChanged]);
+
+  const onRecordSale = (b) => navigate("/sales", { state: { recordSaleFor: b } });
 
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState(null);      // booking being edited, or null for new
@@ -61,6 +76,9 @@ export default function BookingsPanel({ bookings, isAdmin, onRecordSale, onChang
 
   const active = bookings.filter(b => b.status === "active");
   const depositsHeld = active.reduce((s, b) => s + (b.booking_amount || 0), 0);
+  const keptFromWithdrawn = bookings.filter(b => b.status === "cancelled").reduce((s, b) => s + (b.retained_amount || 0), 0);
+  const withdrawnCount = bookings.filter(b => b.status === "cancelled").length;
+  const count = (k) => (k === "all" ? bookings.length : bookings.filter(b => b.status === k).length);
   const shown = filter === "all" ? bookings : bookings.filter(b => b.status === filter);
 
   const openForm = async (booking = null) => {
@@ -136,26 +154,66 @@ export default function BookingsPanel({ bookings, isAdmin, onRecordSale, onChang
 
   const retained = withdrawing ? Math.max((withdrawing.booking_amount || 0) - (Number(refund) || 0), 0) : 0;
 
-  return (
-    <div className="space-y-4" data-testid="bookings-panel">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-1.5 flex-wrap">
-          {FILTERS.map(f => (
-            <button key={f.key} onClick={() => setFilter(f.key)} data-testid={`booking-filter-${f.key}`}
-              className={`h-9 px-3 rounded-lg text-sm font-medium border transition-colors ${filter === f.key ? "bg-blue-600 text-white border-blue-600" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"}`}>
-              {f.label}{f.key === "active" && active.length ? ` (${active.length})` : ""}
-            </button>
-          ))}
-        </div>
-        <div className="flex items-center gap-3">
-          <div className="text-right">
-            <div className="text-[11px] text-slate-500 font-medium">Deposits held</div>
-            <div className="text-base font-bold text-slate-900" style={{ fontFamily: "Manrope" }}>{formatNPR(depositsHeld)}</div>
-          </div>
-          <button onClick={() => openForm()} data-testid="new-booking-btn" className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-3 rounded-lg transition-all active:scale-95 shadow-sm">
-            <Plus size={16} /> New Booking
+  const renderActions = (b) => (
+    <>
+      {b.status === "active" && (
+        <>
+          <button onClick={() => onRecordSale(b)} data-testid="booking-record-sale-btn" className="flex items-center gap-1.5 h-9 px-3 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-medium active:scale-95 transition-all whitespace-nowrap">
+            Record Sale <ArrowRight size={14} />
           </button>
+          <button onClick={() => openForm(b)} title="Edit booking" data-testid="booking-edit-btn" className="w-9 h-9 flex items-center justify-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50"><Pencil size={14} /></button>
+          {isAdmin && <button onClick={() => openWithdraw(b)} title="Customer withdraws" data-testid="booking-withdraw-btn" className="w-9 h-9 flex items-center justify-center rounded-lg border border-amber-200 text-amber-700 hover:bg-amber-50"><Undo2 size={14} /></button>}
+        </>
+      )}
+      {b.status === "converted" && b.sale_id && (
+        <button onClick={() => navigate(`/sales/${b.sale_id}`)} className="h-9 px-3 border border-slate-200 text-slate-600 rounded-lg text-sm font-medium hover:bg-slate-50 whitespace-nowrap">View sale</button>
+      )}
+      {isAdmin && b.status !== "converted" && (
+        <button onClick={() => deleteBooking(b)} title="Delete booking" className="w-9 h-9 flex items-center justify-center rounded-lg hover:bg-red-50"><Trash2 size={14} className="text-red-400" /></button>
+      )}
+    </>
+  );
+
+  if (loading) return <div className="flex items-center justify-center h-64"><div className="animate-spin w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full" /></div>;
+
+  return (
+    <div className="space-y-5 animate-fade-in" data-testid="bookings-page">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-900">Bookings</h1>
+          <p className="text-sm text-slate-500">Deposits taken before a sale — {active.length} active</p>
         </div>
+        <button onClick={() => openForm()} data-testid="new-booking-btn" className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-3 rounded-lg transition-all active:scale-95 shadow-sm">
+          <Plus size={16} /> New Booking
+        </button>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        {[
+          { label: "Active Bookings", value: active.length, icon: Clock, color: "bg-yellow-500" },
+          { label: "Deposits Held", value: formatNPR(depositsHeld), icon: Wallet, color: "bg-green-500" },
+          { label: "Kept from Withdrawals", value: formatNPR(keptFromWithdrawn), sub: `${withdrawnCount} withdrawn`, icon: Undo2, color: "bg-slate-500" },
+        ].map(c => (
+          <div key={c.label} className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 flex items-center gap-3">
+            <div className={`w-9 h-9 rounded-lg ${c.color} flex items-center justify-center shrink-0`}>
+              <c.icon size={16} className="text-white" />
+            </div>
+            <div className="min-w-0">
+              <div className="text-xs text-slate-500 font-medium">{c.label}</div>
+              <div className="text-lg font-bold text-slate-900 truncate" style={{ fontFamily: "Manrope" }}>{c.value}</div>
+              {c.sub && <div className="text-[11px] text-slate-400">{c.sub}</div>}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="flex items-center gap-1.5 flex-wrap">
+        {FILTERS.map(f => (
+          <button key={f.key} onClick={() => setFilter(f.key)} data-testid={`booking-filter-${f.key}`}
+            className={`h-9 px-3 rounded-lg text-sm font-medium border transition-colors ${filter === f.key ? "bg-blue-600 text-white border-blue-600" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"}`}>
+            {f.label}{count(f.key) ? ` (${count(f.key)})` : ""}
+          </button>
+        ))}
       </div>
 
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
@@ -166,62 +224,82 @@ export default function BookingsPanel({ bookings, isAdmin, onRecordSale, onChang
             <p className="text-xs mt-1 text-slate-400">Click "New Booking" when a customer leaves a deposit on a vehicle</p>
           </div>
         ) : (
-          <div className="divide-y divide-slate-100">
-            {shown.map(b => {
-              const st = STATUS_STYLE[b.status] || STATUS_STYLE.active;
-              const agreed = b.agreed_price ?? b.vehicle_selling_price;
-              const balance = agreed != null ? Math.max(agreed - (b.booking_amount || 0), 0) : null;
-              return (
-                <div key={b.id} data-testid="booking-row" className="p-4 flex flex-col lg:flex-row lg:items-center gap-3">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="font-semibold text-slate-900 text-sm">{b.vehicle_info || "—"}</span>
-                      <span className={`px-2 py-0.5 rounded-full text-[11px] font-semibold ${st.cls}`}>{st.label}</span>
+          <>
+            {/* Cards — phones */}
+            <div className="sm:hidden divide-y divide-slate-100">
+              {shown.map(b => {
+                const st = STATUS_STYLE[b.status] || STATUS_STYLE.active;
+                const agreed = b.agreed_price ?? b.vehicle_selling_price;
+                const balance = agreed != null ? Math.max(agreed - (b.booking_amount || 0), 0) : null;
+                return (
+                  <div key={b.id} data-testid="booking-row-mobile" className="p-4 space-y-2">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="font-semibold text-slate-900 text-sm truncate">{b.vehicle_info || "—"}</div>
+                        <div className="text-xs text-slate-500 truncate">{b.customer_name}{b.customer_contact ? ` · ${b.customer_contact}` : ""}</div>
+                      </div>
+                      <span className={`shrink-0 px-2 py-0.5 rounded-full text-[11px] font-semibold ${st.cls}`}>{st.label}</span>
                     </div>
-                    <div className="text-xs text-slate-500 mt-0.5">{b.customer_name}{b.customer_contact ? ` · ${b.customer_contact}` : ""}</div>
-                    {b.notes && <div className="text-xs text-slate-400 mt-0.5 truncate">{b.notes}</div>}
-                    {b.status === "cancelled" && (
-                      <div className="text-xs text-amber-700 mt-1">Refunded {formatNPR(b.refund_amount || 0)} · Kept {formatNPR(b.retained_amount || 0)}{b.cancel_notes ? ` · ${b.cancel_notes}` : ""}</div>
-                    )}
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="font-bold text-green-700">{formatNPR(b.booking_amount)} <span className="text-[11px] font-normal text-slate-400">{b.payment_method}</span></span>
+                      {balance != null && <span className="text-slate-600">Balance {formatNPR(balance)}</span>}
+                    </div>
+                    {b.status === "cancelled" && <div className="text-xs text-amber-700">Refunded {formatNPR(b.refund_amount || 0)} · Kept {formatNPR(b.retained_amount || 0)}</div>}
+                    <div className="flex items-center gap-1.5 pt-1">{renderActions(b)}</div>
                   </div>
-                  <div className="grid grid-cols-3 gap-4 text-sm lg:w-[26rem] shrink-0">
-                    <div>
-                      <div className="text-[11px] text-slate-400">Deposit</div>
-                      <div className="font-bold text-green-700">{formatNPR(b.booking_amount)}</div>
-                      <div className="text-[11px] text-slate-400">{b.payment_method}</div>
-                    </div>
-                    <div>
-                      <div className="text-[11px] text-slate-400">Balance</div>
-                      <div className="font-semibold text-slate-800">{balance != null ? formatNPR(balance) : "—"}</div>
-                      {agreed != null && <div className="text-[11px] text-slate-400">of {formatNPR(agreed)}</div>}
-                    </div>
-                    <div>
-                      <div className="text-[11px] text-slate-400">Booked</div>
-                      <div className="text-slate-700"><HoverADDate date={b.booking_date} /></div>
-                      {b.expected_sale_date && <div className="text-[11px] text-slate-400">Sale by <HoverADDate date={b.expected_sale_date} /></div>}
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    {b.status === "active" && (
-                      <>
-                        <button onClick={() => onRecordSale(b)} data-testid="booking-record-sale-btn" className="flex items-center gap-1.5 h-9 px-3 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-medium active:scale-95 transition-all">
-                          Record Sale <ArrowRight size={14} />
-                        </button>
-                        <button onClick={() => openForm(b)} title="Edit booking" data-testid="booking-edit-btn" className="w-9 h-9 flex items-center justify-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50"><Pencil size={14} /></button>
-                        {isAdmin && <button onClick={() => openWithdraw(b)} title="Customer withdraws" data-testid="booking-withdraw-btn" className="w-9 h-9 flex items-center justify-center rounded-lg border border-amber-200 text-amber-700 hover:bg-amber-50"><Undo2 size={14} /></button>}
-                      </>
-                    )}
-                    {b.status === "converted" && b.sale_id && (
-                      <button onClick={() => navigate(`/sales/${b.sale_id}`)} className="h-9 px-3 border border-slate-200 text-slate-600 rounded-lg text-sm font-medium hover:bg-slate-50">View sale</button>
-                    )}
-                    {isAdmin && b.status !== "converted" && (
-                      <button onClick={() => deleteBooking(b)} title="Delete booking" className="w-9 h-9 flex items-center justify-center rounded-lg hover:bg-red-50"><Trash2 size={14} className="text-red-400" /></button>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
+
+            {/* Table — sm and up */}
+            <div className="hidden sm:block overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-slate-100">
+                    {["Vehicle", "Customer", "Deposit", "Balance", "Booked", "Status", ""].map(h => (
+                      <th key={h} className="text-left text-xs font-semibold uppercase tracking-wider text-slate-500 px-4 py-3 whitespace-nowrap">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-50">
+                  {shown.map(b => {
+                    const st = STATUS_STYLE[b.status] || STATUS_STYLE.active;
+                    const agreed = b.agreed_price ?? b.vehicle_selling_price;
+                    const balance = agreed != null ? Math.max(agreed - (b.booking_amount || 0), 0) : null;
+                    return (
+                      <tr key={b.id} data-testid="booking-row" className="table-row-hover">
+                        <td className="px-4 py-3">
+                          <div className="font-semibold text-slate-900 text-sm">{b.vehicle_info || "—"}</div>
+                          {b.notes && <div className="text-xs text-slate-400 truncate max-w-[16rem]">{b.notes}</div>}
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="text-sm text-slate-700">{b.customer_name}</div>
+                          {b.customer_contact && <div className="text-xs text-slate-400">{b.customer_contact}</div>}
+                        </td>
+                        <td className="px-4 py-3 whitespace-nowrap">
+                          <div className="text-sm font-bold text-green-700">{formatNPR(b.booking_amount)}</div>
+                          <div className="text-[11px] text-slate-400">{b.payment_method}</div>
+                        </td>
+                        <td className="px-4 py-3 whitespace-nowrap">
+                          <div className="text-sm font-semibold text-slate-800">{balance != null ? formatNPR(balance) : "—"}</div>
+                          {agreed != null && <div className="text-[11px] text-slate-400">of {formatNPR(agreed)}</div>}
+                        </td>
+                        <td className="px-4 py-3 text-sm text-slate-600 whitespace-nowrap">
+                          <HoverADDate date={b.booking_date} />
+                          {b.expected_sale_date && <div className="text-[11px] text-slate-400">Sale by <HoverADDate date={b.expected_sale_date} /></div>}
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className={`px-2 py-0.5 rounded-full text-[11px] font-semibold ${st.cls}`}>{st.label}</span>
+                          {b.status === "cancelled" && <div className="text-[11px] text-amber-700 mt-1 whitespace-nowrap">Refunded {formatNPR(b.refund_amount || 0)} · Kept {formatNPR(b.retained_amount || 0)}</div>}
+                        </td>
+                        <td className="px-4 py-3"><div className="flex items-center gap-1.5 justify-end">{renderActions(b)}</div></td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </>
         )}
       </div>
 

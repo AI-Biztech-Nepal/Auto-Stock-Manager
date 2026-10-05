@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { Plus, Search, Trash2, Eye, TrendingUp, DollarSign, Calendar, ShoppingBag, X, ChevronDown, ChevronUp, UserPlus, AlertTriangle, UploadCloud, FileSpreadsheet, CheckCircle2, Undo2 } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
@@ -11,7 +11,6 @@ import BSDatePicker from "../components/BSDatePicker";
 import HoverADDate from "../components/HoverADDate";
 import WarrantyBadge from "../components/WarrantyBadge";
 import PeriodToggle, { PERIOD_OPTIONS } from "../components/PeriodToggle";
-import BookingsPanel from "./BookingsPanel";
 
 const PRESET_EXPENSES = [
   { name: "Registration Transfer Fee", amount: 2000 },
@@ -135,6 +134,7 @@ function marginOf(sale, vehicle) {
 
 export default function Sales() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
   const [sales, setSales] = useState([]);
@@ -152,10 +152,8 @@ export default function Sales() {
   const [showModal, setShowModal] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  // Bookings (deposits taken before a sale) live in their own tab. "Record Sale" on a booking
-  // opens this same sale form pre-filled, with the booking kept in activeBooking.
-  const [view, setView] = useState(() => new URLSearchParams(window.location.search).get("view") === "bookings" ? "bookings" : "sales"); // "sales" | "bookings"
-  const [bookings, setBookings] = useState([]);
+  // "Record Sale" on a booking (Bookings page) lands here and opens this same sale form
+  // pre-filled, with the booking kept in activeBooking.
   const [activeBooking, setActiveBooking] = useState(null);
 
   // Spreadsheet import ("Sales Record 20XX" workbook)
@@ -189,8 +187,8 @@ export default function Sales() {
 
   const fetchAll = useCallback(async () => {
     try {
-      const [s, sm, v, b] = await Promise.all([api.get("/sales"), api.get("/sales/summary"), api.get("/vehicles?status=sold"), api.get("/bookings").catch(() => ({ data: [] }))]);
-      setSales(s.data); setSummary(sm.data); setSoldVehicles(v.data); setBookings(b.data);
+      const [s, sm, v] = await Promise.all([api.get("/sales"), api.get("/sales/summary"), api.get("/vehicles?status=sold")]);
+      setSales(s.data); setSummary(sm.data); setSoldVehicles(v.data);
     } catch { toast.error("Failed to load sales"); }
     finally { setLoading(false); }
   }, []);
@@ -244,6 +242,15 @@ export default function Sales() {
   };
 
   const closeModal = () => { setShowModal(false); setActiveBooking(null); };
+
+  // Arrived from Bookings -> "Record Sale": open the form for that booking, then clear the
+  // router state so a refresh or Back doesn't reopen it.
+  useEffect(() => {
+    const b = location.state?.recordSaleFor;
+    if (!b) return;
+    navigate(location.pathname, { replace: true, state: null });
+    openModal(b);
+  }, [location.state]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const selectedCustomer = customers.find(c => c.id === form.customer_id) || null;
 
@@ -355,7 +362,6 @@ export default function Sales() {
       toast.success(activeBooking ? "Booking converted to a sale!" : "Sale recorded successfully!");
 
       closeModal();
-      if (activeBooking) setView("sales");
       fetchAll();
     } catch (err) { toast.error(getErrMsg(err, "Failed to save sale")); }
     finally { setSaving(false); }
@@ -444,21 +450,6 @@ export default function Sales() {
         </div>
       </div>
 
-      {/* Sales | Bookings */}
-      <div className="flex items-center gap-1.5" data-testid="sales-view-toggle">
-        {[{ key: "sales", label: "Sales" }, { key: "bookings", label: `Bookings${bookings.filter(b => b.status === "active").length ? ` (${bookings.filter(b => b.status === "active").length})` : ""}` }].map(t => (
-          <button key={t.key} onClick={() => setView(t.key)} data-testid={`view-${t.key}`}
-            className={`h-9 px-4 rounded-lg text-sm font-semibold border transition-colors ${view === t.key ? "bg-slate-900 text-white border-slate-900" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"}`}>
-            {t.label}
-          </button>
-        ))}
-      </div>
-
-      {view === "bookings" && (
-        <BookingsPanel bookings={bookings} isAdmin={isAdmin} onRecordSale={openModal} onChanged={fetchAll} />
-      )}
-
-      {view === "sales" && <>
       {/* Summary Cards — the 3rd card follows the period toggle above (defaults to "This
           Month" when nothing's selected, same figure it always showed). */}
       {summary && (
@@ -707,8 +698,6 @@ export default function Sales() {
           </>
         )}
       </div>
-
-      </>}
 
       {/* Record Sale Modal */}
       {showModal && (

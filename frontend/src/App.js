@@ -28,6 +28,7 @@ const Ledger = lazy(() => import("./pages/Ledger"));
 const Finance = lazy(() => import("./pages/Finance"));
 const SpareParts = lazy(() => import("./pages/SpareParts"));
 const Sales = lazy(() => import("./pages/Sales"));
+const Bookings = lazy(() => import("./pages/Bookings"));
 const SaleDetail = lazy(() => import("./pages/SaleDetail"));
 const SoldStockDetail = lazy(() => import("./pages/SoldStockDetail"));
 const Share = lazy(() => import("./pages/Share"));
@@ -99,6 +100,7 @@ function AppRoutes() {
           <Route path="finance" element={<RoleRoute path="/finance"><Finance /></RoleRoute>} />
           <Route path="spare-parts" element={<RoleRoute path="/spare-parts"><SpareParts /></RoleRoute>} />
           <Route path="sales" element={<RoleRoute path="/sales"><Sales /></RoleRoute>} />
+          <Route path="bookings" element={<RoleRoute path="/bookings"><Bookings /></RoleRoute>} />
           <Route path="sales/:id" element={<RoleRoute path="/sales/detail"><SaleDetail /></RoleRoute>} />
           <Route path="sales/vehicle/:id" element={<RoleRoute path="/sales/vehicle"><SoldStockDetail /></RoleRoute>} />
           {/* Sold Stock was merged into Sales. */}
