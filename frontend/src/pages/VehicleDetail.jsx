@@ -413,6 +413,17 @@ export function VehicleDetailModal({ id, onClose }) {
             </div>
           </div>
 
+          {vehicle.status === "reserved" && (
+            <div className="mx-4 sm:mx-5 mb-3 flex items-center justify-between gap-2 flex-wrap text-xs text-yellow-900 bg-yellow-100 border border-yellow-200 rounded-lg px-3 py-2" data-testid="vehicle-booking-banner">
+              <span>
+                {vehicle.booking
+                  ? <>Booked by <span className="font-semibold">{vehicle.booking.customer_name || "customer"}</span>{vehicle.booking.booking_amount != null && <> · {formatNPR(vehicle.booking.booking_amount)} deposit</>}{vehicle.booking.booking_date && <> · <HoverADDate date={vehicle.booking.booking_date} /></>}</>
+                  : "Reserved"}
+              </span>
+              {vehicle.booking && <button type="button" onClick={() => navigate("/sales?view=bookings")} className="font-semibold underline">Open in Sales → Bookings</button>}
+            </div>
+          )}
+
           {/* Status + Actions */}
           <div className="flex items-center gap-2 flex-wrap px-4 sm:px-5 pb-4 sm:pb-5">
             <span className={`px-2.5 py-1 rounded-full text-xs font-semibold uppercase tracking-wide ${ag.bg} ${ag.text}`}>{vehicle.aging?.days}d · {ag.label}</span>

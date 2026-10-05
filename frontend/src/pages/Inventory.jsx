@@ -855,7 +855,7 @@ export default function Inventory() {
                 onClick={() => setSelectedVehicleId(v.id)}
                 thumb={photo ? <img src={photo.url} alt="" className="w-full h-full object-cover" /> : <Package size={16} className="text-slate-300" />}
                 title={`${v.brand} ${v.model}`}
-                subtitle={`${v.year} · ${v.registration_number || "No reg."} · ${formatOwnership(v.ownership_number)}`}
+                subtitle={`${v.year} · ${v.registration_number || "No reg."} · ${formatOwnership(v.ownership_number)}${v.status === "reserved" && v.booking?.customer_name ? ` · Booked by ${v.booking.customer_name}` : ""}`}
                 meta={!hideFinancials && (
                   <div>
                     <div className="font-semibold text-slate-800">{formatNPR(v.total_investment)}</div>
@@ -941,6 +941,13 @@ export default function Inventory() {
                   </span>
                 </div>
 
+                {v.status === "reserved" && (
+                  <div className="text-xs text-yellow-900 bg-yellow-100 border border-yellow-200 rounded-lg px-2.5 py-1.5 mb-3" data-testid="vehicle-card-booking">
+                    {v.booking
+                      ? <>Booked by <span className="font-semibold">{v.booking.customer_name || "customer"}</span>{v.booking.booking_amount != null && <> · {formatNPR(v.booking.booking_amount)} deposit</>}{v.booking.booking_date && <> · <HoverADDate date={v.booking.booking_date} /></>}</>
+                      : "Reserved"}
+                  </div>
+                )}
                 <div className="text-xs text-slate-500 mb-3">
                   Source: <span className="font-medium text-slate-700">{v.purchase_source || "—"}</span>
                 </div>

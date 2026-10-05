@@ -11,6 +11,7 @@ import BSDatePicker from "../components/BSDatePicker";
 import HoverADDate from "../components/HoverADDate";
 import WarrantyBadge from "../components/WarrantyBadge";
 import PeriodToggle, { PERIOD_OPTIONS } from "../components/PeriodToggle";
+import BookingsPanel from "./BookingsPanel";
 
 const PRESET_EXPENSES = [
   { name: "Registration Transfer Fee", amount: 2000 },
@@ -151,6 +152,12 @@ export default function Sales() {
   const [showModal, setShowModal] = useState(false);
   const [saving, setSaving] = useState(false);
 
+  // Bookings (deposits taken before a sale) live in their own tab. "Record Sale" on a booking
+  // opens this same sale form pre-filled, with the booking kept in activeBooking.
+  const [view, setView] = useState(() => new URLSearchParams(window.location.search).get("view") === "bookings" ? "bookings" : "sales"); // "sales" | "bookings"
+  const [bookings, setBookings] = useState([]);
+  const [activeBooking, setActiveBooking] = useState(null);
+
   // Spreadsheet import ("Sales Record 20XX" workbook)
   const [showImport, setShowImport] = useState(false);
   const [importFile, setImportFile] = useState(null);
@@ -182,8 +189,8 @@ export default function Sales() {
 
   const fetchAll = useCallback(async () => {
     try {
-      const [s, sm, v] = await Promise.all([api.get("/sales"), api.get("/sales/summary"), api.get("/vehicles?status=sold")]);
-      setSales(s.data); setSummary(sm.data); setSoldVehicles(v.data);
+      const [s, sm, v, b] = await Promise.all([api.get("/sales"), api.get("/sales/summary"), api.get("/vehicles?status=sold"), api.get("/bookings").catch(() => ({ data: [] }))]);
+      setSales(s.data); setSummary(sm.data); setSoldVehicles(v.data); setBookings(b.data);
     } catch { toast.error("Failed to load sales"); }
     finally { setLoading(false); }
   }, []);
@@ -215,8 +222,15 @@ export default function Sales() {
   // a returned sale only exists as the sale itself.
   const openSale = (s) => navigate(!s.returned && s.vehicle_id && vehicleById[s.vehicle_id] ? `/sales/vehicle/${s.vehicle_id}` : `/sales/${s.id}`);
 
-  const openModal = async () => {
-    setForm(EMPTY_FORM);
+  const openModal = async (booking = null) => {
+    setActiveBooking(booking);
+    setForm(booking ? {
+      ...EMPTY_FORM,
+      vehicle_id: booking.vehicle_id,
+      customer_id: booking.customer_id || "",
+      sale_price: String(booking.agreed_price ?? booking.vehicle_selling_price ?? ""),
+      advance_payment: String(booking.booking_amount ?? ""),
+    } : EMPTY_FORM);
     setExpenseItems([]);
     setPresetToAdd("");
     setNewExpName(""); setNewExpAmt("");
@@ -224,10 +238,12 @@ export default function Sales() {
     setShowAddCust(false);
     setShowModal(true);
     try {
-      const [v, c] = await Promise.all([api.get("/vehicles?status=available"), api.get("/customers")]);
+      const [v, c] = await Promise.all([booking ? api.get(`/vehicles/${booking.vehicle_id}`).then(r => ({ data: [r.data] })) : api.get("/vehicles?status=available"), api.get("/customers")]);
       setVehicles(v.data); setCustomers(c.data);
     } catch { toast.error("Failed to load vehicles/customers"); }
   };
+
+  const closeModal = () => { setShowModal(false); setActiveBooking(null); };
 
   const selectedCustomer = customers.find(c => c.id === form.customer_id) || null;
 
@@ -314,6 +330,7 @@ export default function Sales() {
       if (Number(form.advance_payment) > 0) payMethodParts.push("Advance");
       const payload = {
         vehicle_id: form.vehicle_id,
+        ...(activeBooking ? { booking_id: activeBooking.id } : {}),
         customer_id: customerId,
         sale_price: Number(form.sale_price),
         extra_expenses: extraExpenses.map(e => ({ name: e.name, amount: Number(e.amount) || 0 })),
@@ -335,9 +352,10 @@ export default function Sales() {
       };
 
       await api.post("/sales", payload);
-      toast.success("Sale recorded successfully!");
+      toast.success(activeBooking ? "Booking converted to a sale!" : "Sale recorded successfully!");
 
-      setShowModal(false);
+      closeModal();
+      if (activeBooking) setView("sales");
       fetchAll();
     } catch (err) { toast.error(getErrMsg(err, "Failed to save sale")); }
     finally { setSaving(false); }
@@ -420,12 +438,27 @@ export default function Sales() {
               <UploadCloud size={16} /> Import Sheet
             </button>
           )}
-          <button onClick={openModal} data-testid="new-sale-btn" className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-3 rounded-lg transition-all active:scale-95 shadow-sm">
+          <button onClick={() => openModal()} data-testid="new-sale-btn" className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-3 rounded-lg transition-all active:scale-95 shadow-sm">
             <Plus size={16} /> Record Sale
           </button>
         </div>
       </div>
 
+      {/* Sales | Bookings */}
+      <div className="flex items-center gap-1.5" data-testid="sales-view-toggle">
+        {[{ key: "sales", label: "Sales" }, { key: "bookings", label: `Bookings${bookings.filter(b => b.status === "active").length ? ` (${bookings.filter(b => b.status === "active").length})` : ""}` }].map(t => (
+          <button key={t.key} onClick={() => setView(t.key)} data-testid={`view-${t.key}`}
+            className={`h-9 px-4 rounded-lg text-sm font-semibold border transition-colors ${view === t.key ? "bg-slate-900 text-white border-slate-900" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"}`}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {view === "bookings" && (
+        <BookingsPanel bookings={bookings} isAdmin={isAdmin} onRecordSale={openModal} onChanged={fetchAll} />
+      )}
+
+      {view === "sales" && <>
       {/* Summary Cards — the 3rd card follows the period toggle above (defaults to "This
           Month" when nothing's selected, same figure it always showed). */}
       {summary && (
@@ -675,26 +708,36 @@ export default function Sales() {
         )}
       </div>
 
+      </>}
+
       {/* Record Sale Modal */}
       {showModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 sm:p-4">
           <div className="bg-white sm:rounded-2xl shadow-2xl w-full h-full sm:h-auto sm:max-w-xl sm:max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between p-4 sm:p-5 border-b border-slate-100 sticky top-0 bg-white z-10">
-              <h2 className="text-lg font-bold text-slate-900">Record Sale</h2>
-              <button onClick={() => setShowModal(false)} className="w-11 h-11 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500 shrink-0">✕</button>
+              <h2 className="text-lg font-bold text-slate-900">{activeBooking ? "Record Sale from Booking" : "Record Sale"}</h2>
+              <button onClick={closeModal} className="w-11 h-11 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500 shrink-0">✕</button>
             </div>
             <form onSubmit={handleSave} className="p-4 sm:p-5 space-y-4">
 
+              {activeBooking && (
+                <div className="bg-yellow-50 border border-yellow-200 rounded-xl px-4 py-3 text-sm text-yellow-900" data-testid="booking-banner">
+                  Booking deposit of <strong>{formatNPR(activeBooking.booking_amount)}</strong> is filled in as the advance payment. Enter what the customer pays now as cash / bank below.
+                </div>
+              )}
+
               {/* Vehicle */}
               <Field label="Vehicle" required>
-                <VehicleComboBox
+                {activeBooking ? (
+                  <div className="h-9 px-3 flex items-center text-sm bg-slate-50 border border-slate-200 rounded-lg text-slate-700">{activeBooking.vehicle_info}</div>
+                ) : <VehicleComboBox
                   vehicles={vehicles}
                   value={form.vehicle_id}
                   onChange={id => setForm({...form, vehicle_id: id})}
                   placeholder="Search or select available vehicle..."
                   testId="sale-vehicle"
                   showPrice
-                />
+                />}
               </Field>
 
               {/* Dates */}
@@ -883,7 +926,7 @@ export default function Sales() {
               </Field>
 
               <div className="flex flex-col-reverse sm:flex-row gap-3 pt-4 sm:pt-1 sticky bottom-0 sm:static -mx-4 sm:mx-0 px-4 sm:px-0 pb-4 sm:pb-0 bg-white border-t sm:border-t-0 border-slate-100">
-                <button type="button" onClick={() => setShowModal(false)} className="flex-1 h-14 sm:h-11 border border-slate-200 text-slate-700 rounded-lg text-base sm:text-sm font-semibold hover:bg-slate-50">Cancel</button>
+                <button type="button" onClick={closeModal} className="flex-1 h-14 sm:h-11 border border-slate-200 text-slate-700 rounded-lg text-base sm:text-sm font-semibold hover:bg-slate-50">Cancel</button>
                 <button type="submit" disabled={saving} data-testid="save-sale-btn" className="flex-1 h-14 sm:h-11 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-base sm:text-sm font-semibold disabled:opacity-60 active:scale-95 transition-all">
                   {saving ? "Saving..." : "Record Sale"}
                 </button>
