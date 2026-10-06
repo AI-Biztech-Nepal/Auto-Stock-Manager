@@ -152,6 +152,7 @@ function AccountingSummary({ period }) {
   const [loading, setLoading] = useState(false);
   const [recentSales, setRecentSales] = useState([]);
   const [purchases, setPurchases] = useState([]);
+  const [bookings, setBookings] = useState([]);
   // null | "sales" | "profit" — which tile opened the sales-list popup, and so which
   // summary (Total Sale only, or Total Sale + Total Profit) it shows top-right.
   const [salesModalView, setSalesModalView] = useState(null);
@@ -182,6 +183,15 @@ function AccountingSummary({ period }) {
       .catch(() => {});
     api.get(`/reports/purchases?start_date=${start}&end_date=${end}`)
       .then(r => setPurchases(r.data))
+      .catch(() => {});
+    // Bookings are deposits, not sales — kept out of the sales figures and listed in
+    // their own section of the popup. The endpoint has no date filter, so narrow to
+    // the period here by booking_date.
+    api.get("/bookings")
+      .then(r => setBookings(r.data.filter(b => {
+        const d = (b.booking_date || b.created_at || "").slice(0, 10);
+        return d >= start && d <= end;
+      })))
       .catch(() => {});
   }, [period]);
 
@@ -438,6 +448,48 @@ function AccountingSummary({ period }) {
                     </div>
                   );
                 })
+              )}
+
+              {/* Bookings made in the period — separate from sales; a booking is only a
+                  deposit until it's converted into a sale. */}
+              {salesModalView === "sales" && (
+                <div data-testid="period-bookings-section">
+                  <div className="flex items-center justify-between gap-3 px-4 sm:px-5 py-2.5 bg-amber-50 border-y border-amber-100">
+                    <h3 className="text-sm font-bold text-amber-900">
+                      Bookings <span className="font-medium text-amber-700">({bookings.length})</span>
+                    </h3>
+                    <span className="text-xs font-semibold text-amber-800" data-testid="bookings-modal-total">
+                      Deposits: {formatNPR(bookings.filter(b => b.status !== "cancelled").reduce((s, b) => s + (b.booking_amount || 0), 0))}
+                    </span>
+                  </div>
+                  {bookings.length === 0 ? (
+                    <p className="text-sm text-slate-400 text-center py-6">No bookings in this period</p>
+                  ) : (
+                    <div className="divide-y divide-slate-100">
+                      {bookings.map(b => (
+                        <div
+                          key={b.id}
+                          onClick={() => { setSalesModalView(null); navigate("/bookings"); }}
+                          data-testid="period-bookings-modal-row"
+                          className="flex items-center justify-between gap-3 px-4 sm:px-5 py-3 cursor-pointer hover:bg-slate-50 transition-colors"
+                        >
+                          <div className="min-w-0">
+                            <div className="font-semibold text-slate-900 text-sm truncate" style={{ fontFamily: "Manrope" }}>
+                              {b.vehicle_info || "Vehicle"}
+                            </div>
+                            <div className="text-xs text-slate-500 truncate">
+                              {b.customer_name} · Booked: <HoverADDate date={b.booking_date} />
+                            </div>
+                          </div>
+                          <div className="text-right shrink-0">
+                            <div className="text-sm font-bold text-amber-700">{formatNPR(b.booking_amount)}</div>
+                            <div className="text-[11px] capitalize text-slate-500">{b.status === "cancelled" ? "withdrawn" : b.status}</div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               )}
             </div>
           </div>
