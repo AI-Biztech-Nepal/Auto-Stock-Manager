@@ -5,9 +5,9 @@ import { amountInWords } from "../utils/helpers";
 import { formatBSDateNumeric } from "../utils/nepali-date";
 import { useAuth } from "../context/AuthContext";
 
-// Landscape A5 only while this modal is open, so other prints (bills, reports) keep their page size.
+// A4 only while this modal is open, so other prints (bills, reports) keep their page size.
 const RECEIPT_CSS = `
-@page { size: A5 landscape; margin: 6mm; }
+@page { size: A4 portrait; margin: 10mm; }
 @media print {
   .print-area { padding: 0 !important; background: #fff !important; }
   .rcpt-sheet { filter: none !important; }
