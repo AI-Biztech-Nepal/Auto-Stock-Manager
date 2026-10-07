@@ -45,7 +45,7 @@ const EMPTY_BOOKING = {
 // Bookings: deposits taken before a sale. Not sales — they only become one when the customer
 // pays the balance ("Record Sale" hands the booking to the Sales page, which opens the normal
 // sale form pre-filled from it).
-export default function Bookings() {
+export default function Bookings({ embedded = false, onRecordSale: onRecordSaleProp }) {
   const navigate = useNavigate();
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
@@ -60,7 +60,7 @@ export default function Bookings() {
   }, []);
   useEffect(() => { onChanged(); }, [onChanged]);
 
-  const onRecordSale = (b) => navigate(`/sales?booking=${b.id}`);
+  const onRecordSale = (b) => (onRecordSaleProp ? onRecordSaleProp(b) : navigate(`/sales?booking=${b.id}`));
 
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState(null);      // booking being edited, or null for new
@@ -180,7 +180,7 @@ export default function Bookings() {
     <div className="space-y-5 animate-fade-in" data-testid="bookings-page">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">Bookings</h1>
+          {!embedded && <h1 className="text-2xl font-bold text-slate-900">Bookings</h1>}
           <p className="text-sm text-slate-500">Deposits taken before a sale — {active.length} active</p>
         </div>
         <button onClick={() => openForm()} data-testid="new-booking-btn" className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-3 rounded-lg transition-all active:scale-95 shadow-sm">

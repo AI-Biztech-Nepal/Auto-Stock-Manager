@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
-import { useNavigate, useLocation, Link } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { Plus, Search, Trash2, Eye, TrendingUp, DollarSign, Calendar, ShoppingBag, X, ChevronDown, ChevronUp, UserPlus, AlertTriangle, UploadCloud, FileSpreadsheet, CheckCircle2, Undo2, BookmarkCheck, ArrowRight } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
@@ -10,6 +10,7 @@ import VehicleComboBox from "../components/VehicleComboBox";
 import BSDatePicker from "../components/BSDatePicker";
 import HoverADDate from "../components/HoverADDate";
 import WarrantyBadge from "../components/WarrantyBadge";
+import Bookings from "./Bookings";
 import PeriodToggle, { PERIOD_OPTIONS } from "../components/PeriodToggle";
 
 const PRESET_EXPENSES = [
@@ -257,6 +258,8 @@ export default function Sales() {
 
   // Arrived from the Bookings page (/sales?booking=ID): open the sale form for that booking
   // once bookings have loaded, then drop the param so a refresh doesn't reopen it.
+  const tab = new URLSearchParams(location.search).get("tab") === "bookings" ? "bookings" : "sales";
+  const setTab = (t) => navigate(t === "bookings" ? "/sales?tab=bookings" : "/sales", { replace: true });
   const bookingParam = new URLSearchParams(location.search).get("booking");
   useEffect(() => {
     if (!bookingParam || loading) return;
@@ -443,6 +446,19 @@ export default function Sales() {
 
   return (
     <div className="space-y-5 animate-fade-in">
+      <div className="flex items-center gap-1 border-b border-slate-200" data-testid="sales-tabs">
+        {[{ key: "sales", label: "Sales" }, { key: "bookings", label: `Bookings${openBookings.length ? ` (${openBookings.length})` : ""}` }].map(t => (
+          <button key={t.key} onClick={() => setTab(t.key)} data-testid={`sales-tab-${t.key}`}
+            className={`px-4 h-10 text-sm font-semibold border-b-2 -mb-px transition-colors ${tab === t.key ? "border-blue-600 text-blue-600" : "border-transparent text-slate-500 hover:text-slate-700"}`}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {tab === "bookings" ? (
+        <Bookings key={`${sales.length}-${openBookings.length}`} embedded onRecordSale={openModal} />
+      ) : (
+      <>
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
@@ -560,7 +576,7 @@ export default function Sales() {
             <div className="flex items-center gap-2 text-sm font-semibold text-yellow-900">
               <BookmarkCheck size={16} /> {openBookings.length} open booking{openBookings.length > 1 ? "s" : ""} awaiting sale
             </div>
-            <Link to="/bookings" className="text-xs font-medium text-yellow-800 hover:underline">Manage bookings</Link>
+            <button onClick={() => setTab("bookings")} className="text-xs font-medium text-yellow-800 hover:underline">Manage bookings</button>
           </div>
           <div className="divide-y divide-yellow-100">
             {openBookings.map(b => {
@@ -744,6 +760,9 @@ export default function Sales() {
           </>
         )}
       </div>
+
+      </>
+      )}
 
       {/* Record Sale Modal */}
       {showModal && (
