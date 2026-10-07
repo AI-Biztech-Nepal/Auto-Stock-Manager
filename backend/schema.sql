@@ -283,6 +283,7 @@ CREATE TABLE IF NOT EXISTS bookings (
   company_id VARCHAR(36) NOT NULL,
   vehicle_id VARCHAR(36),
   customer_id VARCHAR(36),
+  receipt_no INT,
   booking_amount DOUBLE,
   payment_method VARCHAR(50),
   booking_date VARCHAR(20),

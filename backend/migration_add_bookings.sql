@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS bookings (
   company_id VARCHAR(36) NOT NULL,
   vehicle_id VARCHAR(36),
   customer_id VARCHAR(36),
+  receipt_no INT,
   booking_amount DOUBLE,
   payment_method VARCHAR(50),
   booking_date VARCHAR(20),
@@ -32,3 +33,6 @@ CREATE TABLE IF NOT EXISTS bookings (
   CONSTRAINT fk_bookings_customer FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE SET NULL,
   CONSTRAINT fk_bookings_company FOREIGN KEY (company_id) REFERENCES companies(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Receipt numbers (added after the first release); safe to re-run on MySQL 8+/MariaDB.
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS receipt_no INT;

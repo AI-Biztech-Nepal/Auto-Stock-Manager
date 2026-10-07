@@ -1,12 +1,13 @@
 import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { Plus, Pencil, Undo2, Trash2, BookmarkCheck, ArrowRight, Wallet, Clock } from "lucide-react";
+import { Plus, Pencil, Undo2, Trash2, BookmarkCheck, ArrowRight, Wallet, Clock, Printer } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
 import { formatNPR } from "../utils/helpers";
 import VehicleComboBox from "../components/VehicleComboBox";
 import BSDatePicker from "../components/BSDatePicker";
 import HoverADDate from "../components/HoverADDate";
+import BookingReceipt from "../components/BookingReceipt";
 import { useAuth } from "../context/AuthContext";
 
 const inp = "w-full h-9 px-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500";
@@ -66,10 +67,10 @@ export default function Bookings({ embedded = false, onRecordSale: onRecordSaleP
   const [editing, setEditing] = useState(null);      // booking being edited, or null for new
   const [form, setForm] = useState(EMPTY_BOOKING);
   const [vehicles, setVehicles] = useState([]);
-  const [customers, setCustomers] = useState([]);
-  const [newCust, setNewCust] = useState(null);      // {name, contact_number} while adding a customer inline
+  const [newCust, setNewCust] = useState({ name: "", contact_number: "" }); // bookings are always for new customers
   const [saving, setSaving] = useState(false);
 
+  const [receipt, setReceipt] = useState(null); // booking whose receipt is open for printing
   const [withdrawing, setWithdrawing] = useState(null);
   const [refund, setRefund] = useState("");
   const [withdrawNotes, setWithdrawNotes] = useState("");
@@ -83,7 +84,7 @@ export default function Bookings({ embedded = false, onRecordSale: onRecordSaleP
 
   const openForm = async (booking = null) => {
     setEditing(booking);
-    setNewCust(null);
+    setNewCust({ name: "", contact_number: "" });
     setForm(booking ? {
       vehicle_id: booking.vehicle_id, customer_id: booking.customer_id || "",
       booking_amount: String(booking.booking_amount ?? ""), payment_method: booking.payment_method || "Cash",
@@ -92,9 +93,8 @@ export default function Bookings({ embedded = false, onRecordSale: onRecordSaleP
     } : EMPTY_BOOKING);
     setShowForm(true);
     try {
-      const [v, c] = await Promise.all([booking ? Promise.resolve({ data: [] }) : api.get("/vehicles?status=available"), api.get("/customers")]);
-      setVehicles(v.data); setCustomers(c.data);
-    } catch { toast.error("Failed to load vehicles/customers"); }
+      if (!booking) setVehicles((await api.get("/vehicles?status=available")).data);
+    } catch { toast.error("Failed to load vehicles"); }
   };
 
   const closeForm = () => { setShowForm(false); setEditing(null); };
@@ -104,10 +104,10 @@ export default function Bookings({ embedded = false, onRecordSale: onRecordSaleP
     const amount = Number(form.booking_amount);
     if (!form.vehicle_id) { toast.error("Select a vehicle"); return; }
     if (!(amount > 0)) { toast.error("Enter the booking amount"); return; }
-    if (!form.customer_id && !(newCust?.name?.trim() && newCust?.contact_number?.trim())) { toast.error("Select a customer, or add their name and phone"); return; }
+    if (!editing && !(newCust.name.trim() && newCust.contact_number.trim())) { toast.error("Enter the customer's name and phone"); return; }
     setSaving(true);
     try {
-      let customerId = form.customer_id;
+      let customerId = editing ? editing.customer_id : "";
       if (!customerId) {
         const r = await api.post("/customers", { name: newCust.name.trim(), contact_number: newCust.contact_number.trim() });
         customerId = r.data.id;
@@ -121,11 +121,13 @@ export default function Bookings({ embedded = false, onRecordSale: onRecordSaleP
         agreed_price: form.agreed_price === "" ? undefined : Number(form.agreed_price),
         notes: form.notes,
       };
+      let created = null;
       if (editing) await api.put(`/bookings/${editing.id}`, payload);
-      else await api.post("/bookings", { ...payload, vehicle_id: form.vehicle_id });
+      else created = (await api.post("/bookings", { ...payload, vehicle_id: form.vehicle_id })).data;
       toast.success(editing ? "Booking updated" : "Vehicle booked");
       closeForm();
       onChanged();
+      if (created) setReceipt(created); // new booking: straight to the printable receipt
     } catch (err) { toast.error(errMsg(err, "Failed to save booking")); }
     finally { setSaving(false); }
   };
@@ -156,6 +158,7 @@ export default function Bookings({ embedded = false, onRecordSale: onRecordSaleP
 
   const renderActions = (b) => (
     <>
+      <button onClick={() => setReceipt(b)} title="Print receipt" data-testid="booking-receipt-btn" className="w-9 h-9 flex items-center justify-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50"><Printer size={14} /></button>
       {b.status === "active" && (
         <>
           <button onClick={() => onRecordSale(b)} data-testid="booking-record-sale-btn" className="flex items-center gap-1.5 h-9 px-3 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-medium active:scale-95 transition-all whitespace-nowrap">
@@ -324,18 +327,13 @@ export default function Bookings({ embedded = false, onRecordSale: onRecordSaleP
               </Field>
 
               <Field label="Customer" required>
-                {newCust ? (
-                  <div className="space-y-2 p-3 bg-blue-50 border border-blue-100 rounded-xl">
-                    <input value={newCust.name} onChange={e => setNewCust({ ...newCust, name: e.target.value })} placeholder="Full name" className={inp} data-testid="booking-new-cust-name" />
-                    <input value={newCust.contact_number} onChange={e => setNewCust({ ...newCust, contact_number: e.target.value })} placeholder="Phone number" className={inp} data-testid="booking-new-cust-phone" />
-                    <button type="button" onClick={() => setNewCust(null)} className="text-xs text-blue-600 hover:underline">Pick an existing customer instead</button>
-                  </div>
+                {editing ? (
+                  <div className="h-9 px-3 flex items-center text-sm bg-slate-50 border border-slate-200 rounded-lg text-slate-700">{editing.customer_name}{editing.customer_contact ? ` · ${editing.customer_contact}` : ""}</div>
                 ) : (
-                  <select value={form.customer_id} onChange={e => e.target.value === "__new" ? (setNewCust({ name: "", contact_number: "" }), setForm({ ...form, customer_id: "" })) : setForm({ ...form, customer_id: e.target.value })} className={sel} data-testid="booking-customer-select">
-                    <option value="">Select customer...</option>
-                    <option value="__new">+ New customer</option>
-                    {customers.map(c => <option key={c.id} value={c.id}>{c.name} — {c.contact_number}</option>)}
-                  </select>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <input value={newCust.name} onChange={e => setNewCust({ ...newCust, name: e.target.value })} placeholder="Full name" className={inp} data-testid="booking-new-cust-name" />
+                    <input value={newCust.contact_number} onChange={e => setNewCust({ ...newCust, contact_number: e.target.value })} placeholder="Phone number" inputMode="tel" className={inp} data-testid="booking-new-cust-phone" />
+                  </div>
                 )}
               </Field>
 
@@ -374,6 +372,8 @@ export default function Bookings({ embedded = false, onRecordSale: onRecordSaleP
           </div>
         </div>
       )}
+
+      <BookingReceipt booking={receipt} onClose={() => setReceipt(null)} />
 
       {/* Withdraw */}
       {withdrawing && (

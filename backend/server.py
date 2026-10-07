@@ -1458,6 +1458,7 @@ BOOKINGS_DDL = """CREATE TABLE IF NOT EXISTS bookings (
   company_id VARCHAR(36) NOT NULL,
   vehicle_id VARCHAR(36),
   customer_id VARCHAR(36),
+  receipt_no INT,
   booking_amount DOUBLE,
   payment_method VARCHAR(50),
   booking_date VARCHAR(20),
@@ -3669,8 +3670,10 @@ async def create_booking(body: BookingCreate, cu: dict = Depends(require("sales"
     if not await db.customers.find_one({"id": body.customer_id}, {"_id": 0, "id": 1}): raise HTTPException(404, "Customer not found")
     if body.booking_amount <= 0: raise HTTPException(400, "Booking amount must be greater than 0")
     now = datetime.now(timezone.utc).isoformat()
+    last = await db.bookings.find({}, {"_id": 0, "receipt_no": 1}).sort("receipt_no", -1).to_list(1)
     doc = {
         "id": str(uuid.uuid4()), "vehicle_id": body.vehicle_id, "customer_id": body.customer_id,
+        "receipt_no": ((last[0].get("receipt_no") or 0) if last else 0) + 1,
         "booking_amount": round(body.booking_amount, 2), "payment_method": body.payment_method,
         "booking_date": body.booking_date or datetime.now(timezone.utc).date().isoformat(),
         "expected_sale_date": body.expected_sale_date, "agreed_price": body.agreed_price,
@@ -4980,6 +4983,7 @@ async def _run_startup_tasks():
             logger.warning("Could not ensure facebook_pages table", exc_info=True)
         _post_schema_cols = [
             ("customers", "id_number", "VARCHAR(100)"),
+            ("bookings", "receipt_no", "INT"),
             ("sales", "witness_name", "VARCHAR(255)"),
             ("sales", "witness_address", "VARCHAR(500)"),
             ("sales", "witness_phone", "VARCHAR(50)"),

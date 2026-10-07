@@ -186,3 +186,22 @@ export const withSanakhatExpenses = (others, sanakhat, resanakhat) => [
   ...(Number(sanakhat) > 0 ? [{ name: SANAKHAT_EXPENSE, amount: Number(sanakhat) }] : []),
   ...(Number(resanakhat) > 0 ? [{ name: RESANAKHAT_EXPENSE, amount: Number(resanakhat) }] : []),
 ];
+
+// 20000 -> "Twenty Thousand". Nepali/Indian grouping (Lakh, Crore), whole rupees only.
+export const amountInWords = (amount) => {
+  let n = Math.floor(Math.abs(Number(amount) || 0));
+  if (n === 0) return "Zero";
+  const ones = ["", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten", "Eleven", "Twelve", "Thirteen", "Fourteen", "Fifteen", "Sixteen", "Seventeen", "Eighteen", "Nineteen"];
+  const tens = ["", "", "Twenty", "Thirty", "Forty", "Fifty", "Sixty", "Seventy", "Eighty", "Ninety"];
+  const below100 = (x) => (x < 20 ? ones[x] : `${tens[Math.floor(x / 10)]}${x % 10 ? ` ${ones[x % 10]}` : ""}`);
+  const below1000 = (x) => (x >= 100 ? `${ones[Math.floor(x / 100)]} Hundred${x % 100 ? ` ${below100(x % 100)}` : ""}` : below100(x));
+  const parts = [];
+  const crore = Math.floor(n / 10000000); n %= 10000000;
+  const lakh = Math.floor(n / 100000); n %= 100000;
+  const thousand = Math.floor(n / 1000); n %= 1000;
+  if (crore) parts.push(`${below1000(crore)} Crore`);
+  if (lakh) parts.push(`${below100(lakh)} Lakh`);
+  if (thousand) parts.push(`${below100(thousand)} Thousand`);
+  if (n) parts.push(below1000(n));
+  return parts.join(" ");
+};
