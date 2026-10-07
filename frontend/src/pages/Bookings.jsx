@@ -60,7 +60,7 @@ export default function Bookings() {
   }, []);
   useEffect(() => { onChanged(); }, [onChanged]);
 
-  const onRecordSale = (b) => navigate("/sales", { state: { recordSaleFor: b } });
+  const onRecordSale = (b) => navigate(`/sales?booking=${b.id}`);
 
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState(null);      // booking being edited, or null for new

@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
-import { useNavigate, useLocation } from "react-router-dom";
-import { Plus, Search, Trash2, Eye, TrendingUp, DollarSign, Calendar, ShoppingBag, X, ChevronDown, ChevronUp, UserPlus, AlertTriangle, UploadCloud, FileSpreadsheet, CheckCircle2, Undo2 } from "lucide-react";
+import { useNavigate, useLocation, Link } from "react-router-dom";
+import { Plus, Search, Trash2, Eye, TrendingUp, DollarSign, Calendar, ShoppingBag, X, ChevronDown, ChevronUp, UserPlus, AlertTriangle, UploadCloud, FileSpreadsheet, CheckCircle2, Undo2, BookmarkCheck, ArrowRight } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
 import { formatNPR, getTransferStatusStyle, splitSanakhatExpenses, withSanakhatExpenses } from "../utils/helpers";
@@ -74,7 +74,12 @@ const DEED_ROWS = [
 
 // Status tags from the sold vehicle's own record (what the old Sold Stock tab showed):
 // returned marker, name-transfer status and warranty. Sanakhat has its own columns.
-function SaleTags({ sale, vehicle }) {
+function SaleTags({ sale, vehicle, booking }) {
+  const fromBooking = booking && (
+    <span className="px-1.5 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide bg-yellow-100 text-yellow-800 whitespace-nowrap" title="This sale completed a booking" data-testid="sale-booking-tag">
+      Booked · {formatNPR(booking.booking_amount)}
+    </span>
+  );
   if (sale.returned) {
     return (
       <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide bg-amber-100 text-amber-700" data-testid="sale-returned-tag">
@@ -82,10 +87,11 @@ function SaleTags({ sale, vehicle }) {
       </span>
     );
   }
-  if (!vehicle) return null;
+  if (!vehicle) return fromBooking || null;
   const tr = getTransferStatusStyle(vehicle.ownership_transfer_status);
   return (
     <>
+      {fromBooking}
       <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide whitespace-nowrap ${tr.bg} ${tr.text}`} title="Ownership transfer status" data-testid="sale-transfer-tag">Transfer {tr.label}</span>
       <WarrantyBadge warranty={vehicle.warranty} />
     </>
@@ -142,6 +148,9 @@ export default function Sales() {
   // margin, sanakhat) onto each sale row.
   const [soldVehicles, setSoldVehicles] = useState([]);
   const [summary, setSummary] = useState(null);
+  // Bookings are fetched here so open ones can be converted from this page and converted ones
+  // can be tagged on their sale row.
+  const [bookings, setBookings] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   // Set via the Today/This Week/This Month toggle in the header — "all" (default) shows
@@ -152,7 +161,7 @@ export default function Sales() {
   const [showModal, setShowModal] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  // "Record Sale" on a booking (Bookings page) lands here and opens this same sale form
+  // "Record Sale" on a booking (strip below or Bookings page) opens this same sale form
   // pre-filled, with the booking kept in activeBooking.
   const [activeBooking, setActiveBooking] = useState(null);
 
@@ -189,6 +198,7 @@ export default function Sales() {
     try {
       const [s, sm, v] = await Promise.all([api.get("/sales"), api.get("/sales/summary"), api.get("/vehicles?status=sold")]);
       setSales(s.data); setSummary(sm.data); setSoldVehicles(v.data);
+      api.get("/bookings").then(r => setBookings(r.data)).catch(() => {});
     } catch { toast.error("Failed to load sales"); }
     finally { setLoading(false); }
   }, []);
@@ -200,6 +210,8 @@ export default function Sales() {
     api.get("/sales/reconcile").then(r => setMismatches(r.data.mismatches)).catch(() => {});
   }, [isAdmin, sales]);
 
+  const openBookings = useMemo(() => bookings.filter(b => b.status === "active"), [bookings]);
+  const bookingBySaleId = useMemo(() => Object.fromEntries(bookings.filter(b => b.sale_id).map(b => [b.sale_id, b])), [bookings]);
   const vehicleById = useMemo(() => Object.fromEntries(soldVehicles.map(v => [v.id, v])), [soldVehicles]);
 
   // Optimistic: flip the pill straight away, roll back if the save fails.
@@ -243,14 +255,17 @@ export default function Sales() {
 
   const closeModal = () => { setShowModal(false); setActiveBooking(null); };
 
-  // Arrived from Bookings -> "Record Sale": open the form for that booking, then clear the
-  // router state so a refresh or Back doesn't reopen it.
+  // Arrived from the Bookings page (/sales?booking=ID): open the sale form for that booking
+  // once bookings have loaded, then drop the param so a refresh doesn't reopen it.
+  const bookingParam = new URLSearchParams(location.search).get("booking");
   useEffect(() => {
-    const b = location.state?.recordSaleFor;
-    if (!b) return;
-    navigate(location.pathname, { replace: true, state: null });
-    openModal(b);
-  }, [location.state]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (!bookingParam || loading) return;
+    navigate(location.pathname, { replace: true });
+    api.get("/bookings").then(r => {
+      const b = r.data.find(x => x.id === bookingParam && x.status === "active");
+      if (b) openModal(b); else toast.error("That booking is no longer open");
+    }).catch(() => toast.error("Failed to load booking"));
+  }, [bookingParam, loading]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const selectedCustomer = customers.find(c => c.id === form.customer_id) || null;
 
@@ -538,6 +553,37 @@ export default function Sales() {
         )}
       </div>
 
+      {/* Open bookings — deposits waiting on the balance; Record Sale opens the normal sale form pre-filled */}
+      {openBookings.length > 0 && (
+        <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4" data-testid="open-bookings-strip">
+          <div className="flex items-center justify-between gap-2 mb-2">
+            <div className="flex items-center gap-2 text-sm font-semibold text-yellow-900">
+              <BookmarkCheck size={16} /> {openBookings.length} open booking{openBookings.length > 1 ? "s" : ""} awaiting sale
+            </div>
+            <Link to="/bookings" className="text-xs font-medium text-yellow-800 hover:underline">Manage bookings</Link>
+          </div>
+          <div className="divide-y divide-yellow-100">
+            {openBookings.map(b => {
+              const agreed = b.agreed_price ?? b.vehicle_selling_price;
+              const balance = agreed != null ? Math.max(agreed - (b.booking_amount || 0), 0) : null;
+              return (
+                <div key={b.id} className="flex items-center justify-between gap-3 py-2" data-testid="open-booking-row">
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium text-slate-900 truncate">{b.vehicle_info || "—"}</div>
+                    <div className="text-xs text-slate-600 truncate">
+                      {b.customer_name} · Deposit {formatNPR(b.booking_amount)}{balance != null && ` · Balance ${formatNPR(balance)}`}
+                    </div>
+                  </div>
+                  <button onClick={() => openModal(b)} className="shrink-0 flex items-center gap-1.5 h-9 px-3 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-medium active:scale-95 transition-all">
+                    Record Sale <ArrowRight size={14} />
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* Sales Table */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
         {filtered.length === 0 ? (
@@ -566,7 +612,7 @@ export default function Sales() {
                           {s.needs_review && <span className="ml-1.5 inline-flex items-center gap-0.5 align-middle text-[10px] font-semibold text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded-full"><AlertTriangle size={9} /> Review</span>}
                         </div>
                         <div className="text-xs text-slate-500 mt-0.5 truncate">{s.customer_name}{s.customer_contact ? ` · ${s.customer_contact}` : ""}</div>
-                        <div className="flex items-center gap-1 flex-wrap mt-1.5"><SaleTags sale={s} vehicle={v} /></div>
+                        <div className="flex items-center gap-1 flex-wrap mt-1.5"><SaleTags sale={s} vehicle={v} booking={bookingBySaleId[s.id]} /></div>
                       </div>
                       {isAdmin && (
                         <button onClick={e => { e.stopPropagation(); handleDelete(s.id); }} className="w-11 h-11 -mr-2.5 -mt-2.5 shrink-0 flex items-center justify-center hover:bg-red-50 rounded-lg transition-colors" data-testid="delete-sale-btn-mobile">
@@ -630,7 +676,7 @@ export default function Sales() {
                             {s.vehicle_info || "—"}
                             {s.needs_review && <span className="inline-flex items-center gap-0.5 text-[10px] font-semibold text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded-full" title={s.review_note || "Imported — might need attention"}><AlertTriangle size={9} /> Review</span>}
                           </div>
-                          <div className="flex items-center gap-1 flex-wrap mt-1"><SaleTags sale={s} vehicle={v} /></div>
+                          <div className="flex items-center gap-1 flex-wrap mt-1"><SaleTags sale={s} vehicle={v} booking={bookingBySaleId[s.id]} /></div>
                         </td>
                         <td className="px-4 py-3">
                           <div className="text-sm text-slate-700">{s.customer_name}</div>
