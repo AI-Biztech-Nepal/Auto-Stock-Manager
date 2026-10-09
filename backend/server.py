@@ -595,9 +595,27 @@ async def _vehicle_investment(vehicle_id: str, vehicle: dict) -> float:
 # expenses_total/total_amount/due_amount — see _strip_job_card_extra_expenses — so it
 # never changes what the customer is billed; it only tells the shop what to expect the
 # vehicle's job cards to cost against margin.
-async def _job_card_cost_total(vehicle_id: str) -> float:
+async def _job_card_cost_total(vehicle_id: str, sale: Optional[dict] = None) -> float:
     jobs = await db.job_cards.find({"vehicle_id": vehicle_id, "is_warranty": {"$ne": True}}, {"_id": 0}).to_list(200)
+    if sale:
+        returns = await db.sales.find({"vehicle_id": vehicle_id, "returned": True}, {"_id": 0, "returned_at": 1}).to_list(200)
+        return _sale_job_card_cost(sale, jobs, [r.get("returned_at") for r in returns])
     return sum(_job_card_cost(j) for j in jobs)
+
+# A vehicle that was returned and put back on sale starts a fresh cycle: job cards opened
+# before its last return belong to the earlier sale and must not show up as the new sale's
+# extra expenses. A returned sale itself only owns cards up to its own return.
+def _sale_job_card_cost(sale: dict, jobs: list, returned_ats: list) -> float:
+    created = sale.get("created_at") or ""
+    cutoff = max((r for r in returned_ats if r and r <= created), default="")
+    upper = (sale.get("returned_at") or "") if sale.get("returned") else ""
+    total = 0.0
+    for j in jobs:
+        opened = j.get("created_at") or _job_day(j)
+        if cutoff and opened < cutoff: continue
+        if upper and opened > upper: continue
+        total += _job_card_cost(j)
+    return total
 
 # For a sale returned via POST /vehicles/{vid}/return, only the retained (unrefunded) portion
 # is real revenue — the rest went back to the customer. Every revenue/profit aggregate should
@@ -3310,11 +3328,15 @@ async def get_sales(start_date: Optional[str] = None, end_date: Optional[str] = 
     if customer_ids:
         cs = await db.customers.find({"id": {"$in": customer_ids}}, {"_id": 0, "id": 1, "name": 1, "contact_number": 1}).to_list(len(customer_ids))
         customers_by_id = {c["id"]: c for c in cs}
-    job_cost_by_vehicle: dict = {}
+    jobs_by_vehicle: dict = {}
+    returns_by_vehicle: dict = {}
     if vehicle_ids:
         all_jobs = await db.job_cards.find({"vehicle_id": {"$in": vehicle_ids}, "is_warranty": {"$ne": True}}, {"_id": 0}).to_list(20000)
         for j in all_jobs:
-            job_cost_by_vehicle[j["vehicle_id"]] = job_cost_by_vehicle.get(j["vehicle_id"], 0) + _job_card_cost(j)
+            jobs_by_vehicle.setdefault(j["vehicle_id"], []).append(j)
+        rets = await db.sales.find({"vehicle_id": {"$in": vehicle_ids}, "returned": True}, {"_id": 0, "vehicle_id": 1, "returned_at": 1}).to_list(20000)
+        for r in rets:
+            returns_by_vehicle.setdefault(r["vehicle_id"], []).append(r.get("returned_at"))
 
     # Margin/profit reveal what the shop paid for the vehicle — restricted to Admin,
     # same as get_sale (single). Only fetched for admins so the query is skipped
@@ -3335,7 +3357,7 @@ async def get_sales(start_date: Optional[str] = None, end_date: Optional[str] = 
         c = customers_by_id.get(s.get("customer_id"))
         s["customer_name"] = c["name"] if c else "Walk-in Customer"
         s["customer_contact"] = c.get("contact_number") if c else None
-        s["job_card_cost"] = job_cost_by_vehicle.get(s.get("vehicle_id"), 0)
+        s["job_card_cost"] = _sale_job_card_cost(s, jobs_by_vehicle.get(s.get("vehicle_id"), []), returns_by_vehicle.get(s.get("vehicle_id"), []))
         if s.get("vehicle_id") in investment_by_vehicle:
             investment = investment_by_vehicle[s["vehicle_id"]]
             revenue = _sale_revenue(s)
@@ -3534,7 +3556,7 @@ async def get_sale(sid: str, cu: dict = Depends(require("sales", "view"))):
         s["vehicle_year"] = v.get("year"); s["registration_number"] = v.get("registration_number")
         s["engine_cc"] = v.get("engine_cc"); s["fuel_type"] = v.get("fuel_type")
         s["vehicle_status"] = v.get("status")
-    s["job_card_cost"] = await _job_card_cost_total(s["vehicle_id"]) if s.get("vehicle_id") else 0
+    s["job_card_cost"] = await _job_card_cost_total(s["vehicle_id"], s) if s.get("vehicle_id") else 0
     c = await db.customers.find_one({"id": s.get("customer_id")}, {"_id": 0}) if s.get("customer_id") else None
     s["customer_name"] = c["name"] if c else "Walk-in Customer"
     s["customer_contact"] = c.get("contact_number") if c else None
