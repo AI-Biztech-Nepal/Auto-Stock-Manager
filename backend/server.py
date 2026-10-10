@@ -76,6 +76,7 @@ TENANT_COLLECTIONS = {
     "leads", "legal_documents", "part_transactions", "partners", "sales", "spare_parts",
     "sync_logs", "team_members", "vehicle_photos", "vehicles", "vendor_payments", "vendors",
     "audit_logs", "ai_chat_sessions", "settings", "facebook_pages", "bookings",
+    "offer_prizes", "offer_codes",
 }
 
 def company_scope(cu: dict) -> dict:
@@ -1590,6 +1591,55 @@ class LeadCreate(BaseModel):
     requested_service: Optional[str] = None  # "service" leads: e.g. "Oil Change"
     vehicle_type: Optional[str] = None  # "service" leads: e.g. "Bike - Pulsar 150"
     preferred_date: Optional[str] = None  # "service" leads: preferred servicing date
+
+# Storefront "Offers" tab (Dashain Spin & Win) -- see the OFFERS section below.
+OFFERS_DDL = [
+    """CREATE TABLE IF NOT EXISTS offer_prizes (
+  id VARCHAR(36) NOT NULL PRIMARY KEY,
+  company_id VARCHAR(36) NOT NULL,
+  INDEX idx_offer_prizes_company_id (company_id),
+  name VARCHAR(100),
+  weight INT DEFAULT 0,
+  stock INT DEFAULT 0,
+  sort_order INT DEFAULT 0,
+  created_at VARCHAR(40),
+  CONSTRAINT fk_offer_prizes_company FOREIGN KEY (company_id) REFERENCES companies(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""",
+    """CREATE TABLE IF NOT EXISTS offer_codes (
+  id VARCHAR(36) NOT NULL PRIMARY KEY,
+  company_id VARCHAR(36) NOT NULL,
+  code VARCHAR(20) NOT NULL,
+  UNIQUE KEY uq_offer_codes_company_code (company_id, code),
+  status VARCHAR(10) DEFAULT 'NEW',
+  customer_name VARCHAR(255),
+  phone VARCHAR(50),
+  prize VARCHAR(100),
+  created_by VARCHAR(100),
+  created_at VARCHAR(40),
+  used_at VARCHAR(40),
+  CONSTRAINT fk_offer_codes_company FOREIGN KEY (company_id) REFERENCES companies(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""",
+]
+
+class OfferPrizeIn(BaseModel):
+    id: Optional[str] = None  # missing = a new prize
+    name: str
+    weight: int = 0  # relative chance; 0 keeps it on the wheel but never wins
+    stock: int = 0
+
+class OfferPrizesUpdate(BaseModel):
+    prizes: List[OfferPrizeIn]
+
+class OfferCodesCreate(BaseModel):
+    count: int = Field(default=10, ge=1, le=100)
+
+class OfferCodeCheck(BaseModel):
+    code: str = Field(max_length=40)
+
+class OfferSpin(BaseModel):
+    code: str = Field(max_length=40)
+    name: str = Field(max_length=200)
+    phone: str = Field(max_length=40)
 
 class LeadUpdate(BaseModel):
     status: str  # "new" | "contacted" | "closed"
@@ -4854,6 +4904,75 @@ async def delete_lead(lid: str, cu: dict = Depends(admin_only)):
     if r.deleted_count == 0: raise HTTPException(404, "Lead not found")
     return {"message": "Deleted"}
 
+# ── OFFERS (storefront "Offers" tab: Dashain Spin & Win) ───────────────
+# A customer who buys a vehicle gets a one-time gift code on their bill. On the storefront's
+# Offers tab they're asked for a Google review, enter the code, and spin a prize wheel. The
+# prize is always picked here, never in the browser, from the prizes that still have stock.
+OFFER_REVIEW_URL = os.environ.get(
+    "OFFER_REVIEW_URL", "https://search.google.com/local/writereview?placeid=ChIJcRmLdk4b6zkRI2pToermlUw")
+OFFER_CODE_CHARS = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"  # no 0/O/1/I/L -- codes get read off a paper bill
+OFFER_DEFAULT_PRIZES = [
+    # name, weight (higher = wins more often), stock (how many there are to give away)
+    ("Petrol Rs. 500", 30, 50), ("Helmet", 10, 10), ("Induction", 3, 3), ("Gloves", 20, 30),
+    ("Rider Bag", 10, 10), ("Rider Jacket", 4, 4), ("Recharge Card", 23, 100),
+]
+
+async def _offer_prizes() -> list:
+    """This company's wheel, in display order -- seeded with the defaults the first time."""
+    prizes = await db.offer_prizes.find({}, {"_id": 0}).sort([("sort_order", 1), ("created_at", 1)]).to_list(100)
+    if not prizes:
+        now = datetime.now(timezone.utc).isoformat()
+        prizes = [{"id": str(uuid.uuid4()), "name": n, "weight": w, "stock": s, "sort_order": i, "created_at": now}
+                  for i, (n, w, s) in enumerate(OFFER_DEFAULT_PRIZES)]
+        await db.offer_prizes.insert_many(prizes)
+        for p in prizes:
+            p.pop("_id", None)
+    return prizes
+
+def _offer_code(code: str) -> str:
+    return (code or "").strip().upper()[:20]
+
+@api_router.get("/offers/dashain")
+async def get_dashain_offer(cu: dict = Depends(admin_only)):
+    prizes = await _offer_prizes()
+    codes = await db.offer_codes.find({}, {"_id": 0}).sort("created_at", -1).to_list(5000)
+    return {"prizes": prizes, "codes": codes, "review_url": OFFER_REVIEW_URL,
+            "storefront_url": f"{STOREFRONT_URL}/offers"}
+
+@api_router.post("/offers/dashain/codes")
+async def create_dashain_codes(req: OfferCodesCreate, cu: dict = Depends(admin_only)):
+    existing = set(await db.offer_codes.distinct("code", {}))
+    now = datetime.now(timezone.utc).isoformat()
+    docs = []
+    while len(docs) < req.count:
+        code = "GNG-" + "".join(secrets.choice(OFFER_CODE_CHARS) for _ in range(5))
+        if code in existing: continue
+        existing.add(code)
+        docs.append({"id": str(uuid.uuid4()), "code": code, "status": "NEW", "customer_name": None, "phone": None,
+                     "prize": None, "created_by": cu.get("username"), "created_at": now, "used_at": None})
+    await db.offer_codes.insert_many(docs)
+    return {"codes": [d["code"] for d in docs]}
+
+@api_router.put("/offers/dashain/prizes")
+async def update_dashain_prizes(req: OfferPrizesUpdate, cu: dict = Depends(admin_only)):
+    """Saves the wheel exactly as sent: listed prizes are updated/added in this order, and
+    any prize left out is removed. Codes already won keep their prize name."""
+    current = {p["id"] for p in await _offer_prizes()}
+    kept = set()
+    now = datetime.now(timezone.utc).isoformat()
+    for i, p in enumerate(req.prizes):
+        name = p.name.strip()[:100]
+        if not name: continue
+        fields = {"name": name, "weight": max(0, p.weight), "stock": max(0, p.stock), "sort_order": i}
+        if p.id and p.id in current:
+            await db.offer_prizes.update_one({"id": p.id}, {"$set": fields})
+            kept.add(p.id)
+        else:
+            await db.offer_prizes.insert_one({"id": str(uuid.uuid4()), **fields, "created_at": now})
+    for pid in current - kept:
+        await db.offer_prizes.delete_one({"id": pid})
+    return await _offer_prizes()
+
 # ── SETTINGS (storefront branding/contact info) ────────────────────────
 @api_router.get("/settings")
 async def get_settings(cu: dict = Depends(admin_only)):
@@ -5044,6 +5163,11 @@ async def _run_startup_tasks():
             await db.execute_raw(BOOKINGS_DDL)
         except Exception:
             logger.warning("Could not ensure bookings table", exc_info=True)
+        for _ddl in OFFERS_DDL:
+            try:
+                await db.execute_raw(_ddl)
+            except Exception:
+                logger.warning("Could not ensure offers tables", exc_info=True)
     await db.vehicles.update_many({"ownership_termination_status": "ok"}, {"$set": {"ownership_termination_status": "yes"}})
     await db.vehicles.update_many({"ownership_termination_status": "missing"}, {"$set": {"ownership_termination_status": "no"}})
     if not await db.settings.find_one({"id": "general"}):
@@ -6082,6 +6206,57 @@ async def public_create_lead(lead: LeadCreate):
     await db.leads.insert_one(l)
     l.pop("_id", None)
     return l
+
+@api_router.get("/public/offers/dashain", dependencies=[Depends(_scope_to_default_company)])
+async def public_dashain_offer():
+    """Public, unauthenticated -- what the storefront's Offers tab needs to draw the wheel."""
+    return {"review_url": OFFER_REVIEW_URL, "prizes": [p["name"] for p in await _offer_prizes()]}
+
+@api_router.post("/public/offers/dashain/check", dependencies=[Depends(_scope_to_default_company)])
+@limiter.limit("20/minute")  # slows down anyone guessing gift codes
+async def public_dashain_check(request: Request, req: OfferCodeCheck):
+    c = await db.offer_codes.find_one({"code": _offer_code(req.code)}, {"_id": 0})
+    if not c:
+        return {"ok": False, "msg": "This gift code is not valid. Please check your bill or ask our staff."}
+    return {"ok": True, "used": c.get("status") == "USED", "prize": c.get("prize") or ""}
+
+@api_router.post("/public/offers/dashain/spin", dependencies=[Depends(_scope_to_default_company)])
+@limiter.limit("10/minute")
+async def public_dashain_spin(request: Request, req: OfferSpin):
+    code = _offer_code(req.code)
+    c = await db.offer_codes.find_one({"code": code}, {"_id": 0})
+    if not c:
+        return {"ok": False, "msg": "This gift code is not valid."}
+    prizes = await _offer_prizes()
+
+    async def already_won():
+        won = (await db.offer_codes.find_one({"code": code}, {"_id": 0}) or {}).get("prize") or ""
+        names = [p["name"] for p in prizes]
+        return {"ok": True, "already": True, "prize": won, "prize_index": names.index(won) if won in names else 0}
+
+    if c.get("status") == "USED":
+        return await already_won()
+
+    # Each step is one guarded UPDATE (same pattern as the spare-parts stock guard, see
+    # sqldb.py), so two phones spinning at once can never share the last gift or one code.
+    pool = [p for p in prizes if (p.get("weight") or 0) > 0 and (p.get("stock") or 0) > 0]
+    won = None
+    while pool and won is None:
+        pick = secrets.SystemRandom().choices(pool, weights=[p["weight"] for p in pool])[0]
+        r = await db.offer_prizes.update_one({"id": pick["id"], "stock": {"$gt": 0}}, {"$inc": {"stock": -1}})
+        if r.matched_count: won = pick
+        else: pool.remove(pick)
+    if won is None:
+        return {"ok": False, "msg": "Gifts are being restocked. Please ask our staff."}
+
+    claimed = await db.offer_codes.update_one({"id": c["id"], "status": "NEW"}, {"$set": {
+        "status": "USED", "customer_name": req.name.strip()[:100], "phone": req.phone.strip()[:20],
+        "prize": won["name"], "used_at": datetime.now(timezone.utc).isoformat()}})
+    if not claimed.matched_count:
+        # Lost a race against another spin of the same code -- put the gift back.
+        await db.offer_prizes.update_one({"id": won["id"]}, {"$inc": {"stock": 1}})
+        return await already_won()
+    return {"ok": True, "prize": won["name"], "prize_index": prizes.index(won)}
 
 @app.on_event("shutdown")
 async def shutdown():

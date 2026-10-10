@@ -107,6 +107,9 @@ TABLES = {
     "ai_chat_sessions": {"columns": {"id", "company_id", "messages", "updated_at"}, "json_cols": {"messages"}},
     "facebook_pages": {"columns": {"id", "company_id", "page_id", "page_name", "access_token", "connected_by",
                                     "connected_at"}},
+    "offer_prizes": {"columns": {"id", "company_id", "name", "weight", "stock", "sort_order", "created_at"}},
+    "offer_codes": {"columns": {"id", "company_id", "code", "status", "customer_name", "phone", "prize", "created_by",
+                                 "created_at", "used_at"}},
 }
 
 

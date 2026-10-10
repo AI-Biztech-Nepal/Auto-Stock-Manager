@@ -623,4 +623,32 @@ CREATE TABLE IF NOT EXISTS facebook_pages (
   CONSTRAINT fk_facebook_pages_company FOREIGN KEY (company_id) REFERENCES companies(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- Storefront "Offers" tab (Dashain Spin & Win): prizes on the wheel and one-time gift codes.
+CREATE TABLE IF NOT EXISTS offer_prizes (
+  id VARCHAR(36) NOT NULL PRIMARY KEY,
+  company_id VARCHAR(36) NOT NULL,
+  INDEX idx_offer_prizes_company_id (company_id),
+  name VARCHAR(100),
+  weight INT DEFAULT 0,
+  stock INT DEFAULT 0,
+  sort_order INT DEFAULT 0,
+  created_at VARCHAR(40),
+  CONSTRAINT fk_offer_prizes_company FOREIGN KEY (company_id) REFERENCES companies(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS offer_codes (
+  id VARCHAR(36) NOT NULL PRIMARY KEY,
+  company_id VARCHAR(36) NOT NULL,
+  code VARCHAR(20) NOT NULL,
+  UNIQUE KEY uq_offer_codes_company_code (company_id, code),
+  status VARCHAR(10) DEFAULT 'NEW',
+  customer_name VARCHAR(255),
+  phone VARCHAR(50),
+  prize VARCHAR(100),
+  created_by VARCHAR(100),
+  created_at VARCHAR(40),
+  used_at VARCHAR(40),
+  CONSTRAINT fk_offer_codes_company FOREIGN KEY (company_id) REFERENCES companies(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 SET FOREIGN_KEY_CHECKS = 1;
