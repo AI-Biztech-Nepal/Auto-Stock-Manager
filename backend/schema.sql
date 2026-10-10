@@ -623,7 +623,8 @@ CREATE TABLE IF NOT EXISTS facebook_pages (
   CONSTRAINT fk_facebook_pages_company FOREIGN KEY (company_id) REFERENCES companies(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- Storefront "Offers" tab (Dashain Spin & Win): prizes on the wheel and one-time gift codes.
+-- Storefront "Offers" tab (Dashain Spin & Win): prizes on the wheel, and one row per bike that
+-- has spun (offer_codes.code = the bike's normalized number plate, unique per company).
 CREATE TABLE IF NOT EXISTS offer_prizes (
   id VARCHAR(36) NOT NULL PRIMARY KEY,
   company_id VARCHAR(36) NOT NULL,

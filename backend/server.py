@@ -1630,9 +1630,8 @@ class OfferPrizeIn(BaseModel):
 class OfferPrizesUpdate(BaseModel):
     prizes: List[OfferPrizeIn]
 
-class OfferCodesCreate(BaseModel):
-    count: int = Field(default=10, ge=1, le=100)
-
+# `code` is the number plate of the bike the customer bought (the wire name predates that --
+# the storefront's relay already sends it as `code`). One spin is allowed per bike.
 class OfferCodeCheck(BaseModel):
     code: str = Field(max_length=40)
 
@@ -4905,12 +4904,14 @@ async def delete_lead(lid: str, cu: dict = Depends(admin_only)):
     return {"message": "Deleted"}
 
 # ── OFFERS (storefront "Offers" tab: Dashain Spin & Win) ───────────────
-# A customer who buys a vehicle gets a one-time gift code on their bill. On the storefront's
-# Offers tab they're asked for a Google review, enter the code, and spin a prize wheel. The
-# prize is always picked here, never in the browser, from the prizes that still have stock.
+# A customer who buys a vehicle enters their name, mobile number and the bike's number plate
+# ("lot no.") on the storefront's Offers tab, leaves a Google review, then spins a prize wheel
+# once per bike. A spin is stored as an `offer_codes` row whose `code` is the normalized plate
+# (UNIQUE per company, so a bike can only ever spin once). The prize is always picked here,
+# never in the browser, from the prizes that still have stock. Staff check the winning screen
+# against the sale when handing over the gift.
 OFFER_REVIEW_URL = os.environ.get(
     "OFFER_REVIEW_URL", "https://search.google.com/local/writereview?placeid=ChIJcRmLdk4b6zkRI2pToermlUw")
-OFFER_CODE_CHARS = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"  # no 0/O/1/I/L -- codes get read off a paper bill
 OFFER_DEFAULT_PRIZES = [
     # name, weight (higher = wins more often), stock (how many there are to give away)
     ("Petrol Rs. 500", 30, 50), ("Helmet", 10, 10), ("Induction", 3, 3), ("Gloves", 20, 30),
@@ -4929,34 +4930,25 @@ async def _offer_prizes() -> list:
             p.pop("_id", None)
     return prizes
 
-def _offer_code(code: str) -> str:
-    return (code or "").strip().upper()[:20]
+_NEPALI_DIGITS = str.maketrans("०१२३४५६७८९", "0123456789")
+
+def _offer_bike_no(raw: str) -> str:
+    """Canonical form of a number plate, so 'Ba 70 Pa 1234', 'BA-70-PA-1234' and 'ba70pa1234'
+    are the same bike. Returns "" when it doesn't look like a plate (needs a digit, 4-20 chars)."""
+    s = re.sub(r"[^A-Z0-9ऀ-ॿ]", "", (raw or "").translate(_NEPALI_DIGITS).upper())
+    return s if 4 <= len(s) <= 20 and re.search(r"\d", s) else ""
 
 @api_router.get("/offers/dashain")
 async def get_dashain_offer(cu: dict = Depends(admin_only)):
     prizes = await _offer_prizes()
-    codes = await db.offer_codes.find({}, {"_id": 0}).sort("created_at", -1).to_list(5000)
-    return {"prizes": prizes, "codes": codes, "review_url": OFFER_REVIEW_URL,
+    spins = await db.offer_codes.find({"status": "USED"}, {"_id": 0}).sort("used_at", -1).to_list(5000)
+    return {"prizes": prizes, "spins": spins, "review_url": OFFER_REVIEW_URL,
             "storefront_url": f"{STOREFRONT_URL}/offers"}
-
-@api_router.post("/offers/dashain/codes")
-async def create_dashain_codes(req: OfferCodesCreate, cu: dict = Depends(admin_only)):
-    existing = set(await db.offer_codes.distinct("code", {}))
-    now = datetime.now(timezone.utc).isoformat()
-    docs = []
-    while len(docs) < req.count:
-        code = "GNG-" + "".join(secrets.choice(OFFER_CODE_CHARS) for _ in range(5))
-        if code in existing: continue
-        existing.add(code)
-        docs.append({"id": str(uuid.uuid4()), "code": code, "status": "NEW", "customer_name": None, "phone": None,
-                     "prize": None, "created_by": cu.get("username"), "created_at": now, "used_at": None})
-    await db.offer_codes.insert_many(docs)
-    return {"codes": [d["code"] for d in docs]}
 
 @api_router.put("/offers/dashain/prizes")
 async def update_dashain_prizes(req: OfferPrizesUpdate, cu: dict = Depends(admin_only)):
     """Saves the wheel exactly as sent: listed prizes are updated/added in this order, and
-    any prize left out is removed. Codes already won keep their prize name."""
+    any prize left out is removed. Spins already won keep their prize name."""
     current = {p["id"] for p in await _offer_prizes()}
     kept = set()
     now = datetime.now(timezone.utc).isoformat()
@@ -6213,32 +6205,38 @@ async def public_dashain_offer():
     return {"review_url": OFFER_REVIEW_URL, "prizes": [p["name"] for p in await _offer_prizes()]}
 
 @api_router.post("/public/offers/dashain/check", dependencies=[Depends(_scope_to_default_company)])
-@limiter.limit("20/minute")  # slows down anyone guessing gift codes
+@limiter.limit("20/minute")
 async def public_dashain_check(request: Request, req: OfferCodeCheck):
-    c = await db.offer_codes.find_one({"code": _offer_code(req.code)}, {"_id": 0})
-    if not c:
-        return {"ok": False, "msg": "This gift code is not valid. Please check your bill or ask our staff."}
-    return {"ok": True, "used": c.get("status") == "USED", "prize": c.get("prize") or ""}
+    bike_no = _offer_bike_no(req.code)
+    if not bike_no:
+        return {"ok": False, "msg": "Please enter the number plate of your bike, e.g. Ba 70 Pa 1234."}
+    c = await db.offer_codes.find_one({"code": bike_no}, {"_id": 0})
+    return {"ok": True, "used": bool(c and c.get("status") == "USED"), "prize": (c or {}).get("prize") or ""}
 
 @api_router.post("/public/offers/dashain/spin", dependencies=[Depends(_scope_to_default_company)])
 @limiter.limit("10/minute")
 async def public_dashain_spin(request: Request, req: OfferSpin):
-    code = _offer_code(req.code)
-    c = await db.offer_codes.find_one({"code": code}, {"_id": 0})
-    if not c:
-        return {"ok": False, "msg": "This gift code is not valid."}
+    bike_no = _offer_bike_no(req.code)
+    name = req.name.strip()[:100]
+    phone = re.sub(r"\s+", "", req.phone)
+    if not bike_no:
+        return {"ok": False, "msg": "Please enter the number plate of your bike, e.g. Ba 70 Pa 1234."}
+    if len(name) < 2:
+        return {"ok": False, "msg": "Please enter your name."}
+    if not re.fullmatch(r"9\d{9}", phone):
+        return {"ok": False, "msg": "Please enter a valid 10-digit mobile number."}
     prizes = await _offer_prizes()
 
     async def already_won():
-        won = (await db.offer_codes.find_one({"code": code}, {"_id": 0}) or {}).get("prize") or ""
+        won = (await db.offer_codes.find_one({"code": bike_no}, {"_id": 0}) or {}).get("prize") or ""
         names = [p["name"] for p in prizes]
         return {"ok": True, "already": True, "prize": won, "prize_index": names.index(won) if won in names else 0}
 
-    if c.get("status") == "USED":
+    if await db.offer_codes.find_one({"code": bike_no}, {"_id": 0}):
         return await already_won()
 
-    # Each step is one guarded UPDATE (same pattern as the spare-parts stock guard, see
-    # sqldb.py), so two phones spinning at once can never share the last gift or one code.
+    # Each step is one guarded write (same pattern as the spare-parts stock guard, see
+    # sqldb.py), so two phones spinning at once can never share the last gift or one bike.
     pool = [p for p in prizes if (p.get("weight") or 0) > 0 and (p.get("stock") or 0) > 0]
     won = None
     while pool and won is None:
@@ -6249,13 +6247,19 @@ async def public_dashain_spin(request: Request, req: OfferSpin):
     if won is None:
         return {"ok": False, "msg": "Gifts are being restocked. Please ask our staff."}
 
-    claimed = await db.offer_codes.update_one({"id": c["id"], "status": "NEW"}, {"$set": {
-        "status": "USED", "customer_name": req.name.strip()[:100], "phone": req.phone.strip()[:20],
-        "prize": won["name"], "used_at": datetime.now(timezone.utc).isoformat()}})
-    if not claimed.matched_count:
-        # Lost a race against another spin of the same code -- put the gift back.
+    now = datetime.now(timezone.utc).isoformat()
+    try:
+        # The UNIQUE (company_id, code) key makes this the claim: only one spin per bike gets in.
+        await db.offer_codes.insert_one({
+            "id": str(uuid.uuid4()), "code": bike_no, "status": "USED", "customer_name": name, "phone": phone[:20],
+            "prize": won["name"], "created_by": "storefront", "created_at": now, "used_at": now})
+    except Exception:
+        # Lost a race against another spin of the same bike (or the write failed) -- put the gift back.
         await db.offer_prizes.update_one({"id": won["id"]}, {"$inc": {"stock": 1}})
-        return await already_won()
+        if await db.offer_codes.find_one({"code": bike_no}, {"_id": 0}):
+            return await already_won()
+        logger.error("Could not record Dashain spin for %s", bike_no, exc_info=True)
+        return {"ok": False, "msg": "Something went wrong. Please ask our staff."}
     return {"ok": True, "prize": won["name"], "prize_index": prizes.index(won)}
 
 @app.on_event("shutdown")
