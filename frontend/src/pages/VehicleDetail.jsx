@@ -424,6 +424,16 @@ export function VehicleDetailModal({ id, onClose }) {
             </div>
           )}
 
+          {vehicle.status === "sold" && (
+            <div className="mx-4 sm:mx-5 mb-3 flex items-center justify-between gap-2 flex-wrap text-sm text-green-900 bg-green-100 border border-green-300 rounded-lg px-3 py-2" data-testid="vehicle-sold-banner">
+              <span>
+                <span className="font-bold uppercase tracking-wide">Sold</span>
+                {vehicle.sold_date && <> · <HoverADDate date={vehicle.sold_date} /></>}
+              </span>
+              <button type="button" onClick={() => navigate(`/sales/vehicle/${vehicle.id}`)} className="text-xs font-semibold underline" data-testid="vehicle-sold-banner-link">View sale details</button>
+            </div>
+          )}
+
           {/* Status + Actions */}
           <div className="flex items-center gap-2 flex-wrap px-4 sm:px-5 pb-4 sm:pb-5">
             <span className={`px-2.5 py-1 rounded-full text-xs font-semibold uppercase tracking-wide ${ag.bg} ${ag.text}`}>{vehicle.aging?.days}d · {ag.label}</span>

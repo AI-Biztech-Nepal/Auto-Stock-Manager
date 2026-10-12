@@ -385,6 +385,20 @@ export default function Inventory() {
     setFiltered(result);
   }, [vehicles, search, statusFilter, brandFilter, agingFilter, dateFilter, periodFilter, photoFilter]); // eslint-disable-line react-hooks/exhaustive-deps -- periodRange is derived fresh from periodFilter each render (a new object every time), so depending on periodFilter itself is the stable, correct trigger
 
+  // Sold vehicles are kept out of this grid, so a search for one would otherwise just read
+  // "No vehicles found" — surface the sold matches so it's clear the vehicle was sold.
+  const soldSearchMatches = useMemo(() => {
+    if (!search) return [];
+    const q = search.toLowerCase();
+    const qNoSlash = q.replace(/\//g, "");
+    return vehicles.filter(v =>
+      v.status === "sold" && (
+        v.brand?.toLowerCase().includes(q) || v.model?.toLowerCase().includes(q) ||
+        v.registration_number?.toLowerCase().replace(/\//g, "").includes(qNoSlash)
+      )
+    );
+  }, [vehicles, search]);
+
   const handleSave = async (e, confirmReusedRegistration = false) => {
     e.preventDefault();
     // Social Media adds basic details only -- purchase info is left for an admin to fill in.
@@ -831,6 +845,20 @@ export default function Inventory() {
                 ? "Try adjusting your filters"
                 : "Add your first vehicle to get started"}
           </p>
+          {search && soldSearchMatches.length > 0 && (
+            <div className="mt-3 flex flex-wrap items-center justify-center gap-2 px-4" data-testid="sold-search-matches">
+              {soldSearchMatches.slice(0, 5).map(v => (
+                <button
+                  key={v.id}
+                  onClick={() => setSelectedVehicleId(v.id)}
+                  className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-green-50 border border-green-200 text-xs font-medium text-green-800 hover:bg-green-100 transition-colors"
+                >
+                  <span className="font-bold uppercase">Sold</span>
+                  {v.brand} {v.model}{v.registration_number ? ` · ${v.registration_number}` : ""}
+                </button>
+              ))}
+            </div>
+          )}
           {agingFilter !== "all" && (
             <button
               onClick={() => { setAgingFilter("all"); setSearchParams({}); }}
