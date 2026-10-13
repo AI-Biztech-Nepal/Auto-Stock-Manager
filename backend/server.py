@@ -343,6 +343,9 @@ ROLE_PERMISSIONS = {
         # Warranty tracker: follow up on sold vehicles and void a warranty when the customer
         # serviced elsewhere. Restoring a voided warranty or changing its length is admin-only.
         "warranty": {"view", "edit"},
+        # Sold vehicle's name-transfer / sanakhat status only (PATCH /vehicles/{vid}/sale-statuses),
+        # not general vehicle edits.
+        "sale_statuses": {"edit"},
     },
     "parts_supervisor": {  # Parts department
         "spare_parts": {"view", "create", "edit", "delete"},
@@ -2662,6 +2665,22 @@ async def get_vehicle(vid: str, cu: dict = Depends(require("vehicles", "view")))
         _attach_service_history(v, v["job_cards"], await _default_warranty_days())
     await _attach_active_bookings([v], cu.get("role", "admin"))
     return _hide_financials_for_role(v, cu.get("role", "admin"))
+
+class SaleStatusesUpdate(BaseModel):
+    ownership_transfer_status: Optional[Literal["pending", "in_progress", "done"]] = None
+    sanakhat_status: Optional[Literal["pending", "done"]] = None
+
+@api_router.patch("/vehicles/{vid}/sale-statuses")
+async def update_sale_statuses(vid: str, body: SaleStatusesUpdate, cu: dict = Depends(require("sale_statuses", "edit"))):
+    """Name-transfer and sanakhat progress on a sold vehicle. Separate from update_vehicle so
+    front desk can keep these current without getting general vehicle edit access."""
+    upd = {k: val for k, val in body.model_dump().items() if val is not None}
+    if not upd:
+        raise HTTPException(400, "Nothing to update")
+    res = await db.vehicles.update_one({"id": vid}, {"$set": {**upd, "updated_at": datetime.now(timezone.utc).isoformat()}})
+    if not res.matched_count:
+        raise HTTPException(404, "Vehicle not found")
+    return upd
 
 @api_router.put("/vehicles/{vid}")
 async def update_vehicle(vid: str, vehicle: VehicleUpdate, cu: dict = Depends(require("vehicles", "edit"))):

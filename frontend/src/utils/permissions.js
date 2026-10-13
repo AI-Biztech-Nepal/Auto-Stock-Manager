@@ -6,7 +6,9 @@ export const ROLE_NAV_PATHS = {
   // Warranty tracker: they follow up on sold vehicles and void a warranty when the customer
   // serviced elsewhere (restoring one or changing its length stays admin-only).
   // Ledger: Staff tab only (see LEDGER_TABS below).
-  stock_supervisor: ["/inventory", "/warranty", "/ledger", "/settings"],
+  // /sales/vehicle: the sold-vehicle page, so they can keep Transfer / Sanakhat status current
+  // (the Sales list itself stays admin-only -- it carries prices and margins).
+  stock_supervisor: ["/inventory", "/warranty", "/ledger", "/sales/vehicle", "/settings"],
   // Parts department gets read-only inventory browsing plus the ability to flip a vehicle's
   // pipeline status (Available <-> In Repair, or Scrap) — see PARTS_ALLOWED_STATUSES in server.py.
   // Ledger: Vendors + Staff tabs (see LEDGER_TABS below).
@@ -88,6 +90,11 @@ export function hidesVehiclePricing(role) {
 // Mirrors ROLE_PERMISSIONS["stock_supervisor"]["warranty"] in server.py: front desk can void a
 // warranty (customer serviced elsewhere); restoring it or changing its length is admin-only.
 export function canVoidWarranty(role) {
+  return !role || role === "admin" || role === "stock_supervisor";
+}
+
+// Name-transfer / sanakhat status on a sold vehicle -- mirrors ROLE_PERMISSIONS["stock_supervisor"]["sale_statuses"].
+export function canEditSaleStatuses(role) {
   return !role || role === "admin" || role === "stock_supervisor";
 }
 

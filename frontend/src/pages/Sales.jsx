@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from "react-router-dom";
 import { Plus, Search, Trash2, Eye, TrendingUp, DollarSign, Calendar, ShoppingBag, X, ChevronDown, ChevronUp, UserPlus, AlertTriangle, UploadCloud, FileSpreadsheet, CheckCircle2, Undo2, BookmarkCheck, ArrowRight } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
-import { formatNPR, splitSanakhatExpenses, withSanakhatExpenses } from "../utils/helpers";
+import { formatNPR, splitSanakhatExpenses, withSanakhatExpenses, TRANSFER_STATUS_OPTIONS, getTransferStatusStyle } from "../utils/helpers";
 import { getCurrentBSMonthRange, getCurrentWeekRange, getTodayAD } from "../utils/nepali-date";
 import { useAuth } from "../context/AuthContext";
 import VehicleComboBox from "../components/VehicleComboBox";
@@ -74,7 +74,7 @@ const DEED_ROWS = [
 ];
 
 // Status tags from the sold vehicle's own record (what the old Sold Stock tab showed):
-// returned marker, name-transfer status and warranty. Sanakhat has its own columns.
+// returned marker, name-transfer status and warranty. Sanakhat cost has its own column.
 function SaleTags({ sale, vehicle, booking }) {
   const fromBooking = booking && (
     <span className="px-1.5 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide bg-yellow-100 text-yellow-800 whitespace-nowrap" title="This sale completed a booking" data-testid="sale-booking-tag">
@@ -89,11 +89,11 @@ function SaleTags({ sale, vehicle, booking }) {
     );
   }
   if (!vehicle) return fromBooking || null;
-  const sanakhatDone = vehicle.sanakhat_status === "done";
+  const transfer = getTransferStatusStyle(vehicle.ownership_transfer_status);
   return (
     <>
       {fromBooking}
-      <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide whitespace-nowrap ${SANAKHAT_STYLE[sanakhatDone ? "done" : "pending"]}`} title="Sanakhat status" data-testid="sale-sanakhat-tag">Sanakhat {sanakhatDone ? "Done" : "Pending"}</span>
+      <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide whitespace-nowrap ${transfer.bg} ${transfer.text}`} title="Transfer status" data-testid="sale-transfer-tag">Transfer {transfer.label}</span>
       <WarrantyBadge warranty={vehicle.warranty} />
     </>
   );
@@ -106,29 +106,24 @@ function sanakhatOf(sale) {
   return { total: sanakhat + resanakhat, resanakhat };
 }
 
-const SANAKHAT_STYLE = {
-  done: "bg-green-100 text-green-800",
-  pending: "bg-amber-100 text-amber-800",
-};
-
-// Pending / Done. Admins flip it right in the row; everyone else just sees the pill.
-function SanakhatStatus({ vehicle, editable, onChange }) {
+// Pending / In Progress / Done name transfer. Admins flip it right in the row; everyone else just sees the pill.
+function TransferStatus({ vehicle, editable, onChange }) {
   if (!vehicle) return <span className="text-slate-400">—</span>;
-  const status = vehicle.sanakhat_status === "done" ? "done" : "pending";
+  const status = vehicle.ownership_transfer_status || "pending";
+  const style = getTransferStatusStyle(status);
   if (!editable) {
-    return <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${SANAKHAT_STYLE[status]}`}>{status === "done" ? "Done" : "Pending"}</span>;
+    return <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${style.bg} ${style.text}`}>{style.label}</span>;
   }
   return (
     <select
       value={status}
       onClick={e => e.stopPropagation()}
       onChange={e => onChange(vehicle, e.target.value)}
-      aria-label="Sanakhat status"
-      data-testid="sanakhat-status-select"
-      className={`h-7 pl-2 pr-6 rounded-full text-xs font-semibold border-0 cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500 ${SANAKHAT_STYLE[status]}`}
+      aria-label="Transfer status"
+      data-testid="transfer-status-select"
+      className={`h-7 pl-2 pr-6 rounded-full text-xs font-semibold border-0 cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500 ${style.bg} ${style.text}`}
     >
-      <option value="pending">Pending</option>
-      <option value="done">Done</option>
+      {TRANSFER_STATUS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
     </select>
   );
 }
@@ -216,16 +211,16 @@ export default function Sales() {
   const vehicleById = useMemo(() => Object.fromEntries(soldVehicles.map(v => [v.id, v])), [soldVehicles]);
 
   // Optimistic: flip the pill straight away, roll back if the save fails.
-  const updateSanakhat = async (vehicle, status) => {
-    const prev = vehicle.sanakhat_status;
-    const set = (val) => setSoldVehicles(vs => vs.map(v => v.id === vehicle.id ? { ...v, sanakhat_status: val } : v));
+  const updateTransfer = async (vehicle, status) => {
+    const prev = vehicle.ownership_transfer_status;
+    const set = (val) => setSoldVehicles(vs => vs.map(v => v.id === vehicle.id ? { ...v, ownership_transfer_status: val } : v));
     set(status);
     try {
-      await api.put(`/vehicles/${vehicle.id}`, { sanakhat_status: status });
-      toast.success(`Sanakhat marked ${status === "done" ? "done" : "pending"}`);
+      await api.put(`/vehicles/${vehicle.id}`, { ownership_transfer_status: status });
+      toast.success(`Transfer marked ${getTransferStatusStyle(status).label}`);
     } catch {
       set(prev);
-      toast.error("Couldn't update sanakhat status");
+      toast.error("Couldn't update transfer status");
     }
   };
 
@@ -646,9 +641,9 @@ export default function Sales() {
                       <div className="mt-1 text-xs text-orange-600 font-medium">+{formatNPR((s.expenses_total || 0) + (s.job_card_cost || 0))} extra expenses{s.extra_expenses?.length > 0 ? ` (${s.extra_expenses.length})` : ""}</div>
                     )}
                     {!s.returned && v && (
-                      <div className="mt-1.5 flex items-center gap-2 text-xs text-slate-500" data-testid="sale-sanakhat-mobile">
-                        Sanakhat <SanakhatStatus vehicle={v} editable={isAdmin} onChange={updateSanakhat} />
-                        {sanakhatOf(s).total > 0 && <span className="text-orange-600 font-medium">{formatNPR(sanakhatOf(s).total)}</span>}
+                      <div className="mt-1.5 flex items-center gap-2 text-xs text-slate-500" data-testid="sale-transfer-mobile">
+                        Transfer <TransferStatus vehicle={v} editable={isAdmin} onChange={updateTransfer} />
+                        {sanakhatOf(s).total > 0 && <span className="text-orange-600 font-medium">Sanakhat {formatNPR(sanakhatOf(s).total)}</span>}
                       </div>
                     )}
                     {!s.returned && (s.due_amount > 0 ? (
@@ -670,7 +665,7 @@ export default function Sales() {
               <table className="w-full">
                 <thead>
                   <tr className="border-b border-slate-100">
-                    {["Vehicle", "Customer", "Sale Price", "Extra Expenses", "Sanakhat Cost", "Sanakhat", "Total", "Margin", "Payment", "Date", ""].map(h => (
+                    {["Vehicle", "Customer", "Sale Price", "Extra Expenses", "Sanakhat Cost", "Transfer", "Total", "Margin", "Payment", "Date", ""].map(h => (
                       <th key={h} className="text-left text-xs font-semibold uppercase tracking-wider text-slate-500 px-4 py-3 whitespace-nowrap">{h}</th>
                     ))}
                   </tr>
@@ -716,7 +711,7 @@ export default function Sales() {
                           ) : <span className="text-slate-400">—</span>}
                         </td>
                         <td className="px-4 py-3 whitespace-nowrap">
-                          {s.returned ? <span className="text-slate-400">—</span> : <SanakhatStatus vehicle={v} editable={isAdmin} onChange={updateSanakhat} />}
+                          {s.returned ? <span className="text-slate-400">—</span> : <TransferStatus vehicle={v} editable={isAdmin} onChange={updateTransfer} />}
                         </td>
                         <td className="px-4 py-3 text-sm font-bold text-green-700 whitespace-nowrap">{formatNPR(s.total_amount)}</td>
                         <td className="px-4 py-3 text-sm font-semibold whitespace-nowrap">
