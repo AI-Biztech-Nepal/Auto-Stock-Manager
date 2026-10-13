@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from "react-router-dom";
 import { Plus, Search, Trash2, Eye, TrendingUp, DollarSign, Calendar, ShoppingBag, X, ChevronDown, ChevronUp, UserPlus, AlertTriangle, UploadCloud, FileSpreadsheet, CheckCircle2, Undo2, BookmarkCheck, ArrowRight } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
-import { formatNPR, getTransferStatusStyle, splitSanakhatExpenses, withSanakhatExpenses } from "../utils/helpers";
+import { formatNPR, splitSanakhatExpenses, withSanakhatExpenses } from "../utils/helpers";
 import { getCurrentBSMonthRange, getCurrentWeekRange, getTodayAD } from "../utils/nepali-date";
 import { useAuth } from "../context/AuthContext";
 import VehicleComboBox from "../components/VehicleComboBox";
@@ -89,11 +89,11 @@ function SaleTags({ sale, vehicle, booking }) {
     );
   }
   if (!vehicle) return fromBooking || null;
-  const tr = getTransferStatusStyle(vehicle.ownership_transfer_status);
+  const sanakhatDone = vehicle.sanakhat_status === "done";
   return (
     <>
       {fromBooking}
-      <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide whitespace-nowrap ${tr.bg} ${tr.text}`} title="Ownership transfer status" data-testid="sale-transfer-tag">Transfer {tr.label}</span>
+      <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide whitespace-nowrap ${SANAKHAT_STYLE[sanakhatDone ? "done" : "pending"]}`} title="Sanakhat status" data-testid="sale-sanakhat-tag">Sanakhat {sanakhatDone ? "Done" : "Pending"}</span>
       <WarrantyBadge warranty={vehicle.warranty} />
     </>
   );
