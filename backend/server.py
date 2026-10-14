@@ -1776,7 +1776,7 @@ async def me(cu: dict = Depends(get_current_user)):
 # their next ping a few seconds later. Keyed per device (a stable id the browser sends in
 # X-Device-Id, one per browser/profile) so the same account open on a phone and a laptop
 # counts as two, and filtered by company_id so one tenant never sees another's headcount.
-# We keep only the count -- no device details, user-agent or IP are stored or exposed.
+# We keep only the count and the role mix -- no device details, user-agent or IP are stored or exposed.
 PRESENCE_WINDOW = timedelta(seconds=90)
 _presence: dict = {}  # (user_id, device_id) -> {"company_id": str, "last_seen": datetime}
 
@@ -1794,6 +1794,7 @@ async def presence_heartbeat(request: Request, cu: dict = Depends(get_current_us
         device_id = (request.headers.get("x-device-id") or "").strip()[:64] or uid
         _presence[(uid, device_id)] = {
             "company_id": cu.get("company_id"),
+            "role": cu.get("role", "admin"),
             "last_seen": datetime.now(timezone.utc),
         }
     _prune_presence()
@@ -1803,8 +1804,13 @@ async def presence_heartbeat(request: Request, cu: dict = Depends(get_current_us
 async def presence_online(cu: dict = Depends(get_current_user)):
     _prune_presence()
     cid = cu.get("company_id")
-    devices = sum(1 for p in _presence.values() if p.get("company_id") == cid)
-    return {"count": devices}
+    mine = [p for p in _presence.values() if p.get("company_id") == cid]
+    # Role -> number of online devices. Roles only, never names or accounts.
+    roles: dict = {}
+    for p in mine:
+        r = p.get("role") or "admin"
+        roles[r] = roles.get(r, 0) + 1
+    return {"count": len(mine), "roles": roles}
 
 @api_router.post("/auth/change-password")
 async def change_password(req: ChangePasswordRequest, cu: dict = Depends(get_current_user)):

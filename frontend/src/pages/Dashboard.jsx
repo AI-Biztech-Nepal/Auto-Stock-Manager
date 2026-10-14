@@ -1,16 +1,13 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
-import { AlertTriangle, TrendingUp, Package, Users, Wrench, DollarSign, Clock, ShoppingCart, CalendarDays, TrendingDown, Banknote, Sparkles } from "lucide-react";
+import { AlertTriangle, TrendingUp, Package, Users, Wrench, DollarSign, ShoppingCart, CalendarDays, TrendingDown, Banknote, Sparkles } from "lucide-react";
 import api from "../utils/api";
 import { formatNPR } from "../utils/helpers";
 import HoverADDate from "../components/HoverADDate";
-import PeriodToggle, { PERIOD_OPTIONS } from "../components/PeriodToggle";
+import DateRangeFilter, { resolveDateFilter } from "../components/DateRangeFilter";
 import { useAuth } from "../context/AuthContext";
-import {
-  getCurrentBSDate, getCurrentBSMonthRange, getCurrentWeekRange,
-  getTodayAD, BS_MONTHS,
-} from "../utils/nepali-date";
+import { getCurrentBSDate, BS_MONTHS } from "../utils/nepali-date";
 
 // ── Sub-components defined OUTSIDE to prevent remount ──────────────────
 const AGING_COLORS = { fresh: "#22c55e", normal: "#eab308", slow: "#f97316", dead: "#ef4444" };
@@ -45,28 +42,6 @@ const AlertCard = ({ title, count, description, color, onClick }) => (
   </div>
 );
 
-// Ticks every second and renders Nepal Standard Time (UTC+5:45). Uses the IANA
-// "Asia/Kathmandu" zone via Intl rather than manually offsetting UTC, so the
-// half-hour-plus-15-minutes quirk (and any DST-style edge case) is handled by
-// the platform's timezone database instead of hand-rolled math.
-const LiveClock = () => {
-  const [now, setNow] = useState(new Date());
-  useEffect(() => {
-    const id = setInterval(() => setNow(new Date()), 1000);
-    return () => clearInterval(id);
-  }, []);
-  const timeStr = now.toLocaleTimeString("en-US", {
-    timeZone: "Asia/Kathmandu",
-    hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: true,
-  });
-  return (
-    <div className="flex items-center gap-2 bg-blue-50 border border-blue-100 px-3 py-1.5 rounded-lg" data-testid="npt-clock">
-      <Clock size={14} className="text-blue-600" />
-      <span className="text-xs font-semibold text-blue-700 tabular-nums">{timeStr} NPT</span>
-    </div>
-  );
-};
-
 // Live count of devices from this company currently in the app (Layout.jsx sends a
 // heartbeat from every session, tagged with a per-browser device id). This component
 // registers its own device first, then polls the count every 15s — so whoever has the
@@ -75,21 +50,24 @@ const LiveClock = () => {
 // bubble in the header.
 const OnlineUsers = () => {
   const [count, setCount] = useState(0);
+  const [roles, setRoles] = useState({});
   useEffect(() => {
     let alive = true;
     const load = () => api.get("/presence/online")
-      .then(r => { if (alive) setCount(r.data.count); })
+      .then(r => { if (alive) { setCount(r.data.count); setRoles(r.data.roles || {}); } })
       .catch(() => {});
     const tick = () => api.post("/presence/heartbeat").catch(() => {}).then(load);
     tick();
     const id = setInterval(tick, 15000);
     return () => { alive = false; clearInterval(id); };
   }, []);
+  const roleList = Object.entries(roles);
+  const roleLabel = (r) => r.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
   return (
     <div
       className="flex items-center gap-2 bg-green-50 border border-green-100 px-3 py-1.5 rounded-lg"
       data-testid="online-users-display"
-      title="Devices currently accessing the app"
+      title={roleList.length ? `Online now: ${roleList.map(([r, n]) => `${roleLabel(r)} (${n})`).join(", ")}` : "Devices currently accessing the app"}
     >
       <span className="relative flex h-2 w-2">
         <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
@@ -99,6 +77,11 @@ const OnlineUsers = () => {
       <span className="text-xs font-semibold text-green-700 tabular-nums">
         {count} {count === 1 ? "device" : "devices"} online
       </span>
+      {roleList.length > 0 && (
+        <span className="text-xs text-green-700/80 border-l border-green-200 pl-2" data-testid="online-roles">
+          {roleList.map(([r, n]) => (n > 1 ? `${roleLabel(r)} ×${n}` : roleLabel(r))).join(", ")}
+        </span>
+      )}
     </div>
   );
 };
@@ -126,27 +109,15 @@ const AccountingKPI = ({ label, value, color, icon: Icon, sub, onClick, testid }
 // (Sun–Sat), "This Month" the whole current BS month. Current-state cards (available
 // stock, pending jobs, alerts) have no period meaning and deliberately ignore it.
 
-// Short "1 Sep" style label for the weekly range — the week is a plain calendar
-// week (Sun–Sat), not a BS-aligned period, so it doesn't get a BS_MONTHS label
-// the way daily/monthly do.
-const fmtShortAD = (iso) => new Date(`${iso}T00:00:00`).toLocaleDateString("en-US", { day: "numeric", month: "short" });
-
-// Per-period copy for the Sales Highlight strip below the KPIs.
-const PERIOD_NOUN = { daily: "today", weekly: "this week", monthly: "this month" };
-const PERIOD_SALE_TITLE = { daily: "Today's Sale", weekly: "This Week's Sale", monthly: "Sale this month" };
-const PERIOD_EMPTY_TEXT = {
-  daily: "No sales for today as of now!",
-  weekly: "No sales this week as of now!",
-  monthly: "No sales this month as of now!",
-};
-
 // ── Accounting Summary Block ───────────────────────────────────────────
 // Follows the dashboard's global period (passed in as a prop) — the period toggle
 // is a pure filter and never opens anything on its own. Each KPI tile below opens
 // its own detail popup instead: Total Sales / Net Profit both open the sales list
 // (salesModalView picks which summary to emphasize up top), Total Cost opens the
 // separate purchases list.
-function AccountingSummary({ period }) {
+function AccountingSummary({ range }) {
+  const rl = range.key === "daily" ? "today" : range.key === "all" ? "" : range.label.toLowerCase();
+  const rangePhrase = range.key === "daily" ? "for today" : range.key === "all" ? "yet" : `for ${range.label.toLowerCase()}`;
   const navigate = useNavigate();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -159,18 +130,7 @@ function AccountingSummary({ period }) {
   const [showPurchasesModal, setShowPurchasesModal] = useState(false);
 
   useEffect(() => {
-    const today = getTodayAD();
-    let start, end;
-    if (period === "daily") {
-      start = today; end = today;
-    } else if (period === "weekly") {
-      const range = getCurrentWeekRange();
-      start = range.start; end = range.end;
-    } else {
-      const range = getCurrentBSMonthRange();
-      if (!range) return;
-      start = range.start; end = range.end;
-    }
+    const { start, end } = range;
     // Filtered server-side now (start_date/end_date) instead of fetching the
     // entire sales history and filtering client-side — that full-history fetch
     // plus its N+1 vehicle/customer lookups was why the ribbon felt slow. Purchases
@@ -193,32 +153,19 @@ function AccountingSummary({ period }) {
         return d >= start && d <= end;
       })))
       .catch(() => {});
-  }, [period]);
+  }, [range.start, range.end]);
 
   const fetchSummary = useCallback(async () => {
     setLoading(true); setData(null);
     try {
-      let start, end, label;
-      const today = getTodayAD();
-      if (period === "daily") {
-        start = today; end = today;
-        const bs = getCurrentBSDate();
-        label = bs ? `${BS_MONTHS[bs.month - 1]} ${bs.day}, ${bs.year} BS` : today;
-      } else if (period === "weekly") {
-        const range = getCurrentWeekRange();
-        start = range.start; end = range.end;
-        label = `${fmtShortAD(range.start)} – ${fmtShortAD(range.end)}`;
-      } else {
-        const range = getCurrentBSMonthRange();
-        start = range?.start ?? today; end = range?.end ?? today;
-        label = range ? `${BS_MONTHS[range.bsMonth - 1]} ${range.bsYear} BS` : today;
-      }
+      const { start, end } = range;
+      const label = range.key === "all" ? "All time" : range.sub;
       const res = await api.get(`/reports/accounting-summary?start_date=${start}&end_date=${end}`);
       setData({ ...res.data, periodLabel: label });
     } catch (e) {
       console.error(e);
     } finally { setLoading(false); }
-  }, [period]);
+  }, [range.start, range.end]);
 
   useEffect(() => { fetchSummary(); }, [fetchSummary]);
 
@@ -239,7 +186,7 @@ function AccountingSummary({ period }) {
             Accounting Summary
           </h2>
           <p className="text-xs text-slate-500 mt-0.5">
-            {data ? data.periodLabel : (PERIOD_OPTIONS.find(p => p.key === period)?.label || "Today")}
+            {data ? data.periodLabel : range.label}
           </p>
         </div>
       </div>
@@ -292,10 +239,10 @@ function AccountingSummary({ period }) {
         >
           <Sparkles size={16} className="text-green-600" />
           <h2 className="text-sm font-bold text-green-900 group-hover:underline">
-            {PERIOD_SALE_TITLE[period] || "Sales"}
+            {range.key === "daily" ? "Today's Sale" : `Sales · ${range.label}`}
           </h2>
           <span className="text-xs font-medium text-green-700 bg-green-100 px-2 py-0.5 rounded-full">
-            {recentSales.length} {PERIOD_NOUN[period] || ""}
+            {recentSales.length} {rl}
           </span>
         </div>
         {recentSales.length > 0 ? (
@@ -324,7 +271,7 @@ function AccountingSummary({ period }) {
           </div>
         ) : (
           <p className="text-sm text-green-700/80 text-center py-3" data-testid="recent-sales-empty">
-            {PERIOD_EMPTY_TEXT[period] || "No sales as of now!"}
+            No sales {rangePhrase} as of now!
           </p>
         )}
       </div>
@@ -345,7 +292,7 @@ function AccountingSummary({ period }) {
           >
             <div className="flex items-center justify-between gap-3 p-4 sm:p-5 border-b border-slate-100 shrink-0">
               <div className="min-w-0">
-                <h2 className="text-lg font-bold text-slate-900">{PERIOD_SALE_TITLE[period] || "Sales"}</h2>
+                <h2 className="text-lg font-bold text-slate-900">{range.key === "daily" ? "Today's Sale" : `Sales · ${range.label}`}</h2>
                 <p className="text-xs text-slate-500 mt-0.5">
                   {recentSales.length} vehicle{recentSales.length !== 1 ? "s" : ""} sold{data?.periodLabel ? ` · ${data.periodLabel}` : ""}
                 </p>
@@ -375,7 +322,7 @@ function AccountingSummary({ period }) {
 
             <div className="overflow-y-auto divide-y divide-slate-100">
               {recentSales.length === 0 ? (
-                <p className="text-sm text-slate-400 text-center py-10">{PERIOD_EMPTY_TEXT[period] || "No sales as of now!"}</p>
+                <p className="text-sm text-slate-400 text-center py-10">No sales {rangePhrase} as of now!</p>
               ) : (
                 recentSales.map(s => {
                   const extraCosts = (s.expenses_total || 0) + (s.job_card_cost || 0);
@@ -514,7 +461,7 @@ function AccountingSummary({ period }) {
             <div className="flex items-center justify-between gap-3 p-4 sm:p-5 border-b border-slate-100 shrink-0">
               <div className="min-w-0">
                 <h2 className="text-lg font-bold text-slate-900">
-                  {period === "daily" ? "Today's Purchases" : period === "weekly" ? "This Week's Purchases" : "Purchases this month"}
+                  {range.key === "daily" ? "Today's Purchases" : `Purchases · ${range.label}`}
                 </h2>
                 <p className="text-xs text-slate-500 mt-0.5">
                   {purchases.length} vehicle{purchases.length !== 1 ? "s" : ""} purchased{data?.periodLabel ? ` · ${data.periodLabel}` : ""}
@@ -539,7 +486,7 @@ function AccountingSummary({ period }) {
             <div className="overflow-y-auto divide-y divide-slate-100">
               {purchases.length === 0 ? (
                 <p className="text-sm text-slate-400 text-center py-10">
-                  {period === "daily" ? "No vehicles purchased today as of now!" : period === "weekly" ? "No vehicles purchased this week as of now!" : "No vehicles purchased this month as of now!"}
+                  No vehicles purchased {rangePhrase} as of now!
                 </p>
               ) : (
                 purchases.map(v => (
@@ -573,25 +520,32 @@ function AccountingSummary({ period }) {
 }
 
 // ── Main Dashboard ─────────────────────────────────────────────────────
-const PERIOD_STORAGE_KEY = "dashboard_period";
+const PERIOD_STORAGE_KEY = "dashboard_date_filter";
 
 export default function Dashboard() {
   const { user } = useAuth();
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
-  // Global period for every period-scoped figure on the page. Persisted so the
-  // choice survives navigation and reloads; defaults to "Today".
-  const [period, setPeriod] = useState(() => {
-    try { return localStorage.getItem(PERIOD_STORAGE_KEY) || "daily"; } catch { return "daily"; }
+  // Global date filter for every period-scoped figure on the page. Persisted so the
+  // choice survives navigation and reloads; defaults to "Today". `custom` holds the
+  // {start, end} AD range when key === "custom".
+  const [filter, setFilter] = useState(() => {
+    try {
+      const f = JSON.parse(localStorage.getItem(PERIOD_STORAGE_KEY));
+      if (f && resolveDateFilter(f.key, f.custom)) return f;
+    } catch { /* fall through */ }
+    return { key: "daily", custom: null };
   });
   const navigate = useNavigate();
+  const range = useMemo(
+    () => resolveDateFilter(filter.key, filter.custom) || resolveDateFilter("daily"),
+    [filter.key, filter.custom?.start, filter.custom?.end],
+  );
 
-  // Pure filter — just scopes the KPIs/ribbon below to the chosen period. Opening a
-  // detail popup is now each KPI tile's own job (see AccountingSummary), not the
-  // toggle's.
-  const changePeriod = (p) => {
-    setPeriod(p);
-    try { localStorage.setItem(PERIOD_STORAGE_KEY, p); } catch { /* private mode — fine */ }
+  const changeFilter = (key, custom) => {
+    const f = { key, custom };
+    setFilter(f);
+    try { localStorage.setItem(PERIOD_STORAGE_KEY, JSON.stringify(f)); } catch { /* private mode — fine */ }
   };
 
   useEffect(() => {
@@ -628,7 +582,6 @@ export default function Dashboard() {
           <p className="text-sm text-slate-500 mt-0.5">Overview of {user?.company_name || "your"} operations</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          <PeriodToggle period={period} onChange={changePeriod} testid="dashboard-period-toggle" />
           {/* Status pills — one tidy row (was date+clock stacked over online-count, which
               read as misaligned once the toggle grew a third tab). Hidden below sm: purely
               informational, and the toggle above already stays reachable on phones. */}
@@ -640,13 +593,13 @@ export default function Dashboard() {
                 <span className="text-xs font-semibold text-blue-700">{bsDateStr}</span>
               </div>
             )}
-            <LiveClock />
           </div>
+          <DateRangeFilter value={filter.key} custom={filter.custom} onChange={changeFilter} testid="dashboard-date-filter" />
         </div>
       </div>
 
       {/* Period-scoped: follows the toggle above. Lifetime totals now live on the Finance tab. */}
-      <AccountingSummary period={period} />
+      <AccountingSummary range={range} />
 
       {/* Current stock & workload — a live "right now" snapshot, not affected by the period toggle */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
