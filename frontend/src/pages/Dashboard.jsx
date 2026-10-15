@@ -153,7 +153,7 @@ function AccountingSummary({ range }) {
         return d >= start && d <= end;
       })))
       .catch(() => {});
-  }, [range.start, range.end]);
+  }, [range]);
 
   const fetchSummary = useCallback(async () => {
     setLoading(true); setData(null);
@@ -165,7 +165,7 @@ function AccountingSummary({ range }) {
     } catch (e) {
       console.error(e);
     } finally { setLoading(false); }
-  }, [range.start, range.end]);
+  }, [range]);
 
   useEffect(() => { fetchSummary(); }, [fetchSummary]);
 
@@ -539,6 +539,7 @@ export default function Dashboard() {
   const navigate = useNavigate();
   const range = useMemo(
     () => resolveDateFilter(filter.key, filter.custom) || resolveDateFilter("daily"),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the custom range's start/end so a new object with the same dates does not recompute
     [filter.key, filter.custom?.start, filter.custom?.end],
   );
 
