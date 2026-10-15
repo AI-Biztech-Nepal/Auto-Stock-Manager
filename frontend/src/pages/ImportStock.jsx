@@ -10,6 +10,25 @@ const OPTIONAL_COLUMNS = [
   "accessories_cost", "purchase_from", "selling_price", "minimum_selling_price", "notes", "status",
 ];
 
+const TEMPLATE_EXAMPLE = {
+  brand: "Honda", model: "CB Shine", year: "2020", purchase_price: "150000", purchase_date: "2026-07-14",
+  purchase_source: "Individual", registration_number: "BA 12 PA 3456",
+  variant: "Disc", engine_cc: "125", fuel_type: "Petrol", ownership_number: "1", chassis_number: "", engine_number: "",
+  kilometer_run: "18000", condition: "Good", condition_rating: "7", color: "Black",
+  accessories_cost: "0", purchase_from: "", selling_price: "175000", minimum_selling_price: "165000", notes: "", status: "available",
+};
+
+const downloadTemplate = () => {
+  const cols = [...REQUIRED_COLUMNS, ...OPTIONAL_COLUMNS];
+  const csv = cols.join(",") + "\r\n" + cols.map(c => `"${(TEMPLATE_EXAMPLE[c] ?? "").replace(/"/g, '""')}"`).join(",") + "\r\n";
+  const url = URL.createObjectURL(new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "stock_import_template.csv";
+  a.click();
+  URL.revokeObjectURL(url);
+};
+
 export default function ImportStock() {
   const [file, setFile] = useState(null);
   const [dragOver, setDragOver] = useState(false);
@@ -56,9 +75,19 @@ export default function ImportStock() {
 
   return (
     <div className="space-y-5 animate-fade-in">
-      <div>
-        <h1 className="text-2xl font-bold text-slate-900">Import Stock</h1>
-        <p className="text-sm text-slate-500">Bulk-add vehicles to inventory from a spreadsheet</p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-900">Import Stock</h1>
+          <p className="text-sm text-slate-500">Bulk-add vehicles to inventory from a spreadsheet</p>
+        </div>
+        <button
+          type="button"
+          onClick={downloadTemplate}
+          data-testid="download-template-btn"
+          className="h-10 px-4 border border-slate-200 bg-white text-slate-700 rounded-lg text-sm font-semibold hover:bg-slate-50 flex items-center gap-2"
+        >
+          <FileSpreadsheet size={16} /> Download Template (.csv)
+        </button>
       </div>
 
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
