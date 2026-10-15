@@ -133,6 +133,14 @@ export default function Inventory() {
   const [photos, setPhotos] = useState([]);
   const [hidingUnpriced, setHidingUnpriced] = useState(false);
   const [exportingStock, setExportingStock] = useState(false);
+  const [stockMenuOpen, setStockMenuOpen] = useState(false);
+  const stockMenuRef = useRef(null);
+  useEffect(() => {
+    if (!stockMenuOpen) return;
+    const close = (e) => { if (!stockMenuRef.current?.contains(e.target)) setStockMenuOpen(false); };
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [stockMenuOpen]);
   // Opening a vehicle renders VehicleDetailModal inline instead of navigating to /inventory/:id,
   // so the Inventory page underneath stays mounted (no refetch, no lost scroll/filter state).
   const [selectedVehicleId, setSelectedVehicleId] = useState(null);
@@ -480,20 +488,39 @@ export default function Inventory() {
               <Share2 size={16} /> Share Stock
             </button>
           )}
-          {!isFrontDesk && !isSocialMedia && (
-            <button
-              onClick={exportStock}
-              disabled={exportingStock}
-              data-testid="export-stock-button"
-              className="flex items-center gap-2 border border-slate-200 text-slate-700 text-sm font-medium px-4 py-3 rounded-lg hover:bg-slate-50 transition-all active:scale-95 disabled:opacity-60"
-            >
-              {exportingStock ? (
-                <div className="animate-spin w-4 h-4 border-2 border-slate-400 border-t-transparent rounded-full" />
-              ) : (
-                <Download size={16} />
+          {((!isFrontDesk && !isSocialMedia) || isAdmin) && (
+            <div className="relative" ref={stockMenuRef}>
+              <button
+                onClick={() => setStockMenuOpen(o => !o)}
+                data-testid="stock-data-menu-button"
+                className="flex items-center gap-2 border border-slate-200 text-slate-700 text-sm font-medium px-4 py-3 rounded-lg hover:bg-slate-50 transition-all active:scale-95"
+              >
+                <Download size={16} /> Import / Export <ChevronDown size={14} />
+              </button>
+              {stockMenuOpen && (
+                <div className="absolute right-0 mt-1 w-48 bg-white border border-slate-200 rounded-lg shadow-lg z-30 py-1">
+                  {isAdmin && (
+                    <button
+                      onClick={() => { setStockMenuOpen(false); navigate("/import-stock"); }}
+                      data-testid="import-stock-btn"
+                      className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 text-left"
+                    >
+                      <UploadCloud size={16} /> Import Stock
+                    </button>
+                  )}
+                  {!isFrontDesk && !isSocialMedia && (
+                    <button
+                      onClick={() => { setStockMenuOpen(false); exportStock(); }}
+                      disabled={exportingStock}
+                      data-testid="export-stock-button"
+                      className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 text-left disabled:opacity-60"
+                    >
+                      <Download size={16} /> {exportingStock ? "Exporting..." : "Export Stock"}
+                    </button>
+                  )}
+                </div>
               )}
-              Export Stock
-            </button>
+            </div>
           )}
           {canManageStock && !isFrontDesk && (
             <button
@@ -935,7 +962,7 @@ export default function Inventory() {
                 key={v.id}
                 data-testid="vehicle-row"
                 onClick={() => setSelectedVehicleId(v.id)}
-                className={`${st.cardBg} rounded-xl border ${st.cardBorder} shadow-sm p-5 hover:shadow-md transition-shadow cursor-pointer ${isDND ? "opacity-60 saturate-50" : ""}`}
+                className={`${st.cardBg} min-w-0 overflow-hidden rounded-xl border ${st.cardBorder} shadow-sm p-5 hover:shadow-md transition-shadow cursor-pointer ${isDND ? "opacity-60 saturate-50" : ""}`}
               >
                 <div className="flex items-start justify-between gap-2 mb-3">
                   <div className="min-w-0">
@@ -1061,19 +1088,6 @@ export default function Inventory() {
               </div>
             );
           })}
-        </div>
-      )}
-
-      {/* Import Stock */}
-      {isAdmin && (
-        <div className="flex justify-center">
-          <button
-            onClick={() => navigate("/import-stock")}
-            data-testid="import-stock-btn"
-            className="flex items-center gap-2 px-4 py-3 border border-slate-200 text-slate-700 text-sm font-medium rounded-lg hover:bg-slate-50 transition-colors"
-          >
-            <UploadCloud size={16} /> Import Stock
-          </button>
         </div>
       )}
 
