@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo, useRef, Suspense } from "react";
 import { Outlet, NavLink, useNavigate } from "react-router-dom";
 import api from "../utils/api";
 import { useAuth } from "../context/AuthContext";
@@ -260,7 +260,11 @@ export default function Layout() {
 
         {/* Content */}
         <main className="flex-1 p-4 lg:p-6 overflow-y-auto">
-          <Outlet />
+          {/* Boundary here (not only at the app root) so a lazy page loading keeps the
+              sidebar/header on screen instead of swapping the whole layout for a spinner. */}
+          <Suspense fallback={<div className="flex items-center justify-center h-64"><div className="animate-spin w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full" /></div>}>
+            <Outlet />
+          </Suspense>
         </main>
       </div>
     </div>
