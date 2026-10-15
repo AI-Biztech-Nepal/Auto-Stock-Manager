@@ -2280,7 +2280,7 @@ async def import_vehicles(file: UploadFile = File(...), confirm: bool = False, c
     inserted = 0
     for i in range(0, len(docs), 500):
         batch = docs[i:i + 500]
-        result = await db.vehicles.insert_many(batch, ordered=False)
+        result = await db.vehicles.insert_many(batch)
         inserted += len(result.inserted_ids)
 
     if sold_docs:
