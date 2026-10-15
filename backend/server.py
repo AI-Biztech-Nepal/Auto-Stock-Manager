@@ -2077,6 +2077,24 @@ def _parse_flexible_date(val) -> str:
     if isinstance(val, datetime):
         return val.date().isoformat()
     s = str(val).strip()
+    # Nepali (BS) dates: a year this far ahead can't be an AD purchase date (today is ~BS 2083),
+    # so convert it rather than saving 2083-06-26 as a future AD date. Sheets are typically
+    # typed M/D/YYYY (Excel's default order) or YYYY/M/D; a leading part > 12 means D/M/YYYY.
+    m = re.fullmatch(r"(\d{1,4})[/\-.](\d{1,2})[/\-.](\d{1,4})", s)
+    if m:
+        a, b, c = (int(g) for g in m.groups())
+        if 2040 <= c <= 2100:
+            y, mo, d = (c, b, a) if a > 12 else (c, a, b)
+        elif 2040 <= a <= 2100:
+            y, mo, d = a, b, c
+        else:
+            y = None
+        if y:
+            try:
+                import nepali_datetime
+                return nepali_datetime.date(y, mo, d).to_datetime_date().isoformat()
+            except Exception:
+                pass
     for fmt in _IMPORT_DATE_FORMATS:
         try:
             return datetime.strptime(s, fmt).date().isoformat()
@@ -2091,7 +2109,11 @@ def _parse_vehicle_import_rows(content: bytes, filename: str, created_by: str):
     if filename.endswith(".csv"):
         import csv, io
         text = content.decode("utf-8-sig", errors="ignore")
-        rows = [row for row in csv.reader(io.StringIO(text))]
+        # Sheets saved from Excel/Google as "tab-separated" (or ";" in some locales) are common,
+        # so pick the delimiter from the header line instead of assuming commas.
+        first = text.split("\n", 1)[0]
+        delim = max([",", "\t", ";"], key=first.count)
+        rows = [row for row in csv.reader(io.StringIO(text), delimiter=delim)]
     elif filename.endswith(".xlsx"):
         import openpyxl, io
         try:
