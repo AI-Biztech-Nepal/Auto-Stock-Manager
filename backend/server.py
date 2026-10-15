@@ -2043,14 +2043,14 @@ async def create_vehicle(vehicle: VehicleCreate, cu: dict = Depends(require_any(
     # Audit log
     await db.audit_logs.insert_one({"action": "vehicle_created", "vehicle_id": v["id"],
         "user": cu["username"], "timestamp": datetime.now(timezone.utc).isoformat(),
-        "details": f"Added {v['brand']} {v['model']} {v['year']}"})
+        "details": f"Added {v['brand']} {v['model']} {v['year'] or ''}".strip()})
     await db.vehicles.insert_one(v)
     v.pop("_id", None)
     asyncio.create_task(_notify_storefront())
     return _hide_financials_for_role(v, role)
 
 # ── Bulk Import (xlsx/csv) ─────────────────────────────────────────────
-IMPORT_REQUIRED_FIELDS = ["brand", "model", "year", "purchase_price", "purchase_date", "purchase_source", "registration_number"]
+IMPORT_REQUIRED_FIELDS = ["brand", "model", "purchase_price", "purchase_date", "purchase_source", "registration_number"]
 
 def _import_cell_str(record: dict, key: str) -> Optional[str]:
     val = record.get(key)
@@ -2146,7 +2146,7 @@ def _parse_vehicle_import_rows(content: bytes, filename: str, created_by: str):
                 "brand": _import_cell_str(record, "brand"),
                 "model": _import_cell_str(record, "model"),
                 "variant": _import_cell_str(record, "variant"),
-                "year": int(float(record.get("year"))),
+                "year": int(float(record.get("year"))) if _import_cell_str(record, "year") else None,
                 "engine_cc": int(float(record.get("engine_cc"))) if _import_cell_str(record, "engine_cc") else 0,
                 "fuel_type": _import_cell_str(record, "fuel_type") or "Petrol",
                 "ownership_number": int(float(record.get("ownership_number"))) if _import_cell_str(record, "ownership_number") else 1,
