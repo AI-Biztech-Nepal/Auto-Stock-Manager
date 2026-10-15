@@ -6,6 +6,7 @@ import { AuthProvider, useAuth } from "./context/AuthContext";
 import { canAccessPath, ROLE_DEFAULT_PATH } from "./utils/permissions";
 import { startUpdateChecker } from "./utils/updateChecker";
 import Layout from "./components/Layout";
+import ImportStock from "./pages/ImportStock";
 
 // Route-level code splitting: previously every page was imported eagerly here,
 // so the browser downloaded and parsed the whole app's JS before the first
@@ -32,7 +33,6 @@ const SaleDetail = lazy(() => import("./pages/SaleDetail"));
 const SoldStockDetail = lazy(() => import("./pages/SoldStockDetail"));
 const Share = lazy(() => import("./pages/Share"));
 const Offers = lazy(() => import("./pages/Offers"));
-const ImportStock = lazy(() => import("./pages/ImportStock"));
 const Platform = lazy(() => import("./pages/Platform"));
 
 const RouteFallback = () => (
