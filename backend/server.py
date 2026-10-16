@@ -5122,25 +5122,6 @@ async def update_dashain_prizes(req: OfferPrizesUpdate, cu: dict = Depends(admin
 def _visit_device(ua: str) -> str:
     return "mobile" if re.search(r"Mobi|Android|iPhone|iPad", ua or "", re.I) else "desktop"
 
-@api_router.post("/public/visit", dependencies=[Depends(_scope_to_default_company)])
-@limiter.limit("120/minute")
-async def public_record_visit(request: Request):
-    try:  # navigator.sendBeacon posts text/plain, so don't insist on a JSON content type
-        body = json.loads((await request.body()) or b"{}")
-    except Exception:
-        body = {}
-    if not isinstance(body, dict): body = {}
-    visitor = re.sub(r"[^A-Za-z0-9-]", "", str(body.get("visitor_id") or ""))[:64]
-    path = (str(body.get("path") or "/").split("?")[0].split("#")[0] or "/")[:300]
-    if not visitor: return {"ok": False}
-    ref_host = (urlparse(str(body.get("referrer") or "")).hostname or "").lower().removeprefix("www.")[:100]
-    if ref_host.endswith("hamroauto.com.np"): ref_host = ""  # internal navigation isn't a source
-    await db.page_views.insert_one({
-        "id": str(uuid.uuid4()), "visitor_id": visitor, "path": path, "referrer": ref_host,
-        "device": _visit_device(request.headers.get("user-agent", "")),
-        "created_at": datetime.now(timezone.utc).isoformat()})
-    return {"ok": True}
-
 @api_router.get("/visits/summary")
 async def visits_summary(days: int = 30, cu: dict = Depends(admin_only)):
     days = max(1, min(days, 365))
@@ -6393,6 +6374,25 @@ async def public_get_settings():
     """Public, unauthenticated site branding/contact info for the storefront."""
     s = await db.settings.find_one({}, {"_id": 0, "id": 0})
     return s or {}
+
+@api_router.post("/public/visit", dependencies=[Depends(_scope_to_default_company)])
+@limiter.limit("120/minute")
+async def public_record_visit(request: Request):
+    try:  # navigator.sendBeacon posts text/plain, so don't insist on a JSON content type
+        body = json.loads((await request.body()) or b"{}")
+    except Exception:
+        body = {}
+    if not isinstance(body, dict): body = {}
+    visitor = re.sub(r"[^A-Za-z0-9-]", "", str(body.get("visitor_id") or ""))[:64]
+    path = (str(body.get("path") or "/").split("?")[0].split("#")[0] or "/")[:300]
+    if not visitor: return {"ok": False}
+    ref_host = (urlparse(str(body.get("referrer") or "")).hostname or "").lower().removeprefix("www.")[:100]
+    if ref_host.endswith("hamroauto.com.np"): ref_host = ""  # internal navigation isn't a source
+    await db.page_views.insert_one({
+        "id": str(uuid.uuid4()), "visitor_id": visitor, "path": path, "referrer": ref_host,
+        "device": _visit_device(request.headers.get("user-agent", "")),
+        "created_at": datetime.now(timezone.utc).isoformat()})
+    return {"ok": True}
 
 @api_router.post("/public/leads", dependencies=[Depends(_scope_to_default_company)])
 async def public_create_lead(lead: LeadCreate):
