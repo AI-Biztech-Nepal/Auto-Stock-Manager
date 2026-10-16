@@ -2266,12 +2266,17 @@ async def import_vehicles(file: UploadFile = File(...), confirm: bool = False, c
     existing_regs_lower = {d["registration_number"].strip().lower() for d in await db.vehicles.find({}, {"_id": 0, "registration_number": 1, "status": 1, "sold_date": 1}).to_list(100000) if d.get("registration_number") and not _sold_over_30_days(d)}
     seen_in_sheet = {}
     kept_docs = []
+    already_in_stock = 0
     for doc, ri in zip(docs, ok_indices):
         row = row_results[ri]
         reg = (doc.get("registration_number") or "").strip()
         reg_lower = reg.lower()
         if reg_lower in existing_regs_lower:
-            reason = f"Registration number '{reg}' is already in stock"
+            # The same running sheet gets re-uploaded as new stock is appended, so rows that
+            # are already in stock are quietly skipped rather than failing the whole file.
+            already_in_stock += 1
+            row_results[ri] = {**row, "status": "skipped", "reason": f"Already in stock — '{reg}' skipped"}
+            continue
         elif reg_lower in seen_in_sheet:
             reason = f"Duplicate registration number '{reg}' (also on row {seen_in_sheet[reg_lower]})"
         else:
@@ -2291,6 +2296,7 @@ async def import_vehicles(file: UploadFile = File(...), confirm: bool = False, c
             "inserted": 0,
             "skipped": len(errors),
             "total_rows": total_data_rows,
+            "already_in_stock": already_in_stock,
             "rows": row_results,
             "errors": errors[:200],
             "message": f"{len(errors)} of {total_data_rows} row(s) failed validation. Fix them and re-upload — nothing was imported.",
@@ -2303,9 +2309,10 @@ async def import_vehicles(file: UploadFile = File(...), confirm: bool = False, c
             "inserted": 0,
             "skipped": 0,
             "total_rows": total_data_rows,
+            "already_in_stock": already_in_stock,
             "rows": row_results,
             "errors": [],
-            "message": f"All {total_data_rows} row(s) validated successfully. Confirm to import.",
+            "message": f"{len(docs)} new row(s) validated successfully" + (f" ({already_in_stock} already in stock, skipped)" if already_in_stock else "") + ". Confirm to import.",
         }
 
     # A row imported with status=Sold bypasses both the Sales form and the Inventory
@@ -2356,9 +2363,10 @@ async def import_vehicles(file: UploadFile = File(...), confirm: bool = False, c
         "inserted": inserted,
         "skipped": 0,
         "total_rows": total_data_rows,
+            "already_in_stock": already_in_stock,
         "rows": row_results,
         "errors": [],
-        "message": f"Imported {inserted} vehicle{'s' if inserted != 1 else ''} successfully." + (f" {len(sold_docs)} marked Sold were added to the Sales tab too." if sold_docs else ""),
+        "message": f"Imported {inserted} vehicle{'s' if inserted != 1 else ''} successfully." + (f" {already_in_stock} already in stock, skipped." if already_in_stock else "") + (f" {len(sold_docs)} marked Sold were added to the Sales tab too." if sold_docs else ""),
     }
 
 # ── Sales spreadsheet import ──────────────────────────────────────────

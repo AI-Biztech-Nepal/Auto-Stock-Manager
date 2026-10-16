@@ -150,7 +150,7 @@ export default function ImportStock() {
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div className="bg-green-50 border border-green-100 rounded-xl p-4 text-center">
               <div className="text-2xl font-bold text-green-700" style={{ fontFamily: "Manrope" }}>
-                {result.committed ? result.inserted : result.total_rows - result.skipped}
+                {result.committed ? result.inserted : (result.rows || []).filter(r => r.status === "ok").length}
               </div>
               <div className="text-xs text-green-600 mt-0.5">{result.committed ? "Imported" : "Ready to import"}</div>
             </div>
@@ -173,16 +173,16 @@ export default function ImportStock() {
           {!result.committed && result.all_success && (
             <div className="flex flex-col sm:flex-row sm:items-center gap-3 text-sm text-green-700 bg-green-50 border border-green-100 rounded-lg px-3 py-3">
               <div className="flex items-center gap-2 flex-1">
-                <CheckCircle2 size={15} /> All {result.total_rows} row{result.total_rows !== 1 ? "s" : ""} passed validation. Nothing has been imported yet.
+                <CheckCircle2 size={15} /> {result.rows.filter(r => r.status === "ok").length} new row{result.rows.filter(r => r.status === "ok").length !== 1 ? "s" : ""} passed validation{result.already_in_stock ? ` (${result.already_in_stock} already in stock, will be skipped)` : ""}. Nothing has been imported yet.
               </div>
               <button
                 type="button"
                 onClick={handleConfirm}
-                disabled={confirming}
+                disabled={confirming || !result.rows.some(r => r.status === "ok")}
                 data-testid="import-confirm-btn"
                 className="h-9 px-4 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-semibold disabled:opacity-60 active:scale-95 transition-all shrink-0"
               >
-                {confirming ? "Importing..." : `Confirm Import (${result.total_rows})`}
+                {confirming ? "Importing..." : `Confirm Import (${result.rows.filter(r => r.status === "ok").length})`}
               </button>
             </div>
           )}
@@ -207,6 +207,12 @@ export default function ImportStock() {
                   </div>
                 ))}
               </div>
+            </div>
+          )}
+
+          {result.rows?.some(r => r.status === "skipped") && (
+            <div className="text-sm text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2" data-testid="import-skipped">
+              {result.rows.filter(r => r.status === "skipped").length} row{result.rows.filter(r => r.status === "skipped").length !== 1 ? "s" : ""} already in stock — skipped, not an error.
             </div>
           )}
 
