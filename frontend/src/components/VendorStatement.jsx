@@ -60,20 +60,6 @@ export default function VendorStatement({ vendor, reloadKey }) {
         />
       )}
 
-      {data.commission_total > 0 && (
-        <LedgerTable
-          title="Commission"
-          countLabel={`${formatNPR(data.commission_rate)} × ${data.vehicles.length} vehicle${data.vehicles.length !== 1 ? "s" : ""}`}
-          headers={["Vehicle", "Commission"]}
-          rows={data.vehicles.map(vh => [
-            `${vh.brand} ${vh.model} ${vh.year || ""}`.trim(),
-            formatNPR(data.commission_rate),
-          ])}
-          totalLabel="Commission total"
-          totalValue={formatNPR(data.commission_total)}
-        />
-      )}
-
       {data.parts_bills?.length > 0 && (
         <div>
           <div className="flex items-center justify-between mb-2">

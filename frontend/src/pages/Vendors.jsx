@@ -202,7 +202,7 @@ export default function Vendors() {
                         </dl>
                         {v.notes && <p className="text-sm text-slate-600 bg-white border border-slate-200 rounded-lg px-3 py-2">{v.notes}</p>}
                         <p className="text-xs text-slate-500">
-                          Bought {formatNPR(v.total_purchased)} in total{v.commission_total > 0 && <> (incl. {formatNPR(v.commission_total)} commission)</>} · Paid {formatNPR(v.total_paid)}
+                          Bought {formatNPR(v.total_purchased)} in total · Paid {formatNPR(v.total_paid)}
                           {v.remaining_due > 0 && <> · <span className="text-orange-700 font-semibold">You owe {formatNPR(v.remaining_due)}</span></>}
                         </p>
 
@@ -277,7 +277,7 @@ export default function Vendors() {
             <div className="flex items-center justify-between p-5 border-b border-slate-100">
               <div>
                 <h2 className="text-lg font-bold text-slate-900">Vendor Commission</h2>
-                <p className="text-xs text-slate-500 mt-0.5">A flat amount added to what you owe a vendor for every vehicle bought from them</p>
+                <p className="text-xs text-slate-500 mt-0.5">Added automatically as a Commission expense on every vehicle you buy from the vendor</p>
               </div>
               <button onClick={() => setShowCommission(false)} className="w-11 h-11 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500" aria-label="Close">✕</button>
             </div>

@@ -643,14 +643,45 @@ def _sale_revenue(s: dict) -> float:
 def _vendor_vehicle_filter(vendor_id: str) -> dict:
     return {"$or": [{"vendor_id": vendor_id}, {"linked_contact_type": "vendor", "linked_contact_id": vendor_id}]}
 
-# Per-vehicle commission a registered vendor earns on every vehicle bought through them
-# (vendors.commission_amount, set from Ledger -> Vendors -> Commission). It is added on top of
-# the vehicle's purchase price in what we owe that vendor. 0/None = no commission.
+# Per-vehicle commission for a registered vendor (vendors.commission_amount, set from
+# Ledger -> Vendors -> Commission). It is NOT part of what we owe the vendor: when a vehicle is
+# bought from such a vendor it is booked as a "commissions" expense on that vehicle instead
+# (see _sync_vendor_commission_expense), so it lands in the vehicle's cost and profit.
+# 0/None = no commission.
 def _commission_per_vehicle(vendor: dict) -> float:
     try:
         return max(0.0, float(vendor.get("commission_amount") or 0))
     except (TypeError, ValueError):
         return 0.0
+
+VENDOR_COMMISSION_NOTE = "Vendor commission"
+
+async def _sync_vendor_commission_expense(vehicle: dict) -> None:
+    """Keeps the auto-added vendor-commission expense on a vehicle in line with its current vendor:
+    drops any previous auto entry, then books the vendor's commission (if they have one) dated at
+    the purchase date. The amount is fixed at booking time, so changing a vendor's rate later
+    doesn't rewrite old vehicles."""
+    vid = vehicle.get("vendor_id") or (vehicle.get("linked_contact_id") if vehicle.get("linked_contact_type") == "vendor" else None)
+    amount, name = 0.0, ""
+    if vid:
+        vendor = await db.vendors.find_one({"id": vid}, {"_id": 0, "name": 1, "commission_amount": 1})
+        if vendor:
+            amount, name = _commission_per_vehicle(vendor), vendor.get("name") or ""
+    existing = await db.expenses.find({"vehicle_id": vehicle["id"], "category": "commissions"}, {"_id": 0, "id": 1, "description": 1}).to_list(50)
+    auto = [e for e in existing if (e.get("description") or "").startswith(VENDOR_COMMISSION_NOTE)]
+    if auto and amount > 0:
+        # Same vendor still attached -> keep the booked amount untouched.
+        if any(f"{VENDOR_COMMISSION_NOTE} – {name}" == e.get("description") for e in auto):
+            return
+    for e in auto:
+        await db.expenses.delete_one({"id": e["id"]})
+    if amount > 0:
+        await db.expenses.insert_one({
+            "id": str(uuid.uuid4()), "vehicle_id": vehicle["id"], "category": "commissions", "amount": amount,
+            "description": f"{VENDOR_COMMISSION_NOTE} – {name}",
+            "date": vehicle.get("purchase_date") or datetime.now(timezone.utc).date().isoformat(),
+            "added_by": "system", "created_at": datetime.now(timezone.utc).isoformat(),
+        })
 
 # What was bought from the vendor on a spare part — NOT what's left on the shelf. A part's
 # `quantity` drops every time it's used on a job card or sold, but the bill from the vendor
@@ -690,8 +721,6 @@ async def _vendor_payable(vendor_id: str) -> float:
     """Returns max(0, total_purchased - total_paid) for a vendor."""
     veh = await db.vehicles.find(_vendor_vehicle_filter(vendor_id), {"_id": 0}).to_list(200)
     owed = sum(v.get("purchase_price", 0) for v in veh)
-    vdoc = await db.vendors.find_one({"id": vendor_id}, {"_id": 0, "commission_amount": 1})
-    owed += _commission_per_vehicle(vdoc or {}) * len(veh)
     pmts = await db.vendor_payments.find({"vendor_id": vendor_id}, {"_id": 0}).to_list(200)
     paid = sum(p["amount"] for p in pmts)
     return max(0.0, owed - paid)
@@ -726,13 +755,11 @@ async def _batch_vendor_payable(vendor_ids: list) -> dict:
         {"$or": [{"vendor_id": {"$in": vendor_ids}}, {"linked_contact_type": "vendor", "linked_contact_id": {"$in": vendor_ids}}]},
         {"_id": 0, "vendor_id": 1, "linked_contact_type": 1, "linked_contact_id": 1, "purchase_price": 1},
     ).to_list(20000)
-    vdocs = await db.vendors.find({"id": {"$in": vendor_ids}}, {"_id": 0, "id": 1, "commission_amount": 1}).to_list(20000)
-    commission = {d["id"]: _commission_per_vehicle(d) for d in vdocs}
     owed: dict = {}
     for v in veh:
         vid = v.get("vendor_id") or (v.get("linked_contact_id") if v.get("linked_contact_type") == "vendor" else None)
         if vid:
-            owed[vid] = owed.get(vid, 0) + v.get("purchase_price", 0) + commission.get(vid, 0)
+            owed[vid] = owed.get(vid, 0) + v.get("purchase_price", 0)
     parts = await db.spare_parts.find({"vendor_id": {"$in": vendor_ids}}, {"_id": 0, "id": 1, "vendor_id": 1, "quantity": 1, "unit_cost": 1}).to_list(20000)
     await _attach_bought_qty(parts)
     for p in parts:
@@ -906,11 +933,10 @@ async def _build_ai_business_snapshot() -> str:
     vendors = await db.vendors.find({}, {"_id": 0}).to_list(500)
     all_parts = await db.spare_parts.find({}, {"_id": 0}).to_list(3000)
     all_vendor_payments = await db.vendor_payments.find({}, {"_id": 0}).to_list(3000)
-    commission_by_vendor = {v["id"]: _commission_per_vehicle(v) for v in vendors}
     owed_by_vendor: dict = {}
     for v in all_vehicles:  # payable doesn't disappear once a vehicle sells
         vid = v.get("vendor_id") or (v.get("linked_contact_id") if v.get("linked_contact_type") == "vendor" else None)
-        if vid: owed_by_vendor[vid] = owed_by_vendor.get(vid, 0) + v.get("purchase_price", 0) + commission_by_vendor.get(vid, 0)
+        if vid: owed_by_vendor[vid] = owed_by_vendor.get(vid, 0) + v.get("purchase_price", 0)
     await _attach_bought_qty(all_parts)
     for p in all_parts:
         if p.get("vendor_id"):
@@ -2059,6 +2085,7 @@ async def create_vehicle(vehicle: VehicleCreate, cu: dict = Depends(require_any(
         "user": cu["username"], "timestamp": datetime.now(timezone.utc).isoformat(),
         "details": f"Added {v['brand']} {v['model']} {v['year'] or ''}".strip()})
     await db.vehicles.insert_one(v)
+    await _sync_vendor_commission_expense(v)
     v.pop("_id", None)
     asyncio.create_task(_notify_storefront())
     return _hide_financials_for_role(v, role)
@@ -2782,6 +2809,8 @@ async def update_vehicle(vid: str, vehicle: VehicleUpdate, cu: dict = Depends(re
 
     r = await db.vehicles.update_one({"id": vid}, {"$set": upd})
     if r.matched_count == 0: raise HTTPException(404, "Vehicle not found")
+    if any(k in upd for k in ("vendor_id", "linked_contact_type", "linked_contact_id")):
+        await _sync_vendor_commission_expense({**existing, **upd})
 
     if became_sold and not await db.sales.find_one({"vehicle_id": vid, "returned": {"$ne": True}}):
         sale_date = upd.get("sold_date", existing.get("sold_date")) or datetime.now(timezone.utc).date().isoformat()
@@ -3977,11 +4006,9 @@ async def get_vendors(cu: dict = Depends(require("vendors", "view"))):
         vehicles = vehicles_by_vendor.get(v["id"], [])
         parts = parts_by_vendor.get(v["id"], [])
         vehicle_owed = sum(vh.get("purchase_price", 0) for vh in vehicles)
-        commission_total = _commission_per_vehicle(v) * len(vehicles)
         parts_owed = _parts_owed(parts)
-        total_owed = vehicle_owed + commission_total + parts_owed
+        total_owed = vehicle_owed + parts_owed
         v["commission_amount"] = _commission_per_vehicle(v)
-        v["commission_total"] = commission_total
         payments = payments_by_vendor.get(v["id"], [])
         total_paid = sum(p["amount"] for p in payments)
         v["total_purchased"] = total_owed; v["total_paid"] = total_paid
@@ -4011,8 +4038,8 @@ class VendorCommission(BaseModel):
 
 @api_router.put("/vendors/{vid}/commission")
 async def set_vendor_commission(vid: str, body: VendorCommission, cu: dict = Depends(require("vendors", "edit"))):
-    """Sets the flat commission added for every vehicle bought from this (already registered)
-    vendor. Amount 0 turns it off."""
+    """Sets the flat commission booked as a vehicle expense for every vehicle bought from this
+    (already registered) vendor from now on. Amount 0 turns it off."""
     if body.amount < 0:
         raise HTTPException(400, "Commission can't be negative")
     r = await db.vendors.update_one({"id": vid}, {"$set": {"commission_amount": body.amount}})
@@ -4042,12 +4069,9 @@ async def get_vendor_payments(vid: str, cu: dict = Depends(require("vendors", "v
     vehicles = await db.vehicles.find(_vendor_vehicle_filter(vid), {"_id": 0}).to_list(200)
     parts = await db.spare_parts.find({"vendor_id": vid}, {"_id": 0}).to_list(1000)
     await _attach_bought_qty(parts)
-    vendor_doc = await db.vendors.find_one({"id": vid}, {"_id": 0, "commission_amount": 1}) or {}
-    commission_rate = _commission_per_vehicle(vendor_doc)
-    commission_total = commission_rate * len(vehicles)
     vehicle_owed = sum(v.get("purchase_price", 0) for v in vehicles)
     parts_owed = _parts_owed(parts)
-    total_owed = vehicle_owed + commission_total + parts_owed
+    total_owed = vehicle_owed + parts_owed
     total_paid = sum(p["amount"] for p in payments)
     bills = {}
     for p in parts:
@@ -4058,8 +4082,7 @@ async def get_vendor_payments(vid: str, cu: dict = Depends(require("vendors", "v
     parts_bills = sorted(bills.values(), key=lambda b: b["entry_date"] or "", reverse=True)
     return {"payments": payments, "total_paid": total_paid,
             "total_owed": total_owed, "remaining_due": max(0, total_owed - total_paid),
-            "vehicles": vehicles, "parts_bills": parts_bills,
-            "commission_rate": commission_rate, "commission_total": commission_total}
+            "vehicles": vehicles, "parts_bills": parts_bills}
 
 @api_router.post("/vendor-payments")
 async def create_vendor_payment(payment: VendorPaymentCreate, cu: dict = Depends(require("vendors", "manage_payments"))):
