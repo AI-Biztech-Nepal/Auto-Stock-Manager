@@ -101,6 +101,7 @@ CREATE TABLE IF NOT EXISTS vendors (
   address VARCHAR(500),
   notes TEXT,
   vendor_type VARCHAR(20) DEFAULT 'both',
+  commission_amount DOUBLE,
   created_at VARCHAR(40),
   CONSTRAINT fk_vendors_company FOREIGN KEY (company_id) REFERENCES companies(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

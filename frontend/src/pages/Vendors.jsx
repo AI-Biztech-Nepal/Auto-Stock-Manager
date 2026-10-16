@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Plus, Phone, MapPin, Edit, Trash2, CreditCard, ChevronDown, Store, Tag } from "lucide-react";
+import { Plus, Phone, MapPin, Edit, Trash2, CreditCard, ChevronDown, Store, Tag, Percent } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
 import { formatNPR } from "../utils/helpers";
@@ -23,6 +23,9 @@ export default function Vendors() {
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState("");
   const [openId, setOpenId] = useState(null);
+  // Commission portal: pick a registered vendor, set the flat amount added per vehicle bought.
+  const [showCommission, setShowCommission] = useState(false);
+  const [commForm, setCommForm] = useState({ vendor_id: "", amount: "" });
   // Bumped after a payment so the open statement refetches its payment history.
   const [statementKey, setStatementKey] = useState(0);
 
@@ -37,6 +40,22 @@ export default function Vendors() {
 
   const openAdd = () => { setEditItem(null); setForm({ name: "", phone: "", address: "", notes: "", vendor_type: "both" }); setShowModal(true); };
   const openEdit = (v) => { setEditItem(v); setForm({ name: v.name, phone: v.phone, address: v.address || "", notes: v.notes || "", vendor_type: v.vendor_type || "both" }); setShowModal(true); };
+  const openCommission = (v) => { setCommForm({ vendor_id: v?.id || "", amount: v?.commission_amount ? String(v.commission_amount) : "" }); setShowCommission(true); };
+  const saveCommission = async (vendorId, amount) => {
+    setSaving(true);
+    try {
+      await api.put(`/vendors/${vendorId}/commission`, { amount });
+      toast.success(amount > 0 ? "Commission saved" : "Commission removed");
+      setCommForm({ vendor_id: "", amount: "" }); setStatementKey(k => k + 1); refresh();
+    } catch { toast.error("Couldn't save the commission — try again"); } finally { setSaving(false); }
+  };
+  const handleCommission = (e) => {
+    e.preventDefault();
+    const amt = Number(commForm.amount);
+    if (!commForm.vendor_id) { toast.error("Pick a vendor from the list"); return; }
+    if (!(amt > 0)) { toast.error("Enter a commission above zero"); return; }
+    saveCommission(commForm.vendor_id, amt);
+  };
   const openPayment = (v) => { setSelectedVendor(v); setPayForm({ vendor_id: v.id, amount: "", payment_date: "", notes: "" }); setShowPayModal(true); };
 
   useEffect(() => {
@@ -108,9 +127,14 @@ export default function Vendors() {
         testid="vendor-search-input"
         count={`${shownCount} of ${vendors.length}`}
         action={
+          <div className="flex items-center gap-2 shrink-0">
+            <button onClick={() => openCommission(null)} data-testid="vendor-commission-btn" className="flex items-center gap-2 h-10 border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-sm font-medium px-3 sm:px-4 rounded-lg transition-all active:scale-95">
+              <Percent size={16} /> <span className="hidden sm:inline">Commission</span>
+            </button>
           <button onClick={openAdd} data-testid="add-vendor-btn" className="flex items-center gap-2 h-10 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 rounded-lg transition-all active:scale-95 shadow-sm shrink-0">
             <Plus size={16} /> <span className="hidden sm:inline">Add Vendor</span><span className="sm:hidden">Add</span>
           </button>
+          </div>
         }
       />
 
@@ -151,6 +175,7 @@ export default function Vendors() {
                         <div className="flex flex-wrap items-center gap-1.5 mt-2 sm:mt-0 sm:justify-end" data-testid="vendor-pills">
                           <InfoPill tone="blue">{v.vehicle_count} vehicle{v.vehicle_count === 1 ? "" : "s"}</InfoPill>
                           <InfoPill>{v.parts_count || 0} bill{v.parts_count === 1 ? "" : "s"}</InfoPill>
+                          {v.commission_amount > 0 && <InfoPill tone="blue">Commission {formatNPR(v.commission_amount)}/vehicle</InfoPill>}
                           {v.remaining_due > 0
                             ? <DueTag amount={v.remaining_due} label="You owe" />
                             : (v.vehicle_count > 0 || v.parts_count > 0) && <InfoPill tone="green">Settled</InfoPill>}
@@ -177,7 +202,7 @@ export default function Vendors() {
                         </dl>
                         {v.notes && <p className="text-sm text-slate-600 bg-white border border-slate-200 rounded-lg px-3 py-2">{v.notes}</p>}
                         <p className="text-xs text-slate-500">
-                          Bought {formatNPR(v.total_purchased)} in total · Paid {formatNPR(v.total_paid)}
+                          Bought {formatNPR(v.total_purchased)} in total{v.commission_total > 0 && <> (incl. {formatNPR(v.commission_total)} commission)</>} · Paid {formatNPR(v.total_paid)}
                           {v.remaining_due > 0 && <> · <span className="text-orange-700 font-semibold">You owe {formatNPR(v.remaining_due)}</span></>}
                         </p>
 
@@ -186,6 +211,9 @@ export default function Vendors() {
                         <div className="flex flex-wrap gap-2">
                           <button onClick={() => openEdit(v)} className="flex items-center gap-1.5 h-9 px-3 border border-slate-200 bg-white text-slate-700 text-xs font-semibold rounded-lg hover:bg-slate-50 transition-colors">
                             <Edit size={13} /> Edit details
+                          </button>
+                          <button onClick={() => openCommission(v)} className="flex items-center gap-1.5 h-9 px-3 border border-slate-200 bg-white text-slate-700 text-xs font-semibold rounded-lg hover:bg-slate-50 transition-colors">
+                            <Percent size={13} /> Commission
                           </button>
                           <button onClick={() => openPayment(v)} className="flex items-center gap-1.5 h-9 px-3 border border-slate-200 bg-white text-slate-700 text-xs font-semibold rounded-lg hover:bg-slate-50 transition-colors" data-testid="record-payment-btn">
                             <CreditCard size={13} /> Record payment
@@ -238,6 +266,55 @@ export default function Vendors() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Vendor Commission Modal */}
+      {showCommission && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between p-5 border-b border-slate-100">
+              <div>
+                <h2 className="text-lg font-bold text-slate-900">Vendor Commission</h2>
+                <p className="text-xs text-slate-500 mt-0.5">A flat amount added to what you owe a vendor for every vehicle bought from them</p>
+              </div>
+              <button onClick={() => setShowCommission(false)} className="w-11 h-11 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500" aria-label="Close">✕</button>
+            </div>
+            <form onSubmit={handleCommission} className="p-5 space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Vendor <span className="text-red-500">*</span></label>
+                <select value={commForm.vendor_id} onChange={e => { const v = vendors.find(x => String(x.id) === e.target.value); setCommForm({ vendor_id: e.target.value, amount: v?.commission_amount ? String(v.commission_amount) : "" }); }} className={inp} data-testid="commission-vendor-select">
+                  <option value="">Select a registered vendor…</option>
+                  {vendors.slice().sort((a, b) => (a.name || "").localeCompare(b.name || "")).map(v => <option key={v.id} value={v.id}>{v.name}{v.phone ? ` · ${v.phone}` : ""}</option>)}
+                </select>
+                {vendors.length === 0 && <p className="text-xs text-slate-400 mt-1">Add the vendor first — commission can only be set on registered vendors.</p>}
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Commission per vehicle (NPR) <span className="text-red-500">*</span></label>
+                <input type="number" min="0" value={commForm.amount} onChange={e => setCommForm({ ...commForm, amount: e.target.value })} placeholder="e.g. 5000" className={inp} data-testid="commission-amount-input" />
+              </div>
+              <button type="submit" disabled={saving} className="w-full h-10 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-semibold disabled:opacity-60" data-testid="save-commission-btn">
+                {saving ? "Saving..." : "Save commission"}
+              </button>
+            </form>
+            <div className="px-5 pb-5">
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Vendors with commission</p>
+              {vendors.filter(v => v.commission_amount > 0).length === 0 ? (
+                <p className="text-xs text-slate-400">None yet.</p>
+              ) : (
+                <ul className="border border-slate-200 rounded-lg divide-y divide-slate-100">
+                  {vendors.filter(v => v.commission_amount > 0).map(v => (
+                    <li key={v.id} className="flex items-center gap-2 px-3 py-2 text-sm">
+                      <span className="min-w-0 flex-1 truncate text-slate-800">{v.name}</span>
+                      <span className="tabular-nums text-slate-600 whitespace-nowrap">{formatNPR(v.commission_amount)}/vehicle</span>
+                      <button type="button" onClick={() => openCommission(v)} className="w-8 h-8 flex items-center justify-center rounded-md text-slate-500 hover:bg-slate-100" aria-label={`Edit commission for ${v.name}`}><Edit size={13} /></button>
+                      <button type="button" onClick={() => saveCommission(v.id, 0)} className="w-8 h-8 flex items-center justify-center rounded-md text-red-500 hover:bg-red-50" aria-label={`Remove commission for ${v.name}`}><Trash2 size={13} /></button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
           </div>
         </div>
       )}
