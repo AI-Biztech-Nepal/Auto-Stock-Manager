@@ -653,4 +653,18 @@ CREATE TABLE IF NOT EXISTS offer_codes (
   CONSTRAINT fk_offer_codes_company FOREIGN KEY (company_id) REFERENCES companies(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- Storefront visit tracking (POST /public/visit beacon -> admin Visits page). No IP stored.
+CREATE TABLE IF NOT EXISTS page_views (
+  id VARCHAR(36) NOT NULL PRIMARY KEY,
+  company_id VARCHAR(36) NOT NULL,
+  INDEX idx_page_views_company_id (company_id),
+  visitor_id VARCHAR(64),
+  path VARCHAR(300),
+  referrer VARCHAR(100),
+  device VARCHAR(10),
+  created_at VARCHAR(40),
+  INDEX idx_page_views_created_at (created_at),
+  CONSTRAINT fk_page_views_company FOREIGN KEY (company_id) REFERENCES companies(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 SET FOREIGN_KEY_CHECKS = 1;

@@ -6,7 +6,7 @@ import { canAccessPath } from "../utils/permissions";
 import { isSanakhatOverdue, sanakhatPendingDays } from "../utils/helpers";
 import {
   LayoutDashboard, Bike, Wrench, BarChart3, Sparkles, Settings, LogOut, Menu, X, Bell,
-  BookOpen, Wallet, Boxes, ShoppingBag, Building2, ImageOff, FileWarning, ShieldCheck, Share2, Gift
+  BookOpen, Wallet, Boxes, ShoppingBag, Building2, ImageOff, FileWarning, ShieldCheck, Share2, Gift, Eye
 } from "lucide-react";
 
 // A vehicle needs at least this many photos before it's considered adequately
@@ -20,6 +20,7 @@ const navItems = [
   { path: "/inventory",    label: "Inventory",    icon: Bike },
   { path: "/share",       label: "Share",        icon: Share2 },
   { path: "/offers",       label: "Offers",       icon: Gift },
+  { path: "/visits",       label: "Visits",       icon: Eye },
   { path: "/sales",        label: "Sales",        icon: ShoppingBag },
   { path: "/spare-parts",  label: "Spare Parts",  icon: Boxes },
   { path: "/ledger",       label: "Ledger",       icon: BookOpen },

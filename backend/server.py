@@ -8,6 +8,7 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from passlib.context import CryptContext
 from typing import Optional, List, Literal
 from datetime import datetime, timezone, timedelta
+from urllib.parse import urlparse
 from pathlib import Path
 import os, logging, jwt, uuid, json, base64, io, asyncio, re, copy, contextvars, secrets, hashlib
 from concurrent.futures import ProcessPoolExecutor
@@ -76,7 +77,7 @@ TENANT_COLLECTIONS = {
     "leads", "legal_documents", "part_transactions", "partners", "sales", "spare_parts",
     "sync_logs", "team_members", "vehicle_photos", "vehicles", "vendor_payments", "vendors",
     "audit_logs", "ai_chat_sessions", "settings", "facebook_pages", "bookings",
-    "offer_prizes", "offer_codes",
+    "offer_prizes", "offer_codes", "page_views",
 }
 
 def company_scope(cu: dict) -> dict:
@@ -1663,6 +1664,20 @@ OFFERS_DDL = [
   CONSTRAINT fk_offer_codes_company FOREIGN KEY (company_id) REFERENCES companies(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""",
 ]
+
+# Storefront visit tracking -- see the VISITS section below.
+PAGE_VIEWS_DDL = """CREATE TABLE IF NOT EXISTS page_views (
+  id VARCHAR(36) NOT NULL PRIMARY KEY,
+  company_id VARCHAR(36) NOT NULL,
+  INDEX idx_page_views_company_id (company_id),
+  visitor_id VARCHAR(64),
+  path VARCHAR(300),
+  referrer VARCHAR(100),
+  device VARCHAR(10),
+  created_at VARCHAR(40),
+  INDEX idx_page_views_created_at (created_at),
+  CONSTRAINT fk_page_views_company FOREIGN KEY (company_id) REFERENCES companies(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"""
 
 class OfferPrizeIn(BaseModel):
     id: Optional[str] = None  # missing = a new prize
@@ -5099,6 +5114,63 @@ async def update_dashain_prizes(req: OfferPrizesUpdate, cu: dict = Depends(admin
         await db.offer_prizes.delete_one({"id": pid})
     return await _offer_prizes()
 
+# ── VISITS (storefront traffic: who is visiting hamroauto.com.np) ──────
+# The storefront reports each page it shows to POST /public/visit (one tiny beacon, see
+# DEPLOYMENT.md). We keep a random per-browser id, the path, the referrer's host and
+# mobile/desktop -- no IP address or other personal data. The admin Visits page reads the
+# totals back from GET /visits/summary.
+def _visit_device(ua: str) -> str:
+    return "mobile" if re.search(r"Mobi|Android|iPhone|iPad", ua or "", re.I) else "desktop"
+
+@api_router.post("/public/visit", dependencies=[Depends(_scope_to_default_company)])
+@limiter.limit("120/minute")
+async def public_record_visit(request: Request):
+    try:  # navigator.sendBeacon posts text/plain, so don't insist on a JSON content type
+        body = json.loads((await request.body()) or b"{}")
+    except Exception:
+        body = {}
+    if not isinstance(body, dict): body = {}
+    visitor = re.sub(r"[^A-Za-z0-9-]", "", str(body.get("visitor_id") or ""))[:64]
+    path = (str(body.get("path") or "/").split("?")[0].split("#")[0] or "/")[:300]
+    if not visitor: return {"ok": False}
+    ref_host = (urlparse(str(body.get("referrer") or "")).hostname or "").lower().removeprefix("www.")[:100]
+    if ref_host.endswith("hamroauto.com.np"): ref_host = ""  # internal navigation isn't a source
+    await db.page_views.insert_one({
+        "id": str(uuid.uuid4()), "visitor_id": visitor, "path": path, "referrer": ref_host,
+        "device": _visit_device(request.headers.get("user-agent", "")),
+        "created_at": datetime.now(timezone.utc).isoformat()})
+    return {"ok": True}
+
+@api_router.get("/visits/summary")
+async def visits_summary(days: int = 30, cu: dict = Depends(admin_only)):
+    days = max(1, min(days, 365))
+    npt = timezone(timedelta(hours=5, minutes=45))  # Nepal time, so "today" matches the shop's day
+    today = datetime.now(npt).date()
+    start = today - timedelta(days=days - 1)
+    since = datetime(start.year, start.month, start.day, tzinfo=npt).astimezone(timezone.utc).isoformat()
+    rows = await db.page_views.find({"created_at": {"$gte": since}}, {"_id": 0}).to_list(200000)
+    by_day, pages, refs, devices = {}, {}, {}, {"mobile": 0, "desktop": 0}
+    visitors, today_views, today_visitors = set(), 0, set()
+    for r in rows:
+        d = datetime.fromisoformat(r["created_at"]).astimezone(npt).date()
+        e = by_day.setdefault(d.isoformat(), {"views": 0, "visitors": set()})
+        e["views"] += 1; e["visitors"].add(r["visitor_id"])
+        visitors.add(r["visitor_id"])
+        pages[r["path"]] = pages.get(r["path"], 0) + 1
+        refs[r.get("referrer") or "Direct"] = refs.get(r.get("referrer") or "Direct", 0) + 1
+        devices[r.get("device") if r.get("device") in devices else "desktop"] += 1
+        if d == today: today_views += 1; today_visitors.add(r["visitor_id"])
+    daily = []
+    for i in range(days):
+        k = (start + timedelta(days=i)).isoformat()
+        e = by_day.get(k)
+        daily.append({"date": k, "views": e["views"] if e else 0, "visitors": len(e["visitors"]) if e else 0})
+    top = lambda m: [{"name": k, "views": v} for k, v in sorted(m.items(), key=lambda kv: -kv[1])[:10]]
+    return {"days": days, "total_views": len(rows), "unique_visitors": len(visitors),
+            "today_views": today_views, "today_visitors": len(today_visitors), "daily": daily,
+            "top_pages": top(pages), "sources": top(refs), "devices": devices,
+            "storefront_url": STOREFRONT_URL}
+
 # ── SETTINGS (storefront branding/contact info) ────────────────────────
 @api_router.get("/settings")
 async def get_settings(cu: dict = Depends(admin_only)):
@@ -5290,7 +5362,7 @@ async def _run_startup_tasks():
             await db.execute_raw(BOOKINGS_DDL)
         except Exception:
             logger.warning("Could not ensure bookings table", exc_info=True)
-        for _ddl in OFFERS_DDL:
+        for _ddl in [*OFFERS_DDL, PAGE_VIEWS_DDL]:
             try:
                 await db.execute_raw(_ddl)
             except Exception:
