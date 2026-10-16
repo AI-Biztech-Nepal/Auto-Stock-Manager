@@ -63,6 +63,7 @@ export default function Visits() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <a href={data.storefront_url} target="_blank" rel="noopener noreferrer" className="text-sm text-blue-600 hover:underline flex items-center gap-1">{data.storefront_url.replace(/^https?:\/\//, "")} <ExternalLink size={12} /></a>
+        <span className="text-xs text-slate-400">{data.source === "google_analytics" ? "Data: Google Analytics" : "Data: site visit beacon"}</span>
         <div className="flex gap-1 bg-slate-100 rounded-lg p-1">
           {RANGES.map(r => (
             <button key={r.days} onClick={() => setDays(r.days)} className={`h-8 px-3 rounded-md text-sm font-medium ${days === r.days ? "bg-white shadow-sm text-slate-900" : "text-slate-500"}`}>{r.label}</button>

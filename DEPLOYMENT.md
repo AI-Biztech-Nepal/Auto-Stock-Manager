@@ -105,6 +105,13 @@ export default function VisitBeacon() {
 Only a random browser id, the path, the referrer host and mobile/desktop are stored -- no IP address.
 Visits appear from the moment the beacon is live; nothing is back-filled.
 
+### Or read the numbers from Google Analytics 4
+
+If the storefront already has GA4, the Visits page can show its history instead:
+1. Google Cloud: enable the **Google Analytics Data API**, create a service account and download its JSON key.
+2. GA4 -> Admin -> Property access management: add the service account's email as **Viewer**.
+3. On the VPS set `GA4_PROPERTY_ID` (numeric id, GA4 -> Admin -> Property details) and `GA4_CREDENTIALS_JSON` (the key's JSON, or the path to the file), then restart the backend.
+
 ## Auto-deploy on push to main
 
 A GitHub webhook hits this app's own VPS listener on every push to `main`, which pulls,

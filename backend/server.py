@@ -5122,9 +5122,68 @@ async def update_dashain_prizes(req: OfferPrizesUpdate, cu: dict = Depends(admin
 def _visit_device(ua: str) -> str:
     return "mobile" if re.search(r"Mobi|Android|iPhone|iPad", ua or "", re.I) else "desktop"
 
+# Optional: read the numbers from Google Analytics 4 instead of our own beacon. Set
+# GA4_PROPERTY_ID (the numeric property id) and GA4_CREDENTIALS_JSON (a service-account key,
+# raw JSON or a path to the file) after adding that service account's email as a Viewer on the
+# GA4 property. Without them the page falls back to the beacon counts above.
+GA4_PROPERTY_ID = os.environ.get("GA4_PROPERTY_ID", "").strip()
+GA4_CREDENTIALS_JSON = os.environ.get("GA4_CREDENTIALS_JSON", "").strip()
+
+def _ga4_token() -> str:
+    from google.oauth2 import service_account
+    from google.auth.transport.requests import Request as GoogleRequest
+    raw = GA4_CREDENTIALS_JSON
+    info = json.loads(raw) if raw.startswith("{") else json.loads(Path(raw).read_text())
+    creds = service_account.Credentials.from_service_account_info(
+        info, scopes=["https://www.googleapis.com/auth/analytics.readonly"])
+    creds.refresh(GoogleRequest())
+    return creds.token
+
+async def _ga4_summary(days: int) -> dict:
+    token = await asyncio.to_thread(_ga4_token)
+    rng = [{"startDate": f"{days - 1}daysAgo", "endDate": "today"}]
+    metrics = [{"name": "screenPageViews"}, {"name": "activeUsers"}]
+    def rep(dim, limit=10, order=True):
+        r = {"dateRanges": rng, "dimensions": [{"name": dim}], "metrics": metrics, "limit": limit}
+        if order: r["orderBys"] = [{"metric": {"metricName": "screenPageViews"}, "desc": True}]
+        return r
+    body = {"requests": [
+        {"dateRanges": rng, "metrics": metrics},
+        {"dateRanges": rng, "dimensions": [{"name": "date"}], "metrics": metrics, "limit": 400,
+         "orderBys": [{"dimension": {"dimensionName": "date"}}]},
+        rep("pagePath"), rep("sessionSource"), rep("deviceCategory"),
+    ]}
+    async with httpx.AsyncClient(timeout=20) as http:
+        resp = await http.post(f"https://analyticsdata.googleapis.com/v1beta/properties/{GA4_PROPERTY_ID}:batchRunReports",
+                               json=body, headers={"Authorization": f"Bearer {token}"})
+    if resp.status_code != 200:
+        raise HTTPException(502, f"Google Analytics error: {resp.json().get('error', {}).get('message', resp.status_code)}")
+    totals, daily_r, pages_r, src_r, dev_r = resp.json().get("reports", [{}] * 5)
+    def rows(r): return r.get("rows", [])
+    def vals(row): return [int(float(v["value"])) for v in row["metricValues"]]
+    by_day = {r["dimensionValues"][0]["value"]: vals(r) for r in rows(daily_r)}
+    npt_today = datetime.now(timezone(timedelta(hours=5, minutes=45))).date()
+    daily = []
+    for i in range(days):
+        d = npt_today - timedelta(days=days - 1 - i)
+        v = by_day.get(d.strftime("%Y%m%d"), [0, 0])
+        daily.append({"date": d.isoformat(), "views": v[0], "visitors": v[1]})
+    t = vals(rows(totals)[0]) if rows(totals) else [0, 0]
+    top = lambda r: [{"name": x["dimensionValues"][0]["value"] or "Direct", "views": vals(x)[0]} for x in rows(r)]
+    devices = {"mobile": 0, "desktop": 0}
+    for x in rows(dev_r):
+        k = "mobile" if x["dimensionValues"][0]["value"] in ("mobile", "tablet") else "desktop"
+        devices[k] += vals(x)[0]
+    return {"days": days, "total_views": t[0], "unique_visitors": t[1],
+            "today_views": daily[-1]["views"], "today_visitors": daily[-1]["visitors"], "daily": daily,
+            "top_pages": top(pages_r), "sources": [{"name": "Direct" if s["name"] == "(direct)" else s["name"], "views": s["views"]} for s in top(src_r)],
+            "devices": devices, "storefront_url": STOREFRONT_URL, "source": "google_analytics"}
+
 @api_router.get("/visits/summary")
 async def visits_summary(days: int = 30, cu: dict = Depends(admin_only)):
     days = max(1, min(days, 365))
+    if GA4_PROPERTY_ID and GA4_CREDENTIALS_JSON:
+        return await _ga4_summary(days)
     npt = timezone(timedelta(hours=5, minutes=45))  # Nepal time, so "today" matches the shop's day
     today = datetime.now(npt).date()
     start = today - timedelta(days=days - 1)
@@ -5150,7 +5209,7 @@ async def visits_summary(days: int = 30, cu: dict = Depends(admin_only)):
     return {"days": days, "total_views": len(rows), "unique_visitors": len(visitors),
             "today_views": today_views, "today_visitors": len(today_visitors), "daily": daily,
             "top_pages": top(pages), "sources": top(refs), "devices": devices,
-            "storefront_url": STOREFRONT_URL}
+            "storefront_url": STOREFRONT_URL, "source": "beacon"}
 
 # ── SETTINGS (storefront branding/contact info) ────────────────────────
 @api_router.get("/settings")
