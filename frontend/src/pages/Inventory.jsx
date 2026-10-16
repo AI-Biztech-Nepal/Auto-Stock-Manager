@@ -12,6 +12,7 @@ import BSDatePicker from "../components/BSDatePicker";
 import PeriodToggle, { PERIOD_OPTIONS } from "../components/PeriodToggle";
 import ViewToggle, { useViewMode } from "../components/ViewToggle";
 import ListRow from "../components/ListRow";
+import LazyThumb from "../components/LazyThumb";
 import { formatBSDate, getCurrentBSMonthRange, getCurrentWeekRange, getTodayAD } from "../utils/nepali-date";
 import { useAuth } from "../context/AuthContext";
 import { hasFullVehicleAccess, canAddVehicle, isBasicStockRole, hidesVehiclePricing } from "../utils/permissions";
@@ -908,7 +909,7 @@ export default function Inventory() {
                 testid="vehicle-row"
                 dim={v.status === "scrap"}
                 onClick={() => setSelectedVehicleId(v.id)}
-                thumb={photo ? <img src={photo.url} alt="" className="w-full h-full object-cover" /> : <Package size={16} className="text-slate-300" />}
+                thumb={photo ? <LazyThumb src={photo.url} /> : <Package size={16} className="text-slate-300" />}
                 title={`${v.brand} ${v.model}`}
                 subtitle={`${v.year} · ${v.registration_number || "No reg."} · ${formatOwnership(v.ownership_number)}${v.status === "reserved" && v.booking?.customer_name ? ` · Booked by ${v.booking.customer_name}` : ""}`}
                 meta={!hideFinancials && (
@@ -962,6 +963,7 @@ export default function Inventory() {
                 key={v.id}
                 data-testid="vehicle-row"
                 onClick={() => setSelectedVehicleId(v.id)}
+                style={{ contentVisibility: "auto", containIntrinsicSize: "auto 340px" }}
                 className={`${st.cardBg} min-w-0 overflow-hidden rounded-xl border ${st.cardBorder} shadow-sm p-5 hover:shadow-md transition-shadow cursor-pointer ${isDND ? "opacity-60 saturate-50" : ""}`}
               >
                 <div className="flex items-start justify-between gap-2 mb-3">
@@ -1059,7 +1061,7 @@ export default function Inventory() {
                           className="w-11 h-11 rounded-lg overflow-hidden border border-slate-200 shrink-0"
                           data-testid="vehicle-card-photo"
                         >
-                          <img src={photo.url} alt="" className="w-full h-full object-cover" />
+                          <LazyThumb src={photo.url} />
                         </button>
                       ) : (
                         <div key={i} className="w-11 h-11 rounded-lg border border-dashed border-slate-200 shrink-0" />
