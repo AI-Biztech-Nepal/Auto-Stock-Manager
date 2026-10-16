@@ -526,10 +526,23 @@ export default function Sales() {
                     ? `${m.vehicle_info || "Vehicle"} — marked Sold on ${m.sale_date}, no sale record`
                     : `${m.vehicle_info || "Vehicle deleted"} — ${formatNPR(m.total_amount)} on ${m.sale_date}`}
                 </div>
-                <div className="font-semibold text-amber-700">
+                <div className="flex items-center gap-3 font-semibold text-amber-700">
                   {m.issue === "vehicle_deleted" ? "Vehicle deleted"
                     : m.issue === "orphan_sold_vehicle" ? "Missing sale record"
                     : `Vehicle is now "${m.vehicle_status}"`}
+                  {m.issue === "vehicle_status_mismatch" && (
+                    <button
+                      onClick={async e => {
+                        e.stopPropagation();
+                        try {
+                          await api.post(`/sales/${m.sale_id}/resync-vehicle`);
+                          setMismatches(prev => prev.filter(x => x.sale_id !== m.sale_id));
+                        } catch (err) { alert(err?.response?.data?.detail || "Could not fix"); }
+                      }}
+                      className="text-xs px-2 py-1 rounded-md bg-amber-600 text-white hover:bg-amber-700"
+                      data-testid="mismatch-fix-btn"
+                    >Mark vehicle Sold</button>
+                  )}
                 </div>
               </div>
             ))}

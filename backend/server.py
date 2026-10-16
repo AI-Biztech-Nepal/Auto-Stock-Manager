@@ -3746,17 +3746,39 @@ async def update_sale(sid: str, sale: SaleUpdate, cu: dict = Depends(get_current
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
     await db.sales.update_one({"id": sid}, {"$set": update_doc})
-    # Keep vehicle record in sync (price/date/customer may have changed)
-    await db.vehicles.update_one({"id": sale.vehicle_id}, {"$set": {
+    # Keep vehicle record in sync (price/date/customer may have changed). Re-saving an active
+    # sale also re-asserts status "sold", so a vehicle that drifted out of Sold Stock (e.g.
+    # status edited from Inventory) is repaired by simply saving its sale again.
+    veh_set = {
         "selling_price": sale.sale_price,
         "sold_date": sale_date,
         "customer_id": sale.customer_id,
         "updated_at": datetime.now(timezone.utc).isoformat(),
-    }})
+    }
+    if not existing.get("returned") and v.get("status") not in ("sold", "in_repair"):
+        veh_set["status"] = "sold"
+    await db.vehicles.update_one({"id": sale.vehicle_id}, {"$set": veh_set})
     if sale.customer_id:
         await db.customers.update_one({"id": sale.customer_id}, {"$set": {"last_purchase_date": sale_date}})
     updated = await db.sales.find_one({"id": sid}, {"_id": 0})
     return updated
+
+@api_router.post("/sales/{sid}/resync-vehicle")
+async def resync_sale_vehicle(sid: str, cu: dict = Depends(admin_only)):
+    """Repair a "vehicle_status_mismatch": the sale is active but its vehicle isn't "sold",
+    so it never shows in Sold Stock. Flips the vehicle back to sold using the sale's data."""
+    s = await db.sales.find_one({"id": sid}, {"_id": 0})
+    if not s: raise HTTPException(404, "Not found")
+    if s.get("returned"): raise HTTPException(400, "Sale was returned; vehicle is meant to be in stock")
+    v = await db.vehicles.find_one({"id": s.get("vehicle_id")}, {"_id": 0})
+    if not v: raise HTTPException(404, "Vehicle not found")
+    await db.vehicles.update_one({"id": v["id"]}, {"$set": {
+        "status": "sold", "selling_price": s.get("sale_price"), "sold_date": s.get("sale_date"),
+        "customer_id": s.get("customer_id"), "pre_repair_status": None,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }})
+    asyncio.create_task(_notify_storefront())
+    return {"message": "Vehicle marked sold"}
 
 @api_router.delete("/sales/{sid}")
 async def delete_sale(sid: str, cu: dict = Depends(get_current_user)):
