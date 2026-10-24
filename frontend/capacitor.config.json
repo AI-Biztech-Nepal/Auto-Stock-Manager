@@ -4,6 +4,6 @@
   "webDir": "build",
   "server": {
     "androidScheme": "https",
-    "url": "https://auto-stock-manager.vercel.app"
+    "url": "https://stock.hamroauto.com.np"
   }
 }

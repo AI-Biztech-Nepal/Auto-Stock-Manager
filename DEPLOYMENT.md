@@ -1,5 +1,8 @@
 # Auto Stock Manager — Deployment Guide
-## Vercel (Frontend) + Self-Hosted VPS (Backend)
+## Self-Hosted VPS (Frontend + Backend)
+
+> The admin frontend moved off Vercel to the VPS (see **Admin frontend on the VPS** below). The older
+> Vercel instructions further down are kept only as history.
 
 ---
 
@@ -7,8 +10,9 @@
 
 | Service | What it hosts | Cost |
 |---|---|---|
-| **Vercel** | React frontend | Free |
-| **Self-hosted VPS** | FastAPI backend + file uploads + MySQL | Your VPS plan |
+| **Self-hosted VPS** | React admin frontend (nginx), FastAPI backend + file uploads + MySQL | Your VPS plan |
+| **Hostinger** | DNS for hamroauto.com.np, and the public storefront | Your Hostinger plan |
+| ~~Vercel~~ | Retired. It used to host the admin frontend. | |
 
 The backend runs on your own VPS (via PM2), talking to a MySQL database
 (`DB_BACKEND=mysql`). MongoDB Atlas is documented below only because the
@@ -210,7 +214,47 @@ the table definitions.
 
 ---
 
-## Vercel (Frontend)
+## Admin frontend on the VPS (stock.hamroauto.com.np)
+
+The admin app is built and served by the VPS itself; nginx serves `/var/www/auto-stock-frontend` and
+passes `/api` to the backend on the same box, so the browser sees one origin (no CORS). Each push to
+`main` runs `deploy/redeploy.sh`, which restarts the backend and, **only if the push changed something
+under `frontend/`** (Android files excluded), runs `deploy/build-frontend.sh`. That script refuses to run
+when the server has under ~1.8 GB of free memory, builds at low priority, and replaces the live site only
+after the build fully succeeded, so a failed build leaves the previous version being served.
+
+```bash
+bash ~/auto-stock-manager/deploy/build-frontend.sh          # publish the current checkout by hand
+FORCE_FRONTEND=1 bash ~/auto-stock-manager/deploy/redeploy.sh   # full deploy, rebuilding the frontend
+```
+
+### One-time setup (needs sudo on the VPS and the DNS account)
+
+1. **DNS (Hostinger -> Domains -> hamroauto.com.np -> DNS records):** add an **A** record, name `stock`,
+   value `203.134.250.70`. Check it with `nslookup stock.hamroauto.com.np 8.8.8.8`.
+2. **nginx + HTTPS on the VPS** (commands are at the top of `deploy/nginx-stock.conf`): copy it to
+   `sites-available`, enable it, `nginx -t`, reload, then `sudo certbot --nginx -d stock.hamroauto.com.np`.
+3. **Let the deploy script publish:** `sudo chown -R mansa:mansa /var/www/auto-stock-frontend`.
+4. **First publish:** `bash ~/auto-stock-manager/deploy/build-frontend.sh`, then open
+   https://stock.hamroauto.com.np/login.
+5. **Backend settings** (`backend/.env`): set `FRONTEND_URL=https://stock.hamroauto.com.np` and add the same
+   address to `CORS_ORIGINS`, then `pm2 restart auto-stock-backend`. `FRONTEND_URL` is used in emailed
+   verify/reset links, the Facebook connect redirect and share links.
+6. **Facebook app** (developers.facebook.com -> your app -> Facebook Login -> Valid OAuth Redirect URIs): add
+   `https://stock.hamroauto.com.np/api/facebook/callback`.
+7. **`hamroauto.com.np/stock`:** the storefront is on Hostinger, a different server, so this address is a
+   redirect, not a copy. In hPanel -> Websites -> Redirects (or the storefront's own redirect rules) send
+   `https://hamroauto.com.np/stock` (and `/stock/`) to `https://stock.hamroauto.com.np/login`.
+8. **Android app:** `frontend/capacitor.config.json` already points at the new address. Rebuild and reinstall
+   the APK (the old APK still opens the old Vercel address and stops working once Vercel is off).
+9. **Retire Vercel only after** all of the above work (log in, upload a photo, Facebook connect, the Android
+   app): Vercel -> the project -> Settings -> delete, or disconnect the GitHub repo.
+
+Everyone signs in once more on the new address, because the browser keeps the login per address.
+
+---
+
+## Vercel (Frontend) — retired, kept for history
 
 1. Go to **[vercel.com](https://vercel.com)** → Login with GitHub
 2. Click **"Add New Project"** → Import your GitHub repo
