@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
-import { Search, Copy, Share2, Facebook, MessageCircle, Download, Sparkles, Package, RotateCcw, Check } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
+import { Search, Copy, Share2, MessageCircle, Download, Sparkles, Package, RotateCcw, Check, Send } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
 import { formatNPR } from "../utils/helpers";
@@ -8,6 +9,9 @@ import { hidesVehiclePricing } from "../utils/permissions";
 import { DEFAULT_TEMPLATE, TEMPLATE_KEY, PLACEHOLDERS, renderVehicle, vehicleValues, absoluteUrl } from "../utils/shareCaption";
 
 const MAX_SHARE_PHOTOS = 10;
+// Only phones have a share sheet that lists Facebook and takes photo files; a desktop browser's
+// (e.g. Windows') lists installed apps only, so there the website link is the way to share.
+const IS_MOBILE = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 const STYLES = [
   ["facebook_sales", "Facebook sales post"],
   ["short", "Short & punchy"],
@@ -20,80 +24,81 @@ const loadTemplate = () => {
   try { return localStorage.getItem(TEMPLATE_KEY) || DEFAULT_TEMPLATE; } catch { return DEFAULT_TEMPLATE; }
 };
 
-// Chrome only accepts PNG on the clipboard, and photos are stored as JPEG/HEIC-derived files.
-const toPng = async (blob) => {
-  if (blob.type === "image/png") return blob;
-  const bmp = await createImageBitmap(blob);
-  const c = document.createElement("canvas");
-  c.width = bmp.width; c.height = bmp.height;
-  c.getContext("2d").drawImage(bmp, 0, 0);
-  return new Promise((res, rej) => c.toBlob(b => (b ? res(b) : rej(new Error("png"))), "image/png"));
-};
-
 const photoFiles = async (vehicleId) => {
   const { data } = await api.get(`/vehicles/${vehicleId}/photos`);
   const files = await Promise.all(data.slice(0, MAX_SHARE_PHOTOS).map(async (p, i) => {
     try {
       const blob = await (await fetch(absoluteUrl(api, p.url))).blob();
-      return new File([blob], p.filename || `vehicle-${i + 1}.jpg`, { type: blob.type });
+      if (!blob.type.startsWith("image/")) return null;
+      // Name by the served type, not the original upload name: uploads are re-encoded on the
+      // server, and Android's share sheet rejects every file if one name has a non-image
+      // extension (e.g. "IMG_1234.HEIC" or a gallery "blob" with none).
+      const ext = blob.type === "image/jpeg" ? "jpg" : blob.type.split("/")[1];
+      return new File([blob], `vehicle-${i + 1}.${ext}`, { type: blob.type });
     } catch { return null; }
   }));
   return files.filter(Boolean);
 };
 
-function PostCard({ vehicle, text, onChange, aiBadge }) {
+function PostCard({ vehicle, text, link, onChange, aiBadge, fbPage }) {
   const [busy, setBusy] = useState(false);
+  const [posting, setPosting] = useState(false);
 
-  // One clipboard entry holding both the caption and the first photo, so pasting into a chat
-  // (WhatsApp Web, Messenger, ...) brings the photo too. Falls back to caption-only where the
-  // browser can't write images, or the vehicle has no photo.
-  const copy = async () => {
-    const first = vehicle.thumb_photos?.[0];
-    if (first && navigator.clipboard?.write && window.ClipboardItem) {
-      try {
-        const png = fetch(absoluteUrl(api, first.url)).then(r => r.blob()).then(toPng);
-        await navigator.clipboard.write([new window.ClipboardItem({
-          "text/plain": new Blob([text], { type: "text/plain" }),
-          "image/png": png,
-        })]);
-        toast.success("Caption and photo copied. Paste it into your post or chat");
-        return true;
-      } catch { /* fall through to caption-only */ }
-    }
-    try { await navigator.clipboard.writeText(text); toast.success("Caption copied. Paste it into your post"); return true; }
-    catch { toast.error("Could not copy. Select the text and copy it manually."); return false; }
-  };
-
-  // Facebook's share dialog takes only a URL and builds the preview (photo, title, details)
-  // from that page's Open Graph tags -- there is no way to prefill the post text via URL any
-  // more -- so we open it with this vehicle's public share link and put the caption on the
-  // clipboard to paste into the post box.
-  const facebook = async () => {
-    const win = window.open("about:blank", "fb-share", "width=700,height=720"); // opened inside the click, before any await, so it isn't popup-blocked
-    setBusy(true);
+  const postToPage = async () => {
+    if (!window.confirm(`Post this to ${fbPage.page_name} on Facebook now?`)) return;
+    setPosting(true);
     try {
-      const [{ data }] = await Promise.all([api.get(`/share/link/${vehicle.id}`), copy()]);
-      const quote = encodeURIComponent(text);
-      const url = `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(data.url)}${quote.length < 1500 ? `&quote=${quote}` : ""}`;
-      if (win) win.location.href = url; else window.open(url, "_blank", "noopener");
-      toast.info("In the Facebook window, paste your caption (Ctrl+V) into the post box if it isn't already there");
-    } catch {
-      win?.close();
-      toast.error("Could not open Facebook");
-    } finally { setBusy(false); }
+      const { data } = await api.post("/facebook/post", { vehicle_id: vehicle.id, message: text }, { timeout: 180000 });
+      toast.success(`Posted to ${data.page_name} with ${data.photos} photo${data.photos === 1 ? "" : "s"}`,
+        { action: { label: "View", onClick: () => window.open(data.url, "_blank", "noopener") } });
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Posting to Facebook failed");
+    } finally { setPosting(false); }
   };
+
+  const writeClipboard = async (value) => {
+    try { await navigator.clipboard.writeText(value); return true; } catch { return false; }
+  };
+
+  const copy = async () => {
+    if (await writeClipboard(text)) toast.success("Caption copied. Paste it into your post");
+    else toast.error("Could not copy. Select the text and copy it manually.");
+  };
+
+  // Facebook's share dialog turns the vehicle's website page into a card (cover photo, title,
+  // price) that sends visitors to the site. The caption is copied for the dialog's text box,
+  // minus the link line, which the card already carries.
+  const shareOnFacebook = async () => {
+    const caption = link ? text.split("\n").filter(l => !l.includes(link)).join("\n").replace(/\n{3,}/g, "\n\n").trim() : text;
+    const copied = await writeClipboard(caption);
+    const url = link ? `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(link)}` : "https://www.facebook.com/";
+    const win = window.open(url, "_blank");
+    if (win) win.opener = null;
+    else toast.info("Your browser blocked the Facebook window", { action: { label: "Open Facebook", onClick: () => window.open(url, "_blank", "noopener") } });
+    if (copied) toast.success("Caption copied. On Facebook, click the text box and paste it (Ctrl+V)", { duration: 15000 });
+    else toast.error("Could not copy the caption. Copy it from the box here instead.");
+  };
+
+  const prepared = useRef(null);
 
   const share = async () => {
     if (!navigator.share) { await copy(); return; }
+    // Facebook drops text that comes in through the share sheet, so put the caption on the
+    // clipboard first; the user just pastes it into the post.
+    navigator.clipboard?.writeText(text).catch(() => {});
     setBusy(true);
     try {
-      const files = await photoFiles(vehicle.id);
+      const files = prepared.current || await photoFiles(vehicle.id);
+      prepared.current = files;
       const data = { text };
       if (files.length && navigator.canShare?.({ files })) data.files = files;
-      else toast.info("Photos can't be attached on this device. Sharing the caption only");
+      else toast.info(files.length ? "Photos can't be attached on this device. Sharing the caption only" : "This vehicle has no photos yet. Sharing the caption only");
       await navigator.share(data);
     } catch (e) {
-      if (e?.name !== "AbortError") toast.error("Share failed. Use Copy caption instead");
+      // Downloading the photos can outlast the tap's permission to open the share sheet;
+      // they're cached now, so a second tap opens it instantly.
+      if (e?.name === "NotAllowedError") toast.info("Photos ready. Tap Share again");
+      else if (e?.name !== "AbortError") toast.error("Share failed. Use Copy caption instead");
     } finally { setBusy(false); }
   };
 
@@ -131,14 +136,95 @@ function PostCard({ vehicle, text, onChange, aiBadge }) {
       </div>
       <textarea value={text} onChange={e => onChange(e.target.value)} rows={12} className="w-full border border-slate-200 rounded-lg p-3 text-sm" />
       <div className="flex flex-wrap gap-2">
-        <button onClick={facebook} disabled={busy} className="flex items-center gap-1.5 bg-[#1877F2] hover:bg-[#166fe0] text-white px-3 py-2 rounded-lg text-sm font-medium disabled:opacity-50" data-testid="share-facebook"><Facebook size={15} /> Facebook</button>
+        {fbPage && (
+          <button onClick={postToPage} disabled={posting || !text.trim()} data-testid="post-to-page"
+            className="flex items-center gap-1.5 bg-[#1877F2] hover:bg-[#166FE5] text-white px-3 py-2 rounded-lg text-sm font-medium disabled:opacity-50">
+            <Send size={15} /> {posting ? "Posting…" : `Post to ${fbPage.page_name}`}
+          </button>
+        )}
+        <button onClick={shareOnFacebook} disabled={!text.trim()} data-testid="share-on-facebook"
+          className={fbPage ? btn : "flex items-center gap-1.5 bg-[#1877F2] hover:bg-[#166FE5] text-white px-3 py-2 rounded-lg text-sm font-medium disabled:opacity-50"}>
+          <Share2 size={15} /> {link ? "Share on Facebook" : "Open Facebook"}
+        </button>
         <button onClick={copy} className={btn}><Copy size={15} /> Copy</button>
         <button onClick={() => window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank", "noopener")} className={btn}><MessageCircle size={15} /> WhatsApp</button>
         <button onClick={download} disabled={busy} className={btn}><Download size={15} /> Photos</button>
-        <button onClick={share} disabled={busy} className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-lg text-sm font-medium disabled:opacity-50">
-          <Share2 size={15} /> {busy ? "Preparing…" : "Share with photos"}
-        </button>
+        {IS_MOBILE && (
+          <button onClick={share} disabled={busy} className={btn}>
+            <Share2 size={15} /> {busy ? "Preparing…" : "Share with photos"}
+          </button>
+        )}
       </div>
+    </div>
+  );
+}
+
+const FB_RESULTS = {
+  connected: ["success", "Facebook Page connected"],
+  cancelled: ["info", "Facebook connection cancelled"],
+  expired: ["error", "That Facebook sign-in took too long. Try connecting again"],
+  failed: ["error", "Couldn't connect to Facebook. Try again"],
+  nopages: ["error", "That Facebook account doesn't manage any Page it can post to"],
+};
+
+// One-click posting to the company's Facebook Page, done by the server, so it works on a
+// computer and inside the Android app, where the share sheet can't attach photos.
+function FacebookBar({ status, isAdmin, onChanged }) {
+  const [params, setParams] = useSearchParams();
+  const [pickPages, setPickPages] = useState(null);
+  const nonce = params.get("nonce");
+
+  useEffect(() => {
+    const fb = params.get("fb");
+    if (!fb) return;
+    if (fb === "pick" && nonce) {
+      api.get(`/facebook/pending/${nonce}`).then(r => setPickPages(r.data))
+        .catch(e => toast.error(e.response?.data?.detail || "Couldn't load your Pages"));
+      return;
+    }
+    const [kind, msg] = FB_RESULTS[fb] || [];
+    if (kind) toast[kind](msg);
+    if (fb === "connected") onChanged();
+    setParams({}, { replace: true });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const connect = async () => {
+    try { window.location.href = (await api.get("/facebook/connect")).data.url; }
+    catch (e) { toast.error(e.response?.data?.detail || "Couldn't start Facebook connection"); }
+  };
+  const pick = async (pageId) => {
+    try {
+      await api.post("/facebook/select", { nonce, page_id: pageId });
+      toast.success("Facebook Page connected");
+      setPickPages(null); setParams({}, { replace: true }); onChanged();
+    } catch (e) { toast.error(e.response?.data?.detail || "Couldn't connect that Page"); }
+  };
+  const disconnect = async () => {
+    if (!window.confirm(`Disconnect ${status.page.page_name}? You can connect again any time.`)) return;
+    try { await api.delete("/facebook/page"); onChanged(); }
+    catch { toast.error("Couldn't disconnect"); }
+  };
+
+  if (pickPages) return (
+    <div className="bg-white border border-blue-200 rounded-xl p-4 space-y-2">
+      <p className="text-sm font-medium text-slate-800">Which Page should vehicles be posted to?</p>
+      <div className="flex flex-wrap gap-2">
+        {pickPages.map(p => <button key={p.id} onClick={() => pick(p.id)} className="border border-slate-200 px-3 py-2 rounded-lg text-sm hover:bg-blue-50">{p.name}</button>)}
+      </div>
+    </div>
+  );
+  if (!status?.configured) return null;
+  if (status.page) return (
+    <div className="bg-blue-50 border border-blue-100 rounded-xl px-4 py-2.5 text-sm text-slate-700 flex flex-wrap items-center gap-x-3 gap-y-1">
+      <span>Posting to Facebook Page <b>{status.page.page_name}</b></span>
+      {isAdmin && <button onClick={disconnect} className="text-xs text-slate-500 hover:text-red-600">Disconnect</button>}
+    </div>
+  );
+  if (!isAdmin) return null;
+  return (
+    <div className="bg-white border border-slate-200 rounded-xl p-4 flex flex-wrap items-center gap-3 justify-between">
+      <p className="text-sm text-slate-600">Connect your Facebook Page to post photos and caption in one click, from a computer or phone.</p>
+      <button onClick={connect} className="bg-[#1877F2] hover:bg-[#166FE5] text-white px-4 py-2 rounded-lg text-sm font-medium">Connect Facebook Page</button>
     </div>
   );
 }
@@ -146,6 +232,9 @@ function PostCard({ vehicle, text, onChange, aiBadge }) {
 export default function Share() {
   const { user } = useAuth();
   const showPrice = !hidesVehiclePricing(user?.role);
+  const role = user?.role || "admin";
+  const [fbStatus, setFbStatus] = useState(null);
+  const loadFb = () => api.get("/facebook/status").then(r => setFbStatus(r.data)).catch(() => {});
   const [vehicles, setVehicles] = useState([]);
   const [loading, setLoading] = useState(true);
   const [profile, setProfile] = useState({});
@@ -165,13 +254,26 @@ export default function Share() {
       .then(r => setVehicles(r.data)).catch(() => toast.error("Failed to load vehicles"))
       .finally(() => setLoading(false));
     api.get("/share/profile").then(r => setProfile(r.data || {})).catch(() => {});
+    loadFb();
   }, []);
 
   const shown = useMemo(() => vehicles.filter(v =>
     `${v.brand} ${v.model} ${v.year} ${v.registration_number || ""}`.toLowerCase().includes(q.toLowerCase())), [vehicles, q]);
   const chosen = selected.map(id => vehicles.find(v => v.id === id)).filter(Boolean);
 
-  const textFor = (v) => edits[v.id] ?? aiTexts[v.id] ?? renderVehicle(template, vehicleValues(v, profile, showPrice));
+  // The storefront lists available vehicles that have a selling price. Roles without pricing
+  // access never receive the price, so for them every available vehicle is assumed listed.
+  const linkFor = (v) => profile.storefront_url && (!showPrice || Number(v.selling_price) > 0)
+    ? `${profile.storefront_url}/inventory/${v.id}` : null;
+
+  // Typed edits are kept as they are; any other caption gets the vehicle's website link
+  // appended, so pasting it into Facebook or WhatsApp shows the cover photo as a link card.
+  const textFor = (v) => {
+    if (edits[v.id] !== undefined) return edits[v.id];
+    const body = aiTexts[v.id] ?? renderVehicle(template, vehicleValues(v, profile, showPrice));
+    const link = linkFor(v);
+    return link ? `${body}\n\n🔗 More photos & details: ${link}` : body;
+  };
 
   const toggle = (id) => setSelected(s => s.includes(id) ? s.filter(x => x !== id) : [...s, id]);
 
@@ -202,6 +304,8 @@ export default function Share() {
         <h1 className="text-2xl font-bold text-slate-900">Share</h1>
         <p className="text-sm text-slate-500">Pick vehicles, get a ready-to-post caption for each, then share to Facebook, WhatsApp or anywhere else.</p>
       </div>
+
+      <FacebookBar status={fbStatus} isAdmin={role === "admin"} onChanged={loadFb} />
 
       <div className="grid lg:grid-cols-5 gap-5 items-start">
         {/* Vehicle picker */}
@@ -273,7 +377,8 @@ export default function Share() {
           {chosen.length === 0 ? (
             <div className="bg-white border border-dashed border-slate-300 rounded-xl py-16 text-center text-slate-400 text-sm">Select one or more vehicles to get a caption</div>
           ) : chosen.map(v => (
-            <PostCard key={v.id} vehicle={v} text={textFor(v)} aiBadge={!!aiTexts[v.id] && edits[v.id] === undefined}
+            <PostCard key={v.id} vehicle={v} text={textFor(v)} link={linkFor(v)} aiBadge={!!aiTexts[v.id] && edits[v.id] === undefined}
+              fbPage={["admin", "social_media"].includes(role) ? fbStatus?.page : null}
               onChange={t => setEdits(prev => ({ ...prev, [v.id]: t }))} />
           ))}
         </div>
