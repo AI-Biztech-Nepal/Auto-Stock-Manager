@@ -79,6 +79,39 @@ app doesn't error, it just silently never emails anyone (check the backend logs 
 
 ---
 
+## Storefront visit tracking (Visits page)
+
+The admin **Visits** page shows traffic to hamroauto.com.np. The storefront (separate Next.js
+app) must report each page view to the backend. Add this client component to its root layout
+(`API_URL` = this backend's public URL):
+
+```jsx
+"use client";
+import { useEffect } from "react";
+import { usePathname } from "next/navigation";
+
+export default function VisitBeacon() {
+  const path = usePathname();
+  useEffect(() => {
+    let id = localStorage.getItem("hamro_vid");
+    if (!id) { id = crypto.randomUUID(); localStorage.setItem("hamro_vid", id); }
+    navigator.sendBeacon(`${API_URL}/api/public/visit`,
+      JSON.stringify({ visitor_id: id, path, referrer: document.referrer }));
+  }, [path]);
+  return null;
+}
+```
+
+Only a random browser id, the path, the referrer host and mobile/desktop are stored -- no IP address.
+Visits appear from the moment the beacon is live; nothing is back-filled.
+
+### Or read the numbers from Google Analytics 4
+
+If the storefront already has GA4, the Visits page can show its history instead:
+1. Google Cloud: enable the **Google Analytics Data API**, create a service account and download its JSON key.
+2. GA4 -> Admin -> Property access management: add the service account's email as **Viewer**.
+3. On the VPS set `GA4_PROPERTY_ID` (numeric id, GA4 -> Admin -> Property details) and `GA4_CREDENTIALS_JSON` (the key's JSON, or the path to the file), then restart the backend.
+
 ## Auto-deploy on push to main
 
 A GitHub webhook hits this app's own VPS listener on every push to `main`, which pulls,

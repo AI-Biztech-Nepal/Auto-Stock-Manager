@@ -1,15 +1,16 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
-import { Plus, Search, Trash2, Eye, TrendingUp, DollarSign, Calendar, ShoppingBag, X, ChevronDown, ChevronUp, UserPlus, AlertTriangle, UploadCloud, FileSpreadsheet, CheckCircle2, Undo2 } from "lucide-react";
+import { useNavigate, useLocation } from "react-router-dom";
+import { Plus, Search, Trash2, Eye, TrendingUp, DollarSign, Calendar, ShoppingBag, X, ChevronDown, ChevronUp, UserPlus, AlertTriangle, UploadCloud, FileSpreadsheet, CheckCircle2, Undo2, BookmarkCheck, ArrowRight } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
-import { formatNPR, getTransferStatusStyle, splitSanakhatExpenses, withSanakhatExpenses } from "../utils/helpers";
+import { formatNPR, splitSanakhatExpenses, withSanakhatExpenses, TRANSFER_STATUS_OPTIONS, getTransferStatusStyle } from "../utils/helpers";
 import { getCurrentBSMonthRange, getCurrentWeekRange, getTodayAD } from "../utils/nepali-date";
 import { useAuth } from "../context/AuthContext";
 import VehicleComboBox from "../components/VehicleComboBox";
 import BSDatePicker from "../components/BSDatePicker";
 import HoverADDate from "../components/HoverADDate";
 import WarrantyBadge from "../components/WarrantyBadge";
+import Bookings from "./Bookings";
 import PeriodToggle, { PERIOD_OPTIONS } from "../components/PeriodToggle";
 
 const PRESET_EXPENSES = [
@@ -73,8 +74,13 @@ const DEED_ROWS = [
 ];
 
 // Status tags from the sold vehicle's own record (what the old Sold Stock tab showed):
-// returned marker, name-transfer status and warranty. Sanakhat has its own columns.
-function SaleTags({ sale, vehicle }) {
+// returned marker, name-transfer status and warranty. Sanakhat cost has its own column.
+function SaleTags({ sale, vehicle, booking }) {
+  const fromBooking = booking && (
+    <span className="px-1.5 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide bg-yellow-100 text-yellow-800 whitespace-nowrap" title="This sale completed a booking" data-testid="sale-booking-tag">
+      Booked · {formatNPR(booking.booking_amount)}
+    </span>
+  );
   if (sale.returned) {
     return (
       <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide bg-amber-100 text-amber-700" data-testid="sale-returned-tag">
@@ -82,11 +88,12 @@ function SaleTags({ sale, vehicle }) {
       </span>
     );
   }
-  if (!vehicle) return null;
-  const tr = getTransferStatusStyle(vehicle.ownership_transfer_status);
+  if (!vehicle) return fromBooking || null;
+  const transfer = getTransferStatusStyle(vehicle.ownership_transfer_status);
   return (
     <>
-      <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide whitespace-nowrap ${tr.bg} ${tr.text}`} title="Ownership transfer status" data-testid="sale-transfer-tag">Transfer {tr.label}</span>
+      {fromBooking}
+      <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide whitespace-nowrap ${transfer.bg} ${transfer.text}`} title="Transfer status" data-testid="sale-transfer-tag">Transfer {transfer.label}</span>
       <WarrantyBadge warranty={vehicle.warranty} />
     </>
   );
@@ -99,29 +106,24 @@ function sanakhatOf(sale) {
   return { total: sanakhat + resanakhat, resanakhat };
 }
 
-const SANAKHAT_STYLE = {
-  done: "bg-green-100 text-green-800",
-  pending: "bg-amber-100 text-amber-800",
-};
-
-// Pending / Done. Admins flip it right in the row; everyone else just sees the pill.
-function SanakhatStatus({ vehicle, editable, onChange }) {
+// Pending / In Progress / Done name transfer. Admins flip it right in the row; everyone else just sees the pill.
+function TransferStatus({ vehicle, editable, onChange }) {
   if (!vehicle) return <span className="text-slate-400">—</span>;
-  const status = vehicle.sanakhat_status === "done" ? "done" : "pending";
+  const status = vehicle.ownership_transfer_status || "pending";
+  const style = getTransferStatusStyle(status);
   if (!editable) {
-    return <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${SANAKHAT_STYLE[status]}`}>{status === "done" ? "Done" : "Pending"}</span>;
+    return <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${style.bg} ${style.text}`}>{style.label}</span>;
   }
   return (
     <select
       value={status}
       onClick={e => e.stopPropagation()}
       onChange={e => onChange(vehicle, e.target.value)}
-      aria-label="Sanakhat status"
-      data-testid="sanakhat-status-select"
-      className={`h-7 pl-2 pr-6 rounded-full text-xs font-semibold border-0 cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500 ${SANAKHAT_STYLE[status]}`}
+      aria-label="Transfer status"
+      data-testid="transfer-status-select"
+      className={`h-7 pl-2 pr-6 rounded-full text-xs font-semibold border-0 cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500 ${style.bg} ${style.text}`}
     >
-      <option value="pending">Pending</option>
-      <option value="done">Done</option>
+      {TRANSFER_STATUS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
     </select>
   );
 }
@@ -134,6 +136,7 @@ function marginOf(sale, vehicle) {
 
 export default function Sales() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
   const [sales, setSales] = useState([]);
@@ -141,6 +144,9 @@ export default function Sales() {
   // margin, sanakhat) onto each sale row.
   const [soldVehicles, setSoldVehicles] = useState([]);
   const [summary, setSummary] = useState(null);
+  // Bookings are fetched here so open ones can be converted from this page and converted ones
+  // can be tagged on their sale row.
+  const [bookings, setBookings] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   // Set via the Today/This Week/This Month toggle in the header — "all" (default) shows
@@ -150,6 +156,10 @@ export default function Sales() {
   const [statusFilter, setStatusFilter] = useState("all"); // "all" | "sold" | "returned"
   const [showModal, setShowModal] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  // "Record Sale" on a booking (strip below or Bookings page) opens this same sale form
+  // pre-filled, with the booking kept in activeBooking.
+  const [activeBooking, setActiveBooking] = useState(null);
 
   // Spreadsheet import ("Sales Record 20XX" workbook)
   const [showImport, setShowImport] = useState(false);
@@ -184,6 +194,7 @@ export default function Sales() {
     try {
       const [s, sm, v] = await Promise.all([api.get("/sales"), api.get("/sales/summary"), api.get("/vehicles?status=sold")]);
       setSales(s.data); setSummary(sm.data); setSoldVehicles(v.data);
+      api.get("/bookings").then(r => setBookings(r.data)).catch(() => {});
     } catch { toast.error("Failed to load sales"); }
     finally { setLoading(false); }
   }, []);
@@ -195,19 +206,21 @@ export default function Sales() {
     api.get("/sales/reconcile").then(r => setMismatches(r.data.mismatches)).catch(() => {});
   }, [isAdmin, sales]);
 
+  const openBookings = useMemo(() => bookings.filter(b => b.status === "active"), [bookings]);
+  const bookingBySaleId = useMemo(() => Object.fromEntries(bookings.filter(b => b.sale_id).map(b => [b.sale_id, b])), [bookings]);
   const vehicleById = useMemo(() => Object.fromEntries(soldVehicles.map(v => [v.id, v])), [soldVehicles]);
 
   // Optimistic: flip the pill straight away, roll back if the save fails.
-  const updateSanakhat = async (vehicle, status) => {
-    const prev = vehicle.sanakhat_status;
-    const set = (val) => setSoldVehicles(vs => vs.map(v => v.id === vehicle.id ? { ...v, sanakhat_status: val } : v));
+  const updateTransfer = async (vehicle, status) => {
+    const prev = vehicle.ownership_transfer_status;
+    const set = (val) => setSoldVehicles(vs => vs.map(v => v.id === vehicle.id ? { ...v, ownership_transfer_status: val } : v));
     set(status);
     try {
-      await api.put(`/vehicles/${vehicle.id}`, { sanakhat_status: status });
-      toast.success(`Sanakhat marked ${status === "done" ? "done" : "pending"}`);
+      await api.put(`/vehicles/${vehicle.id}`, { ownership_transfer_status: status });
+      toast.success(`Transfer marked ${getTransferStatusStyle(status).label}`);
     } catch {
       set(prev);
-      toast.error("Couldn't update sanakhat status");
+      toast.error("Couldn't update transfer status");
     }
   };
 
@@ -215,8 +228,15 @@ export default function Sales() {
   // a returned sale only exists as the sale itself.
   const openSale = (s) => navigate(!s.returned && s.vehicle_id && vehicleById[s.vehicle_id] ? `/sales/vehicle/${s.vehicle_id}` : `/sales/${s.id}`);
 
-  const openModal = async () => {
-    setForm(EMPTY_FORM);
+  const openModal = async (booking = null) => {
+    setActiveBooking(booking);
+    setForm(booking ? {
+      ...EMPTY_FORM,
+      vehicle_id: booking.vehicle_id,
+      customer_id: booking.customer_id || "",
+      sale_price: String(booking.agreed_price ?? booking.vehicle_selling_price ?? ""),
+      advance_payment: String(booking.booking_amount ?? ""),
+    } : EMPTY_FORM);
     setExpenseItems([]);
     setPresetToAdd("");
     setNewExpName(""); setNewExpAmt("");
@@ -224,10 +244,26 @@ export default function Sales() {
     setShowAddCust(false);
     setShowModal(true);
     try {
-      const [v, c] = await Promise.all([api.get("/vehicles?status=available"), api.get("/customers")]);
+      const [v, c] = await Promise.all([booking ? api.get(`/vehicles/${booking.vehicle_id}`).then(r => ({ data: [r.data] })) : api.get("/vehicles?status=available"), api.get("/customers")]);
       setVehicles(v.data); setCustomers(c.data);
     } catch { toast.error("Failed to load vehicles/customers"); }
   };
+
+  const closeModal = () => { setShowModal(false); setActiveBooking(null); };
+
+  // Arrived from the Bookings page (/sales?booking=ID): open the sale form for that booking
+  // once bookings have loaded, then drop the param so a refresh doesn't reopen it.
+  const tab = new URLSearchParams(location.search).get("tab") === "bookings" ? "bookings" : "sales";
+  const setTab = (t) => navigate(t === "bookings" ? "/sales?tab=bookings" : "/sales", { replace: true });
+  const bookingParam = new URLSearchParams(location.search).get("booking");
+  useEffect(() => {
+    if (!bookingParam || loading) return;
+    navigate(location.pathname, { replace: true });
+    api.get("/bookings").then(r => {
+      const b = r.data.find(x => x.id === bookingParam && x.status === "active");
+      if (b) openModal(b); else toast.error("That booking is no longer open");
+    }).catch(() => toast.error("Failed to load booking"));
+  }, [bookingParam, loading]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const selectedCustomer = customers.find(c => c.id === form.customer_id) || null;
 
@@ -314,6 +350,7 @@ export default function Sales() {
       if (Number(form.advance_payment) > 0) payMethodParts.push("Advance");
       const payload = {
         vehicle_id: form.vehicle_id,
+        ...(activeBooking ? { booking_id: activeBooking.id } : {}),
         customer_id: customerId,
         sale_price: Number(form.sale_price),
         extra_expenses: extraExpenses.map(e => ({ name: e.name, amount: Number(e.amount) || 0 })),
@@ -335,9 +372,9 @@ export default function Sales() {
       };
 
       await api.post("/sales", payload);
-      toast.success("Sale recorded successfully!");
+      toast.success(activeBooking ? "Booking converted to a sale!" : "Sale recorded successfully!");
 
-      setShowModal(false);
+      closeModal();
       fetchAll();
     } catch (err) { toast.error(getErrMsg(err, "Failed to save sale")); }
     finally { setSaving(false); }
@@ -404,6 +441,19 @@ export default function Sales() {
 
   return (
     <div className="space-y-5 animate-fade-in">
+      <div className="flex items-center gap-1 border-b border-slate-200" data-testid="sales-tabs">
+        {[{ key: "sales", label: "Sales" }, { key: "bookings", label: `Bookings${openBookings.length ? ` (${openBookings.length})` : ""}` }].map(t => (
+          <button key={t.key} onClick={() => setTab(t.key)} data-testid={`sales-tab-${t.key}`}
+            className={`px-4 h-10 text-sm font-semibold border-b-2 -mb-px transition-colors ${tab === t.key ? "border-blue-600 text-blue-600" : "border-transparent text-slate-500 hover:text-slate-700"}`}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {tab === "bookings" ? (
+        <Bookings key={`${sales.length}-${openBookings.length}`} embedded onRecordSale={openModal} />
+      ) : (
+      <>
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
@@ -420,7 +470,7 @@ export default function Sales() {
               <UploadCloud size={16} /> Import Sheet
             </button>
           )}
-          <button onClick={openModal} data-testid="new-sale-btn" className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-3 rounded-lg transition-all active:scale-95 shadow-sm">
+          <button onClick={() => openModal()} data-testid="new-sale-btn" className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-3 rounded-lg transition-all active:scale-95 shadow-sm">
             <Plus size={16} /> Record Sale
           </button>
         </div>
@@ -476,10 +526,23 @@ export default function Sales() {
                     ? `${m.vehicle_info || "Vehicle"} — marked Sold on ${m.sale_date}, no sale record`
                     : `${m.vehicle_info || "Vehicle deleted"} — ${formatNPR(m.total_amount)} on ${m.sale_date}`}
                 </div>
-                <div className="font-semibold text-amber-700">
+                <div className="flex items-center gap-3 font-semibold text-amber-700">
                   {m.issue === "vehicle_deleted" ? "Vehicle deleted"
                     : m.issue === "orphan_sold_vehicle" ? "Missing sale record"
                     : `Vehicle is now "${m.vehicle_status}"`}
+                  {m.issue === "vehicle_status_mismatch" && (
+                    <button
+                      onClick={async e => {
+                        e.stopPropagation();
+                        try {
+                          await api.post(`/sales/${m.sale_id}/resync-vehicle`);
+                          setMismatches(prev => prev.filter(x => x.sale_id !== m.sale_id));
+                        } catch (err) { alert(err?.response?.data?.detail || "Could not fix"); }
+                      }}
+                      className="text-xs px-2 py-1 rounded-md bg-amber-600 text-white hover:bg-amber-700"
+                      data-testid="mismatch-fix-btn"
+                    >Mark vehicle Sold</button>
+                  )}
                 </div>
               </div>
             ))}
@@ -514,6 +577,37 @@ export default function Sales() {
         )}
       </div>
 
+      {/* Open bookings — deposits waiting on the balance; Record Sale opens the normal sale form pre-filled */}
+      {openBookings.length > 0 && (
+        <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4" data-testid="open-bookings-strip">
+          <div className="flex items-center justify-between gap-2 mb-2">
+            <div className="flex items-center gap-2 text-sm font-semibold text-yellow-900">
+              <BookmarkCheck size={16} /> {openBookings.length} open booking{openBookings.length > 1 ? "s" : ""} awaiting sale
+            </div>
+            <button onClick={() => setTab("bookings")} className="text-xs font-medium text-yellow-800 hover:underline">Manage bookings</button>
+          </div>
+          <div className="divide-y divide-yellow-100">
+            {openBookings.map(b => {
+              const agreed = b.agreed_price ?? b.vehicle_selling_price;
+              const balance = agreed != null ? Math.max(agreed - (b.booking_amount || 0), 0) : null;
+              return (
+                <div key={b.id} className="flex items-center justify-between gap-3 py-2" data-testid="open-booking-row">
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium text-slate-900 truncate">{b.vehicle_info || "—"}</div>
+                    <div className="text-xs text-slate-600 truncate">
+                      {b.customer_name} · Deposit {formatNPR(b.booking_amount)}{balance != null && ` · Balance ${formatNPR(balance)}`}
+                    </div>
+                  </div>
+                  <button onClick={() => openModal(b)} className="shrink-0 flex items-center gap-1.5 h-9 px-3 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-medium active:scale-95 transition-all">
+                    Record Sale <ArrowRight size={14} />
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* Sales Table */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
         {filtered.length === 0 ? (
@@ -542,7 +636,7 @@ export default function Sales() {
                           {s.needs_review && <span className="ml-1.5 inline-flex items-center gap-0.5 align-middle text-[10px] font-semibold text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded-full"><AlertTriangle size={9} /> Review</span>}
                         </div>
                         <div className="text-xs text-slate-500 mt-0.5 truncate">{s.customer_name}{s.customer_contact ? ` · ${s.customer_contact}` : ""}</div>
-                        <div className="flex items-center gap-1 flex-wrap mt-1.5"><SaleTags sale={s} vehicle={v} /></div>
+                        <div className="flex items-center gap-1 flex-wrap mt-1.5"><SaleTags sale={s} vehicle={v} booking={bookingBySaleId[s.id]} /></div>
                       </div>
                       {isAdmin && (
                         <button onClick={e => { e.stopPropagation(); handleDelete(s.id); }} className="w-11 h-11 -mr-2.5 -mt-2.5 shrink-0 flex items-center justify-center hover:bg-red-50 rounded-lg transition-colors" data-testid="delete-sale-btn-mobile">
@@ -560,9 +654,9 @@ export default function Sales() {
                       <div className="mt-1 text-xs text-orange-600 font-medium">+{formatNPR((s.expenses_total || 0) + (s.job_card_cost || 0))} extra expenses{s.extra_expenses?.length > 0 ? ` (${s.extra_expenses.length})` : ""}</div>
                     )}
                     {!s.returned && v && (
-                      <div className="mt-1.5 flex items-center gap-2 text-xs text-slate-500" data-testid="sale-sanakhat-mobile">
-                        Sanakhat <SanakhatStatus vehicle={v} editable={isAdmin} onChange={updateSanakhat} />
-                        {sanakhatOf(s).total > 0 && <span className="text-orange-600 font-medium">{formatNPR(sanakhatOf(s).total)}</span>}
+                      <div className="mt-1.5 flex items-center gap-2 text-xs text-slate-500" data-testid="sale-transfer-mobile">
+                        Transfer <TransferStatus vehicle={v} editable={isAdmin} onChange={updateTransfer} />
+                        {sanakhatOf(s).total > 0 && <span className="text-orange-600 font-medium">Sanakhat {formatNPR(sanakhatOf(s).total)}</span>}
                       </div>
                     )}
                     {!s.returned && (s.due_amount > 0 ? (
@@ -584,7 +678,7 @@ export default function Sales() {
               <table className="w-full">
                 <thead>
                   <tr className="border-b border-slate-100">
-                    {["Vehicle", "Customer", "Sale Price", "Extra Expenses", "Sanakhat Cost", "Sanakhat", "Total", "Margin", "Payment", "Date", ""].map(h => (
+                    {["Vehicle", "Customer", "Sale Price", "Extra Expenses", "Sanakhat Cost", "Transfer", "Total", "Margin", "Payment", "Date", ""].map(h => (
                       <th key={h} className="text-left text-xs font-semibold uppercase tracking-wider text-slate-500 px-4 py-3 whitespace-nowrap">{h}</th>
                     ))}
                   </tr>
@@ -606,7 +700,7 @@ export default function Sales() {
                             {s.vehicle_info || "—"}
                             {s.needs_review && <span className="inline-flex items-center gap-0.5 text-[10px] font-semibold text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded-full" title={s.review_note || "Imported — might need attention"}><AlertTriangle size={9} /> Review</span>}
                           </div>
-                          <div className="flex items-center gap-1 flex-wrap mt-1"><SaleTags sale={s} vehicle={v} /></div>
+                          <div className="flex items-center gap-1 flex-wrap mt-1"><SaleTags sale={s} vehicle={v} booking={bookingBySaleId[s.id]} /></div>
                         </td>
                         <td className="px-4 py-3">
                           <div className="text-sm text-slate-700">{s.customer_name}</div>
@@ -630,7 +724,7 @@ export default function Sales() {
                           ) : <span className="text-slate-400">—</span>}
                         </td>
                         <td className="px-4 py-3 whitespace-nowrap">
-                          {s.returned ? <span className="text-slate-400">—</span> : <SanakhatStatus vehicle={v} editable={isAdmin} onChange={updateSanakhat} />}
+                          {s.returned ? <span className="text-slate-400">—</span> : <TransferStatus vehicle={v} editable={isAdmin} onChange={updateTransfer} />}
                         </td>
                         <td className="px-4 py-3 text-sm font-bold text-green-700 whitespace-nowrap">{formatNPR(s.total_amount)}</td>
                         <td className="px-4 py-3 text-sm font-semibold whitespace-nowrap">
@@ -675,26 +769,37 @@ export default function Sales() {
         )}
       </div>
 
+      </>
+      )}
+
       {/* Record Sale Modal */}
       {showModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 sm:p-4">
           <div className="bg-white sm:rounded-2xl shadow-2xl w-full h-full sm:h-auto sm:max-w-xl sm:max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between p-4 sm:p-5 border-b border-slate-100 sticky top-0 bg-white z-10">
-              <h2 className="text-lg font-bold text-slate-900">Record Sale</h2>
-              <button onClick={() => setShowModal(false)} className="w-11 h-11 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500 shrink-0">✕</button>
+              <h2 className="text-lg font-bold text-slate-900">{activeBooking ? "Record Sale from Booking" : "Record Sale"}</h2>
+              <button onClick={closeModal} className="w-11 h-11 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500 shrink-0">✕</button>
             </div>
             <form onSubmit={handleSave} className="p-4 sm:p-5 space-y-4">
 
+              {activeBooking && (
+                <div className="bg-yellow-50 border border-yellow-200 rounded-xl px-4 py-3 text-sm text-yellow-900" data-testid="booking-banner">
+                  Booking deposit of <strong>{formatNPR(activeBooking.booking_amount)}</strong> is filled in as the advance payment. Enter what the customer pays now as cash / bank below.
+                </div>
+              )}
+
               {/* Vehicle */}
               <Field label="Vehicle" required>
-                <VehicleComboBox
+                {activeBooking ? (
+                  <div className="h-9 px-3 flex items-center text-sm bg-slate-50 border border-slate-200 rounded-lg text-slate-700">{activeBooking.vehicle_info}</div>
+                ) : <VehicleComboBox
                   vehicles={vehicles}
                   value={form.vehicle_id}
                   onChange={id => setForm({...form, vehicle_id: id})}
                   placeholder="Search or select available vehicle..."
                   testId="sale-vehicle"
                   showPrice
-                />
+                />}
               </Field>
 
               {/* Dates */}
@@ -883,7 +988,7 @@ export default function Sales() {
               </Field>
 
               <div className="flex flex-col-reverse sm:flex-row gap-3 pt-4 sm:pt-1 sticky bottom-0 sm:static -mx-4 sm:mx-0 px-4 sm:px-0 pb-4 sm:pb-0 bg-white border-t sm:border-t-0 border-slate-100">
-                <button type="button" onClick={() => setShowModal(false)} className="flex-1 h-14 sm:h-11 border border-slate-200 text-slate-700 rounded-lg text-base sm:text-sm font-semibold hover:bg-slate-50">Cancel</button>
+                <button type="button" onClick={closeModal} className="flex-1 h-14 sm:h-11 border border-slate-200 text-slate-700 rounded-lg text-base sm:text-sm font-semibold hover:bg-slate-50">Cancel</button>
                 <button type="submit" disabled={saving} data-testid="save-sale-btn" className="flex-1 h-14 sm:h-11 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-base sm:text-sm font-semibold disabled:opacity-60 active:scale-95 transition-all">
                   {saving ? "Saving..." : "Record Sale"}
                 </button>

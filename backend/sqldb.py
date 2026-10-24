@@ -41,7 +41,7 @@ TABLES = {
     "companies": {"columns": {"id", "name", "created_at"}},
     "users": {"columns": {"id", "company_id", "username", "password_hash", "name", "role", "email_verified_at", "created_at"}},
     "auth_tokens": {"columns": {"id", "user_id", "purpose", "token_hash", "expires_at", "used_at", "created_at"}},
-    "vendors": {"columns": {"id", "company_id", "name", "phone", "address", "notes", "vendor_type", "created_at"}},
+    "vendors": {"columns": {"id", "company_id", "name", "phone", "address", "notes", "vendor_type", "commission_amount", "created_at"}},
     "customers": {"columns": {"id", "company_id", "name", "contact_number", "address", "id_number", "occupation", "budget_min",
                                "budget_max", "interested_brands", "notes", "created_at", "last_purchase_date"}},
     "team_members": {"columns": {"id", "company_id", "name", "role", "contact", "specialization", "commission_rate",
@@ -67,6 +67,9 @@ TABLES = {
                            "witness_name", "witness_address", "witness_phone", "witness_id_number", "witness_relation",
                            "helmet_given", "imported", "needs_review", "review_note", "reviewed_by", "reviewed_at"},
               "bool_cols": {"returned", "helmet_given", "imported", "needs_review"}, "json_cols": {"extra_expenses"}},
+    "bookings": {"columns": {"id", "company_id", "vehicle_id", "customer_id", "booking_amount", "payment_method", "booking_date",
+                              "expected_sale_date", "agreed_price", "status", "notes", "sale_id", "cancelled_at",
+                              "refund_amount", "retained_amount", "cancel_notes", "created_by", "created_at", "updated_at"}},
     "spare_parts": {"columns": {"id", "company_id", "name", "category", "brand_compatibility", "part_number", "quantity",
                                  "unit_cost", "selling_price", "vendor_id", "bill_no", "entry_date", "supplier",
                                  "min_stock_alert", "location", "notes", "is_kit", "stock_type", "created_at",
@@ -104,6 +107,10 @@ TABLES = {
     "ai_chat_sessions": {"columns": {"id", "company_id", "messages", "updated_at"}, "json_cols": {"messages"}},
     "facebook_pages": {"columns": {"id", "company_id", "page_id", "page_name", "access_token", "connected_by",
                                     "connected_at"}},
+    "offer_prizes": {"columns": {"id", "company_id", "name", "weight", "stock", "sort_order", "created_at"}},
+    "offer_codes": {"columns": {"id", "company_id", "code", "status", "customer_name", "phone", "prize", "created_by",
+                                 "created_at", "used_at"}},
+    "page_views": {"columns": {"id", "company_id", "visitor_id", "path", "referrer", "device", "created_at"}},
 }
 
 

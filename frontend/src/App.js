@@ -6,6 +6,7 @@ import { AuthProvider, useAuth } from "./context/AuthContext";
 import { canAccessPath, ROLE_DEFAULT_PATH } from "./utils/permissions";
 import { startUpdateChecker } from "./utils/updateChecker";
 import Layout from "./components/Layout";
+import ImportStock from "./pages/ImportStock";
 
 // Route-level code splitting: previously every page was imported eagerly here,
 // so the browser downloaded and parsed the whole app's JS before the first
@@ -31,7 +32,8 @@ const Sales = lazy(() => import("./pages/Sales"));
 const SaleDetail = lazy(() => import("./pages/SaleDetail"));
 const SoldStockDetail = lazy(() => import("./pages/SoldStockDetail"));
 const Share = lazy(() => import("./pages/Share"));
-const ImportStock = lazy(() => import("./pages/ImportStock"));
+const Offers = lazy(() => import("./pages/Offers"));
+const Visits = lazy(() => import("./pages/Visits"));
 const Platform = lazy(() => import("./pages/Platform"));
 
 const RouteFallback = () => (
@@ -99,12 +101,15 @@ function AppRoutes() {
           <Route path="finance" element={<RoleRoute path="/finance"><Finance /></RoleRoute>} />
           <Route path="spare-parts" element={<RoleRoute path="/spare-parts"><SpareParts /></RoleRoute>} />
           <Route path="sales" element={<RoleRoute path="/sales"><Sales /></RoleRoute>} />
+          <Route path="bookings" element={<Navigate to="/sales?tab=bookings" replace />} />
           <Route path="sales/:id" element={<RoleRoute path="/sales/detail"><SaleDetail /></RoleRoute>} />
           <Route path="sales/vehicle/:id" element={<RoleRoute path="/sales/vehicle"><SoldStockDetail /></RoleRoute>} />
           {/* Sold Stock was merged into Sales. */}
           <Route path="sold-stock" element={<Navigate to="/sales" replace />} />
           <Route path="sold-stock/:id" element={<SoldStockRedirect />} />
           <Route path="share" element={<RoleRoute path="/share"><Share /></RoleRoute>} />
+          <Route path="visits" element={<RoleRoute path="/visits"><Visits /></RoleRoute>} />
+          <Route path="offers" element={<RoleRoute path="/offers"><Offers /></RoleRoute>} />
           <Route path="ai" element={<RoleRoute path="/ai"><AIAssistant /></RoleRoute>} />
           <Route path="settings" element={<Settings />} />
           <Route path="platform" element={<RoleRoute path="/platform"><Platform /></RoleRoute>} />

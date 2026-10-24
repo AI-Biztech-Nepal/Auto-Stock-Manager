@@ -101,6 +101,7 @@ CREATE TABLE IF NOT EXISTS vendors (
   address VARCHAR(500),
   notes TEXT,
   vendor_type VARCHAR(20) DEFAULT 'both',
+  commission_amount DOUBLE,
   created_at VARCHAR(40),
   CONSTRAINT fk_vendors_company FOREIGN KEY (company_id) REFERENCES companies(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -272,6 +273,39 @@ CREATE TABLE IF NOT EXISTS sales (
   CONSTRAINT fk_sales_vehicle FOREIGN KEY (vehicle_id) REFERENCES vehicles(id) ON DELETE CASCADE,
   CONSTRAINT fk_sales_customer FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE SET NULL,
   CONSTRAINT fk_sales_company FOREIGN KEY (company_id) REFERENCES companies(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+
+-- ── Bookings ──────────────────────────────────────────────────────────────
+-- A customer's deposit on a vehicle before the sale (not a sale). Active bookings keep the
+-- vehicle at status "reserved"; they end as converted (sale_id set) or cancelled (refund split).
+CREATE TABLE IF NOT EXISTS bookings (
+  id VARCHAR(36) NOT NULL PRIMARY KEY,
+  company_id VARCHAR(36) NOT NULL,
+  vehicle_id VARCHAR(36),
+  customer_id VARCHAR(36),
+  receipt_no INT,
+  booking_amount DOUBLE,
+  payment_method VARCHAR(50),
+  booking_date VARCHAR(20),
+  expected_sale_date VARCHAR(20),
+  agreed_price DOUBLE,
+  status VARCHAR(20) DEFAULT 'active',
+  notes TEXT,
+  sale_id VARCHAR(36),
+  cancelled_at VARCHAR(40),
+  refund_amount DOUBLE,
+  retained_amount DOUBLE,
+  cancel_notes TEXT,
+  created_by VARCHAR(100),
+  created_at VARCHAR(40),
+  updated_at VARCHAR(40),
+  INDEX idx_bookings_company_id (company_id),
+  INDEX idx_bookings_vehicle_id (vehicle_id),
+  INDEX idx_bookings_status (status),
+  CONSTRAINT fk_bookings_vehicle FOREIGN KEY (vehicle_id) REFERENCES vehicles(id) ON DELETE CASCADE,
+  CONSTRAINT fk_bookings_customer FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE SET NULL,
+  CONSTRAINT fk_bookings_company FOREIGN KEY (company_id) REFERENCES companies(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- ── Spare parts + set components (was an inline array) + kits ───────────
@@ -588,6 +622,49 @@ CREATE TABLE IF NOT EXISTS facebook_pages (
   connected_by VARCHAR(100),
   connected_at VARCHAR(40),
   CONSTRAINT fk_facebook_pages_company FOREIGN KEY (company_id) REFERENCES companies(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Storefront "Offers" tab (Dashain Spin & Win): prizes on the wheel, and one row per bike that
+-- has spun (offer_codes.code = the bike's normalized number plate, unique per company).
+CREATE TABLE IF NOT EXISTS offer_prizes (
+  id VARCHAR(36) NOT NULL PRIMARY KEY,
+  company_id VARCHAR(36) NOT NULL,
+  INDEX idx_offer_prizes_company_id (company_id),
+  name VARCHAR(100),
+  weight INT DEFAULT 0,
+  stock INT DEFAULT 0,
+  sort_order INT DEFAULT 0,
+  created_at VARCHAR(40),
+  CONSTRAINT fk_offer_prizes_company FOREIGN KEY (company_id) REFERENCES companies(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS offer_codes (
+  id VARCHAR(36) NOT NULL PRIMARY KEY,
+  company_id VARCHAR(36) NOT NULL,
+  code VARCHAR(20) NOT NULL,
+  UNIQUE KEY uq_offer_codes_company_code (company_id, code),
+  status VARCHAR(10) DEFAULT 'NEW',
+  customer_name VARCHAR(255),
+  phone VARCHAR(50),
+  prize VARCHAR(100),
+  created_by VARCHAR(100),
+  created_at VARCHAR(40),
+  used_at VARCHAR(40),
+  CONSTRAINT fk_offer_codes_company FOREIGN KEY (company_id) REFERENCES companies(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Storefront visit tracking (POST /public/visit beacon -> admin Visits page). No IP stored.
+CREATE TABLE IF NOT EXISTS page_views (
+  id VARCHAR(36) NOT NULL PRIMARY KEY,
+  company_id VARCHAR(36) NOT NULL,
+  INDEX idx_page_views_company_id (company_id),
+  visitor_id VARCHAR(64),
+  path VARCHAR(300),
+  referrer VARCHAR(100),
+  device VARCHAR(10),
+  created_at VARCHAR(40),
+  INDEX idx_page_views_created_at (created_at),
+  CONSTRAINT fk_page_views_company FOREIGN KEY (company_id) REFERENCES companies(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 SET FOREIGN_KEY_CHECKS = 1;

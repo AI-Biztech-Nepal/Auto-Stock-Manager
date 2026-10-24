@@ -12,6 +12,7 @@ import BSDatePicker from "../components/BSDatePicker";
 import PeriodToggle, { PERIOD_OPTIONS } from "../components/PeriodToggle";
 import ViewToggle, { useViewMode } from "../components/ViewToggle";
 import ListRow from "../components/ListRow";
+import LazyThumb from "../components/LazyThumb";
 import { formatBSDate, getCurrentBSMonthRange, getCurrentWeekRange, getTodayAD } from "../utils/nepali-date";
 import { useAuth } from "../context/AuthContext";
 import { hasFullVehicleAccess, canAddVehicle, isBasicStockRole, hidesVehiclePricing } from "../utils/permissions";
@@ -133,6 +134,14 @@ export default function Inventory() {
   const [photos, setPhotos] = useState([]);
   const [hidingUnpriced, setHidingUnpriced] = useState(false);
   const [exportingStock, setExportingStock] = useState(false);
+  const [stockMenuOpen, setStockMenuOpen] = useState(false);
+  const stockMenuRef = useRef(null);
+  useEffect(() => {
+    if (!stockMenuOpen) return;
+    const close = (e) => { if (!stockMenuRef.current?.contains(e.target)) setStockMenuOpen(false); };
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [stockMenuOpen]);
   // Opening a vehicle renders VehicleDetailModal inline instead of navigating to /inventory/:id,
   // so the Inventory page underneath stays mounted (no refetch, no lost scroll/filter state).
   const [selectedVehicleId, setSelectedVehicleId] = useState(null);
@@ -385,6 +394,20 @@ export default function Inventory() {
     setFiltered(result);
   }, [vehicles, search, statusFilter, brandFilter, agingFilter, dateFilter, periodFilter, photoFilter]); // eslint-disable-line react-hooks/exhaustive-deps -- periodRange is derived fresh from periodFilter each render (a new object every time), so depending on periodFilter itself is the stable, correct trigger
 
+  // Sold vehicles are kept out of this grid, so a search for one would otherwise just read
+  // "No vehicles found" — surface the sold matches so it's clear the vehicle was sold.
+  const soldSearchMatches = useMemo(() => {
+    if (!search) return [];
+    const q = search.toLowerCase();
+    const qNoSlash = q.replace(/\//g, "");
+    return vehicles.filter(v =>
+      v.status === "sold" && (
+        v.brand?.toLowerCase().includes(q) || v.model?.toLowerCase().includes(q) ||
+        v.registration_number?.toLowerCase().replace(/\//g, "").includes(qNoSlash)
+      )
+    );
+  }, [vehicles, search]);
+
   const handleSave = async (e, confirmReusedRegistration = false) => {
     e.preventDefault();
     // Social Media adds basic details only -- purchase info is left for an admin to fill in.
@@ -466,20 +489,39 @@ export default function Inventory() {
               <Share2 size={16} /> Share Stock
             </button>
           )}
-          {!isFrontDesk && !isSocialMedia && (
-            <button
-              onClick={exportStock}
-              disabled={exportingStock}
-              data-testid="export-stock-button"
-              className="flex items-center gap-2 border border-slate-200 text-slate-700 text-sm font-medium px-4 py-3 rounded-lg hover:bg-slate-50 transition-all active:scale-95 disabled:opacity-60"
-            >
-              {exportingStock ? (
-                <div className="animate-spin w-4 h-4 border-2 border-slate-400 border-t-transparent rounded-full" />
-              ) : (
-                <Download size={16} />
+          {((!isFrontDesk && !isSocialMedia) || isAdmin) && (
+            <div className="relative" ref={stockMenuRef}>
+              <button
+                onClick={() => setStockMenuOpen(o => !o)}
+                data-testid="stock-data-menu-button"
+                className="flex items-center gap-2 border border-slate-200 text-slate-700 text-sm font-medium px-4 py-3 rounded-lg hover:bg-slate-50 transition-all active:scale-95"
+              >
+                <Download size={16} /> Import / Export <ChevronDown size={14} />
+              </button>
+              {stockMenuOpen && (
+                <div className="absolute right-0 mt-1 w-48 bg-white border border-slate-200 rounded-lg shadow-lg z-30 py-1">
+                  {isAdmin && (
+                    <button
+                      onClick={() => { setStockMenuOpen(false); navigate("/import-stock"); }}
+                      data-testid="import-stock-btn"
+                      className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 text-left"
+                    >
+                      <UploadCloud size={16} /> Import Stock
+                    </button>
+                  )}
+                  {!isFrontDesk && !isSocialMedia && (
+                    <button
+                      onClick={() => { setStockMenuOpen(false); exportStock(); }}
+                      disabled={exportingStock}
+                      data-testid="export-stock-button"
+                      className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 text-left disabled:opacity-60"
+                    >
+                      <Download size={16} /> {exportingStock ? "Exporting..." : "Export Stock"}
+                    </button>
+                  )}
+                </div>
               )}
-              Export Stock
-            </button>
+            </div>
           )}
           {canManageStock && !isFrontDesk && (
             <button
@@ -831,6 +873,20 @@ export default function Inventory() {
                 ? "Try adjusting your filters"
                 : "Add your first vehicle to get started"}
           </p>
+          {search && soldSearchMatches.length > 0 && (
+            <div className="mt-3 flex flex-wrap items-center justify-center gap-2 px-4" data-testid="sold-search-matches">
+              {soldSearchMatches.slice(0, 5).map(v => (
+                <button
+                  key={v.id}
+                  onClick={() => setSelectedVehicleId(v.id)}
+                  className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-green-50 border border-green-200 text-xs font-medium text-green-800 hover:bg-green-100 transition-colors"
+                >
+                  <span className="font-bold uppercase">Sold</span>
+                  {v.brand} {v.model}{v.registration_number ? ` · ${v.registration_number}` : ""}
+                </button>
+              ))}
+            </div>
+          )}
           {agingFilter !== "all" && (
             <button
               onClick={() => { setAgingFilter("all"); setSearchParams({}); }}
@@ -853,9 +909,9 @@ export default function Inventory() {
                 testid="vehicle-row"
                 dim={v.status === "scrap"}
                 onClick={() => setSelectedVehicleId(v.id)}
-                thumb={photo ? <img src={photo.url} alt="" className="w-full h-full object-cover" /> : <Package size={16} className="text-slate-300" />}
+                thumb={photo ? <LazyThumb src={photo.url} /> : <Package size={16} className="text-slate-300" />}
                 title={`${v.brand} ${v.model}`}
-                subtitle={`${v.year} · ${v.registration_number || "No reg."} · ${formatOwnership(v.ownership_number)}`}
+                subtitle={`${v.year} · ${v.registration_number || "No reg."} · ${formatOwnership(v.ownership_number)}${v.status === "reserved" && v.booking?.customer_name ? ` · Booked by ${v.booking.customer_name}` : ""}`}
                 meta={!hideFinancials && (
                   <div>
                     <div className="font-semibold text-slate-800">{formatNPR(v.total_investment)}</div>
@@ -907,7 +963,8 @@ export default function Inventory() {
                 key={v.id}
                 data-testid="vehicle-row"
                 onClick={() => setSelectedVehicleId(v.id)}
-                className={`${st.cardBg} rounded-xl border ${st.cardBorder} shadow-sm p-5 hover:shadow-md transition-shadow cursor-pointer ${isDND ? "opacity-60 saturate-50" : ""}`}
+                style={{ contentVisibility: "auto", containIntrinsicSize: "auto 340px" }}
+                className={`${st.cardBg} min-w-0 overflow-hidden rounded-xl border ${st.cardBorder} shadow-sm p-5 hover:shadow-md transition-shadow cursor-pointer ${isDND ? "opacity-60 saturate-50" : ""}`}
               >
                 <div className="flex items-start justify-between gap-2 mb-3">
                   <div className="min-w-0">
@@ -941,6 +998,13 @@ export default function Inventory() {
                   </span>
                 </div>
 
+                {v.status === "reserved" && (
+                  <div className="text-xs text-yellow-900 bg-yellow-100 border border-yellow-200 rounded-lg px-2.5 py-1.5 mb-3" data-testid="vehicle-card-booking">
+                    {v.booking
+                      ? <>Booked by <span className="font-semibold">{v.booking.customer_name || "customer"}</span>{v.booking.booking_amount != null && <> · {formatNPR(v.booking.booking_amount)} deposit</>}{v.booking.booking_date && <> · <HoverADDate date={v.booking.booking_date} /></>}</>
+                      : "Reserved"}
+                  </div>
+                )}
                 <div className="text-xs text-slate-500 mb-3">
                   Source: <span className="font-medium text-slate-700">{v.purchase_source || "—"}</span>
                 </div>
@@ -997,7 +1061,7 @@ export default function Inventory() {
                           className="w-11 h-11 rounded-lg overflow-hidden border border-slate-200 shrink-0"
                           data-testid="vehicle-card-photo"
                         >
-                          <img src={photo.url} alt="" className="w-full h-full object-cover" />
+                          <LazyThumb src={photo.url} />
                         </button>
                       ) : (
                         <div key={i} className="w-11 h-11 rounded-lg border border-dashed border-slate-200 shrink-0" />
@@ -1026,19 +1090,6 @@ export default function Inventory() {
               </div>
             );
           })}
-        </div>
-      )}
-
-      {/* Import Stock */}
-      {isAdmin && (
-        <div className="flex justify-center">
-          <button
-            onClick={() => navigate("/import-stock")}
-            data-testid="import-stock-btn"
-            className="flex items-center gap-2 px-4 py-3 border border-slate-200 text-slate-700 text-sm font-medium rounded-lg hover:bg-slate-50 transition-colors"
-          >
-            <UploadCloud size={16} /> Import Stock
-          </button>
         </div>
       )}
 

@@ -60,6 +60,25 @@ export const vehicleValues = (v, settings, showPrice) => {
   };
 };
 
+// Fields for Hamrobazar's Post Ad form. Its posting rules ban prices and phone numbers in
+// titles, hype wording, and ads that mainly send buyers to another website, so this is plain
+// specs: no emoji, phone or link (price and phone have their own fields on the form).
+export const hamroBazarFields = (v, showPrice) => {
+  const val = vehicleValues(v, {}, showPrice);
+  const plain = (s) => s && String(s).replace(/\s*✅/g, "");
+  const rows = [
+    ["Year", val.year], ["Run", val.km], ["Engine", val.cc], ["Fuel", val.fuel], ["Color", val.color],
+    ["Ownership", val.owner], ["Condition", val.condition], ["Reg. No", val.reg],
+    ["Bluebook", plain(val.bluebook)], ["Insurance", plain(val.insurance)], ["Tax clearance", plain(val.tax)],
+  ];
+  const price = Number(v.selling_price);
+  return {
+    title: val.title,
+    price: showPrice && price > 0 ? String(Math.round(price)) : null,
+    description: rows.filter(([, x]) => x).map(([k, x]) => `${k}: ${x}`).join("\n"),
+  };
+};
+
 export const renderVehicle = (template, values) =>
   template
     .split("\n")

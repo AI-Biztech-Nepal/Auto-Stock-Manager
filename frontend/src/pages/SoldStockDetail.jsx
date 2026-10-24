@@ -8,7 +8,7 @@ import { ReturnModal } from "./VehicleModals";
 import HoverADDate from "../components/HoverADDate";
 import WarrantyBadge, { serviceLabel } from "../components/WarrantyBadge";
 import { useAuth } from "../context/AuthContext";
-import { canVoidWarranty, canManageWarranty } from "../utils/permissions";
+import { canVoidWarranty, canManageWarranty, canEditSaleStatuses } from "../utils/permissions";
 
 const daysToSell = (v) => {
   if (!v.purchase_date || !v.sold_date) return null;
@@ -72,14 +72,26 @@ export default function SoldStockDetail() {
     } catch (err) { toast.error(err.response?.data?.detail || "Failed to delete sale"); }
   };
 
-  // Post-sale name transfer to the buyer — its own field (ownership_transfer_status),
-  // not the in-inventory transfer-paperwork status. Editable inline here so it can be
-  // updated without opening the full record. Optimistic.
+  // Sanakhat status (pending / done) — same field the Sales tab edits. Optimistic.
+  const updateSanakhat = async (val) => {
+    const prev = vehicle.sanakhat_status;
+    setVehicle(v => ({ ...v, sanakhat_status: val }));
+    try {
+      await api.patch(`/vehicles/${id}/sale-statuses`, { sanakhat_status: val });
+      toast.success(`Sanakhat marked ${val === "done" ? "done" : "pending"}`);
+    } catch {
+      setVehicle(v => ({ ...v, sanakhat_status: prev }));
+      toast.error("Couldn't update sanakhat status");
+    }
+  };
+
+  // Name transfer to the buyer. Admins edit it in the Sales list; front desk has no Sales
+  // list, so it's offered here for them.
   const updateTransfer = async (val) => {
     const prev = vehicle.ownership_transfer_status;
     setVehicle(v => ({ ...v, ownership_transfer_status: val }));
     try {
-      await api.put(`/vehicles/${id}`, { ownership_transfer_status: val });
+      await api.patch(`/vehicles/${id}/sale-statuses`, { ownership_transfer_status: val });
       toast.success(`Transfer marked ${getTransferStatusStyle(val).label}`);
     } catch {
       setVehicle(v => ({ ...v, ownership_transfer_status: prev }));
@@ -202,7 +214,23 @@ export default function SoldStockDetail() {
             <div>
               <Row label="Services Since Sale"><span className="text-sm font-medium text-slate-900 sm:text-right">{vehicle.warranty?.services ?? 0}</span></Row>
               <Row label="Total Job Cards"><span className="text-sm font-medium text-slate-900 sm:text-right">{(vehicle.service_history || []).length}</span></Row>
-              <Row label="Sanakhat"><span className="text-sm font-medium text-slate-900 sm:text-right">{formatNPR(saleSanakhat.sanakhat)}</span></Row>
+              {!isAdmin && (
+            <Row label="Transfer">
+              {canEditSaleStatuses(user?.role) ? (
+                <select
+                  data-testid="transfer-status-select"
+                  value={vehicle.ownership_transfer_status || "pending"}
+                  onChange={e => updateTransfer(e.target.value)}
+                  className="text-sm font-medium text-slate-900 border border-slate-200 rounded-lg px-2 py-1 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  {TRANSFER_STATUS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </select>
+              ) : (
+                <span className="text-sm font-medium text-slate-900 sm:text-right">{getTransferStatusStyle(vehicle.ownership_transfer_status).label}</span>
+              )}
+            </Row>
+          )}
+          <Row label="Sanakhat"><span className="text-sm font-medium text-slate-900 sm:text-right">{formatNPR(saleSanakhat.sanakhat)}</span></Row>
               <Row label="Re-Sanakhat"><span className="text-sm font-medium text-slate-900 sm:text-right">{formatNPR(saleSanakhat.resanakhat)}</span></Row>
             </div>
           </div>
@@ -298,18 +326,19 @@ export default function SoldStockDetail() {
           <Row label="Purchase Date"><span className="text-sm font-medium text-slate-900 sm:text-right"><HoverADDate date={vehicle.purchase_date} /></span></Row>
           <Row label="Sold Date"><span className="text-sm font-medium text-slate-900 sm:text-right">{vehicle.sold_date ? <HoverADDate date={vehicle.sold_date} /> : "—"}</span></Row>
           <Row label="Days to Sell"><span className="text-sm font-medium text-slate-900 sm:text-right">{daysToSell(vehicle) ?? "—"}</span></Row>
-          <Row label="Transfer">
-            {isAdmin ? (
+          <Row label="Sanakhat">
+            {canEditSaleStatuses(user?.role) ? (
               <select
-                data-testid="transfer-status-select"
-                value={vehicle.ownership_transfer_status || "pending"}
-                onChange={e => updateTransfer(e.target.value)}
+                data-testid="sanakhat-status-select"
+                value={vehicle.sanakhat_status === "done" ? "done" : "pending"}
+                onChange={e => updateSanakhat(e.target.value)}
                 className="text-sm font-medium text-slate-900 border border-slate-200 rounded-lg px-2 py-1 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
-                {TRANSFER_STATUS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                <option value="pending">Pending</option>
+                <option value="done">Done</option>
               </select>
             ) : (
-              <span className="text-sm font-medium text-slate-900 sm:text-right">{getTransferStatusStyle(vehicle.ownership_transfer_status).label}</span>
+              <span className="text-sm font-medium text-slate-900 sm:text-right">{vehicle.sanakhat_status === "done" ? "Done" : "Pending"}</span>
             )}
           </Row>
         </div>

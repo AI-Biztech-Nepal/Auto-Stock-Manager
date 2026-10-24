@@ -58,6 +58,7 @@ export default function SaleDetail() {
   const isAdmin = user?.role === "admin";
 
   const [sale, setSale] = useState(null);
+  const [booking, setBooking] = useState(null); // the booking this sale completed, if any
   const [loading, setLoading] = useState(true);
   const [isEditing, setIsEditing] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -82,6 +83,7 @@ export default function SaleDetail() {
   const fetchSale = useCallback(async () => {
     try {
       const r = await api.get(`/sales/${id}`);
+      api.get("/bookings?status=converted").then(b => setBooking(b.data.find(x => x.sale_id === id) || null)).catch(() => {});
       setSale(r.data);
     } catch { toast.error("Sale not found"); navigate("/sales"); }
     finally { setLoading(false); }
@@ -529,6 +531,9 @@ export default function SaleDetail() {
               <Row label="Payment Method"><span className="text-sm font-medium text-slate-900 sm:text-right">{sale.payment_method}</span></Row>
               {sale.advance_payment > 0 && (
                 <Row label="Advance Payment"><span className="text-sm font-medium text-slate-900 sm:text-right">{formatNPR(sale.advance_payment)}</span></Row>
+              )}
+              {booking && (
+                <Row label="From Booking"><span className="text-sm font-medium text-slate-900 sm:text-right" data-testid="sale-booking-info">Deposit {formatNPR(booking.booking_amount)} on <HoverADDate date={booking.booking_date} /></span></Row>
               )}
               <Row label="Paid by Cash"><span className="text-sm font-medium text-slate-900 sm:text-right">{formatNPR(sale.paid_cash || 0)}</span></Row>
               <Row label="Paid by Bank"><span className="text-sm font-medium text-slate-900 sm:text-right">{formatNPR(sale.paid_bank || 0)}</span></Row>

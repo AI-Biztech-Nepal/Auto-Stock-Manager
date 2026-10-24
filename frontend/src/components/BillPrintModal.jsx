@@ -6,7 +6,9 @@ export default function BillPrintModal({ bill, vendor, onClose }) {
   const { user } = useAuth();
   if (!bill) return null;
   const items = bill.items || [];
-  const total = bill.total ?? items.reduce((s, it) => s + (it.quantity * it.unit_cost || 0), 0);
+  // bought_qty = what was bought on the bill (stock on hand + what's been used since), not what's left.
+  const qtyOf = (it) => it.bought_qty ?? it.quantity;
+  const total = bill.total ?? items.reduce((s, it) => s + (qtyOf(it) * it.unit_cost || 0), 0);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
@@ -57,9 +59,9 @@ export default function BillPrintModal({ bill, vendor, onClose }) {
                   <td className="px-3 py-2 text-slate-500">{i + 1}</td>
                   <td className="px-3 py-2 font-medium text-slate-800">{it.name}</td>
                   <td className="px-3 py-2 text-slate-500 font-mono text-xs">{it.part_number || "—"}</td>
-                  <td className="px-3 py-2 text-right text-slate-700">{it.quantity}</td>
+                  <td className="px-3 py-2 text-right text-slate-700">{qtyOf(it)}</td>
                   <td className="px-3 py-2 text-right text-slate-700">{formatNPR(it.unit_cost)}</td>
-                  <td className="px-3 py-2 text-right font-semibold text-slate-900 whitespace-nowrap">{formatNPR(it.quantity * it.unit_cost)}</td>
+                  <td className="px-3 py-2 text-right font-semibold text-slate-900 whitespace-nowrap">{formatNPR(qtyOf(it) * it.unit_cost)}</td>
                 </tr>
               ))}
             </tbody>
