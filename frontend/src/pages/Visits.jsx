@@ -232,12 +232,15 @@ export default function Visits() {
   const base = data.storefront_url;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 animate-fade-in" data-testid="visits-page">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-xl font-bold text-slate-900" style={FONT}>Website visits</h2>
-          <a href={base} target="_blank" rel="noopener noreferrer" className="text-sm text-blue-600 hover:underline inline-flex items-center gap-1">{base.replace(/^https?:\/\//, "")} <ExternalLink size={12} /></a>
-          <span className="ml-2 text-xs text-slate-400">{data.source === "google_analytics" ? "Data: Google Analytics" : "Data: site visit tracker"}</span>
+          <h1 className="text-2xl font-bold text-slate-900">Visits</h1>
+          <p className="text-sm text-slate-500">Who visits {base.replace(/^https?:[/][/]/, "")}, where they come from, and how long they stay.</p>
+          <p className="text-xs text-slate-400 mt-1">
+            <a href={base} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline inline-flex items-center gap-1">Open the website <ExternalLink size={11} /></a>
+            <span className="mx-2">·</span>{data.source === "google_analytics" ? "Data: Google Analytics" : "Data: site visit tracker"}
+          </p>
         </div>
         <div className="flex gap-1 bg-slate-100 rounded-xl p-1">
           {RANGES.map(r => (
