@@ -6578,9 +6578,24 @@ async def public_list_vehicles(request: Request):
     cover_by_vehicle = {}
     for p in all_photos:
         cover_by_vehicle.setdefault(p["vehicle_id"], p)  # sorted ascending, so first seen = earliest
+    # How often each vehicle's page was opened in the last 30 days (from the storefront's visit
+    # beacon, the same data as the admin Visits page). The storefront ranks its "most popular" rail
+    # by this. Read-only, and a failure here must never break the public listing.
+    views = {}
+    try:
+        since = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+        rows = await db.page_views.find(
+            {"path": {"$in": [f"/inventory/{i}" for i in vehicle_ids]}, "created_at": {"$gte": since}},
+            {"_id": 0, "path": 1}).to_list(200000) if vehicle_ids else []
+        for r in rows:
+            vid_ = r["path"].rsplit("/", 1)[-1]
+            views[vid_] = views.get(vid_, 0) + 1
+    except Exception:
+        logger.warning("Could not count vehicle views for the public listing", exc_info=True)
     out = []
     for v in vehicles:
         item = _public_vehicle_fields(v)
+        item["view_count"] = views.get(v["id"], 0)
         cover = cover_by_vehicle.get(v["id"])
         item["cover_photo"] = _public_photo_url(request, v["id"], cover["id"]) if cover else None
         item["image_urls"] = [item["cover_photo"]] if cover else []
