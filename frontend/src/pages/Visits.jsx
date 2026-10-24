@@ -51,7 +51,11 @@ const CombinedChart = ({ daily, clicksByDate }) => {
   const max = Math.max(1, ...daily.map(d => d.views), ...clicks.map(c => c || 0));
   const pts = clicks.map((c, i) => (c === null ? null : [((i + 0.5) / daily.length) * 100, 100 - (c / max) * 100]));
   const line = pts.filter(Boolean).map(p => p.join(",")).join(" ");
-  const seg = (d, n, key) => <div className={`w-full ${COLORS[key]}`} style={{ height: `${d.views ? (n / d.views) * 100 : 0}%` }} />;
+  const seg = (d, n, key) => (
+    <div className={`w-full flex items-center justify-center text-[10px] font-semibold text-white overflow-hidden ${COLORS[key]}`} style={{ height: `${d.views ? (n / d.views) * 100 : 0}%` }}>
+      {n > 0 && ((n / max) * 188 >= 14) ? n : null}
+    </div>
+  );
   return (
     <div>
       <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500 mb-3">
@@ -59,6 +63,7 @@ const CombinedChart = ({ daily, clicksByDate }) => {
           <span className="flex items-center gap-1.5"><i className="w-2.5 h-2.5 rounded-sm bg-indigo-500" />Direct</span>
           <span className="flex items-center gap-1.5"><i className="w-2.5 h-2.5 rounded-sm bg-emerald-500" />From Google</span>
           <span className="flex items-center gap-1.5"><i className="w-2.5 h-2.5 rounded-sm bg-amber-400" />Other sites</span>
+          <span className="text-slate-400">Under each date: direct · Google · other</span>
         </> : <span className="flex items-center gap-1.5"><i className="w-2.5 h-2.5 rounded-sm bg-indigo-400" />Page views</span>}
         {clicksByDate && <span className="flex items-center gap-1.5"><i className="w-4 h-0.5 bg-rose-500" />Google search clicks (Search Console)</span>}
       </div>
@@ -94,6 +99,13 @@ const CombinedChart = ({ daily, clicksByDate }) => {
                 <div key={d.date} className="flex-1 text-center leading-tight">
                   <div className="text-[11px] font-medium text-slate-600">{dt.getDate()}</div>
                   <div className="text-[10px] text-slate-400">{dt.toLocaleString("en", { month: "short" })}</div>
+                  {split && (
+                    <div className="mt-1 flex justify-center gap-1 text-[10px] font-semibold">
+                      <span className="text-indigo-600" title="Direct">{d.direct}</span>
+                      <span className="text-emerald-600" title="From Google">{d.google}</span>
+                      <span className="text-amber-500" title="Other sites">{d.other}</span>
+                    </div>
+                  )}
                 </div>
               );
             })}
