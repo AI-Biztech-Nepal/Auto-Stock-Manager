@@ -5211,12 +5211,18 @@ def _ga4_token() -> str:
 async def _name_vehicle_pages(summary: dict) -> dict:
     """Swap /inventory/<id> paths in top_pages for the vehicle (brand model year) so the admin
     sees which bike or car was viewed rather than a long id."""
-    ids = {m.group(1): r for r in summary.get("top_pages", [])
-           if (m := re.fullmatch(r"/inventory/([0-9a-fA-F-]{36})/?", r["name"]))}
+    pat = re.compile(r"/inventory/([0-9a-fA-F-]{36})/?")
+    ids = {m.group(1) for r in summary.get("top_pages", []) if (m := pat.fullmatch(r["name"]))}
+    for v in summary.get("visit_list", []):
+        ids |= {m.group(1) for p in v["paths"] if (m := pat.fullmatch(p))}
     if ids:
+        labels = {}
         for v in await db.vehicles.find({"id": {"$in": list(ids)}}, {"_id": 0, "id": 1, "brand": 1, "model": 1, "year": 1}).to_list(len(ids)):
             label = " ".join(str(x) for x in (v.get("brand"), v.get("model"), v.get("year")) if x)
-            if label: ids[v["id"]]["name"] = label
+            if label: labels[v["id"]] = label
+        name = lambda p: labels.get(m.group(1), p) if (m := pat.fullmatch(p)) else p
+        for r in summary.get("top_pages", []): r["name"] = name(r["name"])
+        for v in summary.get("visit_list", []): v["paths"] = [name(p) for p in v["paths"]]
     return summary
 
 async def _ga4_summary(days: int) -> dict:
@@ -5313,7 +5319,7 @@ async def visits_summary(days: int = 30, cu: dict = Depends(admin_only)):
     stamps = {}  # visitor -> page-view times, to estimate how long each visit lasted
     for r in rows:
         ts = datetime.fromisoformat(r["created_at"])
-        stamps.setdefault(r["visitor_id"], []).append(ts)
+        stamps.setdefault(r["visitor_id"], []).append((ts, r))
         d = ts.astimezone(npt).date()
         e = by_day.setdefault(d.isoformat(), {"views": 0, "visitors": set()})
         e["views"] += 1; e["visitors"].add(r["visitor_id"])
@@ -5331,16 +5337,23 @@ async def visits_summary(days: int = 30, cu: dict = Depends(admin_only)):
     # A visit = one visitor's page views with no gap over 30 minutes. We only see when a page opens,
     # not when the person leaves, so time on site = first to last page of the visit; a one-page
     # visit has no measurable time and counts as a quick visit.
-    visits, spans = 0, []
-    for times in stamps.values():
-        times.sort(); first = last = times[0]; n = 1
-        for t in times[1:] + [None]:
-            if t is not None and (t - last).total_seconds() <= 1800:
-                last, n = t, n + 1
-                continue
-            visits += 1
-            if n > 1: spans.append((last - first).total_seconds())
-            if t is not None: first = last = t; n = 1
+    visits, spans, visit_list = 0, [], []
+    def close_visit(vid, pv):
+        nonlocal visits
+        visits += 1
+        secs = (pv[-1][0] - pv[0][0]).total_seconds()
+        if len(pv) > 1: spans.append(secs)
+        first = pv[0][1]
+        visit_list.append({"started": pv[0][0].astimezone(npt).strftime("%Y-%m-%d %H:%M"), "seconds": int(secs),
+                           "pages": len(pv), "visitor": vid[:6], "device": first.get("device") or "desktop",
+                           "source": first.get("referrer") or "Direct", "paths": [p[1]["path"] for p in pv][:8]})
+    for vid, pv in stamps.items():
+        pv.sort(key=lambda x: x[0]); cur = [pv[0]]
+        for item in pv[1:]:
+            if (item[0] - cur[-1][0]).total_seconds() <= 1800: cur.append(item)
+            else: close_visit(vid, cur); cur = [item]
+        close_visit(vid, cur)
+    visit_list.sort(key=lambda v: v["started"], reverse=True)
     engagement = {"visits": visits, "multi_page_visits": len(spans),
                   "avg_minutes": round(sum(spans) / len(spans) / 60, 1) if spans else 0,
                   "longest_minutes": round(max(spans) / 60, 1) if spans else 0,
@@ -5349,7 +5362,7 @@ async def visits_summary(days: int = 30, cu: dict = Depends(admin_only)):
     return await _name_vehicle_pages({"days": days, "total_views": len(rows), "unique_visitors": len(visitors),
             "today_views": today_views, "today_visitors": len(today_visitors), "daily": daily,
             "top_pages": top(pages), "sources": top(refs), "devices": devices,
-            "storefront_url": STOREFRONT_URL, "source": "beacon", "engagement": engagement})
+            "storefront_url": STOREFRONT_URL, "source": "beacon", "engagement": engagement, "visit_list": visit_list[:200]})
 
 # ── SETTINGS (storefront branding/contact info) ────────────────────────
 @api_router.get("/settings")
