@@ -482,7 +482,7 @@ export default function Inventory() {
           <ViewToggle view={view} onChange={setView} testid="inventory-view-toggle" />
           {!isFrontDesk && (
             <button
-              onClick={() => navigate("/share")}
+              onClick={() => navigate("/marketing?tab=share")}
               data-testid="share-stock-button"
               className="flex items-center gap-2 border border-slate-200 text-slate-700 text-sm font-medium px-4 py-3 rounded-lg hover:bg-slate-50 transition-all active:scale-95"
             >

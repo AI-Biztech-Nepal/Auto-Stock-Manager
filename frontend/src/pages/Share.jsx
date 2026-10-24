@@ -286,7 +286,7 @@ function FacebookBar({ status, isAdmin, onChanged }) {
   );
 }
 
-export default function Share() {
+export default function Share({ embedded = false }) {
   const { user } = useAuth();
   const showPrice = !hidesVehiclePricing(user?.role);
   const role = user?.role || "admin";
@@ -358,7 +358,7 @@ export default function Share() {
   return (
     <div className="space-y-5 animate-fade-in">
       <div>
-        <h1 className="text-2xl font-bold text-slate-900">Share</h1>
+        {!embedded && <h1 className="text-2xl font-bold text-slate-900">Share</h1>}
         <p className="text-sm text-slate-500">Pick vehicles, get a ready-to-post caption for each, then share to Facebook, WhatsApp or anywhere else.</p>
       </div>
 

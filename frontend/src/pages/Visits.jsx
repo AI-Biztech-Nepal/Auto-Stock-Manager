@@ -224,7 +224,7 @@ const VisitModal = ({ v, onClose }) => {
 };
 
 // Storefront traffic: page views and unique visitors reported by the site's visit beacon.
-export default function Visits() {
+export default function Visits({ embedded = false }) {
   const [days, setDays] = useState(30);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -266,7 +266,7 @@ export default function Visits() {
     <div className="space-y-6 animate-fade-in" data-testid="visits-page">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">Visits</h1>
+          {!embedded && <h1 className="text-2xl font-bold text-slate-900">Visits</h1>}
           <p className="text-sm text-slate-500">Who visits {base.replace(/^https?:[/][/]/, "")}, where they come from, and how long they stay.</p>
           <p className="text-xs text-slate-400 mt-1">
             <a href={base} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline inline-flex items-center gap-1">Open the website <ExternalLink size={11} /></a>

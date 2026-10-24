@@ -14,7 +14,7 @@ export const ROLE_NAV_PATHS = {
   // Ledger: Vendors + Staff tabs (see LEDGER_TABS below).
   parts_supervisor: ["/spare-parts", "/ledger", "/jobs", "/inventory", "/settings"],
   // Social Media adds new stock (basic details only) and manages vehicle photos -- nothing else.
-  social_media: ["/inventory", "/share", "/settings"],
+  social_media: ["/inventory", "/marketing", "/settings"],
   // Cross-company visibility only -- no company_id of its own, so it must never reach any
   // of the regular per-company pages (they'd have nothing scoped to show it anyway).
   platform_owner: ["/platform"],
@@ -33,6 +33,17 @@ const LEDGER_TABS = {
   stock_supervisor: ["staff"],
   parts_supervisor: ["vendors", "staff"],
 };
+
+// Which Marketing tabs each role sees -- Social Media only gets Share (the backend limits
+// Offers and Visits to admin).
+const MARKETING_TABS = {
+  social_media: ["share"],
+};
+
+export function marketingTabsFor(role) {
+  if (!role || role === "admin") return ["share", "offers", "visits"];
+  return MARKETING_TABS[role] || [];
+}
 
 export function ledgerTabsFor(role) {
   if (!role || role === "admin") return ["customers", "vendors", "staff"];

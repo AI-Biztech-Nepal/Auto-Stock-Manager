@@ -1,6 +1,6 @@
 import "@/App.css";
 import { Suspense, lazy, useEffect } from "react";
-import { BrowserRouter, Routes, Route, Navigate, useParams } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useParams, useLocation } from "react-router-dom";
 import { Toaster } from "sonner";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import { canAccessPath, ROLE_DEFAULT_PATH } from "./utils/permissions";
@@ -31,10 +31,17 @@ const SpareParts = lazy(() => import("./pages/SpareParts"));
 const Sales = lazy(() => import("./pages/Sales"));
 const SaleDetail = lazy(() => import("./pages/SaleDetail"));
 const SoldStockDetail = lazy(() => import("./pages/SoldStockDetail"));
-const Share = lazy(() => import("./pages/Share"));
-const Offers = lazy(() => import("./pages/Offers"));
-const Visits = lazy(() => import("./pages/Visits"));
+const Marketing = lazy(() => import("./pages/Marketing"));
 const Platform = lazy(() => import("./pages/Platform"));
+
+// Share, Offers and Visits now live as tabs of Marketing; keep their old addresses working
+// (including the ?fb=... the Facebook connect flow returns to).
+function MarketingTab({ tab }) {
+  const { search } = useLocation();
+  const params = new URLSearchParams(search);
+  params.set("tab", tab);
+  return <Navigate to={`/marketing?${params.toString()}`} replace />;
+}
 
 const RouteFallback = () => (
   <div className="flex items-center justify-center h-64">
@@ -107,9 +114,10 @@ function AppRoutes() {
           {/* Sold Stock was merged into Sales. */}
           <Route path="sold-stock" element={<Navigate to="/sales" replace />} />
           <Route path="sold-stock/:id" element={<SoldStockRedirect />} />
-          <Route path="share" element={<RoleRoute path="/share"><Share /></RoleRoute>} />
-          <Route path="visits" element={<RoleRoute path="/visits"><Visits /></RoleRoute>} />
-          <Route path="offers" element={<RoleRoute path="/offers"><Offers /></RoleRoute>} />
+          <Route path="marketing" element={<RoleRoute path="/marketing"><Marketing /></RoleRoute>} />
+          <Route path="share" element={<MarketingTab tab="share" />} />
+          <Route path="offers" element={<MarketingTab tab="offers" />} />
+          <Route path="visits" element={<MarketingTab tab="visits" />} />
           <Route path="ai" element={<RoleRoute path="/ai"><AIAssistant /></RoleRoute>} />
           <Route path="settings" element={<Settings />} />
           <Route path="platform" element={<RoleRoute path="/platform"><Platform /></RoleRoute>} />
