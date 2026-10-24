@@ -5310,8 +5310,11 @@ async def visits_summary(days: int = 30, cu: dict = Depends(admin_only)):
     rows = await db.page_views.find({"created_at": {"$gte": since}}, {"_id": 0}).to_list(200000)
     by_day, pages, refs, devices = {}, {}, {}, {"mobile": 0, "desktop": 0}
     visitors, today_views, today_visitors = set(), 0, set()
+    stamps = {}  # visitor -> page-view times, to estimate how long each visit lasted
     for r in rows:
-        d = datetime.fromisoformat(r["created_at"]).astimezone(npt).date()
+        ts = datetime.fromisoformat(r["created_at"])
+        stamps.setdefault(r["visitor_id"], []).append(ts)
+        d = ts.astimezone(npt).date()
         e = by_day.setdefault(d.isoformat(), {"views": 0, "visitors": set()})
         e["views"] += 1; e["visitors"].add(r["visitor_id"])
         visitors.add(r["visitor_id"])
@@ -5325,10 +5328,28 @@ async def visits_summary(days: int = 30, cu: dict = Depends(admin_only)):
         e = by_day.get(k)
         daily.append({"date": k, "views": e["views"] if e else 0, "visitors": len(e["visitors"]) if e else 0})
     top = lambda m: [{"name": k, "views": v} for k, v in sorted(m.items(), key=lambda kv: -kv[1])[:25]]
+    # A visit = one visitor's page views with no gap over 30 minutes. We only see when a page opens,
+    # not when the person leaves, so time on site = first to last page of the visit; a one-page
+    # visit has no measurable time and counts as a quick visit.
+    visits, spans = 0, []
+    for times in stamps.values():
+        times.sort(); first = last = times[0]; n = 1
+        for t in times[1:] + [None]:
+            if t is not None and (t - last).total_seconds() <= 1800:
+                last, n = t, n + 1
+                continue
+            visits += 1
+            if n > 1: spans.append((last - first).total_seconds())
+            if t is not None: first = last = t; n = 1
+    engagement = {"visits": visits, "multi_page_visits": len(spans),
+                  "avg_minutes": round(sum(spans) / len(spans) / 60, 1) if spans else 0,
+                  "longest_minutes": round(max(spans) / 60, 1) if spans else 0,
+                  "pages_per_visit": round(len(rows) / visits, 1) if visits else 0,
+                  "quick_visit_pct": round(100 * (visits - len(spans)) / visits) if visits else 0}
     return await _name_vehicle_pages({"days": days, "total_views": len(rows), "unique_visitors": len(visitors),
             "today_views": today_views, "today_visitors": len(today_visitors), "daily": daily,
             "top_pages": top(pages), "sources": top(refs), "devices": devices,
-            "storefront_url": STOREFRONT_URL, "source": "beacon"})
+            "storefront_url": STOREFRONT_URL, "source": "beacon", "engagement": engagement})
 
 # ── SETTINGS (storefront branding/contact info) ────────────────────────
 @api_router.get("/settings")

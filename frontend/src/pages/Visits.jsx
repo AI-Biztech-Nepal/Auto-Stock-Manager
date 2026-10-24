@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
-import { Eye, Users, Smartphone, Monitor, Globe, FileText, ExternalLink, Search } from "lucide-react";
+import { Eye, Users, Smartphone, Monitor, Globe, FileText, ExternalLink, Search, Clock } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
 
@@ -115,6 +115,20 @@ export default function Visits() {
         <Stat value={data.unique_visitors} label={`Visitors, ${days} days`} cls="bg-green-50 border-green-100 text-green-700" />
         <Stat value={data.total_views} label={`Page views, ${days} days`} cls="bg-blue-50 border-blue-100 text-blue-700" />
       </div>
+
+      {data.engagement && (
+        <div className="bg-white border border-slate-200 rounded-xl shadow-sm p-4">
+          <h3 className="text-base font-bold text-slate-900 flex items-center gap-2 mb-1" style={{ fontFamily: "Manrope" }}><Clock size={17} className="text-blue-600" />Time on site</h3>
+          <p className="text-xs text-slate-400 mb-4">Estimated from page opens: first to last page of a visit (a break of over 30 minutes starts a new visit). A one-page visit has no measurable time.</p>
+          <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 text-center">
+            <div><div className="text-2xl font-bold" style={{ fontFamily: "Manrope" }}>{data.engagement.avg_minutes} min</div><div className="text-xs text-slate-500">Average, visits with 2+ pages</div></div>
+            <div><div className="text-2xl font-bold" style={{ fontFamily: "Manrope" }}>{data.engagement.longest_minutes} min</div><div className="text-xs text-slate-500">Longest visit</div></div>
+            <div><div className="text-2xl font-bold" style={{ fontFamily: "Manrope" }}>{data.engagement.pages_per_visit}</div><div className="text-xs text-slate-500">Pages per visit</div></div>
+            <div><div className="text-2xl font-bold" style={{ fontFamily: "Manrope" }}>{data.engagement.visits}</div><div className="text-xs text-slate-500">Visits ({data.engagement.multi_page_visits} with 2+ pages)</div></div>
+            <div><div className="text-2xl font-bold" style={{ fontFamily: "Manrope" }}>{data.engagement.quick_visit_pct}%</div><div className="text-xs text-slate-500">Left after one page</div></div>
+          </div>
+        </div>
+      )}
 
       <div className="bg-white border border-slate-200 rounded-xl shadow-sm p-4">
         <h3 className="text-base font-bold text-slate-900 flex items-center gap-2 mb-4" style={{ fontFamily: "Manrope" }}><Eye size={17} className="text-blue-600" />Daily page views</h3>
