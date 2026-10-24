@@ -20,7 +20,7 @@ const RankList = ({ title, icon: Icon, rows, empty }) => {
         <h3 className="text-base font-bold text-slate-900 flex items-center gap-2" style={{ fontFamily: "Manrope" }}><Icon size={17} className="text-blue-600" />{title}</h3>
       </div>
       {rows.length === 0 ? <p className="p-6 text-sm text-slate-500 text-center">{empty}</p> : (
-        <ul className="p-4 space-y-2.5">
+        <ul className="p-4 space-y-2.5 max-h-96 overflow-y-auto">
           {rows.map(r => (
             <li key={r.name} className="text-sm">
               <div className="flex justify-between gap-3"><span className="truncate text-slate-700">{r.name}</span><span className="font-semibold text-slate-900">{r.views}</span></div>
@@ -33,6 +33,13 @@ const RankList = ({ title, icon: Icon, rows, empty }) => {
   );
 };
 
+// Search Console reports countries as ISO alpha-3 codes; Intl.DisplayNames wants alpha-2.
+const A3 = "afg:AF,alb:AL,dza:DZ,arg:AR,arm:AM,aus:AU,aut:AT,aze:AZ,bhr:BH,bgd:BD,blr:BY,bel:BE,btn:BT,bol:BO,bih:BA,bra:BR,brn:BN,bgr:BG,khm:KH,cmr:CM,can:CA,chl:CL,chn:CN,col:CO,hrv:HR,cyp:CY,cze:CZ,dnk:DK,egy:EG,est:EE,eth:ET,fin:FI,fra:FR,deu:DE,gha:GH,grc:GR,gin:GN,hkg:HK,hun:HU,isl:IS,ind:IN,idn:ID,irn:IR,irq:IQ,irl:IE,isr:IL,ita:IT,jpn:JP,jor:JO,kaz:KZ,ken:KE,kwt:KW,kgz:KG,lao:LA,lva:LV,lbn:LB,ltu:LT,lux:LU,mac:MO,mys:MY,mdv:MV,mlt:MT,mus:MU,mex:MX,mng:MN,mar:MA,mmr:MM,npl:NP,nld:NL,nzl:NZ,nga:NG,nor:NO,omn:OM,pak:PK,per:PE,phl:PH,pol:PL,prt:PT,qat:QA,rou:RO,rus:RU,sau:SA,srb:RS,sgp:SG,svk:SK,svn:SI,zaf:ZA,kor:KR,esp:ES,lka:LK,swe:SE,che:CH,twn:TW,tza:TZ,tha:TH,tur:TR,uga:UG,ukr:UA,are:AE,gbr:GB,usa:US,uzb:UZ,ven:VE,vnm:VN,yem:YE,zmb:ZM,zwe:ZW".split(",").reduce((m, p) => { const [k, v] = p.split(":"); m[k] = v; return m; }, {});
+const countryName = code => {
+  const a2 = A3[code.toLowerCase()];
+  try { return a2 ? new Intl.DisplayNames(["en"], { type: "region" }).of(a2) : code.toUpperCase(); } catch { return code.toUpperCase(); }
+};
+
 // Google Search Console table (keywords / countries). Shown only once the backend has it configured.
 const SearchTable = ({ title, icon: Icon, rows, empty }) => (
   <div className="bg-white border border-slate-200 rounded-xl shadow-sm">
@@ -40,7 +47,7 @@ const SearchTable = ({ title, icon: Icon, rows, empty }) => (
       <h3 className="text-base font-bold text-slate-900 flex items-center gap-2" style={{ fontFamily: "Manrope" }}><Icon size={17} className="text-blue-600" />{title}</h3>
     </div>
     {rows.length === 0 ? <p className="p-6 text-sm text-slate-500 text-center">{empty}</p> : (
-      <table className="w-full text-sm">
+      <div className="max-h-96 overflow-y-auto"><table className="w-full text-sm">
         <thead><tr className="text-xs text-slate-400 text-left"><th className="px-4 py-2 font-medium">&nbsp;</th><th className="py-2 font-medium text-right">Clicks</th><th className="py-2 font-medium text-right">Shown</th><th className="px-4 py-2 font-medium text-right">Rank</th></tr></thead>
         <tbody>{rows.map(r => (
           <tr key={r.name} className="border-t border-slate-100">
@@ -50,7 +57,7 @@ const SearchTable = ({ title, icon: Icon, rows, empty }) => (
             <td className="px-4 py-2 text-right text-slate-600">{r.position}</td>
           </tr>
         ))}</tbody>
-      </table>
+      </table></div>
     )}
   </div>
 );
@@ -143,7 +150,7 @@ export default function Visits() {
           <p className="text-xs text-slate-400">Google Search, last {days} days. Search Console data lags by 2 to 3 days.</p>
           <div className="grid lg:grid-cols-2 gap-4">
             <SearchTable title="What people searched on Google" icon={Search} rows={search.queries} empty="No search data yet" />
-            <SearchTable title="Countries (Google Search)" icon={Globe} rows={search.countries.map(c => ({ ...c, name: c.name.toUpperCase() }))} empty="No search data yet" />
+            <SearchTable title="Countries (Google Search)" icon={Globe} rows={search.countries.map(c => ({ ...c, name: countryName(c.name) }))} empty="No search data yet" />
           </div>
         </div>
       )}

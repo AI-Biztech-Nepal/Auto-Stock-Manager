@@ -5208,11 +5208,22 @@ def _ga4_token() -> str:
     creds.refresh(GoogleRequest())
     return creds.token
 
+async def _name_vehicle_pages(summary: dict) -> dict:
+    """Swap /inventory/<id> paths in top_pages for the vehicle (brand model year) so the admin
+    sees which bike or car was viewed rather than a long id."""
+    ids = {m.group(1): r for r in summary.get("top_pages", [])
+           if (m := re.fullmatch(r"/inventory/([0-9a-fA-F-]{36})/?", r["name"]))}
+    if ids:
+        for v in await db.vehicles.find({"id": {"$in": list(ids)}}, {"_id": 0, "id": 1, "brand": 1, "model": 1, "year": 1}).to_list(len(ids)):
+            label = " ".join(str(x) for x in (v.get("brand"), v.get("model"), v.get("year")) if x)
+            if label: ids[v["id"]]["name"] = label
+    return summary
+
 async def _ga4_summary(days: int) -> dict:
     token = await asyncio.to_thread(_ga4_token)
     rng = [{"startDate": f"{days - 1}daysAgo", "endDate": "today"}]
     metrics = [{"name": "screenPageViews"}, {"name": "activeUsers"}]
-    def rep(dim, limit=10, order=True):
+    def rep(dim, limit=25, order=True):
         r = {"dateRanges": rng, "dimensions": [{"name": dim}], "metrics": metrics, "limit": limit}
         if order: r["orderBys"] = [{"metric": {"metricName": "screenPageViews"}, "desc": True}]
         return r
@@ -5284,14 +5295,14 @@ async def visits_search(days: int = 30, cu: dict = Depends(admin_only)):
             raise HTTPException(502, f"Google Search Console error: {resp.json().get('error', {}).get('message', resp.status_code)}")
         return [{"name": r["keys"][0], "clicks": int(r["clicks"]), "impressions": int(r["impressions"]),
                  "position": round(r["position"], 1)} for r in resp.json().get("rows", [])]
-    queries, countries = await asyncio.gather(query("query", 20), query("country", 15))
+    queries, countries = await asyncio.gather(query("query", 100), query("country", 100))
     return {"configured": True, "days": days, "queries": queries, "countries": countries}
 
 @api_router.get("/visits/summary")
 async def visits_summary(days: int = 30, cu: dict = Depends(admin_only)):
     days = max(1, min(days, 365))
     if GA4_PROPERTY_ID and GA4_CREDENTIALS_JSON:
-        return await _ga4_summary(days)
+        return await _name_vehicle_pages(await _ga4_summary(days))
     npt = timezone(timedelta(hours=5, minutes=45))  # Nepal time, so "today" matches the shop's day
     today = datetime.now(npt).date()
     start = today - timedelta(days=days - 1)
@@ -5313,11 +5324,11 @@ async def visits_summary(days: int = 30, cu: dict = Depends(admin_only)):
         k = (start + timedelta(days=i)).isoformat()
         e = by_day.get(k)
         daily.append({"date": k, "views": e["views"] if e else 0, "visitors": len(e["visitors"]) if e else 0})
-    top = lambda m: [{"name": k, "views": v} for k, v in sorted(m.items(), key=lambda kv: -kv[1])[:10]]
-    return {"days": days, "total_views": len(rows), "unique_visitors": len(visitors),
+    top = lambda m: [{"name": k, "views": v} for k, v in sorted(m.items(), key=lambda kv: -kv[1])[:25]]
+    return await _name_vehicle_pages({"days": days, "total_views": len(rows), "unique_visitors": len(visitors),
             "today_views": today_views, "today_visitors": len(today_visitors), "daily": daily,
             "top_pages": top(pages), "sources": top(refs), "devices": devices,
-            "storefront_url": STOREFRONT_URL, "source": "beacon"}
+            "storefront_url": STOREFRONT_URL, "source": "beacon"})
 
 # ── SETTINGS (storefront branding/contact info) ────────────────────────
 @api_router.get("/settings")
