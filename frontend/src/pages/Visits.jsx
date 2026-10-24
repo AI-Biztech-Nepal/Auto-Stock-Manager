@@ -1,10 +1,10 @@
 import { useEffect, useState, useCallback } from "react";
-import { Eye, Users, Smartphone, Monitor, Globe, FileText, ExternalLink, Search, Clock, ChevronDown, TrendingUp, Layers } from "lucide-react";
+import { Eye, Users, Smartphone, Monitor, Globe, FileText, ExternalLink, Search, Clock, TrendingUp, Layers } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
 
 const RANGES = [{ days: 7, label: "7 days" }, { days: 30, label: "30 days" }, { days: 90, label: "90 days" }];
-const PAGE_SIZE = 12;
+const PAGE_SIZE = 16;
 const FONT = { fontFamily: "Manrope" };
 
 const fmtDuration = s => (s < 60 ? (s ? `${s} sec` : "under 1 min") : `${Math.floor(s / 60)} min ${s % 60} sec`);
@@ -112,46 +112,59 @@ const SearchTable = ({ title, icon, rows, empty, linkBase }) => (
   </Card>
 );
 
-// One visit as a clickable card; the time spent sits at the bottom. Click to see the page-by-page timeline.
-const VisitCard = ({ v, open, onToggle }) => {
+// One visit as a compact clickable tile; click it to open the page-by-page timeline.
+const VisitTile = ({ v, onOpen }) => {
   const Dev = v.device === "mobile" ? Smartphone : Monitor;
   const quick = v.seconds === 0;
   return (
-    <button type="button" onClick={onToggle} aria-expanded={open}
-      className={`text-left bg-white border rounded-2xl p-4 flex flex-col transition shadow-[0_1px_3px_rgba(15,23,42,0.06)] hover:shadow-md hover:border-blue-300 ${open ? "border-blue-400 ring-2 ring-blue-100 sm:col-span-2 xl:col-span-3" : "border-slate-200/80"}`}>
-      <div className="flex items-center justify-between gap-2">
-        <span className="flex items-center gap-2 text-sm font-semibold text-slate-800"><Dev size={15} className="text-slate-500" />{v.started}</span>
-        <span className="text-[11px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 truncate max-w-[45%]">{v.source}</span>
+    <button type="button" onClick={onOpen}
+      className="text-left bg-white border border-slate-200/80 rounded-2xl p-3.5 flex flex-col gap-2 transition shadow-[0_1px_3px_rgba(15,23,42,0.06)] hover:shadow-md hover:border-blue-300 hover:-translate-y-0.5">
+      <div className="flex items-center justify-between gap-2 text-xs text-slate-500">
+        <span className="flex items-center gap-1.5"><Dev size={13} />{v.started.slice(5)}</span>
+        <span className="font-mono text-slate-400">{v.visitor}</span>
       </div>
+      <div className={`text-2xl font-bold leading-tight ${quick ? "text-slate-400" : "text-slate-900"}`} style={FONT}>{fmtDuration(v.seconds)}</div>
+      <div className="text-[11px] text-slate-400 flex items-center gap-1"><Clock size={11} />time on site</div>
+      <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-100 text-xs">
+        <span className="text-slate-600">{v.pages} {v.pages === 1 ? "page" : "pages"}</span>
+        <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 truncate max-w-[60%]">{v.source}</span>
+      </div>
+    </button>
+  );
+};
 
-      {open ? (
-        <ol className="mt-4 space-y-0">
+const VisitModal = ({ v, onClose }) => {
+  const Dev = v.device === "mobile" ? Smartphone : Monitor;
+  useEffect(() => {
+    const h = e => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  }, [onClose]);
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[85vh] overflow-y-auto p-5" onClick={e => e.stopPropagation()} role="dialog" aria-modal="true">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="text-xs text-slate-500 flex items-center gap-1.5"><Dev size={13} />{v.started} · from {v.source} · visitor <span className="font-mono">{v.visitor}</span></div>
+            <div className="text-2xl font-bold text-slate-900 mt-1" style={FONT}>{fmtDuration(v.seconds)}</div>
+            <div className="text-xs text-slate-400">time on site · {v.pages} {v.pages === 1 ? "page" : "pages"}</div>
+          </div>
+          <button onClick={onClose} className="h-8 px-3 rounded-lg border border-slate-200 text-sm text-slate-600 hover:bg-slate-50">Close</button>
+        </div>
+        <ol className="mt-5">
           {(v.steps || []).map((st, i) => (
             <li key={i} className="flex gap-3">
               <div className="flex flex-col items-center"><span className="w-2.5 h-2.5 rounded-full bg-blue-500 mt-1.5" />{i < v.steps.length - 1 && <span className="flex-1 w-px bg-slate-200" />}</div>
               <div className="pb-3 min-w-0">
-                <div className="text-sm text-slate-800 truncate">{st.label || st.path}</div>
+                <div className="text-sm text-slate-800 break-words">{st.label || st.path}</div>
                 <div className="text-xs text-slate-400">{st.time}{i > 0 && ` · ${fmtDuration(st.after)} after the previous page`}</div>
               </div>
             </li>
           ))}
           {v.pages > (v.steps || []).length && <li className="text-xs text-slate-400 pl-5">+ {v.pages - v.steps.length} more pages</li>}
         </ol>
-      ) : (
-        <div className="mt-3 flex flex-wrap gap-1.5">
-          {v.paths.slice(0, 3).map((p, i) => <span key={i} className="text-xs px-2 py-1 rounded-md bg-blue-50 text-blue-700 truncate max-w-full">{p}</span>)}
-          {v.paths.length > 3 && <span className="text-xs px-2 py-1 rounded-md bg-slate-100 text-slate-500">+{v.paths.length - 3}</span>}
-        </div>
-      )}
-
-      <div className="mt-auto pt-4 flex items-end justify-between">
-        <div>
-          <div className={`text-xl font-bold leading-none ${quick ? "text-slate-400" : "text-slate-900"}`} style={FONT}>{fmtDuration(v.seconds)}</div>
-          <div className="text-[11px] text-slate-400 mt-1 flex items-center gap-1"><Clock size={11} />time on site · {v.pages} {v.pages === 1 ? "page" : "pages"}</div>
-        </div>
-        <span className="flex items-center gap-2 text-[11px] text-slate-400"><span className="font-mono">{v.visitor}</span><ChevronDown size={15} className={`transition ${open ? "rotate-180" : ""}`} /></span>
       </div>
-    </button>
+    </div>
   );
 };
 
@@ -232,18 +245,20 @@ export default function Visits() {
           <div className="flex flex-wrap items-end justify-between gap-2">
             <div>
               <h3 className="text-base font-bold text-slate-900 flex items-center gap-2" style={FONT}><Clock size={18} className="text-blue-600" />Every visit</h3>
-              <p className="text-xs text-slate-400 mt-1">Newest first, Nepal time. Tap a card for its page-by-page timeline. Time is first to last page opened, so a one-page visit shows as under a minute.</p>
+              <p className="text-xs text-slate-400 mt-1">Newest first, Nepal time. Tap a tile for its page-by-page timeline. Time is first to last page opened, so a one-page visit shows as under a minute.</p>
             </div>
             {eng && <span className="text-xs text-slate-500">{eng.visits} visits · {eng.pages_per_visit} pages each · longest {eng.longest_minutes} min · {eng.quick_visit_pct}% left after one page</span>}
           </div>
-          <div className="grid sm:grid-cols-2 xl:grid-cols-3 gap-4">
-            {visitList.slice(0, shown).map((v, i) => <VisitCard key={`${v.visitor}-${v.started}-${i}`} v={v} open={open === i} onToggle={() => setOpen(open === i ? null : i)} />)}
+          <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3">
+            {visitList.slice(0, shown).map((v, i) => <VisitTile key={`${v.visitor}-${v.started}-${i}`} v={v} onOpen={() => setOpen(i)} />)}
           </div>
           {shown < visitList.length && (
             <div className="text-center"><button onClick={() => setShown(shown + PAGE_SIZE)} className="h-9 px-5 rounded-xl border border-slate-200 bg-white text-sm font-medium text-slate-700 hover:border-blue-300 hover:text-blue-700">Show more visits ({visitList.length - shown} left)</button></div>
           )}
         </div>
       )}
+
+      {open !== null && visitList[open] && <VisitModal v={visitList[open]} onClose={() => setOpen(null)} />}
 
       <div className="grid lg:grid-cols-3 gap-4">
         <RankList title="Top pages" icon={FileText} rows={data.top_pages} empty="No pages yet" linkBase={base} />
