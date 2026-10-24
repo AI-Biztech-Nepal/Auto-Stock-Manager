@@ -42,18 +42,45 @@ const Stat = ({ icon: Icon, value, label }) => (
   </Card>
 );
 
-const Bars = ({ items, valueKey, color, tip }) => {
-  const max = Math.max(1, ...items.map(d => d[valueKey]));
+// Daily page views stacked by where they came from (direct / Google / other sites), with Google
+// search clicks from Search Console drawn over them as a line.
+const COLORS = { direct: "bg-indigo-500 group-hover:bg-indigo-600", google: "bg-emerald-500 group-hover:bg-emerald-600", other: "bg-amber-400 group-hover:bg-amber-500", views: "bg-indigo-400 group-hover:bg-indigo-500" };
+const CombinedChart = ({ daily, clicksByDate }) => {
+  const split = daily.some(d => d.direct !== undefined);
+  const clicks = daily.map(d => (clicksByDate ? clicksByDate[d.date] ?? null : null));
+  const max = Math.max(1, ...daily.map(d => d.views), ...clicks.map(c => c || 0));
+  const pts = clicks.map((c, i) => (c === null ? null : [((i + 0.5) / daily.length) * 100, 100 - (c / max) * 100]));
+  const line = pts.filter(Boolean).map(p => p.join(",")).join(" ");
+  const seg = (d, n, key) => <div className={`w-full ${COLORS[key]}`} style={{ height: `${d.views ? (n / d.views) * 100 : 0}%` }} />;
   return (
-    <div className="relative h-40">
-      {[0.25, 0.5, 0.75].map(f => <div key={f} className="absolute inset-x-0 border-t border-dashed border-slate-100" style={{ bottom: `${f * 100}%` }} />)}
-      <div className="relative flex items-end gap-[3px] h-full">
-        {items.map(d => (
-          <div key={d.date} className="flex-1 h-full flex items-end group" title={tip(d)}>
-            <div className={`w-full rounded-t-md transition-all ${color}`} style={{ height: `${(d[valueKey] / max) * 100}%`, minHeight: d[valueKey] ? 3 : 0 }} />
-          </div>
-        ))}
+    <div>
+      <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500 mb-3">
+        {split ? <>
+          <span className="flex items-center gap-1.5"><i className="w-2.5 h-2.5 rounded-sm bg-indigo-500" />Direct</span>
+          <span className="flex items-center gap-1.5"><i className="w-2.5 h-2.5 rounded-sm bg-emerald-500" />From Google</span>
+          <span className="flex items-center gap-1.5"><i className="w-2.5 h-2.5 rounded-sm bg-amber-400" />Other sites</span>
+        </> : <span className="flex items-center gap-1.5"><i className="w-2.5 h-2.5 rounded-sm bg-indigo-400" />Page views</span>}
+        {clicksByDate && <span className="flex items-center gap-1.5"><i className="w-4 h-0.5 bg-rose-500" />Google search clicks (Search Console)</span>}
       </div>
+      <div className="relative h-48">
+        {[0.25, 0.5, 0.75].map(f => <div key={f} className="absolute inset-x-0 border-t border-dashed border-slate-100" style={{ bottom: `${f * 100}%` }} />)}
+        <div className="relative flex items-end gap-[3px] h-full">
+          {daily.map((d, i) => (
+            <div key={d.date} className="flex-1 h-full flex items-end group"
+              title={`${d.date}: ${d.views} views, ${d.visitors} visitors${split ? ` (direct ${d.direct}, Google ${d.google}, other ${d.other})` : ""}${clicks[i] !== null ? `, ${clicks[i]} Google search clicks` : ""}`}>
+              <div className="w-full flex flex-col-reverse rounded-t-md overflow-hidden" style={{ height: `${(d.views / max) * 100}%`, minHeight: d.views ? 3 : 0 }}>
+                {split ? <>{seg(d, d.direct, "direct")}{seg(d, d.google, "google")}{seg(d, d.other, "other")}</> : seg(d, d.views, "views")}
+              </div>
+            </div>
+          ))}
+        </div>
+        {line && (
+          <svg className="absolute inset-0 w-full h-full pointer-events-none" viewBox="0 0 100 100" preserveAspectRatio="none">
+            <polyline points={line} fill="none" stroke="#f43f5e" strokeWidth="1.6" vectorEffect="non-scaling-stroke" strokeLinejoin="round" />
+          </svg>
+        )}
+      </div>
+      <div className="flex justify-between text-xs text-slate-400 mt-1"><span>{daily[0]?.date}</span><span>{daily[daily.length - 1]?.date}</span></div>
     </div>
   );
 };
@@ -228,34 +255,20 @@ export default function Visits() {
       </div>
 
       <Card>
-        <SectionTitle icon={TrendingUp} title="Daily page views" hint="Hover a bar to see that day's views and visitors."
-          right={<span className="text-xs text-slate-400">{data.daily[0]?.date} to {data.daily[data.daily.length - 1]?.date}</span>} />
+        <SectionTitle icon={TrendingUp} title="Daily visits" hint={`Page views each day by source${search?.configured ? ", with Google search clicks as the red line. Search Console data lags by 2 to 3 days" : ""}. Hover a day for the numbers.`}
+          right={search?.configured && <span className="text-sm text-slate-600"><b className="text-slate-900">{search.total_clicks.toLocaleString()}</b> Google clicks · <b className="text-slate-900">{search.total_impressions.toLocaleString()}</b> times shown</span>} />
         <div className="px-5 pb-5">
-          {data.total_views === 0
+          {data.total_views === 0 && !search?.configured
             ? <p className="py-10 text-center text-sm text-slate-500">No visits recorded yet. Once the storefront sends visits (see DEPLOYMENT.md), they appear here.</p>
-            : <Bars items={data.daily} valueKey="views" color="bg-gradient-to-t from-blue-600 to-indigo-400 group-hover:from-blue-700 group-hover:to-indigo-500" tip={d => `${d.date}: ${d.views} views, ${d.visitors} visitors`} />}
-        </div>
-      </Card>
-
-      {visitList.length > 0 && (
-        <div className="space-y-3">
-          <div className="flex flex-wrap items-end justify-between gap-2">
-            <div>
-              <h3 className="text-base font-bold text-slate-900 flex items-center gap-2" style={FONT}><Clock size={18} className="text-blue-600" />Every visit</h3>
-              <p className="text-xs text-slate-400 mt-1">Newest first, Nepal time. Tap a tile for its page-by-page timeline. Time is first to last page opened, so a one-page visit shows as under a minute.</p>
-            </div>
-            {eng && <span className="text-xs text-slate-500">{eng.visits} visits · {eng.pages_per_visit} pages each · longest {eng.longest_minutes} min · {eng.quick_visit_pct}% left after one page</span>}
-          </div>
-          <div className="space-y-2">
-            {visitList.slice(0, shown).map((v, i) => <VisitTile key={`${v.visitor}-${v.started}-${i}`} v={v} onOpen={() => setOpen(i)} />)}
-          </div>
-          {shown < visitList.length && (
-            <div className="text-center"><button onClick={() => setShown(shown + PAGE_SIZE)} className="h-9 px-5 rounded-xl border border-slate-200 bg-white text-sm font-medium text-slate-700 hover:border-blue-300 hover:text-blue-700">Show more visits ({visitList.length - shown} left)</button></div>
+            : <CombinedChart daily={data.daily} clicksByDate={search?.configured ? Object.fromEntries(search.daily.map(d => [d.date, d.clicks])) : null} />}
+          {search?.configured && (
+            <table className="w-full text-sm mt-5">
+              <thead><tr className="text-xs text-slate-400 text-left"><th className="py-2 font-medium">Month (Google search)</th><th className="py-2 font-medium text-right">Clicks</th><th className="py-2 font-medium text-right">Shown</th></tr></thead>
+              <tbody>{search.months.map(m => <tr key={m.month} className="border-t border-slate-100"><td className="py-2 text-slate-700">{m.month}</td><td className="py-2 text-right font-semibold text-slate-900">{m.clicks}</td><td className="py-2 text-right text-slate-600">{m.impressions}</td></tr>)}</tbody>
+            </table>
           )}
         </div>
-      )}
-
-      {open !== null && visitList[open] && <VisitModal v={visitList[open]} onClose={() => setOpen(null)} />}
+      </Card>
 
       <div className="grid lg:grid-cols-3 gap-4">
         <RankList title="Top pages" icon={FileText} rows={data.top_pages} empty="No pages yet" linkBase={base} />
@@ -275,26 +288,31 @@ export default function Visits() {
 
       {searchErr && <p className="text-sm text-red-600">{searchErr}</p>}
       {search?.configured && (
-        <div className="space-y-4">
-          <Card>
-            <SectionTitle icon={Search} title="Google search" hint={`Last ${days} days. Search Console data lags by 2 to 3 days.`}
-              right={<span className="text-sm text-slate-600"><b className="text-slate-900">{search.total_clicks.toLocaleString()}</b> clicks · <b className="text-slate-900">{search.total_impressions.toLocaleString()}</b> times shown</span>} />
-            <div className="px-5 pb-5">
-              <Bars items={search.daily} valueKey="clicks" color="bg-gradient-to-t from-emerald-600 to-emerald-400 group-hover:from-emerald-700 group-hover:to-emerald-500" tip={d => `${d.date}: ${d.clicks} clicks, shown ${d.impressions}`} />
-              <div className="flex justify-between text-xs text-slate-400 mt-1"><span>{search.daily[0]?.date}</span><span>{search.daily[search.daily.length - 1]?.date}</span></div>
-              <table className="w-full text-sm mt-4">
-                <thead><tr className="text-xs text-slate-400 text-left"><th className="py-2 font-medium">Month</th><th className="py-2 font-medium text-right">Clicks</th><th className="py-2 font-medium text-right">Shown</th></tr></thead>
-                <tbody>{search.months.map(m => <tr key={m.month} className="border-t border-slate-100"><td className="py-2 text-slate-700">{m.month}</td><td className="py-2 text-right font-semibold text-slate-900">{m.clicks}</td><td className="py-2 text-right text-slate-600">{m.impressions}</td></tr>)}</tbody>
-              </table>
-            </div>
-          </Card>
-          <div className="grid lg:grid-cols-2 gap-4">
-            <SearchTable title="What people searched on Google" icon={Search} rows={search.queries} empty="No search data yet" />
-            <SearchTable title="Pages Google sends people to" icon={FileText} rows={search.pages} empty="No search data yet" linkBase={base} />
-            <SearchTable title="Countries (Google Search)" icon={Globe} rows={search.countries.map(c => ({ ...c, name: countryName(c.name) }))} empty="No search data yet" />
-          </div>
+        <div className="grid lg:grid-cols-2 gap-4">
+          <SearchTable title="What people searched on Google" icon={Search} rows={search.queries} empty="No search data yet" />
+          <SearchTable title="Countries (Google Search)" icon={Globe} rows={search.countries.map(c => ({ ...c, name: countryName(c.name) }))} empty="No search data yet" />
         </div>
       )}
+
+      {visitList.length > 0 && (
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-end justify-between gap-2">
+            <div>
+              <h3 className="text-base font-bold text-slate-900 flex items-center gap-2" style={FONT}><Clock size={18} className="text-blue-600" />Every visit</h3>
+              <p className="text-xs text-slate-400 mt-1">Newest first, Nepal time. Tap a row for its page-by-page timeline. Time is first to last page opened, so a one-page visit shows as under a minute.</p>
+            </div>
+            {eng && <span className="text-xs text-slate-500">{eng.visits} visits · {eng.pages_per_visit} pages each · longest {eng.longest_minutes} min · {eng.quick_visit_pct}% left after one page</span>}
+          </div>
+          <div className="space-y-2">
+            {visitList.slice(0, shown).map((v, i) => <VisitTile key={`${v.visitor}-${v.started}-${i}`} v={v} onOpen={() => setOpen(i)} />)}
+          </div>
+          {shown < visitList.length && (
+            <div className="text-center"><button onClick={() => setShown(shown + PAGE_SIZE)} className="h-9 px-5 rounded-xl border border-slate-200 bg-white text-sm font-medium text-slate-700 hover:border-blue-300 hover:text-blue-700">Show more visits ({visitList.length - shown} left)</button></div>
+          )}
+        </div>
+      )}
+
+      {open !== null && visitList[open] && <VisitModal v={visitList[open]} onClose={() => setOpen(null)} />}
     </div>
   );
 }

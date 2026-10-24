@@ -5336,8 +5336,10 @@ async def visits_summary(days: int = 30, cu: dict = Depends(admin_only)):
         ts = datetime.fromisoformat(r["created_at"])
         stamps.setdefault(r["visitor_id"], []).append((ts, r))
         d = ts.astimezone(npt).date()
-        e = by_day.setdefault(d.isoformat(), {"views": 0, "visitors": set()})
+        e = by_day.setdefault(d.isoformat(), {"views": 0, "visitors": set(), "direct": 0, "google": 0, "other": 0})
         e["views"] += 1; e["visitors"].add(r["visitor_id"])
+        ref = r.get("referrer") or ""
+        e["direct" if not ref else "google" if "google" in ref else "other"] += 1
         visitors.add(r["visitor_id"])
         pages[r["path"]] = pages.get(r["path"], 0) + 1
         refs[r.get("referrer") or "Direct"] = refs.get(r.get("referrer") or "Direct", 0) + 1
@@ -5347,7 +5349,8 @@ async def visits_summary(days: int = 30, cu: dict = Depends(admin_only)):
     for i in range(days):
         k = (start + timedelta(days=i)).isoformat()
         e = by_day.get(k)
-        daily.append({"date": k, "views": e["views"] if e else 0, "visitors": len(e["visitors"]) if e else 0})
+        daily.append({"date": k, "views": e["views"] if e else 0, "visitors": len(e["visitors"]) if e else 0,
+                      "direct": e["direct"] if e else 0, "google": e["google"] if e else 0, "other": e["other"] if e else 0})
     top = lambda m: [{"name": k, "views": v} for k, v in sorted(m.items(), key=lambda kv: -kv[1])[:25]]
     # A visit = one visitor's page views with no gap over 30 minutes. We only see when a page opens,
     # not when the person leaves, so time on site = first to last page of the visit; a one-page
