@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
-import { Eye, Users, Smartphone, Monitor, Globe, FileText, ExternalLink } from "lucide-react";
+import { Eye, Users, Smartphone, Monitor, Globe, FileText, ExternalLink, Search } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
 
@@ -33,11 +33,35 @@ const RankList = ({ title, icon: Icon, rows, empty }) => {
   );
 };
 
+// Google Search Console table (keywords / countries). Shown only once the backend has it configured.
+const SearchTable = ({ title, icon: Icon, rows, empty }) => (
+  <div className="bg-white border border-slate-200 rounded-xl shadow-sm">
+    <div className="p-4 border-b border-slate-100">
+      <h3 className="text-base font-bold text-slate-900 flex items-center gap-2" style={{ fontFamily: "Manrope" }}><Icon size={17} className="text-blue-600" />{title}</h3>
+    </div>
+    {rows.length === 0 ? <p className="p-6 text-sm text-slate-500 text-center">{empty}</p> : (
+      <table className="w-full text-sm">
+        <thead><tr className="text-xs text-slate-400 text-left"><th className="px-4 py-2 font-medium">&nbsp;</th><th className="py-2 font-medium text-right">Clicks</th><th className="py-2 font-medium text-right">Shown</th><th className="px-4 py-2 font-medium text-right">Rank</th></tr></thead>
+        <tbody>{rows.map(r => (
+          <tr key={r.name} className="border-t border-slate-100">
+            <td className="px-4 py-2 text-slate-700 max-w-[220px] truncate">{r.name}</td>
+            <td className="py-2 text-right font-semibold text-slate-900">{r.clicks}</td>
+            <td className="py-2 text-right text-slate-600">{r.impressions}</td>
+            <td className="px-4 py-2 text-right text-slate-600">{r.position}</td>
+          </tr>
+        ))}</tbody>
+      </table>
+    )}
+  </div>
+);
+
 // Storefront traffic: page views and unique visitors reported by the site's visit beacon.
 export default function Visits() {
   const [days, setDays] = useState(30);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState(null);
+  const [searchErr, setSearchErr] = useState("");
 
   const load = useCallback(async () => {
     try {
@@ -51,6 +75,13 @@ export default function Visits() {
   }, [days]);
 
   useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    setSearchErr("");
+    api.get("/visits/search", { params: { days } })
+      .then(r => setSearch(r.data))
+      .catch(e => { setSearch(null); setSearchErr(e.response?.data?.detail || "Could not load Google Search data"); });
+  }, [days]);
 
   if (loading) return <div className="flex items-center justify-center h-48"><div className="animate-spin w-7 h-7 border-4 border-blue-600 border-t-transparent rounded-full" /></div>;
   if (!data) return null;
@@ -105,6 +136,17 @@ export default function Visits() {
           </div>
         </div>
       </div>
+
+      {searchErr && <p className="text-sm text-red-600">{searchErr}</p>}
+      {search?.configured && (
+        <div className="space-y-2">
+          <p className="text-xs text-slate-400">Google Search, last {days} days. Search Console data lags by 2 to 3 days.</p>
+          <div className="grid lg:grid-cols-2 gap-4">
+            <SearchTable title="What people searched on Google" icon={Search} rows={search.queries} empty="No search data yet" />
+            <SearchTable title="Countries (Google Search)" icon={Globe} rows={search.countries.map(c => ({ ...c, name: c.name.toUpperCase() }))} empty="No search data yet" />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

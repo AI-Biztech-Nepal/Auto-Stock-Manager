@@ -8,7 +8,7 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from passlib.context import CryptContext
 from typing import Optional, List, Literal
 from datetime import datetime, timezone, timedelta
-from urllib.parse import urlparse
+from urllib.parse import urlparse, quote
 from pathlib import Path
 import os, logging, jwt, uuid, hmac, html, json, base64, io, asyncio, re, copy, contextvars, secrets, hashlib
 from concurrent.futures import ProcessPoolExecutor
@@ -5247,6 +5247,45 @@ async def _ga4_summary(days: int) -> dict:
             "today_views": daily[-1]["views"], "today_visitors": daily[-1]["visitors"], "daily": daily,
             "top_pages": top(pages_r), "sources": [{"name": "Direct" if s["name"] == "(direct)" else s["name"], "views": s["views"]} for s in top(src_r)],
             "devices": devices, "storefront_url": STOREFRONT_URL, "source": "google_analytics"}
+
+# Optional: Google Search Console -- the searches (keywords) and countries that brought people to
+# the storefront from Google. Set GSC_CREDENTIALS_JSON (service-account key, raw JSON or a file
+# path; falls back to GA4_CREDENTIALS_JSON) after adding that account's email as a user on the
+# Search Console property, and GSC_SITE_URL ("sc-domain:hamroauto.com.np" for a Domain property,
+# or the full URL prefix such as "https://hamroauto.com.np/").
+GSC_CREDENTIALS_JSON = os.environ.get("GSC_CREDENTIALS_JSON", "").strip() or GA4_CREDENTIALS_JSON
+GSC_SITE_URL = os.environ.get("GSC_SITE_URL", "sc-domain:hamroauto.com.np").strip()
+
+def _gsc_token() -> str:
+    from google.oauth2 import service_account
+    from google.auth.transport.requests import Request as GoogleRequest
+    raw = GSC_CREDENTIALS_JSON
+    info = json.loads(raw) if raw.startswith("{") else json.loads(Path(raw).read_text())
+    creds = service_account.Credentials.from_service_account_info(
+        info, scopes=["https://www.googleapis.com/auth/webmasters.readonly"])
+    creds.refresh(GoogleRequest())
+    return creds.token
+
+@api_router.get("/visits/search")
+async def visits_search(days: int = 30, cu: dict = Depends(admin_only)):
+    days = max(1, min(days, 365))
+    if not GSC_CREDENTIALS_JSON:
+        return {"configured": False}
+    token = await asyncio.to_thread(_gsc_token)
+    end = datetime.now(timezone.utc).date()
+    start = end - timedelta(days=days - 1)
+    url = f"https://searchconsole.googleapis.com/webmasters/v3/sites/{quote(GSC_SITE_URL, safe='')}/searchAnalytics/query"
+    async def query(dim, limit):
+        async with httpx.AsyncClient(timeout=20) as http:
+            resp = await http.post(url, headers={"Authorization": f"Bearer {token}"}, json={
+                "startDate": start.isoformat(), "endDate": end.isoformat(),
+                "dimensions": [dim], "rowLimit": limit})
+        if resp.status_code != 200:
+            raise HTTPException(502, f"Google Search Console error: {resp.json().get('error', {}).get('message', resp.status_code)}")
+        return [{"name": r["keys"][0], "clicks": int(r["clicks"]), "impressions": int(r["impressions"]),
+                 "position": round(r["position"], 1)} for r in resp.json().get("rows", [])]
+    queries, countries = await asyncio.gather(query("query", 20), query("country", 15))
+    return {"configured": True, "days": days, "queries": queries, "countries": countries}
 
 @api_router.get("/visits/summary")
 async def visits_summary(days: int = 30, cu: dict = Depends(admin_only)):

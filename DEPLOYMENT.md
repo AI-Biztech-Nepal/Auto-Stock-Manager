@@ -112,6 +112,15 @@ If the storefront already has GA4, the Visits page can show its history instead:
 2. GA4 -> Admin -> Property access management: add the service account's email as **Viewer**.
 3. On the VPS set `GA4_PROPERTY_ID` (numeric id, GA4 -> Admin -> Property details) and `GA4_CREDENTIALS_JSON` (the key's JSON, or the path to the file), then restart the backend.
 
+### Google Search keywords and countries (Search Console)
+
+The Visits page can also show what people typed into Google and which countries those searches came from:
+1. Google Cloud: enable the **Google Search Console API** and create a service account + JSON key.
+2. Search Console -> Settings -> Users and permissions: add the service account email as a user (Restricted is enough).
+3. On the VPS set `GSC_CREDENTIALS_JSON` (key JSON or path to the file; falls back to `GA4_CREDENTIALS_JSON`) and `GSC_SITE_URL` (`sc-domain:hamroauto.com.np` for a Domain property, or the full URL for a URL-prefix property), then restart the backend.
+
+Search Console data runs 2 to 3 days behind and only exists from when the site was verified.
+
 ## Auto-deploy on push to main
 
 A GitHub webhook hits this app's own VPS listener on every push to `main`, which pulls,
