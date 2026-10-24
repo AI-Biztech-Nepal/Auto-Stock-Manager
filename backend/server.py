@@ -5212,9 +5212,11 @@ async def _name_vehicle_pages(summary: dict) -> dict:
     """Swap /inventory/<id> paths in top_pages for the vehicle (brand model year) so the admin
     sees which bike or car was viewed rather than a long id."""
     pat = re.compile(r"/inventory/([0-9a-fA-F-]{36})/?")
+    for r in summary.get("top_pages", []): r["path"] = r["name"]
     ids = {m.group(1) for r in summary.get("top_pages", []) if (m := pat.fullmatch(r["name"]))}
     for v in summary.get("visit_list", []):
         ids |= {m.group(1) for p in v["paths"] if (m := pat.fullmatch(p))}
+        ids |= {m.group(1) for st in v.get("steps", []) if (m := pat.fullmatch(st["path"]))}
     if ids:
         labels = {}
         for v in await db.vehicles.find({"id": {"$in": list(ids)}}, {"_id": 0, "id": 1, "brand": 1, "model": 1, "year": 1}).to_list(len(ids)):
@@ -5222,7 +5224,9 @@ async def _name_vehicle_pages(summary: dict) -> dict:
             if label: labels[v["id"]] = label
         name = lambda p: labels.get(m.group(1), p) if (m := pat.fullmatch(p)) else p
         for r in summary.get("top_pages", []): r["name"] = name(r["name"])
-        for v in summary.get("visit_list", []): v["paths"] = [name(p) for p in v["paths"]]
+        for v in summary.get("visit_list", []):
+            v["paths"] = [name(p) for p in v["paths"]]
+            for st in v.get("steps", []): st["label"] = name(st["path"])
     return summary
 
 async def _ga4_summary(days: int) -> dict:
@@ -5357,7 +5361,10 @@ async def visits_summary(days: int = 30, cu: dict = Depends(admin_only)):
         first = pv[0][1]
         visit_list.append({"started": pv[0][0].astimezone(npt).strftime("%Y-%m-%d %H:%M"), "seconds": int(secs),
                            "pages": len(pv), "visitor": vid[:6], "device": first.get("device") or "desktop",
-                           "source": first.get("referrer") or "Direct", "paths": [p[1]["path"] for p in pv][:8]})
+                           "source": first.get("referrer") or "Direct", "paths": [p[1]["path"] for p in pv][:8],
+                           "steps": [{"path": p[1]["path"], "time": p[0].astimezone(npt).strftime("%H:%M:%S"),
+                                      "after": int((p[0] - pv[i - 1][0]).total_seconds()) if i else 0}
+                                     for i, p in enumerate(pv[:30])]})
     for vid, pv in stamps.items():
         pv.sort(key=lambda x: x[0]); cur = [pv[0]]
         for item in pv[1:]:

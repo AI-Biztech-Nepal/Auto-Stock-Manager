@@ -1,37 +1,11 @@
 import { useEffect, useState, useCallback } from "react";
-import { Eye, Users, Smartphone, Monitor, Globe, FileText, ExternalLink, Search, Clock } from "lucide-react";
+import { Eye, Users, Smartphone, Monitor, Globe, FileText, ExternalLink, Search, Clock, ChevronDown, TrendingUp, Layers } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
 
 const RANGES = [{ days: 7, label: "7 days" }, { days: 30, label: "30 days" }, { days: 90, label: "90 days" }];
-
-const Stat = ({ value, label, cls }) => (
-  <div className={`border rounded-xl p-4 text-center ${cls}`}>
-    <div className="text-2xl font-bold" style={{ fontFamily: "Manrope" }}>{value.toLocaleString()}</div>
-    <div className="text-xs mt-0.5 opacity-80">{label}</div>
-  </div>
-);
-
-const RankList = ({ title, icon: Icon, rows, empty }) => {
-  const max = Math.max(1, ...rows.map(r => r.views));
-  return (
-    <div className="bg-white border border-slate-200 rounded-xl shadow-sm">
-      <div className="p-4 border-b border-slate-100">
-        <h3 className="text-base font-bold text-slate-900 flex items-center gap-2" style={{ fontFamily: "Manrope" }}><Icon size={17} className="text-blue-600" />{title}</h3>
-      </div>
-      {rows.length === 0 ? <p className="p-6 text-sm text-slate-500 text-center">{empty}</p> : (
-        <ul className="p-4 space-y-2.5 max-h-96 overflow-y-auto">
-          {rows.map(r => (
-            <li key={r.name} className="text-sm">
-              <div className="flex justify-between gap-3"><span className="truncate text-slate-700">{r.name}</span><span className="font-semibold text-slate-900">{r.views}</span></div>
-              <div className="h-1.5 bg-slate-100 rounded-full mt-1"><div className="h-1.5 bg-blue-500 rounded-full" style={{ width: `${(r.views / max) * 100}%` }} /></div>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
-};
+const PAGE_SIZE = 12;
+const FONT = { fontFamily: "Manrope" };
 
 const fmtDuration = s => (s < 60 ? (s ? `${s} sec` : "under 1 min") : `${Math.floor(s / 60)} min ${s % 60} sec`);
 
@@ -42,27 +16,144 @@ const countryName = code => {
   try { return a2 ? new Intl.DisplayNames(["en"], { type: "region" }).of(a2) : code.toUpperCase(); } catch { return code.toUpperCase(); }
 };
 
-// Google Search Console table (keywords / countries). Shown only once the backend has it configured.
-const SearchTable = ({ title, icon: Icon, rows, empty }) => (
-  <div className="bg-white border border-slate-200 rounded-xl shadow-sm">
-    <div className="p-4 border-b border-slate-100">
-      <h3 className="text-base font-bold text-slate-900 flex items-center gap-2" style={{ fontFamily: "Manrope" }}><Icon size={17} className="text-blue-600" />{title}</h3>
+const Card = ({ children, className = "" }) => (
+  <div className={`bg-white border border-slate-200/80 rounded-2xl shadow-[0_1px_3px_rgba(15,23,42,0.06)] ${className}`}>{children}</div>
+);
+
+const SectionTitle = ({ icon: Icon, title, hint, right }) => (
+  <div className="flex flex-wrap items-start justify-between gap-2 px-5 pt-5 pb-3">
+    <div>
+      <h3 className="text-base font-bold text-slate-900 flex items-center gap-2" style={FONT}>
+        <span className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center"><Icon size={16} /></span>{title}
+      </h3>
+      {hint && <p className="text-xs text-slate-400 mt-1.5">{hint}</p>}
     </div>
-    {rows.length === 0 ? <p className="p-6 text-sm text-slate-500 text-center">{empty}</p> : (
-      <div className="max-h-96 overflow-y-auto"><table className="w-full text-sm">
-        <thead><tr className="text-xs text-slate-400 text-left"><th className="px-4 py-2 font-medium">&nbsp;</th><th className="py-2 font-medium text-right">Clicks</th><th className="py-2 font-medium text-right">Shown</th><th className="px-4 py-2 font-medium text-right">Rank</th></tr></thead>
-        <tbody>{rows.map(r => (
-          <tr key={r.name} className="border-t border-slate-100">
-            <td className="px-4 py-2 text-slate-700 max-w-[220px] truncate">{r.name}</td>
-            <td className="py-2 text-right font-semibold text-slate-900">{r.clicks}</td>
-            <td className="py-2 text-right text-slate-600">{r.impressions}</td>
-            <td className="px-4 py-2 text-right text-slate-600">{r.position}</td>
-          </tr>
-        ))}</tbody>
-      </table></div>
-    )}
+    {right}
   </div>
 );
+
+const Stat = ({ icon: Icon, value, label }) => (
+  <Card className="p-4 flex items-center gap-3">
+    <span className="w-10 h-10 rounded-xl bg-slate-100 text-slate-600 flex items-center justify-center shrink-0"><Icon size={18} /></span>
+    <div className="min-w-0">
+      <div className="text-2xl font-bold text-slate-900 leading-tight" style={FONT}>{typeof value === "number" ? value.toLocaleString() : value}</div>
+      <div className="text-xs text-slate-500 truncate">{label}</div>
+    </div>
+  </Card>
+);
+
+const Bars = ({ items, valueKey, color, tip }) => {
+  const max = Math.max(1, ...items.map(d => d[valueKey]));
+  return (
+    <div className="relative h-40">
+      {[0.25, 0.5, 0.75].map(f => <div key={f} className="absolute inset-x-0 border-t border-dashed border-slate-100" style={{ bottom: `${f * 100}%` }} />)}
+      <div className="relative flex items-end gap-[3px] h-full">
+        {items.map(d => (
+          <div key={d.date} className="flex-1 h-full flex items-end group" title={tip(d)}>
+            <div className={`w-full rounded-t-md transition-all ${color}`} style={{ height: `${(d[valueKey] / max) * 100}%`, minHeight: d[valueKey] ? 3 : 0 }} />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+const RankList = ({ title, icon, rows, empty, linkBase }) => {
+  const max = Math.max(1, ...rows.map(r => r.views));
+  return (
+    <Card>
+      <SectionTitle icon={icon} title={title} />
+      {rows.length === 0 ? <p className="px-5 pb-6 text-sm text-slate-500 text-center">{empty}</p> : (
+        <ul className="px-5 pb-5 space-y-3 max-h-96 overflow-y-auto">
+          {rows.map(r => {
+            const inner = (
+              <>
+                <div className="flex justify-between gap-3 text-sm">
+                  <span className="truncate text-slate-700 group-hover:text-blue-700">{r.name}</span>
+                  <span className="font-semibold text-slate-900">{r.views}</span>
+                </div>
+                <div className="h-1.5 bg-slate-100 rounded-full mt-1.5"><div className="h-1.5 bg-gradient-to-r from-blue-500 to-indigo-500 rounded-full" style={{ width: `${(r.views / max) * 100}%` }} /></div>
+              </>
+            );
+            return (
+              <li key={r.name}>
+                {linkBase && r.path
+                  ? <a href={linkBase + r.path} target="_blank" rel="noopener noreferrer" className="group block rounded-lg -mx-2 px-2 py-1 hover:bg-slate-50" title="Open this page">{inner}</a>
+                  : <div className="group">{inner}</div>}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </Card>
+  );
+};
+
+const SearchTable = ({ title, icon, rows, empty, linkBase }) => (
+  <Card>
+    <SectionTitle icon={icon} title={title} />
+    {rows.length === 0 ? <p className="px-5 pb-6 text-sm text-slate-500 text-center">{empty}</p> : (
+      <div className="max-h-96 overflow-y-auto pb-2">
+        <table className="w-full text-sm">
+          <thead className="sticky top-0 bg-white"><tr className="text-xs text-slate-400 text-left"><th className="px-5 py-2 font-medium">&nbsp;</th><th className="py-2 font-medium text-right">Clicks</th><th className="py-2 font-medium text-right">Shown</th><th className="px-5 py-2 font-medium text-right">Rank</th></tr></thead>
+          <tbody>{rows.map(r => (
+            <tr key={r.name} className="border-t border-slate-100 hover:bg-slate-50">
+              <td className="px-5 py-2.5 text-slate-700 max-w-[240px] truncate" title={r.name}>
+                {linkBase && r.path ? <a href={linkBase + r.path} target="_blank" rel="noopener noreferrer" className="hover:text-blue-700 hover:underline">{r.name}</a> : r.name}
+              </td>
+              <td className="py-2.5 text-right font-semibold text-slate-900">{r.clicks}</td>
+              <td className="py-2.5 text-right text-slate-600">{r.impressions}</td>
+              <td className="px-5 py-2.5 text-right text-slate-600">{r.position}</td>
+            </tr>
+          ))}</tbody>
+        </table>
+      </div>
+    )}
+  </Card>
+);
+
+// One visit as a clickable card; the time spent sits at the bottom. Click to see the page-by-page timeline.
+const VisitCard = ({ v, open, onToggle }) => {
+  const Dev = v.device === "mobile" ? Smartphone : Monitor;
+  const quick = v.seconds === 0;
+  return (
+    <button type="button" onClick={onToggle} aria-expanded={open}
+      className={`text-left bg-white border rounded-2xl p-4 flex flex-col transition shadow-[0_1px_3px_rgba(15,23,42,0.06)] hover:shadow-md hover:border-blue-300 ${open ? "border-blue-400 ring-2 ring-blue-100 sm:col-span-2 xl:col-span-3" : "border-slate-200/80"}`}>
+      <div className="flex items-center justify-between gap-2">
+        <span className="flex items-center gap-2 text-sm font-semibold text-slate-800"><Dev size={15} className="text-slate-500" />{v.started}</span>
+        <span className="text-[11px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 truncate max-w-[45%]">{v.source}</span>
+      </div>
+
+      {open ? (
+        <ol className="mt-4 space-y-0">
+          {(v.steps || []).map((st, i) => (
+            <li key={i} className="flex gap-3">
+              <div className="flex flex-col items-center"><span className="w-2.5 h-2.5 rounded-full bg-blue-500 mt-1.5" />{i < v.steps.length - 1 && <span className="flex-1 w-px bg-slate-200" />}</div>
+              <div className="pb-3 min-w-0">
+                <div className="text-sm text-slate-800 truncate">{st.label || st.path}</div>
+                <div className="text-xs text-slate-400">{st.time}{i > 0 && ` · ${fmtDuration(st.after)} after the previous page`}</div>
+              </div>
+            </li>
+          ))}
+          {v.pages > (v.steps || []).length && <li className="text-xs text-slate-400 pl-5">+ {v.pages - v.steps.length} more pages</li>}
+        </ol>
+      ) : (
+        <div className="mt-3 flex flex-wrap gap-1.5">
+          {v.paths.slice(0, 3).map((p, i) => <span key={i} className="text-xs px-2 py-1 rounded-md bg-blue-50 text-blue-700 truncate max-w-full">{p}</span>)}
+          {v.paths.length > 3 && <span className="text-xs px-2 py-1 rounded-md bg-slate-100 text-slate-500">+{v.paths.length - 3}</span>}
+        </div>
+      )}
+
+      <div className="mt-auto pt-4 flex items-end justify-between">
+        <div>
+          <div className={`text-xl font-bold leading-none ${quick ? "text-slate-400" : "text-slate-900"}`} style={FONT}>{fmtDuration(v.seconds)}</div>
+          <div className="text-[11px] text-slate-400 mt-1 flex items-center gap-1"><Clock size={11} />time on site · {v.pages} {v.pages === 1 ? "page" : "pages"}</div>
+        </div>
+        <span className="flex items-center gap-2 text-[11px] text-slate-400"><span className="font-mono">{v.visitor}</span><ChevronDown size={15} className={`transition ${open ? "rotate-180" : ""}`} /></span>
+      </div>
+    </button>
+  );
+};
 
 // Storefront traffic: page views and unique visitors reported by the site's visit beacon.
 export default function Visits() {
@@ -71,6 +162,8 @@ export default function Visits() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState(null);
   const [searchErr, setSearchErr] = useState("");
+  const [open, setOpen] = useState(null);
+  const [shown, setShown] = useState(PAGE_SIZE);
 
   const load = useCallback(async () => {
     try {
@@ -83,7 +176,7 @@ export default function Visits() {
     }
   }, [days]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { load(); setOpen(null); setShown(PAGE_SIZE); }, [load]);
 
   useEffect(() => {
     setSearchErr("");
@@ -95,119 +188,97 @@ export default function Visits() {
   if (loading) return <div className="flex items-center justify-center h-48"><div className="animate-spin w-7 h-7 border-4 border-blue-600 border-t-transparent rounded-full" /></div>;
   if (!data) return null;
 
-  const maxViews = Math.max(1, ...data.daily.map(d => d.views));
   const devTotal = data.devices.mobile + data.devices.desktop;
   const pct = n => (devTotal ? Math.round((n / devTotal) * 100) : 0);
+  const eng = data.engagement;
+  const visitList = data.visit_list || [];
+  const base = data.storefront_url;
 
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <a href={data.storefront_url} target="_blank" rel="noopener noreferrer" className="text-sm text-blue-600 hover:underline flex items-center gap-1">{data.storefront_url.replace(/^https?:\/\//, "")} <ExternalLink size={12} /></a>
-        <span className="text-xs text-slate-400">{data.source === "google_analytics" ? "Data: Google Analytics" : "Data: site visit beacon"}</span>
-        <div className="flex gap-1 bg-slate-100 rounded-lg p-1">
+        <div>
+          <h2 className="text-xl font-bold text-slate-900" style={FONT}>Website visits</h2>
+          <a href={base} target="_blank" rel="noopener noreferrer" className="text-sm text-blue-600 hover:underline inline-flex items-center gap-1">{base.replace(/^https?:\/\//, "")} <ExternalLink size={12} /></a>
+          <span className="ml-2 text-xs text-slate-400">{data.source === "google_analytics" ? "Data: Google Analytics" : "Data: site visit tracker"}</span>
+        </div>
+        <div className="flex gap-1 bg-slate-100 rounded-xl p-1">
           {RANGES.map(r => (
-            <button key={r.days} onClick={() => setDays(r.days)} className={`h-8 px-3 rounded-md text-sm font-medium ${days === r.days ? "bg-white shadow-sm text-slate-900" : "text-slate-500"}`}>{r.label}</button>
+            <button key={r.days} onClick={() => setDays(r.days)} className={`h-8 px-4 rounded-lg text-sm font-medium transition ${days === r.days ? "bg-white shadow-sm text-blue-700" : "text-slate-500 hover:text-slate-800"}`}>{r.label}</button>
           ))}
         </div>
       </div>
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <Stat value={data.today_visitors} label="Visitors today" cls="bg-white border-slate-200 text-slate-900 shadow-sm" />
-        <Stat value={data.today_views} label="Page views today" cls="bg-white border-slate-200 text-slate-900 shadow-sm" />
-        <Stat value={data.unique_visitors} label={`Visitors, ${days} days`} cls="bg-green-50 border-green-100 text-green-700" />
-        <Stat value={data.total_views} label={`Page views, ${days} days`} cls="bg-blue-50 border-blue-100 text-blue-700" />
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+        <Stat icon={Users} value={data.today_visitors} label="Visitors today" />
+        <Stat icon={Eye} value={data.today_views} label="Page views today" />
+        <Stat icon={Users} value={data.unique_visitors} label={`Visitors, ${days} days`} />
+        <Stat icon={Layers} value={data.total_views} label={`Page views, ${days} days`} />
+        {eng && <Stat icon={Clock} value={`${eng.avg_minutes} min`} label="Avg time, visits with 2+ pages" />}
       </div>
 
-      {data.engagement && (
-        <div className="bg-white border border-slate-200 rounded-xl shadow-sm p-4">
-          <h3 className="text-base font-bold text-slate-900 flex items-center gap-2 mb-1" style={{ fontFamily: "Manrope" }}><Clock size={17} className="text-blue-600" />Time on site</h3>
-          <p className="text-xs text-slate-400 mb-4">Estimated from page opens: first to last page of a visit (a break of over 30 minutes starts a new visit). A one-page visit has no measurable time.</p>
-          <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 text-center">
-            <div><div className="text-2xl font-bold" style={{ fontFamily: "Manrope" }}>{data.engagement.avg_minutes} min</div><div className="text-xs text-slate-500">Average, visits with 2+ pages</div></div>
-            <div><div className="text-2xl font-bold" style={{ fontFamily: "Manrope" }}>{data.engagement.longest_minutes} min</div><div className="text-xs text-slate-500">Longest visit</div></div>
-            <div><div className="text-2xl font-bold" style={{ fontFamily: "Manrope" }}>{data.engagement.pages_per_visit}</div><div className="text-xs text-slate-500">Pages per visit</div></div>
-            <div><div className="text-2xl font-bold" style={{ fontFamily: "Manrope" }}>{data.engagement.visits}</div><div className="text-xs text-slate-500">Visits ({data.engagement.multi_page_visits} with 2+ pages)</div></div>
-            <div><div className="text-2xl font-bold" style={{ fontFamily: "Manrope" }}>{data.engagement.quick_visit_pct}%</div><div className="text-xs text-slate-500">Left after one page</div></div>
+      <Card>
+        <SectionTitle icon={TrendingUp} title="Daily page views" hint="Hover a bar to see that day's views and visitors."
+          right={<span className="text-xs text-slate-400">{data.daily[0]?.date} to {data.daily[data.daily.length - 1]?.date}</span>} />
+        <div className="px-5 pb-5">
+          {data.total_views === 0
+            ? <p className="py-10 text-center text-sm text-slate-500">No visits recorded yet. Once the storefront sends visits (see DEPLOYMENT.md), they appear here.</p>
+            : <Bars items={data.daily} valueKey="views" color="bg-gradient-to-t from-blue-600 to-indigo-400 group-hover:from-blue-700 group-hover:to-indigo-500" tip={d => `${d.date}: ${d.views} views, ${d.visitors} visitors`} />}
+        </div>
+      </Card>
+
+      {visitList.length > 0 && (
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-end justify-between gap-2">
+            <div>
+              <h3 className="text-base font-bold text-slate-900 flex items-center gap-2" style={FONT}><Clock size={18} className="text-blue-600" />Every visit</h3>
+              <p className="text-xs text-slate-400 mt-1">Newest first, Nepal time. Tap a card for its page-by-page timeline. Time is first to last page opened, so a one-page visit shows as under a minute.</p>
+            </div>
+            {eng && <span className="text-xs text-slate-500">{eng.visits} visits · {eng.pages_per_visit} pages each · longest {eng.longest_minutes} min · {eng.quick_visit_pct}% left after one page</span>}
           </div>
+          <div className="grid sm:grid-cols-2 xl:grid-cols-3 gap-4">
+            {visitList.slice(0, shown).map((v, i) => <VisitCard key={`${v.visitor}-${v.started}-${i}`} v={v} open={open === i} onToggle={() => setOpen(open === i ? null : i)} />)}
+          </div>
+          {shown < visitList.length && (
+            <div className="text-center"><button onClick={() => setShown(shown + PAGE_SIZE)} className="h-9 px-5 rounded-xl border border-slate-200 bg-white text-sm font-medium text-slate-700 hover:border-blue-300 hover:text-blue-700">Show more visits ({visitList.length - shown} left)</button></div>
+          )}
         </div>
       )}
 
-      <div className="bg-white border border-slate-200 rounded-xl shadow-sm p-4">
-        <h3 className="text-base font-bold text-slate-900 flex items-center gap-2 mb-4" style={{ fontFamily: "Manrope" }}><Eye size={17} className="text-blue-600" />Daily page views</h3>
-        {data.total_views === 0 ? (
-          <p className="py-10 text-center text-sm text-slate-500">No visits recorded yet. Once the storefront sends visits (see DEPLOYMENT.md), they appear here.</p>
-        ) : (
-          <div className="flex items-end gap-px h-40">
-            {data.daily.map(d => (
-              <div key={d.date} className="flex-1 h-full flex items-end group relative" title={`${d.date}: ${d.views} views, ${d.visitors} visitors`}>
-                <div className="w-full bg-blue-500 group-hover:bg-blue-700 rounded-t-sm" style={{ height: `${(d.views / maxViews) * 100}%`, minHeight: d.views ? 2 : 0 }} />
+      <div className="grid lg:grid-cols-3 gap-4">
+        <RankList title="Top pages" icon={FileText} rows={data.top_pages} empty="No pages yet" linkBase={base} />
+        <RankList title="Where visitors come from" icon={Globe} rows={data.sources} empty="No traffic yet" />
+        <Card>
+          <SectionTitle icon={Users} title="Devices" />
+          <div className="px-5 pb-5 space-y-5 text-sm">
+            {[["Mobile", Smartphone, data.devices.mobile, "from-blue-500 to-indigo-500"], ["Desktop", Monitor, data.devices.desktop, "from-slate-400 to-slate-500"]].map(([label, Icon, n, grad]) => (
+              <div key={label}>
+                <div className="flex items-center gap-2"><Icon size={16} className="text-slate-500" /><span className="flex-1 text-slate-700">{label}</span><b className="text-slate-900">{pct(n)}%</b></div>
+                <div className="h-2 bg-slate-100 rounded-full mt-2"><div className={`h-2 rounded-full bg-gradient-to-r ${grad}`} style={{ width: `${pct(n)}%` }} /></div>
               </div>
             ))}
           </div>
-        )}
-        <div className="flex justify-between text-xs text-slate-400 mt-1"><span>{data.daily[0]?.date}</span><span>{data.daily[data.daily.length - 1]?.date}</span></div>
+        </Card>
       </div>
-
-      <div className="grid lg:grid-cols-3 gap-4">
-        <RankList title="Top pages" icon={FileText} rows={data.top_pages} empty="No pages yet" />
-        <RankList title="Where visitors come from" icon={Globe} rows={data.sources} empty="No traffic yet" />
-        <div className="bg-white border border-slate-200 rounded-xl shadow-sm">
-          <div className="p-4 border-b border-slate-100"><h3 className="text-base font-bold text-slate-900 flex items-center gap-2" style={{ fontFamily: "Manrope" }}><Users size={17} className="text-blue-600" />Devices</h3></div>
-          <div className="p-4 space-y-3 text-sm">
-            <div className="flex items-center gap-2"><Smartphone size={16} className="text-slate-500" /><span className="flex-1">Mobile</span><b>{pct(data.devices.mobile)}%</b></div>
-            <div className="flex items-center gap-2"><Monitor size={16} className="text-slate-500" /><span className="flex-1">Desktop</span><b>{pct(data.devices.desktop)}%</b></div>
-          </div>
-        </div>
-      </div>
-
-      {data.visit_list && (
-        <div className="bg-white border border-slate-200 rounded-xl shadow-sm">
-          <div className="p-4 border-b border-slate-100">
-            <h3 className="text-base font-bold text-slate-900 flex items-center gap-2" style={{ fontFamily: "Manrope" }}><Clock size={17} className="text-blue-600" />Every visit, with its time</h3>
-            <p className="text-xs text-slate-400 mt-1">Newest first, Nepal time. Time is first to last page opened, so a one-page visit shows as under a minute.</p>
-          </div>
-          <div className="max-h-[28rem] overflow-auto">
-            <table className="w-full text-sm">
-              <thead className="sticky top-0 bg-white"><tr className="text-xs text-slate-400 text-left"><th className="px-4 py-2 font-medium">Started</th><th className="py-2 font-medium">Time</th><th className="py-2 font-medium text-right">Pages</th><th className="py-2 pl-4 font-medium">Pages viewed</th><th className="py-2 font-medium">From</th><th className="py-2 font-medium">Device</th><th className="px-4 py-2 font-medium">Visitor</th></tr></thead>
-              <tbody>{data.visit_list.map((v, i) => (
-                <tr key={i} className="border-t border-slate-100 align-top">
-                  <td className="px-4 py-2 whitespace-nowrap text-slate-700">{v.started}</td>
-                  <td className="py-2 whitespace-nowrap font-semibold text-slate-900">{fmtDuration(v.seconds)}</td>
-                  <td className="py-2 text-right text-slate-600">{v.pages}</td>
-                  <td className="py-2 pl-4 text-slate-600 max-w-[280px] truncate" title={v.paths.join(", ")}>{v.paths.join(", ")}</td>
-                  <td className="py-2 text-slate-600 whitespace-nowrap">{v.source}</td>
-                  <td className="py-2 text-slate-600 capitalize">{v.device}</td>
-                  <td className="px-4 py-2 text-slate-400 font-mono text-xs">{v.visitor}</td>
-                </tr>
-              ))}</tbody>
-            </table>
-          </div>
-        </div>
-      )}
 
       {searchErr && <p className="text-sm text-red-600">{searchErr}</p>}
       {search?.configured && (
-        <div className="space-y-2">
-          <p className="text-xs text-slate-400">Google Search, last {days} days. Search Console data lags by 2 to 3 days.</p>
-          <div className="grid grid-cols-2 gap-4">
-            <Stat value={search.total_clicks} label={`Clicks from Google, ${days} days`} cls="bg-green-50 border-green-100 text-green-700" />
-            <Stat value={search.total_impressions} label={`Times shown in Google, ${days} days`} cls="bg-blue-50 border-blue-100 text-blue-700" />
-          </div>
-          <div className="bg-white border border-slate-200 rounded-xl shadow-sm p-4">
-            <h3 className="text-base font-bold text-slate-900 flex items-center gap-2 mb-4" style={{ fontFamily: "Manrope" }}><Search size={17} className="text-blue-600" />Google clicks per day</h3>
-            <div className="flex items-end gap-px h-32">
-              {search.daily.map(d => {
-                const mx = Math.max(1, ...search.daily.map(x => x.clicks));
-                return <div key={d.date} className="flex-1 h-full flex items-end" title={`${d.date}: ${d.clicks} clicks, shown ${d.impressions}`}><div className="w-full bg-green-500 hover:bg-green-700 rounded-t-sm" style={{ height: `${(d.clicks / mx) * 100}%`, minHeight: d.clicks ? 2 : 0 }} /></div>;
-              })}
+        <div className="space-y-4">
+          <Card>
+            <SectionTitle icon={Search} title="Google search" hint={`Last ${days} days. Search Console data lags by 2 to 3 days.`}
+              right={<span className="text-sm text-slate-600"><b className="text-slate-900">{search.total_clicks.toLocaleString()}</b> clicks · <b className="text-slate-900">{search.total_impressions.toLocaleString()}</b> times shown</span>} />
+            <div className="px-5 pb-5">
+              <Bars items={search.daily} valueKey="clicks" color="bg-gradient-to-t from-emerald-600 to-emerald-400 group-hover:from-emerald-700 group-hover:to-emerald-500" tip={d => `${d.date}: ${d.clicks} clicks, shown ${d.impressions}`} />
+              <div className="flex justify-between text-xs text-slate-400 mt-1"><span>{search.daily[0]?.date}</span><span>{search.daily[search.daily.length - 1]?.date}</span></div>
+              <table className="w-full text-sm mt-4">
+                <thead><tr className="text-xs text-slate-400 text-left"><th className="py-2 font-medium">Month</th><th className="py-2 font-medium text-right">Clicks</th><th className="py-2 font-medium text-right">Shown</th></tr></thead>
+                <tbody>{search.months.map(m => <tr key={m.month} className="border-t border-slate-100"><td className="py-2 text-slate-700">{m.month}</td><td className="py-2 text-right font-semibold text-slate-900">{m.clicks}</td><td className="py-2 text-right text-slate-600">{m.impressions}</td></tr>)}</tbody>
+              </table>
             </div>
-            <div className="flex justify-between text-xs text-slate-400 mt-1"><span>{search.daily[0]?.date}</span><span>{search.daily[search.daily.length - 1]?.date}</span></div>
-            <table className="w-full text-sm mt-4"><thead><tr className="text-xs text-slate-400 text-left"><th className="py-2 font-medium">Month</th><th className="py-2 font-medium text-right">Clicks</th><th className="py-2 font-medium text-right">Shown</th></tr></thead>
-              <tbody>{search.months.map(m => <tr key={m.month} className="border-t border-slate-100"><td className="py-2 text-slate-700">{m.month}</td><td className="py-2 text-right font-semibold text-slate-900">{m.clicks}</td><td className="py-2 text-right text-slate-600">{m.impressions}</td></tr>)}</tbody></table>
-          </div>
+          </Card>
           <div className="grid lg:grid-cols-2 gap-4">
             <SearchTable title="What people searched on Google" icon={Search} rows={search.queries} empty="No search data yet" />
-            <SearchTable title="Pages Google sends people to" icon={FileText} rows={search.pages} empty="No search data yet" />
+            <SearchTable title="Pages Google sends people to" icon={FileText} rows={search.pages} empty="No search data yet" linkBase={base} />
             <SearchTable title="Countries (Google Search)" icon={Globe} rows={search.countries.map(c => ({ ...c, name: countryName(c.name) }))} empty="No search data yet" />
           </div>
         </div>
