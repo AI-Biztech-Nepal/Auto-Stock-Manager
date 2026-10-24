@@ -112,23 +112,20 @@ const SearchTable = ({ title, icon, rows, empty, linkBase }) => (
   </Card>
 );
 
-// One visit as a compact clickable tile; click it to open the page-by-page timeline.
+// One visit as a single full-width clickable line with every detail; click it to open the page-by-page timeline.
 const VisitTile = ({ v, onOpen }) => {
   const Dev = v.device === "mobile" ? Smartphone : Monitor;
   const quick = v.seconds === 0;
   return (
     <button type="button" onClick={onOpen}
-      className="text-left bg-white border border-slate-200/80 rounded-2xl p-3.5 flex flex-col gap-2 transition shadow-[0_1px_3px_rgba(15,23,42,0.06)] hover:shadow-md hover:border-blue-300 hover:-translate-y-0.5">
-      <div className="flex items-center justify-between gap-2 text-xs text-slate-500">
-        <span className="flex items-center gap-1.5"><Dev size={13} />{v.started.slice(5)}</span>
-        <span className="font-mono text-slate-400">{v.visitor}</span>
-      </div>
-      <div className={`text-2xl font-bold leading-tight ${quick ? "text-slate-400" : "text-slate-900"}`} style={FONT}>{fmtDuration(v.seconds)}</div>
-      <div className="text-[11px] text-slate-400 flex items-center gap-1"><Clock size={11} />time on site</div>
-      <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-100 text-xs">
-        <span className="text-slate-600">{v.pages} {v.pages === 1 ? "page" : "pages"}</span>
-        <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 truncate max-w-[60%]">{v.source}</span>
-      </div>
+      className="w-full text-left bg-white border border-slate-200/80 rounded-xl px-4 py-3 flex flex-wrap md:flex-nowrap items-center gap-x-4 gap-y-1.5 transition shadow-[0_1px_3px_rgba(15,23,42,0.06)] hover:shadow-md hover:border-blue-300">
+      <span className="flex items-center gap-2 text-sm font-semibold text-slate-800 whitespace-nowrap md:w-44 shrink-0"><Dev size={15} className="text-slate-500" />{v.started}</span>
+      <span className={`flex items-center gap-1.5 text-sm font-bold whitespace-nowrap md:w-36 shrink-0 ${quick ? "text-slate-400" : "text-slate-900"}`} style={FONT}><Clock size={13} className="text-slate-400" />{fmtDuration(v.seconds)}</span>
+      <span className="text-xs text-slate-500 whitespace-nowrap md:w-16 shrink-0">{v.pages} {v.pages === 1 ? "page" : "pages"}</span>
+      <span className="text-xs text-slate-600 truncate flex-1 min-w-[140px] basis-full md:basis-0" title={v.paths.join(", ")}>{v.paths.join("  ›  ")}</span>
+      <span className="text-[11px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 whitespace-nowrap shrink-0 max-w-[140px] truncate">{v.source}</span>
+      <span className="text-[11px] text-slate-500 capitalize whitespace-nowrap shrink-0 md:w-16">{v.device}</span>
+      <span className="font-mono text-[11px] text-slate-400 shrink-0">{v.visitor}</span>
     </button>
   );
 };
@@ -249,7 +246,7 @@ export default function Visits() {
             </div>
             {eng && <span className="text-xs text-slate-500">{eng.visits} visits · {eng.pages_per_visit} pages each · longest {eng.longest_minutes} min · {eng.quick_visit_pct}% left after one page</span>}
           </div>
-          <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3">
+          <div className="space-y-2">
             {visitList.slice(0, shown).map((v, i) => <VisitTile key={`${v.visitor}-${v.started}-${i}`} v={v} onOpen={() => setOpen(i)} />)}
           </div>
           {shown < visitList.length && (
