@@ -111,6 +111,23 @@ TABLES = {
     "offer_codes": {"columns": {"id", "company_id", "code", "status", "customer_name", "phone", "prize", "created_by",
                                  "created_at", "used_at"}},
     "page_views": {"columns": {"id", "company_id", "visitor_id", "path", "referrer", "device", "created_at"}},
+    # Finance books (finance_books.py)
+    "fin_parties": {"columns": {"id", "company_id", "name", "phone", "address", "created_at", "updated_at"}},
+    "fin_bank_accounts": {"columns": {"id", "company_id", "name", "bank_name", "account_number", "account_holder_name",
+                                       "address", "created_at", "updated_at"}},
+    "fin_account_transfers": {"columns": {"id", "company_id", "from_account_id", "to_account_id", "amount", "note",
+                                           "transfer_date", "created_at"}},
+    "fin_expense_categories": {"columns": {"id", "company_id", "name", "created_at", "updated_at"}},
+    "fin_items": {"columns": {"id", "company_id", "name", "rate", "created_at", "updated_at"}},
+    "fin_transactions": {"columns": {"id", "company_id", "type", "amount", "note", "party_name", "customer_id", "bill_no",
+                                      "bill_date", "party_address", "vat_pan_no", "items", "discount_amount", "vat_amount",
+                                      "expense_category_id", "payment_mode", "bank_account_id", "source_type", "source_id",
+                                      "created_at", "updated_at"}, "json_cols": {"items"}},
+    "fin_customer_ledger": {"columns": {"id", "company_id", "customer_id", "entry_type", "amount", "note", "source", "source_type", "source_id",
+                                     "bank_account_id", "entry_date", "receipt_no", "created_at"}},
+    "fin_vendor_ledger": {"columns": {"id", "company_id", "vendor_id", "entry_type", "amount", "note", "source", "source_type", "source_id",
+                                     "bank_account_id", "entry_date", "receipt_no", "created_at"}},
+    "fin_statement_imports": {"columns": {"id", "company_id", "reference_code", "created_at"}},
 }
 
 

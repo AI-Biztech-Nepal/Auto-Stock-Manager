@@ -78,6 +78,9 @@ TENANT_COLLECTIONS = {
     "sync_logs", "team_members", "vehicle_photos", "vehicles", "vendor_payments", "vendors",
     "audit_logs", "ai_chat_sessions", "settings", "facebook_pages", "bookings",
     "offer_prizes", "offer_codes", "page_views",
+    # Finance books (see finance_books.py); tables are created by migration_add_finance_books.sql.
+    "fin_parties", "fin_bank_accounts", "fin_account_transfers", "fin_expense_categories", "fin_items",
+    "fin_transactions", "fin_customer_ledger", "fin_vendor_ledger", "fin_statement_imports",
 }
 
 def company_scope(cu: dict) -> dict:
@@ -2038,7 +2041,14 @@ async def platform_delete_company(company_id: str, cu: dict = Depends(platform_o
     if not company:
         raise HTTPException(404, "Company not found")
     for name in TENANT_COLLECTIONS:
-        await getattr(db, name).delete_many({"company_id": company_id})
+        try:
+            await getattr(db, name).delete_many({"company_id": company_id})
+        except Exception as e:
+            # The finance tables only exist once migration_add_finance_books.sql has been run by hand;
+            # until then there is nothing of theirs to delete.
+            if name.startswith("fin_") and ("1146" in str(e) or "doesn't exist" in str(e)):
+                continue
+            raise
     await db.users.delete_many({"company_id": company_id})
     await db.companies.delete_one({"id": company_id})
     return {"message": f"{company['name']} and all its data have been permanently deleted"}
@@ -6706,5 +6716,8 @@ async def public_dashain_spin(request: Request, req: OfferSpin):
 async def shutdown():
     client.close()
     _compress_pool.shutdown(wait=False, cancel_futures=True)
+
+import finance_books
+finance_books.register(api_router, db, admin_only)
 
 app.include_router(api_router)
