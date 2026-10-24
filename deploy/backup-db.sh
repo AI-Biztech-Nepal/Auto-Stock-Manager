@@ -3,11 +3,11 @@
 #   15 2 * * * /home/mansa/auto-stock-manager/deploy/backup-db.sh
 #
 # Uses ~/.my.cnf for credentials (host/user/password/database), so it follows whatever
-# the app is currently pointed at. Keeps 14 days of gzipped dumps in ~/backups.
+# the app is currently pointed at. Keeps 7 days of gzipped dumps in ~/backups.
 set -e
 
 DEST="${BACKUP_DIR:-$HOME/backups}"
-KEEP_DAYS="${BACKUP_KEEP_DAYS:-14}"
+KEEP_DAYS="${BACKUP_KEEP_DAYS:-7}"
 DB="$(awk -F= '/^database=/{print $2}' "$HOME/.my.cnf")"
 
 mkdir -p "$DEST"
