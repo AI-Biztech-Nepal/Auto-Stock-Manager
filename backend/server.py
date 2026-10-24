@@ -5301,8 +5301,19 @@ async def visits_search(days: int = 30, cu: dict = Depends(admin_only)):
             raise HTTPException(502, f"Google Search Console error: {resp.json().get('error', {}).get('message', resp.status_code)}")
         return [{"name": r["keys"][0], "clicks": int(r["clicks"]), "impressions": int(r["impressions"]),
                  "position": round(r["position"], 1)} for r in resp.json().get("rows", [])]
-    queries, countries = await asyncio.gather(query("query", 100), query("country", 100))
-    return {"configured": True, "days": days, "queries": queries, "countries": countries}
+    queries, countries, pages, daily = await asyncio.gather(
+        query("query", 500), query("country", 100), query("page", 100), query("date", 400))
+    for p in pages:  # show the path, not the full address
+        p["name"] = urlparse(p["name"]).path or "/"
+    pages = (await _name_vehicle_pages({"top_pages": pages}))["top_pages"]
+    daily = sorted(({"date": d["name"], "clicks": d["clicks"], "impressions": d["impressions"]} for d in daily), key=lambda d: d["date"])
+    months = {}
+    for d in daily:
+        m = months.setdefault(d["date"][:7], {"month": d["date"][:7], "clicks": 0, "impressions": 0})
+        m["clicks"] += d["clicks"]; m["impressions"] += d["impressions"]
+    return {"configured": True, "days": days, "queries": queries, "countries": countries, "pages": pages,
+            "daily": daily, "months": list(months.values()),
+            "total_clicks": sum(d["clicks"] for d in daily), "total_impressions": sum(d["impressions"] for d in daily)}
 
 @api_router.get("/visits/summary")
 async def visits_summary(days: int = 30, cu: dict = Depends(admin_only)):

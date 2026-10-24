@@ -189,8 +189,25 @@ export default function Visits() {
       {search?.configured && (
         <div className="space-y-2">
           <p className="text-xs text-slate-400">Google Search, last {days} days. Search Console data lags by 2 to 3 days.</p>
+          <div className="grid grid-cols-2 gap-4">
+            <Stat value={search.total_clicks} label={`Clicks from Google, ${days} days`} cls="bg-green-50 border-green-100 text-green-700" />
+            <Stat value={search.total_impressions} label={`Times shown in Google, ${days} days`} cls="bg-blue-50 border-blue-100 text-blue-700" />
+          </div>
+          <div className="bg-white border border-slate-200 rounded-xl shadow-sm p-4">
+            <h3 className="text-base font-bold text-slate-900 flex items-center gap-2 mb-4" style={{ fontFamily: "Manrope" }}><Search size={17} className="text-blue-600" />Google clicks per day</h3>
+            <div className="flex items-end gap-px h-32">
+              {search.daily.map(d => {
+                const mx = Math.max(1, ...search.daily.map(x => x.clicks));
+                return <div key={d.date} className="flex-1 h-full flex items-end" title={`${d.date}: ${d.clicks} clicks, shown ${d.impressions}`}><div className="w-full bg-green-500 hover:bg-green-700 rounded-t-sm" style={{ height: `${(d.clicks / mx) * 100}%`, minHeight: d.clicks ? 2 : 0 }} /></div>;
+              })}
+            </div>
+            <div className="flex justify-between text-xs text-slate-400 mt-1"><span>{search.daily[0]?.date}</span><span>{search.daily[search.daily.length - 1]?.date}</span></div>
+            <table className="w-full text-sm mt-4"><thead><tr className="text-xs text-slate-400 text-left"><th className="py-2 font-medium">Month</th><th className="py-2 font-medium text-right">Clicks</th><th className="py-2 font-medium text-right">Shown</th></tr></thead>
+              <tbody>{search.months.map(m => <tr key={m.month} className="border-t border-slate-100"><td className="py-2 text-slate-700">{m.month}</td><td className="py-2 text-right font-semibold text-slate-900">{m.clicks}</td><td className="py-2 text-right text-slate-600">{m.impressions}</td></tr>)}</tbody></table>
+          </div>
           <div className="grid lg:grid-cols-2 gap-4">
             <SearchTable title="What people searched on Google" icon={Search} rows={search.queries} empty="No search data yet" />
+            <SearchTable title="Pages Google sends people to" icon={FileText} rows={search.pages} empty="No search data yet" />
             <SearchTable title="Countries (Google Search)" icon={Globe} rows={search.countries.map(c => ({ ...c, name: countryName(c.name) }))} empty="No search data yet" />
           </div>
         </div>
