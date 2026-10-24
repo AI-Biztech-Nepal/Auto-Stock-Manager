@@ -62,25 +62,44 @@ const CombinedChart = ({ daily, clicksByDate }) => {
         </> : <span className="flex items-center gap-1.5"><i className="w-2.5 h-2.5 rounded-sm bg-indigo-400" />Page views</span>}
         {clicksByDate && <span className="flex items-center gap-1.5"><i className="w-4 h-0.5 bg-rose-500" />Google search clicks (Search Console)</span>}
       </div>
-      <div className="relative h-48">
-        {[0.25, 0.5, 0.75].map(f => <div key={f} className="absolute inset-x-0 border-t border-dashed border-slate-100" style={{ bottom: `${f * 100}%` }} />)}
-        <div className="relative flex items-end gap-[3px] h-full">
-          {daily.map((d, i) => (
-            <div key={d.date} className="flex-1 h-full flex items-end group"
-              title={`${d.date}: ${d.views} views, ${d.visitors} visitors${split ? ` (direct ${d.direct}, Google ${d.google}, other ${d.other})` : ""}${clicks[i] !== null ? `, ${clicks[i]} Google search clicks` : ""}`}>
-              <div className="w-full flex flex-col-reverse rounded-t-md overflow-hidden" style={{ height: `${(d.views / max) * 100}%`, minHeight: d.views ? 3 : 0 }}>
-                {split ? <>{seg(d, d.direct, "direct")}{seg(d, d.google, "google")}{seg(d, d.other, "other")}</> : seg(d, d.views, "views")}
+      <div className="overflow-x-auto pb-1">
+        <div style={{ minWidth: daily.length * 40 }}>
+          <div className="relative h-52">
+            <div className="absolute inset-x-0 top-5 bottom-0">
+              {[0.25, 0.5, 0.75].map(f => <div key={f} className="absolute inset-x-0 border-t border-dashed border-slate-100" style={{ bottom: `${f * 100}%` }} />)}
+              <div className="relative flex items-end gap-[3px] h-full">
+                {daily.map((d, i) => (
+                  <div key={d.date} className="flex-1 h-full flex items-end group"
+                    title={`${d.date}: ${d.views} views, ${d.visitors} visitors${split ? ` (direct ${d.direct}, Google ${d.google}, other ${d.other})` : ""}${clicks[i] !== null ? `, ${clicks[i]} Google search clicks` : ""}`}>
+                    <div className="w-full relative" style={{ height: `${(d.views / max) * 100}%`, minHeight: d.views ? 3 : 0 }}>
+                      {d.views > 0 && <span className="absolute -top-4 inset-x-0 text-center text-[11px] font-semibold text-slate-700">{d.views}</span>}
+                      <div className="absolute inset-0 flex flex-col-reverse rounded-t-md overflow-hidden">
+                        {split ? <>{seg(d, d.direct, "direct")}{seg(d, d.google, "google")}{seg(d, d.other, "other")}</> : seg(d, d.views, "views")}
+                      </div>
+                    </div>
+                  </div>
+                ))}
               </div>
+              {line && (
+                <svg className="absolute inset-0 w-full h-full pointer-events-none" viewBox="0 0 100 100" preserveAspectRatio="none">
+                  <polyline points={line} fill="none" stroke="#f43f5e" strokeWidth="1.6" vectorEffect="non-scaling-stroke" strokeLinejoin="round" />
+                </svg>
+              )}
             </div>
-          ))}
+          </div>
+          <div className="flex gap-[3px] mt-1.5">
+            {daily.map(d => {
+              const dt = new Date(d.date + "T00:00:00");
+              return (
+                <div key={d.date} className="flex-1 text-center leading-tight">
+                  <div className="text-[11px] font-medium text-slate-600">{dt.getDate()}</div>
+                  <div className="text-[10px] text-slate-400">{dt.toLocaleString("en", { month: "short" })}</div>
+                </div>
+              );
+            })}
+          </div>
         </div>
-        {line && (
-          <svg className="absolute inset-0 w-full h-full pointer-events-none" viewBox="0 0 100 100" preserveAspectRatio="none">
-            <polyline points={line} fill="none" stroke="#f43f5e" strokeWidth="1.6" vectorEffect="non-scaling-stroke" strokeLinejoin="round" />
-          </svg>
-        )}
       </div>
-      <div className="flex justify-between text-xs text-slate-400 mt-1"><span>{daily[0]?.date}</span><span>{daily[daily.length - 1]?.date}</span></div>
     </div>
   );
 };
@@ -258,18 +277,12 @@ export default function Visits() {
       </div>
 
       <Card>
-        <SectionTitle icon={TrendingUp} title="Daily visits" hint={`Page views each day by source${search?.configured ? ", with Google search clicks as the red line. Search Console data lags by 2 to 3 days" : ""}. Hover a day for the numbers.`}
+        <SectionTitle icon={TrendingUp} title="Visits graph" hint={`Page views each day by source${search?.configured ? ", with Google search clicks as the red line. Search Console data lags by 2 to 3 days" : ""}. The number on each bar is that day's page views; hover a day for the full split.`}
           right={search?.configured && <span className="text-sm text-slate-600"><b className="text-slate-900">{search.total_clicks.toLocaleString()}</b> Google clicks · <b className="text-slate-900">{search.total_impressions.toLocaleString()}</b> times shown</span>} />
         <div className="px-5 pb-5">
           {data.total_views === 0 && !search?.configured
             ? <p className="py-10 text-center text-sm text-slate-500">No visits recorded yet. Once the storefront sends visits (see DEPLOYMENT.md), they appear here.</p>
             : <CombinedChart daily={data.daily} clicksByDate={search?.configured ? Object.fromEntries(search.daily.map(d => [d.date, d.clicks])) : null} />}
-          {search?.configured && (
-            <table className="w-full text-sm mt-5">
-              <thead><tr className="text-xs text-slate-400 text-left"><th className="py-2 font-medium">Month (Google search)</th><th className="py-2 font-medium text-right">Clicks</th><th className="py-2 font-medium text-right">Shown</th></tr></thead>
-              <tbody>{search.months.map(m => <tr key={m.month} className="border-t border-slate-100"><td className="py-2 text-slate-700">{m.month}</td><td className="py-2 text-right font-semibold text-slate-900">{m.clicks}</td><td className="py-2 text-right text-slate-600">{m.impressions}</td></tr>)}</tbody>
-            </table>
-          )}
         </div>
       </Card>
 
