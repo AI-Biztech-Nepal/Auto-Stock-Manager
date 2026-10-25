@@ -12,9 +12,9 @@ const Offers = lazy(() => import("./Offers"));
 const Visits = lazy(() => import("./Visits"));
 
 const TABS = {
-  share: { label: "Share", Icon: Share2, Page: Share },
-  offers: { label: "Offers", Icon: Gift, Page: Offers },
-  visits: { label: "Visits", Icon: Eye, Page: Visits },
+  share: { label: "Share", hint: "Post your vehicles to social media", Icon: Share2, Page: Share },
+  offers: { label: "Offers", hint: "Run the festival gift spin", Icon: Gift, Page: Offers },
+  visits: { label: "Visits", hint: "See who visits your website", Icon: Eye, Page: Visits },
 };
 
 export default function Marketing() {
@@ -24,7 +24,7 @@ export default function Marketing() {
   const requested = searchParams.get("tab");
   const tab = allowed.includes(requested) ? requested : allowed[0];
   if (!tab) return null;
-  const { Page } = TABS[tab];
+  const { Page, hint } = TABS[tab];
 
   const switchTab = (t) => setSearchParams({ tab: t }, { replace: true });
 
@@ -34,11 +34,11 @@ export default function Marketing() {
         <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
           <Megaphone size={22} className="text-slate-400" /> Marketing
         </h1>
-        <p className="text-sm text-slate-500">Post your vehicles, run offers and see who visits your website</p>
+        <p className="text-sm text-slate-500">{hint}</p>
       </div>
 
       {allowed.length > 1 && (
-        <div className="grid gap-2 bg-slate-100 rounded-2xl p-1.5" style={{ gridTemplateColumns: `repeat(${allowed.length}, minmax(0, 1fr))` }} role="tablist" aria-label="Marketing" data-testid="marketing-tabs">
+        <div className="grid gap-1 bg-slate-100 rounded-xl p-1" style={{ gridTemplateColumns: `repeat(${allowed.length}, minmax(0, 1fr))` }} role="tablist" aria-label="Marketing" data-testid="marketing-tabs">
           {allowed.map(key => {
             const { label, Icon } = TABS[key];
             const active = tab === key;
@@ -49,7 +49,7 @@ export default function Marketing() {
                 aria-selected={active}
                 onClick={() => switchTab(key)}
                 data-testid={`marketing-tab-${key}`}
-                className={`flex items-center justify-center gap-2 h-12 rounded-xl text-sm sm:text-base font-semibold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
+                className={`flex items-center justify-center gap-1.5 sm:gap-2 h-11 rounded-lg text-sm font-semibold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
                   active ? "bg-blue-600 text-white shadow-md" : "text-slate-600 hover:bg-white hover:text-slate-900"
                 }`}
               >

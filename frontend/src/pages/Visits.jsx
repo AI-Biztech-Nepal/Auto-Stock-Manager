@@ -46,16 +46,20 @@ const Stat = ({ icon: Icon, value, label }) => (
 // search clicks from Search Console drawn over them as a line.
 const COLORS = { direct: "bg-indigo-500 group-hover:bg-indigo-600", google: "bg-emerald-500 group-hover:bg-emerald-600", other: "bg-amber-400 group-hover:bg-amber-500", views: "bg-indigo-400 group-hover:bg-indigo-500" };
 const CombinedChart = ({ daily, clicksByDate }) => {
+  const [sel, setSel] = useState(null);
   const split = daily.some(d => d.direct !== undefined);
   const clicks = daily.map(d => (clicksByDate ? clicksByDate[d.date] ?? null : null));
   const max = Math.max(1, ...daily.map(d => d.views), ...clicks.map(c => c || 0));
   const pts = clicks.map((c, i) => (c === null ? null : [((i + 0.5) / daily.length) * 100, 100 - (c / max) * 100]));
   const line = pts.filter(Boolean).map(p => p.join(",")).join(" ");
+  // The chart always fits its card (no sideways scroll); detail that cannot fit a bar moves to a tap-to-read panel.
+  const dense = daily.length > 10;
+  const step = Math.ceil(daily.length / 8);
+  const fmtDay = d => new Date(d.date + "T00:00:00").toLocaleDateString("en", { day: "numeric", month: "short" });
   const seg = (d, n, key) => (
-    <div className={`w-full flex items-center justify-center text-[10px] font-semibold text-white overflow-hidden ${COLORS[key]}`} style={{ height: `${d.views ? (n / d.views) * 100 : 0}%` }}>
-      {n > 0 && ((n / max) * 188 >= 14) ? n : null}
-    </div>
+    <div className={`w-full ${COLORS[key]}`} style={{ height: `${d.views ? (n / d.views) * 100 : 0}%` }} />
   );
+  const cur = sel !== null ? daily[sel] : null;
   return (
     <div>
       <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500 mb-3">
@@ -63,67 +67,60 @@ const CombinedChart = ({ daily, clicksByDate }) => {
           <span className="flex items-center gap-1.5"><i className="w-2.5 h-2.5 rounded-sm bg-indigo-500" />Direct</span>
           <span className="flex items-center gap-1.5"><i className="w-2.5 h-2.5 rounded-sm bg-emerald-500" />From Google</span>
           <span className="flex items-center gap-1.5"><i className="w-2.5 h-2.5 rounded-sm bg-amber-400" />Other sites</span>
-          <span className="text-slate-400">Under each date: direct · Google · other</span>
         </> : <span className="flex items-center gap-1.5"><i className="w-2.5 h-2.5 rounded-sm bg-indigo-400" />Page views</span>}
-        {clicksByDate && <span className="flex items-center gap-1.5"><i className="w-4 h-0.5 bg-rose-500" />Google search clicks (Search Console)</span>}
+        {clicksByDate && <span className="flex items-center gap-1.5"><i className="w-4 h-0.5 bg-rose-500" />Google search clicks</span>}
       </div>
-      <div className="overflow-x-auto pb-1">
-        <div style={{ minWidth: daily.length * 40 }}>
-          <div className="relative h-52">
-            <div className="absolute inset-x-0 top-5 bottom-0">
-              {[0.25, 0.5, 0.75].map(f => <div key={f} className="absolute inset-x-0 border-t border-dashed border-slate-100" style={{ bottom: `${f * 100}%` }} />)}
-              <div className="relative flex items-end gap-[3px] h-full">
-                {daily.map((d, i) => (
-                  <div key={d.date} className="flex-1 h-full flex items-end group"
-                    title={`${d.date}: ${d.views} views, ${d.visitors} visitors${split ? ` (direct ${d.direct}, Google ${d.google}, other ${d.other})` : ""}${clicks[i] !== null ? `, ${clicks[i]} Google search clicks` : ""}`}>
-                    <div className="w-full relative" style={{ height: `${(d.views / max) * 100}%`, minHeight: d.views ? 3 : 0 }}>
-                      {d.views > 0 && <span className="absolute -top-4 inset-x-0 text-center text-[11px] font-semibold text-slate-700">{d.views}</span>}
-                      <div className="absolute inset-0 flex flex-col-reverse rounded-t-md overflow-hidden">
-                        {split ? <>{seg(d, d.direct, "direct")}{seg(d, d.google, "google")}{seg(d, d.other, "other")}</> : seg(d, d.views, "views")}
-                      </div>
-                    </div>
+      <div className="min-h-[2.75rem] mb-2 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">
+        {cur ? (
+          <span><b className="text-slate-900">{fmtDay(cur)}</b>: {cur.views} views, {cur.visitors} visitors
+            {split && <> · <span className="text-indigo-600 font-semibold">{cur.direct} direct</span> · <span className="text-emerald-600 font-semibold">{cur.google} Google</span> · <span className="text-amber-500 font-semibold">{cur.other} other</span></>}
+            {clicks[sel] !== null && <> · <span className="text-rose-500 font-semibold">{clicks[sel]} search clicks</span></>}</span>
+        ) : "Tap a bar to see that day's split."}
+      </div>
+      <div className="relative h-44 sm:h-52">
+        <div className="absolute inset-x-0 top-5 bottom-0">
+          {[0.25, 0.5, 0.75].map(f => <div key={f} className="absolute inset-x-0 border-t border-dashed border-slate-100" style={{ bottom: `${f * 100}%` }} />)}
+          <div className={`relative flex items-end h-full ${dense ? "gap-px" : "gap-1"}`}>
+            {daily.map((d, i) => (
+              <button type="button" key={d.date} onClick={() => setSel(sel === i ? null : i)} aria-label={`${fmtDay(d)}: ${d.views} views`}
+                className={`flex-1 min-w-0 h-full flex items-end group ${sel === i ? "bg-blue-50 rounded" : ""}`}>
+                <div className="w-full relative" style={{ height: `${(d.views / max) * 100}%`, minHeight: d.views ? 3 : 0 }}>
+                  {!dense && d.views > 0 && <span className="absolute -top-4 inset-x-0 text-center text-[11px] font-semibold text-slate-700">{d.views}</span>}
+                  <div className="absolute inset-0 flex flex-col-reverse rounded-t-sm overflow-hidden">
+                    {split ? <>{seg(d, d.direct, "direct")}{seg(d, d.google, "google")}{seg(d, d.other, "other")}</> : seg(d, d.views, "views")}
                   </div>
-                ))}
-              </div>
-              {line && (
-                <svg className="absolute inset-0 w-full h-full pointer-events-none" viewBox="0 0 100 100" preserveAspectRatio="none">
-                  <polyline points={line} fill="none" stroke="#f43f5e" strokeWidth="1.6" vectorEffect="non-scaling-stroke" strokeLinejoin="round" />
-                </svg>
-              )}
-            </div>
-          </div>
-          <div className="flex gap-[3px] mt-1.5">
-            {daily.map(d => {
-              const dt = new Date(d.date + "T00:00:00");
-              return (
-                <div key={d.date} className="flex-1 text-center leading-tight">
-                  <div className="text-[11px] font-medium text-slate-600">{dt.getDate()}</div>
-                  <div className="text-[10px] text-slate-400">{dt.toLocaleString("en", { month: "short" })}</div>
-                  {split && (
-                    <div className="mt-1 flex justify-center gap-1 text-[10px] font-semibold">
-                      <span className="text-indigo-600" title="Direct">{d.direct}</span>
-                      <span className="text-emerald-600" title="From Google">{d.google}</span>
-                      <span className="text-amber-500" title="Other sites">{d.other}</span>
-                    </div>
-                  )}
                 </div>
-              );
-            })}
+              </button>
+            ))}
           </div>
+          {line && (
+            <svg className="absolute inset-0 w-full h-full pointer-events-none" viewBox="0 0 100 100" preserveAspectRatio="none">
+              <polyline points={line} fill="none" stroke="#f43f5e" strokeWidth="1.6" vectorEffect="non-scaling-stroke" strokeLinejoin="round" />
+            </svg>
+          )}
         </div>
+      </div>
+      <div className={`flex mt-1.5 ${dense ? "gap-px" : "gap-1"}`}>
+        {daily.map((d, i) => (
+          <div key={d.date} className="flex-1 min-w-0 text-center leading-tight text-[10px] text-slate-500">
+            {i % step === 0 ? <span className="whitespace-nowrap inline-block">{fmtDay(d)}</span> : <span>&nbsp;</span>}
+          </div>
+        ))}
       </div>
     </div>
   );
 };
 
 const RankList = ({ title, icon, rows, empty, linkBase }) => {
+  const [all, setAll] = useState(false);
+  const list = all ? rows : rows.slice(0, 8);
   const max = Math.max(1, ...rows.map(r => r.views));
   return (
     <Card>
       <SectionTitle icon={icon} title={title} />
       {rows.length === 0 ? <p className="px-5 pb-6 text-sm text-slate-500 text-center">{empty}</p> : (
-        <ul className="px-5 pb-5 space-y-3 max-h-96 overflow-y-auto">
-          {rows.map(r => {
+        <ul className="px-5 pb-5 space-y-3">
+          {list.map(r => {
             const inner = (
               <>
                 <div className="flex justify-between gap-3 text-sm">
@@ -143,20 +140,24 @@ const RankList = ({ title, icon, rows, empty, linkBase }) => {
           })}
         </ul>
       )}
+      {rows.length > 8 && <button onClick={() => setAll(!all)} className="w-full pb-4 text-xs font-medium text-blue-600 hover:underline">{all ? "Show less" : `Show all ${rows.length}`}</button>}
     </Card>
   );
 };
 
-const SearchTable = ({ title, icon, rows, empty, linkBase }) => (
+const SearchTable = ({ title, icon, rows: allRows, empty, linkBase }) => {
+  const [all, setAll] = useState(false);
+  const rows = all ? allRows : allRows.slice(0, 8);
+  return (
   <Card>
     <SectionTitle icon={icon} title={title} />
-    {rows.length === 0 ? <p className="px-5 pb-6 text-sm text-slate-500 text-center">{empty}</p> : (
-      <div className="max-h-96 overflow-y-auto pb-2">
+    {allRows.length === 0 ? <p className="px-5 pb-6 text-sm text-slate-500 text-center">{empty}</p> : (
+      <div className="pb-2">
         <table className="w-full text-sm">
-          <thead className="sticky top-0 bg-white"><tr className="text-xs text-slate-400 text-left"><th className="px-5 py-2 font-medium">&nbsp;</th><th className="py-2 font-medium text-right">Clicks</th><th className="py-2 font-medium text-right">Shown</th><th className="px-5 py-2 font-medium text-right">Rank</th></tr></thead>
+          <thead><tr className="text-xs text-slate-400 text-left"><th className="px-5 py-2 font-medium">&nbsp;</th><th className="py-2 font-medium text-right">Clicks</th><th className="py-2 font-medium text-right">Shown</th><th className="px-5 py-2 font-medium text-right">Rank</th></tr></thead>
           <tbody>{rows.map(r => (
             <tr key={r.name} className="border-t border-slate-100 hover:bg-slate-50">
-              <td className="px-5 py-2.5 text-slate-700 max-w-[240px] truncate" title={r.name}>
+              <td className="px-5 py-2.5 text-slate-700 max-w-[150px] sm:max-w-[240px] truncate" title={r.name}>
                 {linkBase && r.path ? <a href={linkBase + r.path} target="_blank" rel="noopener noreferrer" className="hover:text-blue-700 hover:underline">{r.name}</a> : r.name}
               </td>
               <td className="py-2.5 text-right font-semibold text-slate-900">{r.clicks}</td>
@@ -167,8 +168,10 @@ const SearchTable = ({ title, icon, rows, empty, linkBase }) => (
         </table>
       </div>
     )}
+    {allRows.length > 8 && <button onClick={() => setAll(!all)} className="w-full pb-4 text-xs font-medium text-blue-600 hover:underline">{all ? "Show less" : `Show all ${allRows.length}`}</button>}
   </Card>
-);
+  );
+};
 
 // One visit as a single full-width clickable line with every detail; click it to open the page-by-page timeline.
 const VisitTile = ({ v, onOpen }) => {
@@ -176,7 +179,7 @@ const VisitTile = ({ v, onOpen }) => {
   const quick = v.seconds === 0;
   return (
     <button type="button" onClick={onOpen}
-      className="w-full text-left bg-white border border-slate-200/80 rounded-xl px-4 py-3 flex flex-wrap md:flex-nowrap items-center gap-x-4 gap-y-1.5 transition shadow-[0_1px_3px_rgba(15,23,42,0.06)] hover:shadow-md hover:border-blue-300">
+      className="w-full text-left bg-white border border-slate-200/80 rounded-xl px-4 py-3 flex flex-wrap md:flex-nowrap items-center gap-x-3 gap-y-1.5 min-w-0 transition shadow-[0_1px_3px_rgba(15,23,42,0.06)] hover:shadow-md hover:border-blue-300">
       <span className="flex items-center gap-2 text-sm font-semibold text-slate-800 whitespace-nowrap md:w-44 shrink-0"><Dev size={15} className="text-slate-500" />{v.started}</span>
       <span className={`flex items-center gap-1.5 text-sm font-bold whitespace-nowrap md:w-36 shrink-0 ${quick ? "text-slate-400" : "text-slate-900"}`} style={FONT}><Clock size={13} className="text-slate-400" />{fmtDuration(v.seconds)}</span>
       <span className="text-xs text-slate-500 whitespace-nowrap md:w-16 shrink-0">{v.pages} {v.pages === 1 ? "page" : "pages"}</span>
@@ -273,14 +276,14 @@ export default function Visits({ embedded = false }) {
             <span className="mx-2">·</span>{data.source === "google_analytics" ? "Data: Google Analytics" : "Data: site visit tracker"}
           </p>
         </div>
-        <div className="flex gap-1 bg-slate-100 rounded-xl p-1">
+        <div className="flex gap-1 bg-slate-100 rounded-xl p-1 w-full sm:w-auto">
           {RANGES.map(r => (
-            <button key={r.days} onClick={() => setDays(r.days)} className={`h-8 px-4 rounded-lg text-sm font-medium transition ${days === r.days ? "bg-white shadow-sm text-blue-700" : "text-slate-500 hover:text-slate-800"}`}>{r.label}</button>
+            <button key={r.days} onClick={() => setDays(r.days)} className={`flex-1 sm:flex-none h-9 sm:h-8 px-4 rounded-lg text-sm font-medium transition ${days === r.days ? "bg-white shadow-sm text-blue-700" : "text-slate-500 hover:text-slate-800"}`}>{r.label}</button>
           ))}
         </div>
       </div>
 
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-4">
         <Stat icon={Users} value={data.today_visitors} label="Visitors today" />
         <Stat icon={Eye} value={data.today_views} label="Page views today" />
         <Stat icon={Users} value={data.unique_visitors} label={`Visitors, ${days} days`} />
@@ -291,7 +294,7 @@ export default function Visits({ embedded = false }) {
       <Card>
         <SectionTitle icon={TrendingUp} title="Visits graph" hint={`Page views each day by source${search?.configured ? ", with Google search clicks as the red line. Search Console data lags by 2 to 3 days" : ""}. The number on each bar is that day's page views; hover a day for the full split.`}
           right={search?.configured && <span className="text-sm text-slate-600"><b className="text-slate-900">{search.total_clicks.toLocaleString()}</b> Google clicks · <b className="text-slate-900">{search.total_impressions.toLocaleString()}</b> times shown</span>} />
-        <div className="px-5 pb-5">
+        <div className="px-3 sm:px-5 pb-5">
           {data.total_views === 0 && !search?.configured
             ? <p className="py-10 text-center text-sm text-slate-500">No visits recorded yet. Once the storefront sends visits (see DEPLOYMENT.md), they appear here.</p>
             : <CombinedChart daily={data.daily} clicksByDate={search?.configured ? Object.fromEntries(search.daily.map(d => [d.date, d.clicks])) : null} />}
