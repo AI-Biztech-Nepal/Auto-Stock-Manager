@@ -5239,9 +5239,9 @@ async def _name_vehicle_pages(summary: dict) -> dict:
             for st in v.get("steps", []): st["label"] = name(st["path"])
     return summary
 
-async def _ga4_summary(days: int) -> dict:
+async def _ga4_summary(days: int, skip: int = 0) -> dict:
     token = await asyncio.to_thread(_ga4_token)
-    rng = [{"startDate": f"{days - 1}daysAgo", "endDate": "today"}]
+    rng = [{"startDate": f"{days - 1 + skip}daysAgo", "endDate": f"{skip}daysAgo" if skip else "today"}]
     metrics = [{"name": "screenPageViews"}, {"name": "activeUsers"}]
     def rep(dim, limit=25, order=True):
         r = {"dateRanges": rng, "dimensions": [{"name": dim}], "metrics": metrics, "limit": limit}
@@ -5262,7 +5262,7 @@ async def _ga4_summary(days: int) -> dict:
     def rows(r): return r.get("rows", [])
     def vals(row): return [int(float(v["value"])) for v in row["metricValues"]]
     by_day = {r["dimensionValues"][0]["value"]: vals(r) for r in rows(daily_r)}
-    npt_today = datetime.now(timezone(timedelta(hours=5, minutes=45))).date()
+    npt_today = datetime.now(timezone(timedelta(hours=5, minutes=45))).date() - timedelta(days=skip)
     daily = []
     for i in range(days):
         d = npt_today - timedelta(days=days - 1 - i)
@@ -5298,12 +5298,12 @@ def _gsc_token() -> str:
     return creds.token
 
 @api_router.get("/visits/search")
-async def visits_search(days: int = 30, cu: dict = Depends(admin_only)):
-    days = max(1, min(days, 365))
+async def visits_search(days: int = 30, skip: int = 0, cu: dict = Depends(admin_only)):
+    days = max(1, min(days, 365)); skip = max(0, min(skip, 30))
     if not GSC_CREDENTIALS_JSON:
         return {"configured": False}
     token = await asyncio.to_thread(_gsc_token)
-    end = datetime.now(timezone.utc).date()
+    end = datetime.now(timezone.utc).date() - timedelta(days=skip)
     start = end - timedelta(days=days - 1)
     url = f"https://searchconsole.googleapis.com/webmasters/v3/sites/{quote(GSC_SITE_URL, safe='')}/searchAnalytics/query"
     async def query(dim, limit):
@@ -5330,15 +5330,18 @@ async def visits_search(days: int = 30, cu: dict = Depends(admin_only)):
             "total_clicks": sum(d["clicks"] for d in daily), "total_impressions": sum(d["impressions"] for d in daily)}
 
 @api_router.get("/visits/summary")
-async def visits_summary(days: int = 30, cu: dict = Depends(admin_only)):
-    days = max(1, min(days, 365))
+async def visits_summary(days: int = 30, skip: int = 0, cu: dict = Depends(admin_only)):
+    days = max(1, min(days, 365)); skip = max(0, min(skip, 30))  # skip = days back from today the range ends (1 = yesterday)
     if GA4_PROPERTY_ID and GA4_CREDENTIALS_JSON:
-        return await _name_vehicle_pages(await _ga4_summary(days))
+        return await _name_vehicle_pages(await _ga4_summary(days, skip))
     npt = timezone(timedelta(hours=5, minutes=45))  # Nepal time, so "today" matches the shop's day
-    today = datetime.now(npt).date()
+    today = datetime.now(npt).date() - timedelta(days=skip)
     start = today - timedelta(days=days - 1)
     since = datetime(start.year, start.month, start.day, tzinfo=npt).astimezone(timezone.utc).isoformat()
-    rows = await db.page_views.find({"created_at": {"$gte": since}}, {"_id": 0}).to_list(200000)
+    q = {"$gte": since}
+    if skip:
+        q["$lt"] = (datetime(today.year, today.month, today.day, tzinfo=npt) + timedelta(days=1)).astimezone(timezone.utc).isoformat()
+    rows = await db.page_views.find({"created_at": q}, {"_id": 0}).to_list(200000)
     by_day, pages, refs, devices = {}, {}, {}, {"mobile": 0, "desktop": 0}
     visitors, today_views, today_visitors = set(), 0, set()
     stamps = {}  # visitor -> page-view times, to estimate how long each visit lasted

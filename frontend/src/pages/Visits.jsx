@@ -3,7 +3,13 @@ import { Eye, Users, Smartphone, Monitor, Globe, FileText, ExternalLink, Search,
 import { toast } from "sonner";
 import api from "../utils/api";
 
-const RANGES = [{ days: 7, label: "7 days" }, { days: 30, label: "30 days" }, { days: 90, label: "90 days" }];
+const RANGES = [
+  { key: "today", days: 1, skip: 0, label: "Today", short: "today" },
+  { key: "yesterday", days: 1, skip: 1, label: "Yesterday", short: "yesterday" },
+  { key: "week", days: 7, skip: 0, label: "7 days", short: "the last 7 days" },
+  { key: "month", days: 30, skip: 0, label: "Month", short: "the last 30 days" },
+  { key: "year", days: 365, skip: 0, label: "Year", short: "the last year" },
+];
 const PAGE_SIZE = 16;
 const FONT = { fontFamily: "Manrope" };
 
@@ -228,7 +234,9 @@ const VisitModal = ({ v, onClose }) => {
 
 // Storefront traffic: page views and unique visitors reported by the site's visit beacon.
 export default function Visits({ embedded = false }) {
-  const [days, setDays] = useState(30);
+  const [rangeKey, setRangeKey] = useState("month");
+  const range = RANGES.find(r => r.key === rangeKey);
+  const { days, skip } = range;
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState(null);
@@ -238,23 +246,23 @@ export default function Visits({ embedded = false }) {
 
   const load = useCallback(async () => {
     try {
-      const { data } = await api.get("/visits/summary", { params: { days } });
+      const { data } = await api.get("/visits/summary", { params: { days, skip } });
       setData(data);
     } catch {
       toast.error("Failed to load visits");
     } finally {
       setLoading(false);
     }
-  }, [days]);
+  }, [days, skip]);
 
   useEffect(() => { load(); setOpen(null); setShown(PAGE_SIZE); }, [load]);
 
   useEffect(() => {
     setSearchErr("");
-    api.get("/visits/search", { params: { days } })
+    api.get("/visits/search", { params: { days, skip } })
       .then(r => setSearch(r.data))
       .catch(e => { setSearch(null); setSearchErr(e.response?.data?.detail || "Could not load Google Search data"); });
-  }, [days]);
+  }, [days, skip]);
 
   if (loading) return <div className="flex items-center justify-center h-48"><div className="animate-spin w-7 h-7 border-4 border-blue-600 border-t-transparent rounded-full" /></div>;
   if (!data) return null;
@@ -278,28 +286,26 @@ export default function Visits({ embedded = false }) {
         </div>
         <div className="flex gap-1 bg-slate-100 rounded-xl p-1 w-full sm:w-auto">
           {RANGES.map(r => (
-            <button key={r.days} onClick={() => setDays(r.days)} className={`flex-1 sm:flex-none h-9 sm:h-8 px-4 rounded-lg text-sm font-medium transition ${days === r.days ? "bg-white shadow-sm text-blue-700" : "text-slate-500 hover:text-slate-800"}`}>{r.label}</button>
+            <button key={r.key} onClick={() => setRangeKey(r.key)} className={`flex-1 sm:flex-none h-9 sm:h-8 px-2 sm:px-4 rounded-lg text-xs sm:text-sm font-medium transition ${rangeKey === r.key ? "bg-white shadow-sm text-blue-700" : "text-slate-500 hover:text-slate-800"}`}>{r.label}</button>
           ))}
         </div>
       </div>
 
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-4">
-        <Stat icon={Users} value={data.today_visitors} label="Visitors today" />
-        <Stat icon={Eye} value={data.today_views} label="Page views today" />
-        <Stat icon={Users} value={data.unique_visitors} label={`Visitors, ${days} days`} />
-        <Stat icon={Layers} value={data.total_views} label={`Page views, ${days} days`} />
+      <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
+        <Stat icon={Users} value={data.unique_visitors} label={`Visitors, ${range.short}`} />
+        <Stat icon={Layers} value={data.total_views} label={`Page views, ${range.short}`} />
         {eng && <Stat icon={Clock} value={`${eng.avg_minutes} min`} label="Avg time, visits with 2+ pages" />}
       </div>
 
-      <Card>
-        <SectionTitle icon={TrendingUp} title="Visits graph" hint={`Page views each day by source${search?.configured ? ", with Google search clicks as the red line. Search Console data lags by 2 to 3 days" : ""}. The number on each bar is that day's page views; hover a day for the full split.`}
+      {days > 1 && <Card>
+        <SectionTitle icon={TrendingUp} title="Visits graph" hint={`Page views each day by source${search?.configured ? ", with Google search clicks as the red line. Search Console data lags by 2 to 3 days" : ""}. Tap a bar for that day's full split.`}
           right={search?.configured && <span className="text-sm text-slate-600"><b className="text-slate-900">{search.total_clicks.toLocaleString()}</b> Google clicks · <b className="text-slate-900">{search.total_impressions.toLocaleString()}</b> times shown</span>} />
         <div className="px-3 sm:px-5 pb-5">
           {data.total_views === 0 && !search?.configured
             ? <p className="py-10 text-center text-sm text-slate-500">No visits recorded yet. Once the storefront sends visits (see DEPLOYMENT.md), they appear here.</p>
             : <CombinedChart daily={data.daily} clicksByDate={search?.configured ? Object.fromEntries(search.daily.map(d => [d.date, d.clicks])) : null} />}
         </div>
-      </Card>
+      </Card>}
 
       <div className="grid lg:grid-cols-3 gap-4">
         <RankList title="Top pages" icon={FileText} rows={data.top_pages} empty="No pages yet" linkBase={base} />
