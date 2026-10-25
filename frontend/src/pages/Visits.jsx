@@ -60,7 +60,8 @@ const CombinedChart = ({ daily, clicksByDate }) => {
   const line = pts.filter(Boolean).map(p => p.join(",")).join(" ");
   // The chart always fits its card (no sideways scroll); detail that cannot fit a bar moves to a tap-to-read panel.
   const dense = daily.length > 10;
-  const step = Math.ceil(daily.length / 8);
+  const labelled = daily.length <= 45; // every bar carries its number; wider ranges rely on tap
+  const step = dense ? Math.ceil(daily.length / 8) : 1;
   const fmtDay = d => new Date(d.date + "T00:00:00").toLocaleDateString("en", { day: "numeric", month: "short" });
   const seg = (d, n, key) => (
     <div className={`w-full ${COLORS[key]}`} style={{ height: `${d.views ? (n / d.views) * 100 : 0}%` }} />
@@ -84,14 +85,16 @@ const CombinedChart = ({ daily, clicksByDate }) => {
         ) : "Tap a bar to see that day's split."}
       </div>
       <div className="relative h-44 sm:h-52">
-        <div className="absolute inset-x-0 top-5 bottom-0">
+        <div className="absolute inset-x-0 top-7 bottom-0">
           {[0.25, 0.5, 0.75].map(f => <div key={f} className="absolute inset-x-0 border-t border-dashed border-slate-100" style={{ bottom: `${f * 100}%` }} />)}
           <div className={`relative flex items-end h-full ${dense ? "gap-px" : "gap-1"}`}>
             {daily.map((d, i) => (
               <button type="button" key={d.date} onClick={() => setSel(sel === i ? null : i)} aria-label={`${fmtDay(d)}: ${d.views} views`}
                 className={`flex-1 min-w-0 h-full flex items-end group ${sel === i ? "bg-blue-50 rounded" : ""}`}>
                 <div className="w-full relative" style={{ height: `${(d.views / max) * 100}%`, minHeight: d.views ? 3 : 0 }}>
-                  {!dense && d.views > 0 && <span className="absolute -top-4 inset-x-0 text-center text-[11px] font-semibold text-slate-700">{d.views}</span>}
+                  {labelled && d.views > 0 && (dense
+                    ? <span className="absolute bottom-full mb-0.5 left-1/2 -translate-x-1/2 text-[9px] font-semibold text-slate-700 leading-none" style={{ writingMode: "vertical-rl", transform: "translateX(-50%) rotate(180deg)" }}>{d.views}</span>
+                    : <span className="absolute -top-4 inset-x-0 text-center text-[11px] font-semibold text-slate-700">{d.views}</span>)}
                   <div className="absolute inset-0 flex flex-col-reverse rounded-t-sm overflow-hidden">
                     {split ? <>{seg(d, d.direct, "direct")}{seg(d, d.google, "google")}{seg(d, d.other, "other")}</> : seg(d, d.views, "views")}
                   </div>
@@ -110,6 +113,11 @@ const CombinedChart = ({ daily, clicksByDate }) => {
         {daily.map((d, i) => (
           <div key={d.date} className="flex-1 min-w-0 text-center leading-tight text-[10px] text-slate-500">
             {i % step === 0 ? <span className="whitespace-nowrap inline-block">{fmtDay(d)}</span> : <span>&nbsp;</span>}
+            {!dense && split && (
+              <div className="mt-1 flex flex-col sm:flex-row justify-center sm:gap-1 text-[10px] font-semibold">
+                <span className="text-indigo-600">{d.direct}</span><span className="text-emerald-600">{d.google}</span><span className="text-amber-500">{d.other}</span>
+              </div>
+            )}
           </div>
         ))}
       </div>
