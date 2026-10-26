@@ -4,14 +4,14 @@ import { Plus, Search, Trash2, Eye, TrendingUp, DollarSign, Calendar, ShoppingBa
 import { toast } from "sonner";
 import api from "../utils/api";
 import { formatNPR, splitSanakhatExpenses, withSanakhatExpenses, TRANSFER_STATUS_OPTIONS, getTransferStatusStyle } from "../utils/helpers";
-import { getCurrentBSMonthRange, getCurrentWeekRange, getTodayAD } from "../utils/nepali-date";
+import { getCurrentBSMonthRange } from "../utils/nepali-date";
 import { useAuth } from "../context/AuthContext";
 import VehicleComboBox from "../components/VehicleComboBox";
 import BSDatePicker from "../components/BSDatePicker";
 import HoverADDate from "../components/HoverADDate";
 import WarrantyBadge from "../components/WarrantyBadge";
 import Bookings from "./Bookings";
-import PeriodToggle, { PERIOD_OPTIONS } from "../components/PeriodToggle";
+import DateRangeFilter, { resolveDateFilter } from "../components/DateRangeFilter";
 
 const PRESET_EXPENSES = [
   { name: "Registration Transfer Fee", amount: 2000 },
@@ -151,8 +151,7 @@ export default function Sales() {
   const [search, setSearch] = useState("");
   // Set via the Today/This Week/This Month toggle in the header — "all" (default) shows
   // every sale; otherwise restricts the list below to sale_date falling in that range.
-  const [periodFilter, setPeriodFilter] = useState("all");
-  const [dateFilter, setDateFilter] = useState(""); // AD "YYYY-MM-DD" — exact sale date; mutually exclusive with periodFilter
+  const [dateRange, setDateRange] = useState({ key: "all", custom: null }); // key "all" = off
   const [statusFilter, setStatusFilter] = useState("all"); // "all" | "sold" | "returned"
   const [showModal, setShowModal] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -409,10 +408,7 @@ export default function Sales() {
   // month's sales fall in the *previous* AD month, so that count reads as far lower
   // than what the business considers "this month". Recomputed here against the actual
   // BS month's AD range instead, and generalized to the other two period tabs too.
-  const periodRange = periodFilter === "daily" ? { start: getTodayAD(), end: getTodayAD() }
-    : periodFilter === "weekly" ? getCurrentWeekRange()
-    : periodFilter === "monthly" ? getCurrentBSMonthRange()
-    : null;
+  const periodRange = dateRange.key === "all" ? null : resolveDateFilter(dateRange.key, dateRange.custom);
   const bsMonthRange = getCurrentBSMonthRange();
   const thisMonthSalesCount = bsMonthRange
     ? sales.filter(s => s.sale_date >= bsMonthRange.start && s.sale_date <= bsMonthRange.end).length
@@ -427,7 +423,6 @@ export default function Sales() {
     if (statusFilter === "sold" && s.returned) return false;
     if (statusFilter === "returned" && !s.returned) return false;
     if (periodRange && !(s.sale_date >= periodRange.start && s.sale_date <= periodRange.end)) return false;
-    if (dateFilter && s.sale_date?.slice(0, 10) !== dateFilter) return false;
     if (!search) return true;
     const q = search.toLowerCase();
     return (s.vehicle_info || "").toLowerCase().includes(q) ||
@@ -435,7 +430,7 @@ export default function Sales() {
       (s.registration_number || "").toLowerCase().includes(q) ||
       (s.payment_method || "").toLowerCase().includes(q);
   });
-  const anyFilter = periodFilter !== "all" || search || dateFilter || statusFilter !== "all";
+  const anyFilter = dateRange.key !== "all" || search || statusFilter !== "all";
 
   if (loading) return <div className="flex items-center justify-center h-64"><div className="animate-spin w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full" /></div>;
 
@@ -459,12 +454,12 @@ export default function Sales() {
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Sales</h1>
           <p className="text-sm text-slate-500">
-            {periodFilter !== "all" ? `${filtered.length} sales ${PERIOD_OPTIONS.find(p => p.key === periodFilter)?.label.toLowerCase()}` : `${sales.length} sales recorded`}
+            {periodRange ? `${filtered.length} sales · ${periodRange.label}` : `${sales.length} sales recorded`}
             {returnedCount > 0 && ` · ${returnedCount} returned`}
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          <PeriodToggle period={periodFilter} onChange={p => { setPeriodFilter(p); setDateFilter(""); }} testid="sales-period-toggle" allowOff />
+          <DateRangeFilter value={dateRange.key} custom={dateRange.custom} onChange={(key, custom) => setDateRange({ key, custom })} testid="sales-date-filter" />
           {isAdmin && (
             <button onClick={() => setShowImport(true)} data-testid="import-sales-btn" className="flex items-center gap-2 border border-slate-200 text-slate-700 text-sm font-medium px-4 py-3 rounded-lg hover:bg-slate-50 transition-all active:scale-95">
               <UploadCloud size={16} /> Import Sheet
@@ -483,7 +478,7 @@ export default function Sales() {
           {[
             { label: "Total Sales", value: summary.total_sales, icon: ShoppingBag, color: "bg-blue-500" },
             { label: "Total Revenue", value: formatNPR(summary.total_revenue), icon: TrendingUp, color: "bg-green-500" },
-            { label: periodFilter === "all" ? "This Month" : PERIOD_OPTIONS.find(p => p.key === periodFilter)?.label, value: periodSalesCount + " sales", icon: Calendar, color: "bg-indigo-500" },
+            { label: periodRange ? periodRange.label : "This Month", value: periodSalesCount + " sales", icon: Calendar, color: "bg-indigo-500" },
             { label: "Avg Sale Price", value: formatNPR(summary.avg_sale_price), icon: DollarSign, color: "bg-purple-500" },
           ].map(c => (
             <div
@@ -561,20 +556,6 @@ export default function Sales() {
           <option value="sold">Sold only</option>
           <option value="returned">Returned only{returnedCount ? ` (${returnedCount})` : ""}</option>
         </select>
-        <div className="w-44" data-testid="sales-date-filter-input">
-          <BSDatePicker value={dateFilter} onChange={val => { setDateFilter(val); setPeriodFilter("all"); }} />
-        </div>
-        {dateFilter && (
-          <button
-            onClick={() => setDateFilter("")}
-            data-testid="clear-sales-date-filter"
-            className="flex items-center justify-center w-9 h-9 text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
-            title="Clear date filter"
-            aria-label="Clear date filter"
-          >
-            <X size={14} />
-          </button>
-        )}
       </div>
 
       {/* Open bookings — deposits waiting on the balance; Record Sale opens the normal sale form pre-filled */}

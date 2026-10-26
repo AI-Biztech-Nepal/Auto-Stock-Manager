@@ -8,12 +8,10 @@ import { formatNPR, getAgingStyle, getStatusStyle, getTerminationStyle, isSanakh
 import { AddVehicleModal } from "./AddVehicleModal";
 import { VehicleDetailModal } from "./VehicleDetail";
 import HoverADDate from "../components/HoverADDate";
-import BSDatePicker from "../components/BSDatePicker";
-import PeriodToggle, { PERIOD_OPTIONS } from "../components/PeriodToggle";
+import DateRangeFilter, { resolveDateFilter } from "../components/DateRangeFilter";
 import ViewToggle, { useViewMode } from "../components/ViewToggle";
 import ListRow from "../components/ListRow";
 import LazyThumb from "../components/LazyThumb";
-import { formatBSDate, getCurrentBSMonthRange, getCurrentWeekRange, getTodayAD } from "../utils/nepali-date";
 import { useAuth } from "../context/AuthContext";
 import { hasFullVehicleAccess, canAddVehicle, isBasicStockRole, hidesVehiclePricing } from "../utils/permissions";
 
@@ -25,9 +23,6 @@ const STATUSES = ["all", ...VEHICLE_STATUS_OPTIONS.filter(o => o.value !== "sold
 const STATUS_ICONS = { all: Filter, unlisted: EyeOff, in_repair: Wrench, available: CheckCircle2, reserved: Clock };
 const AGING_CATEGORIES = ["all", "fresh", "normal", "slow", "dead"];
 const AGING_RANGES = { fresh: "0–30 days", normal: "31–45 days", slow: "46–60 days", dead: "60+ days" };
-
-// periodFilter (below) uses the shared PeriodToggle's three presets, applied here
-// against created_at (when stock was entered).
 
 // A single photo isn't enough for a storefront listing — this is the bar a vehicle
 // needs to clear before it's considered adequately photographed.
@@ -70,11 +65,9 @@ export default function Inventory() {
   const [statusFilter, setStatusFilter] = useState(searchParams.get("aging") ? "available" : "all");
   const [brandFilter, setBrandFilter] = useState("all");
   const [agingFilter, setAgingFilter] = useState(searchParams.get("aging") || "all");
-  const [dateFilter, setDateFilter] = useState("");
-  // "all" = off, else a quick-range preset over the same field dateFilter above uses
-  // (created_at — when the stock was entered, not purchase_date). Mutually exclusive
-  // with dateFilter's exact-date pick — setting one clears the other, see their setters.
-  const [periodFilter, setPeriodFilter] = useState("all");
+  // Date-range filter over created_at (when the stock was entered, not purchase_date).
+  // key "all" = off; otherwise resolved to an AD start/end by resolveDateFilter below.
+  const [dateRange, setDateRange] = useState({ key: "all", custom: null });
   const [view, setView] = useViewMode();
   // null = off, "none" = zero photos, "low" = fewer than MIN_PHOTOS
   const [photoFilter, setPhotoFilter] = useState(null);
@@ -197,14 +190,8 @@ export default function Inventory() {
   const totalSellingPrice = filtered.reduce((sum, v) => sum + (v.selling_price || 0), 0);
   const lockedCapital = filtered.filter(v => v.status === "available").reduce((sum, v) => sum + (v.total_investment || 0), 0);
 
-  // AD range for the active period tab, against created_at (same field dateFilter uses).
-  // Toggling a period tab clears the exact-date pick (see the PeriodToggle onChange
-  // below) and vice versa (see the BSDatePicker's onChange further down) — an exact
-  // date and a range both narrowing created_at at once reads as confusing, not additive.
-  const periodRange = periodFilter === "daily" ? { start: getTodayAD(), end: getTodayAD() }
-    : periodFilter === "weekly" ? getCurrentWeekRange()
-    : periodFilter === "monthly" ? getCurrentBSMonthRange()
-    : null;
+  // AD range for the active date filter, against created_at; null when the filter is off.
+  const periodRange = dateRange.key === "all" ? null : resolveDateFilter(dateRange.key, dateRange.custom);
 
   // Same permission split the per-card finance row already uses — reused so the "Total
   // Vehicles" popup (the one summary tile parts_supervisor can actually reach) doesn't
@@ -233,7 +220,6 @@ export default function Inventory() {
     else result = result.filter(v => v.status === s);
     if (agingFilter !== "all") result = result.filter(v => v.aging?.category === agingFilter);
     if (brandFilter !== "all") result = result.filter(v => v.brand === brandFilter);
-    if (dateFilter) result = result.filter(v => v.created_at?.slice(0, 10) === dateFilter);
     if (periodRange) result = result.filter(v => { const d = v.created_at?.slice(0, 10); return d && d >= periodRange.start && d <= periodRange.end; });
     if (photoFilter === "none") result = result.filter(v => !v.has_photo && v.status !== "scrap");
     else if (photoFilter === "low") result = result.filter(v => (v.photo_count ?? 0) < MIN_PHOTOS && v.status !== "scrap");
@@ -258,7 +244,6 @@ export default function Inventory() {
     if (statusFilter !== "all") result = result.filter(v => v.status === statusFilter);
     if (agingFilter !== "all") result = result.filter(v => v.aging?.category === agingFilter);
     if (brandFilter !== "all") result = result.filter(v => v.brand === brandFilter);
-    if (dateFilter) result = result.filter(v => v.created_at?.slice(0, 10) === dateFilter);
     if (periodRange) result = result.filter(v => { const d = v.created_at?.slice(0, 10); return d && d >= periodRange.start && d <= periodRange.end; });
     if (search) {
       const q = search.toLowerCase();
@@ -280,7 +265,6 @@ export default function Inventory() {
     if (statusFilter !== "all") result = result.filter(v => v.status === statusFilter);
     if (agingFilter !== "all") result = result.filter(v => v.aging?.category === agingFilter);
     if (brandFilter !== "all") result = result.filter(v => v.brand === brandFilter);
-    if (dateFilter) result = result.filter(v => v.created_at?.slice(0, 10) === dateFilter);
     if (periodRange) result = result.filter(v => { const d = v.created_at?.slice(0, 10); return d && d >= periodRange.start && d <= periodRange.end; });
     if (search) {
       const q = search.toLowerCase();
@@ -375,7 +359,6 @@ export default function Inventory() {
     if (statusFilter !== "all") result = result.filter(v => v.status === statusFilter);
     if (agingFilter !== "all") result = result.filter(v => v.aging?.category === agingFilter);
     if (brandFilter !== "all") result = result.filter(v => v.brand === brandFilter);
-    if (dateFilter) result = result.filter(v => v.created_at?.slice(0, 10) === dateFilter);
     if (periodRange) result = result.filter(v => { const d = v.created_at?.slice(0, 10); return d && d >= periodRange.start && d <= periodRange.end; });
     if (photoFilter === "none") result = result.filter(v => !v.has_photo && v.status !== "scrap");
     else if (photoFilter === "low") result = result.filter(v => (v.photo_count ?? 0) < MIN_PHOTOS && v.status !== "scrap");
@@ -392,7 +375,7 @@ export default function Inventory() {
     result.sort(sortStock);
 
     setFiltered(result);
-  }, [vehicles, search, statusFilter, brandFilter, agingFilter, dateFilter, periodFilter, photoFilter]); // eslint-disable-line react-hooks/exhaustive-deps -- periodRange is derived fresh from periodFilter each render (a new object every time), so depending on periodFilter itself is the stable, correct trigger
+  }, [vehicles, search, statusFilter, brandFilter, agingFilter, dateRange, photoFilter]); // eslint-disable-line react-hooks/exhaustive-deps -- periodRange is derived fresh from dateRange each render (a new object every time), so depending on dateRange itself is the stable, correct trigger
 
   // Sold vehicles are kept out of this grid, so a search for one would otherwise just read
   // "No vehicles found" — surface the sold matches so it's clear the vehicle was sold.
@@ -478,7 +461,7 @@ export default function Inventory() {
           <p className="text-sm text-slate-500">{filtered.length} vehicles found</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          <PeriodToggle period={periodFilter} onChange={p => { setPeriodFilter(p); setDateFilter(""); }} testid="inventory-period-toggle" allowOff />
+          <DateRangeFilter value={dateRange.key} custom={dateRange.custom} onChange={(key, custom) => setDateRange({ key, custom })} testid="inventory-date-filter" />
           <ViewToggle view={view} onChange={setView} testid="inventory-view-toggle" />
           {!isFrontDesk && (
             <button
@@ -764,19 +747,6 @@ export default function Inventory() {
               <option key={a} value={a}>{a === "all" ? "All Stock Age" : `${getAgingStyle(a).label} (${AGING_RANGES[a]})`}</option>
             ))}
           </select>
-          <div className="w-44" data-testid="date-filter-input">
-            <BSDatePicker value={dateFilter} onChange={val => { setDateFilter(val); setPeriodFilter("all"); }} />
-          </div>
-          {dateFilter && (
-            <button
-              onClick={() => setDateFilter("")}
-              data-testid="clear-date-filter"
-              className="flex items-center gap-1 h-9 px-2.5 text-sm text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
-              title="Clear date filter"
-            >
-              <X size={14} />
-            </button>
-          )}
         </div>
       </div>
 
@@ -860,16 +830,14 @@ export default function Inventory() {
           <p className="font-medium">
             {agingFilter !== "all"
               ? `No ${getAgingStyle(agingFilter).label.toLowerCase()} (${AGING_RANGES[agingFilter]}) vehicles found`
-              : dateFilter
-                ? `No stock entered on ${formatBSDate(dateFilter)} BS`
-                : periodFilter !== "all"
-                  ? `No stock entered ${PERIOD_OPTIONS.find(p => p.key === periodFilter)?.label.toLowerCase()}`
-                  : "No vehicles found"}
+              : dateRange.key !== "all"
+                ? `No stock entered in this period (${periodRange?.label || "selected dates"})`
+                : "No vehicles found"}
           </p>
           <p className="text-sm mt-1">
             {agingFilter !== "all"
               ? "No vehicles fall into this stock age range right now."
-              : search || statusFilter !== "all" || brandFilter !== "all" || dateFilter || periodFilter !== "all" || photoFilter
+              : search || statusFilter !== "all" || brandFilter !== "all" || dateRange.key !== "all" || photoFilter
                 ? "Try adjusting your filters"
                 : "Add your first vehicle to get started"}
           </p>

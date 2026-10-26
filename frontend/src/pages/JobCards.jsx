@@ -3,12 +3,12 @@ import { Plus, Search, Wrench, X, Package, Pencil, ShoppingBag } from "lucide-re
 import { toast } from "sonner";
 import api from "../utils/api";
 import { formatNPR, getJobStyle, getStatusStyle, VEHICLE_STATUS_OPTIONS } from "../utils/helpers";
-import { formatBSDate, getCurrentBSMonthRange, getCurrentWeekRange, getTodayAD } from "../utils/nepali-date";
+import { formatBSDate } from "../utils/nepali-date";
 import VehicleComboBox from "../components/VehicleComboBox";
 import BSDatePicker from "../components/BSDatePicker";
 import HoverADDate from "../components/HoverADDate";
 import { serviceLabel } from "../components/WarrantyBadge";
-import PeriodToggle from "../components/PeriodToggle";
+import DateRangeFilter, { resolveDateFilter } from "../components/DateRangeFilter";
 import ViewToggle, { useViewMode } from "../components/ViewToggle";
 import ListRow from "../components/ListRow";
 import { useAuth } from "../context/AuthContext";
@@ -55,7 +55,7 @@ export default function JobCards() {
   const [vehicleStatusFilter, setVehicleStatusFilter] = useState("all");
   // "all" (default) | "daily" | "weekly" | "monthly" — scopes to created_at, the same
   // date this page's cards already display as "Created".
-  const [periodFilter, setPeriodFilter] = useState("all");
+  const [dateRange, setDateRange] = useState({ key: "all", custom: null }); // key "all" = off
   const [view, setView] = useViewMode();
   const [search, setSearch] = useState("");
   const [showModal, setShowModal] = useState(false);
@@ -109,11 +109,8 @@ export default function JobCards() {
     api.get("/team").then(r => setMechanics(r.data.filter(m => m.role === "mechanic"))).catch(() => {});
   }, [fetchJobs]);
 
-  // AD range for the active period tab, against created_at.
-  const periodRange = periodFilter === "daily" ? { start: getTodayAD(), end: getTodayAD() }
-    : periodFilter === "weekly" ? getCurrentWeekRange()
-    : periodFilter === "monthly" ? getCurrentBSMonthRange()
-    : null;
+  // AD range for the active date filter, against created_at; null when the filter is off.
+  const periodRange = dateRange.key === "all" ? null : resolveDateFilter(dateRange.key, dateRange.custom);
 
   useEffect(() => {
     let result = [...jobs];
@@ -137,7 +134,7 @@ export default function JobCards() {
       );
     }
     setFiltered(result);
-  }, [jobs, statusFilter, vehicleStatusFilter, periodFilter, search]); // eslint-disable-line react-hooks/exhaustive-deps -- periodRange is derived fresh from periodFilter each render (a new object every time), so depending on periodFilter itself is the stable, correct trigger
+  }, [jobs, statusFilter, vehicleStatusFilter, dateRange, search]); // eslint-disable-line react-hooks/exhaustive-deps -- periodRange is derived fresh from dateRange each render (a new object every time), so depending on dateRange itself is the stable, correct trigger
 
   const partsTotalCost = jobParts.reduce((s, p) => s + p.quantity * p.unit_cost, 0);
   // Warranty service (a job card on a sold vehicle): labour is free, the customer pays for parts only.
@@ -351,8 +348,8 @@ export default function JobCards() {
     completed: jobs.filter(j => j.status === "completed").length,
   };
 
-  const hasActiveFilters = statusFilter !== "all" || vehicleStatusFilter !== "all" || periodFilter !== "all" || search !== "";
-  const clearFilters = () => { setStatusFilter("all"); setVehicleStatusFilter("all"); setPeriodFilter("all"); setSearch(""); };
+  const hasActiveFilters = statusFilter !== "all" || vehicleStatusFilter !== "all" || dateRange.key !== "all" || search !== "";
+  const clearFilters = () => { setStatusFilter("all"); setVehicleStatusFilter("all"); setDateRange({ key: "all", custom: null }); setSearch(""); };
 
   return (
     <div className="space-y-5 animate-fade-in">
@@ -370,7 +367,7 @@ export default function JobCards() {
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          <PeriodToggle period={periodFilter} onChange={setPeriodFilter} testid="job-cards-period-toggle" allowOff />
+          <DateRangeFilter value={dateRange.key} custom={dateRange.custom} onChange={(key, custom) => setDateRange({ key, custom })} testid="job-cards-date-filter" />
           <ViewToggle view={view} onChange={setView} testid="job-cards-view-toggle" />
           {canEdit && (
             <button onClick={openModal} data-testid="create-job-button" className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-3 rounded-lg transition-all active:scale-95 shadow-sm">
