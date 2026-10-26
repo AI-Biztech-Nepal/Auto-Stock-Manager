@@ -13,7 +13,9 @@ What goes where (the new books treat a BILL as a debt and a PAYMENT as the cash,
   customers / vendors / vehicle sellers  -> fin_parties (matched by phone, then exact name)
   sales                                  -> sale bill + customer-ledger debit, plus one credit for what was paid
                                             (total - still due). Returned sales are skipped and listed.
-  vehicle purchases (purchase_price)     -> purchase bill + vendor-ledger debit (only when the seller is a saved party)
+  vehicle purchases (purchase_price)     -> purchase bill + vendor-ledger debit (only when the seller is a saved party).
+                                            Bought from an individual = paid on the spot (a matching payment), as the
+                                            old app only ever treated VENDORS as owed money.
   vendor payments                        -> vendor-ledger credit
   vehicle expenses (expenses table)      -> expense (paid on the spot), category kept
 NOT imported: spare-part purchase bills and job-card costs. Cash vs bank is not recorded on the old data
@@ -117,7 +119,7 @@ async def main():
     async def exists(coll, source_type, source_id):
         return await coll.find_one(F(source_type=source_type, source_id=source_id), {"_id": 0, "id": 1})
 
-    stats = {k: [0, 0.0] for k in ("sales", "sale_payments", "purchases", "vendor_payments", "expenses")}
+    stats = {k: [0, 0.0] for k in ("sales", "sale_payments", "purchases", "paid_at_purchase", "vendor_payments", "expenses")}
     skipped = []
 
     async def bill(kind, source_type, source_id, amount, date, party_id, party_name, note, category_id=None):
@@ -193,6 +195,13 @@ async def main():
                    seller.get("name"), f"Purchase · {label}")
         stats["purchases"][0] += 1
         stats["purchases"][1] += price
+        if kind == "customer":
+            # Bought from an individual: the old app never treated that as a debt (only vendors have a
+            # payable), so book it as paid on the spot -- the bill and its payment cancel out.
+            await credit("vendor", pid, "imported_purchase", v["id"], price, v.get("purchase_date") or v.get("created_at"),
+                         f"Paid at purchase · {label}")
+            stats["paid_at_purchase"][0] += 1
+            stats["paid_at_purchase"][1] += price
 
     # ── vendor payments ─────────────────────────────────────────────────
     for p in vpay:
@@ -233,7 +242,7 @@ async def main():
     # ── report ──────────────────────────────────────────────────────────
     print(f"{'would create' if not apply else 'created'}:")
     print(f"  parties (new):          {new_parties}")
-    for k, label in (("sales", "sale bills"), ("sale_payments", "customer payments"), ("purchases", "purchase bills"),
+    for k, label in (("sales", "sale bills"), ("sale_payments", "customer payments"), ("purchases", "purchase bills"), ("paid_at_purchase", "  of which paid at buy"),
                      ("vendor_payments", "vendor payments"), ("expenses", "expenses")):
         n, amt = stats[k]
         print(f"  {label:<22} {n:>5}   Rs {amt:,.2f}")
