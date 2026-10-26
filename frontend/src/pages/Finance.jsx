@@ -77,8 +77,10 @@ function FinanceInner() {
 
   return (
     <div className="flex flex-col lg:flex-row gap-5 items-start">
-      <nav className="fin-no-print w-full lg:w-52 shrink-0 lg:sticky lg:top-20" aria-label="Finance sections">
-        <div className="flex lg:flex-col gap-x-1 overflow-x-auto lg:overflow-visible pb-2 lg:pb-0 -mx-1 px-1">
+      {/* Pinned while the page scrolls: a bar under the header on phones, a left rail on desktop.
+          The rail has its own scroll so every section stays reachable on a short screen. */}
+      <nav className="fin-no-print w-[calc(100%+2rem)] lg:w-52 shrink-0 sticky top-0 z-20 bg-slate-50 -mx-4 px-4 py-2 lg:mx-0 lg:px-0 lg:py-0 lg:max-h-[calc(100dvh-7rem)] lg:overflow-y-auto border-b border-slate-200 lg:border-0" aria-label="Finance sections">
+        <div className="flex lg:flex-col gap-x-1 overflow-x-auto lg:overflow-visible lg:pb-0 -mx-1 px-1">
           {GROUPS.map((g) => (
             <div key={g.title} className="flex lg:flex-col gap-1 lg:mb-3 shrink-0">
               <div className="hidden lg:block text-xs font-bold uppercase tracking-wider text-slate-400 px-3 mb-0.5">{g.title}</div>
