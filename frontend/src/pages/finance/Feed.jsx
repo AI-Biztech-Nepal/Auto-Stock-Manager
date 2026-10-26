@@ -45,7 +45,7 @@ export default function Feed({ defaultFilter = "all", title = "Entries" }) {
                 const k = KIND_STYLE[r.kind];
                 return (
                   <button key={r.key} onClick={() => setEditing(r)} className="w-full text-left px-4 py-3 flex items-center gap-3 border-t border-slate-100 hover:bg-slate-50">
-                    <span className="text-[11px] font-bold px-2 py-0.5 rounded-full shrink-0" style={{ color: k.color, background: `${k.color}15` }}>{k.label}</span>
+                    <span className="text-xs font-bold px-2 py-0.5 rounded-full shrink-0" style={{ color: k.color, background: `${k.color}15` }}>{k.label}</span>
                     <span className="flex-1 min-w-0 truncate text-sm text-slate-800">{r.label}{r.number ? <span className="text-slate-400"> · #{r.number}</span> : null}</span>
                     <span className="text-sm font-semibold shrink-0" style={{ color: k.color }}>{npr(r.amount)}</span>
                   </button>

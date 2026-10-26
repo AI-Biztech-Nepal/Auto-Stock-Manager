@@ -590,7 +590,7 @@ export default function Inventory() {
             onClick={dismissDupBanner}
             title="Remove this warning"
             data-testid="duplicate-reg-dismiss"
-            className="p-1 rounded-lg text-red-400 hover:text-red-700 hover:bg-red-100 transition-colors shrink-0"
+            className="max-md:min-w-11 max-md:min-h-11 max-md:inline-flex max-md:items-center max-md:justify-center p-1 rounded-lg text-red-400 hover:text-red-700 hover:bg-red-100 transition-colors shrink-0"
           >
             <X size={16} />
           </button>
@@ -711,7 +711,7 @@ export default function Inventory() {
       )}
 
       {/* Filters — sticky so search/filters stay reachable while scrolling a long list */}
-      <div className="sticky top-0 z-20 bg-white rounded-xl border border-slate-200 shadow-sm p-4 flex flex-wrap gap-3 items-center">
+      <div className="sm:sticky top-0 z-20 bg-white rounded-xl border border-slate-200 shadow-sm p-3 sm:p-4 flex flex-wrap gap-2 sm:gap-3 items-center">
         <div className="relative flex-1 min-w-48">
           <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
           <input
@@ -722,12 +722,12 @@ export default function Inventory() {
             className="w-full h-9 pl-9 pr-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
         </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          <Filter size={14} className="text-slate-400" />
+        <div className="grid grid-cols-2 sm:flex items-center gap-2 w-full sm:w-auto">
+          <Filter size={14} className="hidden sm:block text-slate-400" />
           <select
             value={brandFilter}
             onChange={e => setBrandFilter(e.target.value)}
-            className="h-9 px-3 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="h-11 sm:h-9 px-3 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
           >
             <option value="all">All Brands</option>
             {BRANDS.map(b => <option key={b}>{b}</option>)}
@@ -741,7 +741,7 @@ export default function Inventory() {
               else setSearchParams({ aging: val });
             }}
             data-testid="aging-filter-select"
-            className="h-9 px-3 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="h-11 sm:h-9 px-3 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
           >
             {AGING_CATEGORIES.map(a => (
               <option key={a} value={a}>{a === "all" ? "All Stock Age" : `${getAgingStyle(a).label} (${AGING_RANGES[a]})`}</option>
@@ -752,7 +752,7 @@ export default function Inventory() {
 
       {/* Summary */}
       {!loading && !isFrontDesk && (
-        <div className="grid grid-cols-2 lg:grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-4">
+        <div className="grid grid-cols-2 lg:grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-2 sm:gap-4">
           {[
             { label: "Total Vehicles", value: filtered.length, icon: Package, color: "bg-blue-500", view: "all" },
             !hideFinancials && { label: "Total Investment", value: formatNPR(totalInvestment), icon: Wallet, color: "bg-indigo-500", view: "investment" },
@@ -763,14 +763,14 @@ export default function Inventory() {
               key={c.label}
               onClick={() => setSummaryModalView(c.view)}
               data-testid={`inventory-summary-tile-${c.view}`}
-              className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 flex items-center gap-3 min-w-0 cursor-pointer hover:shadow-md active:scale-[0.98] transition-all"
+              className="bg-white rounded-xl border border-slate-200 shadow-sm p-2.5 sm:p-4 flex items-center gap-3 min-w-0 cursor-pointer hover:shadow-md active:scale-[0.98] transition-all"
             >
-              <div className={`w-9 h-9 rounded-lg ${c.color} flex items-center justify-center shrink-0`}>
+              <div className={`hidden sm:flex w-9 h-9 rounded-lg ${c.color} items-center justify-center shrink-0`}>
                 <c.icon size={16} className="text-white" />
               </div>
               <div className="min-w-0">
                 <div className="text-xs text-slate-500 font-medium truncate">{c.label}</div>
-                <div className="text-lg font-bold text-slate-900 truncate" style={{ fontFamily: "Manrope" }}>{c.value}</div>
+                <div className="text-sm sm:text-lg font-bold text-slate-900 leading-tight" style={{ fontFamily: "Manrope" }}>{c.value}</div>
               </div>
             </div>
           ))}
@@ -799,7 +799,7 @@ export default function Inventory() {
                 >
                   <div className="flex items-start justify-between gap-2 mb-1">
                     <div className="font-bold text-slate-900 text-sm truncate" style={{ fontFamily: "Manrope" }}>{v.brand} {v.model}</div>
-                    <span className={`shrink-0 px-1.5 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide ${st.bg} ${st.text}`}>
+                    <span className={`shrink-0 px-1.5 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wide ${st.bg} ${st.text}`}>
                       {st.label}
                     </span>
                   </div>
@@ -881,20 +881,20 @@ export default function Inventory() {
                 title={`${v.brand} ${v.model}`}
                 subtitle={`${v.year} · ${v.registration_number || "No reg."} · ${formatOwnership(v.ownership_number)}${v.status === "reserved" && v.booking?.customer_name ? ` · Booked by ${v.booking.customer_name}` : ""}`}
                 meta={!hideFinancials && (
-                  <div>
-                    <div className="font-semibold text-slate-800">{formatNPR(v.total_investment)}</div>
-                    {!hidePricing && <div className="text-slate-400">{v.selling_price ? formatNPR(v.selling_price) : "—"} selling</div>}
+                  <div className="flex items-baseline gap-x-3 flex-wrap md:block">
+                    <div className="font-semibold text-slate-800 text-sm md:text-xs">{formatNPR(v.total_investment)}</div>
+                    {!hidePricing && <div className="text-slate-500">{v.selling_price ? formatNPR(v.selling_price) : "—"} selling</div>}
                   </div>
                 )}
                 pills={<>
-                  <span className={`px-2 py-0.5 rounded-full text-[11px] font-semibold uppercase tracking-wide ${st.bg} ${st.text}`}>{st.label}</span>
+                  <span className={`px-2 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wide ${st.bg} ${st.text}`}>{st.label}</span>
                   {(() => {
                     const tm = getTerminationStyle(v.ownership_termination_status);
                     const late = isSanakhatOverdue(v);
                     const days = sanakhatPendingDays(v);
                     return (
                       <span
-                        className={`px-2 py-0.5 rounded-full text-[11px] font-semibold uppercase tracking-wide ${late ? "bg-red-100 text-red-800" : `${tm.bg} ${tm.text}`}`}
+                        className={`px-2 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wide ${late ? "bg-red-100 text-red-800" : `${tm.bg} ${tm.text}`}`}
                         title={late ? `Sanaakhat pending for ${days} days` : undefined}
                         data-testid="vehicle-row-termination"
                       >
@@ -902,14 +902,14 @@ export default function Inventory() {
                       </span>
                     );
                   })()}
-                  <span className={`px-2 py-0.5 rounded-full text-[11px] font-semibold uppercase tracking-wide ${ag.bg} ${ag.text}`}>{v.aging?.days}d</span>
+                  <span className={`px-2 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wide ${ag.bg} ${ag.text}`}>{v.aging?.days}d</span>
                 </>}
                 actions={<>
-                  <button onClick={() => setSelectedVehicleId(v.id)} className="w-9 h-9 flex items-center justify-center hover:bg-slate-100 rounded-lg transition-colors" data-testid="view-vehicle-btn">
+                  <button onClick={() => setSelectedVehicleId(v.id)} className="w-11 h-11 md:w- md:h- flex items-center justify-center hover:bg-slate-100 rounded-lg transition-colors" data-testid="view-vehicle-btn">
                     <Eye size={14} className="text-slate-500" />
                   </button>
                   {isAdmin && (
-                    <button onClick={e => handleDelete(v.id, e)} className="w-9 h-9 flex items-center justify-center hover:bg-red-50 rounded-lg transition-colors" data-testid="delete-vehicle-btn">
+                    <button onClick={e => handleDelete(v.id, e)} className="w-11 h-11 md:w- md:h- flex items-center justify-center hover:bg-red-50 rounded-lg transition-colors" data-testid="delete-vehicle-btn">
                       <Trash2 size={14} className="text-red-400" />
                     </button>
                   )}
@@ -987,7 +987,7 @@ export default function Inventory() {
                 )}
 
                 {showFinRow && (
-                  <div className="flex gap-4 bg-slate-50 rounded-lg px-3 py-2 border border-slate-100 mb-3 text-xs">
+                  <div className="grid grid-cols-2 sm:flex gap-x-4 gap-y-2 bg-slate-50 rounded-lg px-3 py-2 border border-slate-100 mb-3 text-xs">
                     {!hideFinancials && (
                       <div>
                         <div className="text-slate-400">Investment</div>
@@ -1151,7 +1151,7 @@ export default function Inventory() {
                       <div className="min-w-0">
                         <div className="font-semibold text-slate-900 text-sm truncate" style={{ fontFamily: "Manrope" }}>{v.brand} {v.model}</div>
                         <div className="text-xs text-slate-500 truncate flex items-center gap-1.5 mt-0.5">
-                          <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide ${st.bg} ${st.text}`}>{st.label}</span>
+                          <span className={`px-1.5 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wide ${st.bg} ${st.text}`}>{st.label}</span>
                           {v.registration_number && <span className="font-mono">{v.registration_number}</span>}
                         </div>
                       </div>

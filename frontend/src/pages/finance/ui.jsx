@@ -36,7 +36,7 @@ export function Modal({ title, onClose, children, wide = false }) {
       <div className={`bg-white w-full ${wide ? "sm:max-w-2xl" : "sm:max-w-md"} max-h-[92vh] overflow-y-auto rounded-t-2xl sm:rounded-2xl shadow-xl`} onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
         <div className="sticky top-0 bg-white flex items-center justify-between gap-3 px-5 py-4 border-b border-slate-100">
           <h3 className="text-base font-bold text-slate-900">{title}</h3>
-          <button onClick={onClose} className="p-1 rounded-lg text-slate-500 hover:bg-slate-100" aria-label="Close"><X size={18} /></button>
+          <button onClick={onClose} className="max-md:min-w-11 max-md:min-h-11 max-md:inline-flex max-md:items-center max-md:justify-center p-1 rounded-lg text-slate-500 hover:bg-slate-100" aria-label="Close"><X size={18} /></button>
         </div>
         <div className="p-5">{children}</div>
       </div>
@@ -132,9 +132,9 @@ export function TwoTapDelete({ onConfirm, label = "Delete" }) {
 export const Stat = ({ label, value, color, onClick, sub }) => (
   <div onClick={onClick} role={onClick ? "button" : undefined} tabIndex={onClick ? 0 : undefined}
     onKeyDown={onClick ? (e) => (e.key === "Enter" || e.key === " ") && onClick() : undefined}
-    className={`bg-white border border-slate-200 rounded-xl p-4 shadow-sm ${onClick ? "cursor-pointer hover:border-blue-300 hover:shadow-md transition" : ""}`}>
+    className={`bg-white border border-slate-200 rounded-xl p-3 sm:p-4 shadow-sm ${onClick ? "cursor-pointer hover:border-blue-300 hover:shadow-md transition" : ""}`}>
     <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</div>
-    <div className="text-xl font-bold mt-1" style={{ fontFamily: "Manrope", color: color || "#0f172a" }}>{typeof value === "number" ? npr(value) : value}</div>
+    <div className="text-lg sm:text-xl font-bold mt-1 leading-tight" style={{ fontFamily: "Manrope", color: color || "#0f172a" }}>{typeof value === "number" ? npr(value) : value}</div>
     {sub && <div className="text-xs text-slate-400 mt-0.5">{sub}</div>}
   </div>
 );

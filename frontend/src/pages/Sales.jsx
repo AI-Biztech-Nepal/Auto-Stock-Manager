@@ -30,7 +30,7 @@ const miniInp = "w-full h-8 px-2 text-sm border border-slate-200 rounded-lg focu
 // line (truncate) so it never wraps — the two panels then line up row-for-row.
 const MiniField = ({ label, required, children }) => (
   <div>
-    <label className="block text-[11px] font-medium text-slate-500 mb-0.5 truncate">
+    <label className="block text-xs font-medium text-slate-500 mb-0.5 truncate">
       {label}{required && <span className="text-red-500 ml-0.5">*</span>}
     </label>
     {children}
@@ -77,13 +77,13 @@ const DEED_ROWS = [
 // returned marker, name-transfer status and warranty. Sanakhat cost has its own column.
 function SaleTags({ sale, vehicle, booking }) {
   const fromBooking = booking && (
-    <span className="px-1.5 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide bg-yellow-100 text-yellow-800 whitespace-nowrap" title="This sale completed a booking" data-testid="sale-booking-tag">
+    <span className="px-1.5 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wide bg-yellow-100 text-yellow-800 whitespace-nowrap" title="This sale completed a booking" data-testid="sale-booking-tag">
       Booked · {formatNPR(booking.booking_amount)}
     </span>
   );
   if (sale.returned) {
     return (
-      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide bg-amber-100 text-amber-700" data-testid="sale-returned-tag">
+      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wide bg-amber-100 text-amber-700" data-testid="sale-returned-tag">
         <Undo2 size={9} /> Returned <HoverADDate date={sale.returned_at?.slice(0, 10)} />
       </span>
     );
@@ -93,7 +93,7 @@ function SaleTags({ sale, vehicle, booking }) {
   return (
     <>
       {fromBooking}
-      <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide whitespace-nowrap ${transfer.bg} ${transfer.text}`} title="Transfer status" data-testid="sale-transfer-tag">Transfer {transfer.label}</span>
+      <span className={`px-1.5 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wide whitespace-nowrap ${transfer.bg} ${transfer.text}`} title="Transfer status" data-testid="sale-transfer-tag">Transfer {transfer.label}</span>
       <WarrantyBadge warranty={vehicle.warranty} />
     </>
   );
@@ -474,7 +474,7 @@ export default function Sales() {
       {/* Summary Cards — the 3rd card follows the period toggle above (defaults to "This
           Month" when nothing's selected, same figure it always showed). */}
       {summary && (
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-4">
           {[
             { label: "Total Sales", value: summary.total_sales, icon: ShoppingBag, color: "bg-blue-500" },
             { label: "Total Revenue", value: formatNPR(summary.total_revenue), icon: TrendingUp, color: "bg-green-500" },
@@ -483,14 +483,14 @@ export default function Sales() {
           ].map(c => (
             <div
               key={c.label}
-              className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 flex items-center gap-3 text-left"
+              className="bg-white rounded-xl border border-slate-200 shadow-sm p-2.5 sm:p-4 flex items-center gap-3 text-left"
             >
-              <div className={`w-9 h-9 rounded-lg ${c.color} flex items-center justify-center shrink-0`}>
+              <div className={`hidden sm:flex w-9 h-9 rounded-lg ${c.color} items-center justify-center shrink-0`}>
                 <c.icon size={16} className="text-white" />
               </div>
               <div className="min-w-0">
                 <div className="text-xs text-slate-500 font-medium">{c.label}</div>
-                <div className="text-lg font-bold text-slate-900 truncate" style={{ fontFamily: "Manrope" }}>{c.value}</div>
+                <div className="text-sm sm:text-lg font-bold text-slate-900 leading-tight" style={{ fontFamily: "Manrope" }}>{c.value}</div>
               </div>
             </div>
           ))}
@@ -546,7 +546,7 @@ export default function Sales() {
       )}
 
       {/* Search + filters — sticky so they stay reachable while scrolling a long list */}
-      <div className="sticky top-0 z-20 bg-white rounded-xl border border-slate-200 shadow-sm p-4 flex flex-wrap items-start gap-3">
+      <div className="sm:sticky top-0 z-20 bg-white rounded-xl border border-slate-200 shadow-sm p-3 sm:p-4 flex flex-wrap items-start gap-2 sm:gap-3">
         <div className="relative flex-1 min-w-[14rem] max-w-sm">
           <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
           <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search vehicle, reg#, customer..." className="w-full h-9 pl-9 pr-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" data-testid="sales-search" />
@@ -614,7 +614,7 @@ export default function Sales() {
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
                         <div className="font-semibold text-slate-900 text-sm truncate">{s.vehicle_info || "—"}
-                          {s.needs_review && <span className="ml-1.5 inline-flex items-center gap-0.5 align-middle text-[10px] font-semibold text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded-full"><AlertTriangle size={9} /> Review</span>}
+                          {s.needs_review && <span className="ml-1.5 inline-flex items-center gap-0.5 align-middle text-xs font-semibold text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded-full"><AlertTriangle size={9} /> Review</span>}
                         </div>
                         <div className="text-xs text-slate-500 mt-0.5 truncate">{s.customer_name}{s.customer_contact ? ` · ${s.customer_contact}` : ""}</div>
                         <div className="flex items-center gap-1 flex-wrap mt-1.5"><SaleTags sale={s} vehicle={v} booking={bookingBySaleId[s.id]} /></div>
@@ -679,7 +679,7 @@ export default function Sales() {
                         <td className="px-4 py-3">
                           <div className="font-semibold text-slate-900 text-sm flex items-center gap-1.5">
                             {s.vehicle_info || "—"}
-                            {s.needs_review && <span className="inline-flex items-center gap-0.5 text-[10px] font-semibold text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded-full" title={s.review_note || "Imported — might need attention"}><AlertTriangle size={9} /> Review</span>}
+                            {s.needs_review && <span className="inline-flex items-center gap-0.5 text-xs font-semibold text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded-full" title={s.review_note || "Imported — might need attention"}><AlertTriangle size={9} /> Review</span>}
                           </div>
                           <div className="flex items-center gap-1 flex-wrap mt-1"><SaleTags sale={s} vehicle={v} booking={bookingBySaleId[s.id]} /></div>
                         </td>
@@ -700,7 +700,7 @@ export default function Sales() {
                           {sanakhat.total > 0 ? (
                             <>
                               <div className="text-orange-600 font-medium">{formatNPR(sanakhat.total)}</div>
-                              {sanakhat.resanakhat > 0 && <div className="text-[11px] text-slate-400">incl. re-sanakhat {formatNPR(sanakhat.resanakhat)}</div>}
+                              {sanakhat.resanakhat > 0 && <div className="text-xs text-slate-400">incl. re-sanakhat {formatNPR(sanakhat.resanakhat)}</div>}
                             </>
                           ) : <span className="text-slate-400">—</span>}
                         </td>
@@ -730,11 +730,11 @@ export default function Sales() {
                         <td className="px-4 py-3 text-sm text-slate-500 whitespace-nowrap"><HoverADDate date={s.sale_date} /></td>
                         <td className="px-4 py-3">
                           <div className="flex items-center gap-1">
-                            <button onClick={e => { e.stopPropagation(); navigate(`/sales/${s.id}`); }} className="p-1.5 hover:bg-slate-100 rounded-lg transition-colors" title="View / edit sale" data-testid="view-sale-btn">
+                            <button onClick={e => { e.stopPropagation(); navigate(`/sales/${s.id}`); }} className="max-md:min-w-11 max-md:min-h-11 max-md:inline-flex max-md:items-center max-md:justify-center p-1.5 hover:bg-slate-100 rounded-lg transition-colors" title="View / edit sale" data-testid="view-sale-btn">
                               <Eye size={14} className="text-slate-500" />
                             </button>
                             {isAdmin && (
-                              <button onClick={e => { e.stopPropagation(); handleDelete(s.id); }} className="p-1.5 hover:bg-red-50 rounded-lg transition-colors" title="Delete sale" data-testid="delete-sale-btn">
+                              <button onClick={e => { e.stopPropagation(); handleDelete(s.id); }} className="max-md:min-w-11 max-md:min-h-11 max-md:inline-flex max-md:items-center max-md:justify-center p-1.5 hover:bg-red-50 rounded-lg transition-colors" title="Delete sale" data-testid="delete-sale-btn">
                                 <Trash2 size={14} className="text-red-400" />
                               </button>
                             )}
@@ -864,7 +864,7 @@ export default function Sales() {
                 </Field>
                 <Field label="Due Amount (NPR)">
                   <input type="text" inputMode="numeric" value={form.due_amount === "" ? autoDue : form.due_amount} onChange={e => setForm({...form, due_amount: e.target.value})} className={inp} data-testid="due-amount-input" />
-                  <p className="text-[11px] text-slate-400 mt-1">Auto: Grand Total − paid. Type to override.</p>
+                  <p className="text-xs text-slate-400 mt-1">Auto: Grand Total − paid. Type to override.</p>
                 </Field>
               </div>
 
@@ -1025,7 +1025,7 @@ export default function Sales() {
                     ].map(s => (
                       <div key={s.label} className={`border rounded-lg p-2.5 text-center ${s.cls}`}>
                         <div className="text-xl font-bold" style={{ fontFamily: "Manrope" }}>{s.value}</div>
-                        <div className="text-[10px] mt-0.5 leading-tight">{s.label}</div>
+                        <div className="text-xs mt-0.5 leading-tight">{s.label}</div>
                       </div>
                     ))}
                   </div>
@@ -1040,7 +1040,7 @@ export default function Sales() {
 
                   {importResult.row_errors?.length > 0 && (
                     <div className="max-h-32 overflow-y-auto space-y-1">
-                      <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Unreadable rows — skipped</p>
+                      <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide">Unreadable rows — skipped</p>
                       {importResult.row_errors.map((e, i) => (
                         <div key={i} className="text-xs bg-amber-50 border border-amber-100 rounded px-2 py-1 text-amber-700">
                           <span className="font-semibold">{e.sheet} row {e.row}</span> ({e.sale}): {e.reason}
@@ -1051,7 +1051,7 @@ export default function Sales() {
 
                   {!importResult.committed && importResult.sample_import?.length > 0 && (
                     <div className="max-h-40 overflow-y-auto space-y-1">
-                      <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Preview ({importResult.sample_import.length} of {importResult.to_import})</p>
+                      <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide">Preview ({importResult.sample_import.length} of {importResult.to_import})</p>
                       {importResult.sample_import.map((r, i) => (
                         <div key={i} className={`text-xs border rounded px-2 py-1 flex justify-between gap-2 ${r.review_note ? "bg-amber-50 border-amber-100" : "bg-slate-50 border-slate-100"}`}>
                           <span className="truncate">{r.sale} · {r.customer}{r.returned ? " · returned" : ""}{r.review_note ? ` · ⚠ ${r.review_note}` : ""}</span>

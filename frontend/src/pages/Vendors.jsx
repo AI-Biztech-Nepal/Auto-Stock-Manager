@@ -234,9 +234,9 @@ export default function Vendors() {
 
       {/* Add/Edit Vendor Modal */}
       {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
-            <div className="flex items-center justify-between p-5 border-b border-slate-100">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 sm:p-4">
+          <div className="bg-white sm:rounded-2xl shadow-2xl overflow-y-auto w-full h-full sm:h-auto max-w-md">
+            <div className="flex items-center justify-between p-5 border-b border-slate-100 sticky top-0 bg-white z-10">
               <h2 className="text-lg font-bold text-slate-900">{editItem ? "Edit Vendor" : "Add Vendor"}</h2>
               <button onClick={() => setShowModal(false)} className="w-11 h-11 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500" aria-label="Close">✕</button>
             </div>
@@ -259,7 +259,7 @@ export default function Vendors() {
                 <label className="block text-xs font-medium text-slate-600 mb-1">Notes</label>
                 <textarea value={form.notes} onChange={e => setForm({...form, notes: e.target.value})} rows={2} className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" />
               </div>
-              <div className="flex gap-3">
+              <div className="flex gap-3 sticky bottom-0 bg-white -mx-5 -mb-5 px-5 py-3 border-t border-slate-100 sm:static sm:mx-0 sm:mb-0 sm:px-0 sm:py-0 sm:border-0">
                 <button type="button" onClick={() => setShowModal(false)} className="flex-1 h-10 border border-slate-200 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50">Cancel</button>
                 <button type="submit" disabled={saving} className="flex-1 h-10 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-semibold disabled:opacity-60" data-testid="save-vendor-btn">
                   {saving ? "Saving..." : editItem ? "Update" : "Add Vendor"}
@@ -272,9 +272,9 @@ export default function Vendors() {
 
       {/* Vendor Commission Modal */}
       {showCommission && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between p-5 border-b border-slate-100">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 sm:p-4">
+          <div className="bg-white sm:rounded-2xl shadow-2xl w-full h-full sm:h-auto max-w-md sm:max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between p-5 border-b border-slate-100 sticky top-0 bg-white z-10">
               <div>
                 <h2 className="text-lg font-bold text-slate-900">Vendor Commission</h2>
                 <p className="text-xs text-slate-500 mt-0.5">Added automatically as a Commission expense on every vehicle you buy from the vendor</p>
@@ -308,8 +308,8 @@ export default function Vendors() {
                     <li key={v.id} className="flex items-center gap-2 px-3 py-2 text-sm">
                       <span className="min-w-0 flex-1 truncate text-slate-800">{v.name}</span>
                       <span className="tabular-nums text-slate-600 whitespace-nowrap">{formatNPR(v.commission_amount)}/vehicle</span>
-                      <button type="button" onClick={() => openCommission(v)} className="w-8 h-8 flex items-center justify-center rounded-md text-slate-500 hover:bg-slate-100" aria-label={`Edit commission for ${v.name}`}><Edit size={13} /></button>
-                      <button type="button" onClick={() => saveCommission(v.id, 0)} className="w-8 h-8 flex items-center justify-center rounded-md text-red-500 hover:bg-red-50" aria-label={`Remove commission for ${v.name}`}><Trash2 size={13} /></button>
+                      <button type="button" onClick={() => openCommission(v)} className="w-11 h-11 md:w- md:h- flex items-center justify-center rounded-md text-slate-500 hover:bg-slate-100" aria-label={`Edit commission for ${v.name}`}><Edit size={13} /></button>
+                      <button type="button" onClick={() => saveCommission(v.id, 0)} className="w-11 h-11 md:w- md:h- flex items-center justify-center rounded-md text-red-500 hover:bg-red-50" aria-label={`Remove commission for ${v.name}`}><Trash2 size={13} /></button>
                     </li>
                   ))}
                 </ul>
@@ -321,9 +321,9 @@ export default function Vendors() {
 
       {/* Record Payment Modal */}
       {showPayModal && selectedVendor && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
-            <div className="flex items-center justify-between p-5 border-b border-slate-100">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 sm:p-4">
+          <div className="bg-white sm:rounded-2xl shadow-2xl overflow-y-auto w-full h-full sm:h-auto max-w-md">
+            <div className="flex items-center justify-between p-5 border-b border-slate-100 sticky top-0 bg-white z-10">
               <div>
                 <h2 className="text-lg font-bold text-slate-900">Record Payment</h2>
                 <p className="text-xs text-slate-500 mt-0.5">To {selectedVendor.name} · You owe {formatNPR(selectedVendor.remaining_due)}</p>
@@ -343,7 +343,7 @@ export default function Vendors() {
                 <label className="block text-xs font-medium text-slate-600 mb-1">Notes</label>
                 <input value={payForm.notes} onChange={e => setPayForm({...payForm, notes: e.target.value})} placeholder="Payment method, cheque number, etc." className={inp} />
               </div>
-              <div className="flex gap-3">
+              <div className="flex gap-3 sticky bottom-0 bg-white -mx-5 -mb-5 px-5 py-3 border-t border-slate-100 sm:static sm:mx-0 sm:mb-0 sm:px-0 sm:py-0 sm:border-0">
                 <button type="button" onClick={() => setShowPayModal(false)} className="flex-1 h-10 border border-slate-200 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50">Cancel</button>
                 <button type="submit" disabled={saving} className="flex-1 h-10 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-semibold disabled:opacity-60" data-testid="confirm-payment-btn">
                   {saving ? "Recording..." : "Record Payment"}

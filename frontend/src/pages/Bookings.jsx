@@ -158,21 +158,21 @@ export default function Bookings({ embedded = false, onRecordSale: onRecordSaleP
 
   const renderActions = (b) => (
     <>
-      <button onClick={() => setReceipt(b)} title="Print receipt" data-testid="booking-receipt-btn" className="w-9 h-9 flex items-center justify-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50"><Printer size={14} /></button>
+      <button onClick={() => setReceipt(b)} title="Print receipt" data-testid="booking-receipt-btn" className="w-11 h-11 md:w- md:h- flex items-center justify-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50"><Printer size={14} /></button>
       {b.status === "active" && (
         <>
           <button onClick={() => onRecordSale(b)} data-testid="booking-record-sale-btn" className="flex items-center gap-1.5 h-9 px-3 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-medium active:scale-95 transition-all whitespace-nowrap">
             Record Sale <ArrowRight size={14} />
           </button>
-          <button onClick={() => openForm(b)} title="Edit booking" data-testid="booking-edit-btn" className="w-9 h-9 flex items-center justify-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50"><Pencil size={14} /></button>
-          {isAdmin && <button onClick={() => openWithdraw(b)} title="Customer withdraws" data-testid="booking-withdraw-btn" className="w-9 h-9 flex items-center justify-center rounded-lg border border-amber-200 text-amber-700 hover:bg-amber-50"><Undo2 size={14} /></button>}
+          <button onClick={() => openForm(b)} title="Edit booking" data-testid="booking-edit-btn" className="w-11 h-11 md:w- md:h- flex items-center justify-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50"><Pencil size={14} /></button>
+          {isAdmin && <button onClick={() => openWithdraw(b)} title="Customer withdraws" data-testid="booking-withdraw-btn" className="w-11 h-11 md:w- md:h- flex items-center justify-center rounded-lg border border-amber-200 text-amber-700 hover:bg-amber-50"><Undo2 size={14} /></button>}
         </>
       )}
       {b.status === "converted" && b.sale_id && (
         <button onClick={() => navigate(`/sales/${b.sale_id}`)} className="h-9 px-3 border border-slate-200 text-slate-600 rounded-lg text-sm font-medium hover:bg-slate-50 whitespace-nowrap">View sale</button>
       )}
       {isAdmin && b.status !== "converted" && (
-        <button onClick={() => deleteBooking(b)} title="Delete booking" className="w-9 h-9 flex items-center justify-center rounded-lg hover:bg-red-50"><Trash2 size={14} className="text-red-400" /></button>
+        <button onClick={() => deleteBooking(b)} title="Delete booking" className="w-11 h-11 md:w- md:h- flex items-center justify-center rounded-lg hover:bg-red-50"><Trash2 size={14} className="text-red-400" /></button>
       )}
     </>
   );
@@ -191,20 +191,20 @@ export default function Bookings({ embedded = false, onRecordSale: onRecordSaleP
         </button>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-4">
         {[
           { label: "Active Bookings", value: active.length, icon: Clock, color: "bg-yellow-500" },
           { label: "Deposits Held", value: formatNPR(depositsHeld), icon: Wallet, color: "bg-green-500" },
           { label: "Kept from Withdrawals", value: formatNPR(keptFromWithdrawn), sub: `${withdrawnCount} withdrawn`, icon: Undo2, color: "bg-slate-500" },
         ].map(c => (
-          <div key={c.label} className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 flex items-center gap-3">
-            <div className={`w-9 h-9 rounded-lg ${c.color} flex items-center justify-center shrink-0`}>
+          <div key={c.label} className="bg-white rounded-xl border border-slate-200 shadow-sm p-2.5 sm:p-4 flex items-center gap-3">
+            <div className={`hidden sm:flex w-9 h-9 rounded-lg ${c.color} items-center justify-center shrink-0`}>
               <c.icon size={16} className="text-white" />
             </div>
             <div className="min-w-0">
               <div className="text-xs text-slate-500 font-medium">{c.label}</div>
-              <div className="text-lg font-bold text-slate-900 truncate" style={{ fontFamily: "Manrope" }}>{c.value}</div>
-              {c.sub && <div className="text-[11px] text-slate-400">{c.sub}</div>}
+              <div className="text-base sm:text-lg font-bold text-slate-900 break-words leading-tight" style={{ fontFamily: "Manrope" }}>{c.value}</div>
+              {c.sub && <div className="text-xs text-slate-500">{c.sub}</div>}
             </div>
           </div>
         ))}
@@ -241,10 +241,10 @@ export default function Bookings({ embedded = false, onRecordSale: onRecordSaleP
                         <div className="font-semibold text-slate-900 text-sm truncate">{b.vehicle_info || "—"}</div>
                         <div className="text-xs text-slate-500 truncate">{b.customer_name}{b.customer_contact ? ` · ${b.customer_contact}` : ""}</div>
                       </div>
-                      <span className={`shrink-0 px-2 py-0.5 rounded-full text-[11px] font-semibold ${st.cls}`}>{st.label}</span>
+                      <span className={`shrink-0 px-2 py-0.5 rounded-full text-xs font-semibold ${st.cls}`}>{st.label}</span>
                     </div>
                     <div className="flex items-center justify-between text-sm">
-                      <span className="font-bold text-green-700">{formatNPR(b.booking_amount)} <span className="text-[11px] font-normal text-slate-400">{b.payment_method}</span></span>
+                      <span className="font-bold text-green-700">{formatNPR(b.booking_amount)} <span className="text-xs font-normal text-slate-400">{b.payment_method}</span></span>
                       {balance != null && <span className="text-slate-600">Balance {formatNPR(balance)}</span>}
                     </div>
                     {b.status === "cancelled" && <div className="text-xs text-amber-700">Refunded {formatNPR(b.refund_amount || 0)} · Kept {formatNPR(b.retained_amount || 0)}</div>}
@@ -281,19 +281,19 @@ export default function Bookings({ embedded = false, onRecordSale: onRecordSaleP
                         </td>
                         <td className="px-4 py-3 whitespace-nowrap">
                           <div className="text-sm font-bold text-green-700">{formatNPR(b.booking_amount)}</div>
-                          <div className="text-[11px] text-slate-400">{b.payment_method}</div>
+                          <div className="text-xs text-slate-400">{b.payment_method}</div>
                         </td>
                         <td className="px-4 py-3 whitespace-nowrap">
                           <div className="text-sm font-semibold text-slate-800">{balance != null ? formatNPR(balance) : "—"}</div>
-                          {agreed != null && <div className="text-[11px] text-slate-400">of {formatNPR(agreed)}</div>}
+                          {agreed != null && <div className="text-xs text-slate-400">of {formatNPR(agreed)}</div>}
                         </td>
                         <td className="px-4 py-3 text-sm text-slate-600 whitespace-nowrap">
                           <HoverADDate date={b.booking_date} />
-                          {b.expected_sale_date && <div className="text-[11px] text-slate-400">Sale by <HoverADDate date={b.expected_sale_date} /></div>}
+                          {b.expected_sale_date && <div className="text-xs text-slate-400">Sale by <HoverADDate date={b.expected_sale_date} /></div>}
                         </td>
                         <td className="px-4 py-3">
-                          <span className={`px-2 py-0.5 rounded-full text-[11px] font-semibold ${st.cls}`}>{st.label}</span>
-                          {b.status === "cancelled" && <div className="text-[11px] text-amber-700 mt-1 whitespace-nowrap">Refunded {formatNPR(b.refund_amount || 0)} · Kept {formatNPR(b.retained_amount || 0)}</div>}
+                          <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${st.cls}`}>{st.label}</span>
+                          {b.status === "cancelled" && <div className="text-xs text-amber-700 mt-1 whitespace-nowrap">Refunded {formatNPR(b.refund_amount || 0)} · Kept {formatNPR(b.retained_amount || 0)}</div>}
                         </td>
                         <td className="px-4 py-3"><div className="flex items-center gap-1.5 justify-end">{renderActions(b)}</div></td>
                       </tr>
@@ -387,7 +387,7 @@ export default function Bookings({ embedded = false, onRecordSale: onRecordSaleP
               <div className="text-sm text-slate-600">Deposit held: <span className="font-bold text-slate-900">{formatNPR(withdrawing.booking_amount)}</span></div>
               <Field label="Refund to customer (NPR)">
                 <input type="text" inputMode="numeric" value={refund} onChange={e => setRefund(e.target.value)} className={inp} data-testid="withdraw-refund-input" />
-                <p className="text-[11px] text-slate-400 mt-1">Whatever isn't refunded is kept by the shop: <span className="font-semibold text-slate-600">{formatNPR(retained)}</span></p>
+                <p className="text-xs text-slate-400 mt-1">Whatever isn't refunded is kept by the shop: <span className="font-semibold text-slate-600">{formatNPR(retained)}</span></p>
               </Field>
               <Field label="Reason / notes">
                 <input value={withdrawNotes} onChange={e => setWithdrawNotes(e.target.value)} placeholder="Why they withdrew..." className={inp} />

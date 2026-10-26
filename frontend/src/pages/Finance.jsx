@@ -81,7 +81,7 @@ function FinanceInner() {
         <div className="flex lg:flex-col gap-x-1 overflow-x-auto lg:overflow-visible pb-2 lg:pb-0 -mx-1 px-1">
           {GROUPS.map((g) => (
             <div key={g.title} className="flex lg:flex-col gap-1 lg:mb-3 shrink-0">
-              <div className="hidden lg:block text-[11px] font-bold uppercase tracking-wider text-slate-400 px-3 mb-0.5">{g.title}</div>
+              <div className="hidden lg:block text-xs font-bold uppercase tracking-wider text-slate-400 px-3 mb-0.5">{g.title}</div>
               {g.items.map(([key, label, Icon]) => (
                 <button key={key} onClick={() => goTab(key)} data-testid={`finance-tab-${key}`}
                   className={`flex items-center gap-2.5 h-10 px-3 rounded-lg text-sm font-medium whitespace-nowrap transition-colors ${tab === key ? "bg-blue-600 text-white shadow-sm" : "text-slate-600 hover:bg-white hover:text-slate-900"}`}>

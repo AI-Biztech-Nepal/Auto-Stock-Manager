@@ -64,7 +64,7 @@ export default function VendorStatement({ vendor, reloadKey }) {
         <div>
           <div className="flex items-center justify-between mb-2">
             <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Spare parts bills</p>
-            <span className="text-[11px] text-slate-400">{data.parts_bills.length} bill{data.parts_bills.length !== 1 ? "s" : ""}</span>
+            <span className="text-xs text-slate-400">{data.parts_bills.length} bill{data.parts_bills.length !== 1 ? "s" : ""}</span>
           </div>
           <div className="border border-slate-200 rounded-lg divide-y divide-slate-100 bg-white">
             {data.parts_bills
@@ -80,7 +80,7 @@ export default function VendorStatement({ vendor, reloadKey }) {
                     <button
                       type="button"
                       onClick={e => { e.preventDefault(); setPrintBill(b); }}
-                      className="shrink-0 w-8 h-8 -my-1 flex items-center justify-center rounded-md text-blue-600 hover:bg-blue-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                      className="shrink-0 w-11 h-11 md:w- md:h- -my-1 flex items-center justify-center rounded-md text-blue-600 hover:bg-blue-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
                       title="Print bill"
                       aria-label={`Print bill ${b.bill_no}`}
                       data-testid="print-bill-tile-btn"

@@ -156,13 +156,13 @@ export default function Warranty() {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 sm:gap-3">
         {tiles.map(([key, label, count, color]) => (
           <button
             key={key}
             onClick={() => setFilter(key)}
             data-testid={`warranty-filter-${key}`}
-            className={`text-left bg-white rounded-xl border p-4 transition-all ${filter === key ? "border-blue-500 ring-2 ring-blue-100" : "border-slate-200 hover:border-slate-300"}`}
+            className={`text-left bg-white rounded-xl border p-3 sm:p-4 transition-all ${filter === key ? "border-blue-500 ring-2 ring-blue-100" : "border-slate-200 hover:border-slate-300"}`}
           >
             <div className={`text-2xl font-bold ${color}`} style={{ fontFamily: "Manrope" }}>{count}</div>
             <div className="text-xs text-slate-500 mt-0.5">{label}</div>
@@ -218,7 +218,7 @@ export default function Warranty() {
                   </div>
 
                   <div className="flex items-center gap-2 lg:w-60 lg:justify-end shrink-0 flex-wrap">
-                    <span className={`px-2 py-0.5 rounded-full text-[11px] font-semibold uppercase tracking-wide ${isExpiringSoon(w) ? "bg-amber-100 text-amber-700" : st.pill}`}>
+                    <span className={`px-2 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wide ${isExpiringSoon(w) ? "bg-amber-100 text-amber-700" : st.pill}`}>
                       {st.label}
                     </span>
                     <span className="text-xs text-slate-500 flex items-center gap-1"><Clock size={11} />{daysLeftLabel(w)}</span>
@@ -285,7 +285,7 @@ export default function Warranty() {
                 <h2 className="text-base font-bold text-slate-900" style={{ fontFamily: "Manrope" }}>Void warranty</h2>
                 <p className="text-xs text-slate-500">{voiding.brand} {voiding.model} · {voiding.registration_number} · {voiding.customer_name || "no customer"}</p>
               </div>
-              <button type="button" onClick={() => setVoiding(null)} className="p-1 hover:bg-slate-100 rounded-lg"><X size={16} /></button>
+              <button type="button" onClick={() => setVoiding(null)} className="max-md:min-w-11 max-md:min-h-11 max-md:inline-flex max-md:items-center max-md:justify-center p-1 hover:bg-slate-100 rounded-lg"><X size={16} /></button>
             </div>
             <p className="text-xs text-slate-600 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
               The customer had this vehicle serviced outside Hamro G&amp;G. No more free-labour warranty services will be allowed. Only an admin can restore it.
@@ -319,7 +319,7 @@ export default function Warranty() {
                 <h2 className="text-base font-bold text-slate-900" style={{ fontFamily: "Manrope" }}>Warranty length</h2>
                 <p className="text-xs text-slate-500">{editingLength.brand} {editingLength.model} · {editingLength.registration_number} · counted from the sale date</p>
               </div>
-              <button type="button" onClick={() => setEditingLength(null)} className="p-1 hover:bg-slate-100 rounded-lg"><X size={16} /></button>
+              <button type="button" onClick={() => setEditingLength(null)} className="max-md:min-w-11 max-md:min-h-11 max-md:inline-flex max-md:items-center max-md:justify-center p-1 hover:bg-slate-100 rounded-lg"><X size={16} /></button>
             </div>
             <WarrantyLengthInput days={editingLength.warranty.days} onChange={setLengthDays} />
             <div className="flex flex-wrap justify-end gap-2">

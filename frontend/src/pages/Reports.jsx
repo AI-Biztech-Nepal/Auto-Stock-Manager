@@ -83,7 +83,7 @@ export default function Reports() {
                 title={aging ? `Click to view ${label} vehicles in Inventory` : undefined}
               >
                 <div className="text-xs text-slate-500 mb-1 truncate">{label}</div>
-                <div className={`text-xl font-bold truncate ${color}`} style={{ fontFamily: "Manrope" }}>{val}</div>
+                <div className={`text-lg sm:text-xl font-bold break-words leading-tight ${color}`} style={{ fontFamily: "Manrope" }}>{val}</div>
                 {aging && <div className="text-xs text-blue-500 mt-1">View in Inventory →</div>}
               </div>
             ))}
@@ -137,7 +137,21 @@ export default function Reports() {
           {(inventory.dead_stock?.length > 0 || inventory.slow_moving?.length > 0) ? (
             <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
               <h2 className="text-base font-bold text-slate-900 mb-4" style={{ fontFamily: "Manrope" }}>Action Required Stock</h2>
-              <div className="overflow-x-auto">
+              <div className="sm:hidden divide-y divide-slate-100">
+                {[...inventory.dead_stock, ...inventory.slow_moving].map((v) => (
+                  <div key={v.id} onClick={() => navigate(`/inventory/${v.id}`)} className="py-3 cursor-pointer active:bg-slate-50">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="font-medium text-slate-900 text-sm min-w-0">{v.brand} {v.model} {v.year}</div>
+                      <span className={`shrink-0 px-2 py-0.5 rounded-full text-xs font-semibold ${v.days > 60 ? "bg-red-100 text-red-800" : "bg-orange-100 text-orange-800"}`}>{v.days}d · {v.days > 60 ? "Dead" : "Slow"}</span>
+                    </div>
+                    <div className="flex justify-between gap-3 mt-1 text-sm text-slate-700">
+                      <span>Bought {formatNPR(v.purchase_price)}</span>
+                      <span className="font-semibold">Sell {v.selling_price ? formatNPR(v.selling_price) : "—"}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="hidden sm:block overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-slate-100">

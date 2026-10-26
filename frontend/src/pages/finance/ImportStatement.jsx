@@ -152,7 +152,7 @@ export default function ImportStatement() {
                   <tr key={r.reference} className={`border-t border-slate-100 align-top ${r.checked ? "" : "opacity-40"}`}>
                     <td className="px-3 py-2"><input type="checkbox" checked={r.checked} onChange={(e) => setRow(r.reference, { checked: e.target.checked })} /></td>
                     <td className="px-3 py-2 whitespace-nowrap text-slate-500">{r.date}</td>
-                    <td className="px-3 py-2 max-w-[260px] text-slate-700"><div className="truncate" title={r.description}>{r.description}</div><div className="text-[11px] text-slate-400">{r.reference}</div></td>
+                    <td className="px-3 py-2 max-w-[260px] text-slate-700"><div className="truncate" title={r.description}>{r.description}</div><div className="text-xs text-slate-400">{r.reference}</div></td>
                     <td className="px-3 py-2"><select value={r.kind} onChange={(e) => setRow(r.reference, { kind: e.target.value })} className={`${inputCls} h-9 w-36`}>{KINDS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></td>
                     <td className="px-3 py-2"><input value={r.party} onChange={(e) => setRow(r.reference, { party: e.target.value })} disabled={r.kind === "withdraw" || r.kind === "deposit"} className={`${inputCls} h-9 w-44`} /></td>
                     <td className="px-3 py-2">

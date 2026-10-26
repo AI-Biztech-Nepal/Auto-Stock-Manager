@@ -25,7 +25,7 @@ export default function WarrantyBadge({ warranty, className = "" }) {
     : warranty.days_left <= WARRANTY_EXPIRING_SOON_DAYS ? "bg-amber-100 text-amber-700"
     : "bg-teal-100 text-teal-700";
   return (
-    <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide whitespace-nowrap ${style} ${className}`} data-testid="warranty-badge">
+    <span className={`px-1.5 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wide whitespace-nowrap ${style} ${className}`} data-testid="warranty-badge">
       {label}
     </span>
   );

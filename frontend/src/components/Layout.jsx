@@ -100,7 +100,7 @@ export default function Layout() {
   }, [user]);
 
   const Sidebar = ({ mobile = false }) => (
-    <aside className={`${mobile ? "fixed inset-0 z-50 flex" : "hidden lg:flex"} flex-col bg-slate-900 text-white ${mobile ? "w-64" : "w-64"} h-screen`}>
+    <aside className={`${mobile ? "fixed inset-0 z-50 flex" : "hidden lg:flex"} flex-col bg-slate-900 text-white ${mobile ? "w-64" : "w-64"} h-app`}>
       {/* Logo */}
       <div className="flex items-center gap-3 px-6 py-5 border-b border-slate-700">
         <div className="w-9 h-9 rounded-lg bg-blue-600 flex items-center justify-center font-bold text-white text-sm">AS</div>
@@ -160,7 +160,7 @@ export default function Layout() {
   );
 
   return (
-    <div className="flex h-screen overflow-hidden bg-slate-50">
+    <div className="flex h-app overflow-hidden bg-slate-50 pl-safe pr-safe">
       {/* Desktop Sidebar */}
       <Sidebar />
 
@@ -176,7 +176,7 @@ export default function Layout() {
       {/* Main */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* Header */}
-        <header className="sticky top-0 z-30 bg-white border-b border-slate-200 shadow-sm h-14 flex items-center px-4 lg:px-6 gap-4">
+        <header className="sticky top-0 z-30 bg-white border-b border-slate-200 shadow-sm h-14 box-content pt-safe flex items-center px-4 lg:px-6 gap-4">
           <button
             className="lg:hidden w-11 h-11 -ml-2.5 rounded-lg flex items-center justify-center text-slate-500 hover:bg-slate-50 hover:text-slate-900 transition-colors"
             onClick={() => setSidebarOpen(true)}
@@ -226,17 +226,17 @@ export default function Layout() {
                           <div className="text-sm font-medium text-slate-800 truncate">{v.brand} {v.model}</div>
                           <div className="flex items-center gap-1.5 mt-1 flex-wrap">
                             {v.issues.includes("No reg. number") && (
-                              <span className="inline-flex items-center gap-1 text-[11px] font-medium text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded-full">
+                              <span className="inline-flex items-center gap-1 text-xs font-medium text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded-full">
                                 <FileWarning size={10} /> No reg. number
                               </span>
                             )}
                             {v.issues.includes("Sanaakhat overdue") && (
-                              <span className="inline-flex items-center gap-1 text-[11px] font-medium text-red-700 bg-red-50 px-1.5 py-0.5 rounded-full">
+                              <span className="inline-flex items-center gap-1 text-xs font-medium text-red-700 bg-red-50 px-1.5 py-0.5 rounded-full">
                                 <FileWarning size={10} /> Sanaakhat pending {sanakhatPendingDays(v)}d
                               </span>
                             )}
                             {(v.issues.includes("No photos") || v.issues.includes("Needs more photos")) && (
-                              <span className="inline-flex items-center gap-1 text-[11px] font-medium text-red-700 bg-red-50 px-1.5 py-0.5 rounded-full">
+                              <span className="inline-flex items-center gap-1 text-xs font-medium text-red-700 bg-red-50 px-1.5 py-0.5 rounded-full">
                                 <ImageOff size={10} /> {v.issues.includes("No photos") ? "No photos" : "Needs more photos"}
                               </span>
                             )}
@@ -264,6 +264,7 @@ export default function Layout() {
           <Suspense fallback={<div className="flex items-center justify-center h-64"><div className="animate-spin w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full" /></div>}>
             <Outlet />
           </Suspense>
+          <div className="pb-safe" aria-hidden="true" />
         </main>
       </div>
     </div>

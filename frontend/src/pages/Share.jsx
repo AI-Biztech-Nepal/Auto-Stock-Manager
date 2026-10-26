@@ -168,7 +168,7 @@ function PostCard({ vehicle, text, link, onChange, aiBadge, fbPage, showPrice })
           <div className="font-semibold text-slate-900 truncate">{vehicle.brand} {vehicle.model} {vehicle.year}</div>
           <div className="text-xs text-slate-500">{vehicle.photo_count || 0} photo{vehicle.photo_count === 1 ? "" : "s"}</div>
         </div>
-        {aiBadge && <span className="text-[11px] font-semibold text-purple-700 bg-purple-50 px-2 py-0.5 rounded-full flex items-center gap-1"><Sparkles size={11} /> AI</span>}
+        {aiBadge && <span className="text-xs font-semibold text-purple-700 bg-purple-50 px-2 py-0.5 rounded-full flex items-center gap-1"><Sparkles size={11} /> AI</span>}
       </div>
       <textarea ref={box} value={text} onChange={e => onChange(e.target.value)} rows={12} className="w-full border border-slate-200 rounded-lg p-3 text-sm" />
       <div className="flex flex-wrap gap-2">
@@ -200,7 +200,7 @@ function PostCard({ vehicle, text, link, onChange, aiBadge, fbPage, showPrice })
           {[["Title", hb.title], ["Price (NPR)", hb.price], ["Description", hb.description]].filter(([, value]) => value).map(([label, value]) => (
             <div key={label} className="flex items-start gap-2">
               <div className="min-w-0 flex-1">
-                <div className="text-[11px] font-medium text-slate-500">{label}</div>
+                <div className="text-xs font-medium text-slate-500">{label}</div>
                 <div className="text-sm text-slate-800 whitespace-pre-line break-words select-all">{value}</div>
               </div>
               <button onClick={() => copyField(label, value)} className={btn}><Copy size={14} /> Copy</button>
@@ -425,7 +425,7 @@ export default function Share({ embedded = false }) {
             {showTemplate && (
               <div className="space-y-1 p-2 bg-slate-50 rounded-lg border border-slate-200">
                 <textarea value={template} onChange={e => saveTemplate(e.target.value)} rows={10} className="w-full border border-slate-200 rounded-lg p-2 text-xs font-mono" />
-                <p className="text-[11px] text-slate-500">Used instantly for every selected vehicle (and whenever AI is unavailable). Lines with a missing value are skipped. Available: {PLACEHOLDERS.map(p => `{${p}}`).join(" ")}</p>
+                <p className="text-xs text-slate-500">Used instantly for every selected vehicle (and whenever AI is unavailable). Lines with a missing value are skipped. Available: {PLACEHOLDERS.map(p => `{${p}}`).join(" ")}</p>
                 <button className="text-xs text-blue-600" onClick={() => saveTemplate(DEFAULT_TEMPLATE)}>Reset to default</button>
               </div>
             )}

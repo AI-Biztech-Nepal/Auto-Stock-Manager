@@ -251,9 +251,9 @@ export default function SoldStockDetail() {
                     <span className="font-mono text-slate-400 shrink-0">{j.job_number}</span>
                     <span className="shrink-0 text-slate-600"><HoverADDate date={j.job_date} /></span>
                     {j.service_no
-                      ? <span className="px-1.5 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide bg-indigo-100 text-indigo-700">{serviceLabel(j.service_no)}</span>
-                      : <span className="px-1.5 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide bg-slate-100 text-slate-500">Before sale</span>}
-                    {j.is_warranty && <span className="px-1.5 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide bg-teal-100 text-teal-700">Warranty</span>}
+                      ? <span className="px-1.5 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wide bg-indigo-100 text-indigo-700">{serviceLabel(j.service_no)}</span>
+                      : <span className="px-1.5 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wide bg-slate-100 text-slate-500">Before sale</span>}
+                    {j.is_warranty && <span className="px-1.5 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wide bg-teal-100 text-teal-700">Warranty</span>}
                     <span className="text-slate-700 flex-1 min-w-[8rem] truncate">{j.work_description}</span>
                     <span className="shrink-0 capitalize text-slate-400 w-20 text-right">{j.status?.replace("_", " ")}</span>
                   </div>

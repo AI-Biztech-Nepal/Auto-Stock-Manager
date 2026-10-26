@@ -16,15 +16,15 @@ const KPICard = ({ title, value, subtitle, icon: Icon, color, testid, onClick })
   <div
     data-testid={testid}
     onClick={onClick}
-    className={`bg-white rounded-xl border border-slate-200 shadow-sm p-5 hover:shadow-md transition-shadow duration-200 animate-fade-in ${onClick ? "cursor-pointer" : ""}`}
+    className={`bg-white rounded-xl border border-slate-200 shadow-sm p-3 sm:p-5 hover:shadow-md transition-shadow duration-200 animate-fade-in ${onClick ? "cursor-pointer" : ""}`}
   >
     <div className="flex items-start justify-between gap-2">
       <div className="min-w-0">
         <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1 truncate">{title}</p>
-        <p className="text-2xl font-bold text-slate-900 truncate" style={{ fontFamily: "Manrope, sans-serif" }}>{value}</p>
+        <p className="text-xl sm:text-2xl font-bold text-slate-900 break-words leading-tight" style={{ fontFamily: "Manrope, sans-serif" }}>{value}</p>
         {subtitle && <p className="text-xs text-slate-500 mt-1 truncate">{subtitle}</p>}
       </div>
-      <div className={`w-11 h-11 rounded-lg flex items-center justify-center shrink-0 ${color}`}>
+      <div className={`hidden sm:flex w-11 h-11 rounded-lg items-center justify-center shrink-0 ${color}`}>
         <Icon size={20} className="text-white" />
       </div>
     </div>
@@ -90,14 +90,14 @@ const AccountingKPI = ({ label, value, color, icon: Icon, sub, onClick, testid }
   <div
     onClick={onClick}
     data-testid={testid}
-    className={`rounded-xl p-4 ${color} flex items-center gap-4 ${onClick ? "cursor-pointer hover:brightness-105 active:scale-[0.98] transition-all" : ""}`}
+    className={`rounded-xl p-3 sm:p-4 ${color} flex items-center gap-4 ${onClick ? "cursor-pointer hover:brightness-105 active:scale-[0.98] transition-all" : ""}`}
   >
-    <div className="w-10 h-10 rounded-lg bg-white/30 flex items-center justify-center shrink-0">
+    <div className="hidden sm:flex w-10 h-10 rounded-lg bg-white/30 items-center justify-center shrink-0">
       <Icon size={18} className="text-white" />
     </div>
     <div className="min-w-0">
       <p className="text-xs font-semibold opacity-80 uppercase tracking-wider">{label}</p>
-      <p className="text-xl font-bold text-white truncate" style={{ fontFamily: "Manrope, sans-serif" }}>{value}</p>
+      <p className="text-lg sm:text-xl font-bold text-white break-words leading-tight" style={{ fontFamily: "Manrope, sans-serif" }}>{value}</p>
       {sub && <p className="text-xs opacity-70 mt-0.5 truncate">{sub}</p>}
     </div>
   </div>
@@ -196,7 +196,7 @@ function AccountingSummary({ range }) {
           <div className="animate-spin w-6 h-6 border-4 border-blue-600 border-t-transparent rounded-full" />
         </div>
       ) : data ? (
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-3">
           <AccountingKPI
             label="Vehicle Purchase Cost"
             value={formatNPR(vehiclePurchaseCost)}
@@ -430,7 +430,7 @@ function AccountingSummary({ range }) {
                           </div>
                           <div className="text-right shrink-0">
                             <div className="text-sm font-bold text-amber-700">{formatNPR(b.booking_amount)}</div>
-                            <div className="text-[11px] capitalize text-slate-500">{b.status === "cancelled" ? "withdrawn" : b.status}</div>
+                            <div className="text-xs capitalize text-slate-500">{b.status === "cancelled" ? "withdrawn" : b.status}</div>
                           </div>
                         </div>
                       ))}
@@ -603,7 +603,7 @@ export default function Dashboard() {
       <AccountingSummary range={range} />
 
       {/* Current stock & workload — a live "right now" snapshot, not affected by the period toggle */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-4">
         <KPICard title="Available Vehicles" value={stats.available} icon={Package} color="bg-blue-500" testid="kpi-available" onClick={() => navigate("/inventory")} />
         <KPICard title="Locked Capital" value={formatNPR(stats.locked_capital)} icon={DollarSign} color="bg-indigo-500" testid="kpi-capital" subtitle="In available stock" onClick={() => navigate("/inventory")} />
         <KPICard title="Pending Jobs" value={stats.pending_jobs} icon={Wrench} color="bg-orange-500" testid="kpi-pending-jobs" onClick={() => navigate("/jobs")} />

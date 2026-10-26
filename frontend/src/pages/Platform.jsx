@@ -95,7 +95,7 @@ export default function Platform() {
                   <button
                     onClick={(e) => { e.stopPropagation(); setDeleteTarget(c); setDeleteConfirmText(""); }}
                     data-testid="delete-company-btn"
-                    className="w-8 h-8 flex items-center justify-center hover:bg-red-50 rounded-lg transition-colors"
+                    className="w-11 h-11 md:w- md:h- flex items-center justify-center hover:bg-red-50 rounded-lg transition-colors"
                   >
                     <Trash2 size={14} className="text-red-400" />
                   </button>
@@ -117,7 +117,7 @@ export default function Platform() {
                             </div>
                             <div className="text-xs text-slate-400">@{u.username}</div>
                           </div>
-                          <span className="text-[10px] font-semibold uppercase tracking-wide bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded">{u.role}</span>
+                          <span className="text-xs font-semibold uppercase tracking-wide bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded">{u.role}</span>
                         </div>
                       ))}
                     </div>

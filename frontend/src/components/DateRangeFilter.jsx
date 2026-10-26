@@ -124,7 +124,7 @@ export default function DateRangeFilter({ value, custom, onChange, testid = "dat
           >
             <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
               <h2 className="text-lg font-bold text-slate-900">Select Date</h2>
-              <button type="button" onClick={close} className="p-1 text-slate-400 hover:text-slate-600" aria-label="Close">
+              <button type="button" onClick={close} className="max-md:min-w-11 max-md:min-h-11 max-md:inline-flex max-md:items-center max-md:justify-center p-1 text-slate-400 hover:text-slate-600" aria-label="Close">
                 <X size={18} />
               </button>
             </div>

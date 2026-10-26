@@ -234,10 +234,10 @@ export default function Settings() {
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className="text-[10px] font-semibold uppercase tracking-wide bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded">{ROLE_LABELS[u.role] || u.role}</span>
-                    <button onClick={() => openEditUser(u)} data-testid="edit-account-btn" className="w-8 h-8 flex items-center justify-center hover:bg-slate-200 rounded-lg transition-colors"><Edit size={13} className="text-slate-500" /></button>
+                    <span className="text-xs font-semibold uppercase tracking-wide bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded">{ROLE_LABELS[u.role] || u.role}</span>
+                    <button onClick={() => openEditUser(u)} data-testid="edit-account-btn" className="w-11 h-11 md:w- md:h- flex items-center justify-center hover:bg-slate-200 rounded-lg transition-colors"><Edit size={13} className="text-slate-500" /></button>
                     {u.username !== user?.username && (
-                      <button onClick={() => handleDeleteUser(u)} data-testid="delete-account-btn" className="w-8 h-8 flex items-center justify-center hover:bg-red-50 rounded-lg transition-colors"><Trash2 size={13} className="text-red-400" /></button>
+                      <button onClick={() => handleDeleteUser(u)} data-testid="delete-account-btn" className="w-11 h-11 md:w- md:h- flex items-center justify-center hover:bg-red-50 rounded-lg transition-colors"><Trash2 size={13} className="text-red-400" /></button>
                     )}
                   </div>
                 </div>
@@ -431,11 +431,11 @@ export default function Settings() {
 
       {/* Add Account Modal */}
       {showAddUserModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm">
-            <div className="flex items-center justify-between p-5 border-b border-slate-100">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 sm:p-4">
+          <div className="bg-white sm:rounded-2xl shadow-2xl overflow-y-auto w-full h-full sm:h-auto max-w-sm">
+            <div className="flex items-center justify-between p-5 border-b border-slate-100 sticky top-0 bg-white z-10">
               <h2 className="text-lg font-bold text-slate-900">Add Account</h2>
-              <button onClick={() => setShowAddUserModal(false)} className="w-9 h-9 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500">✕</button>
+              <button onClick={() => setShowAddUserModal(false)} className="w-11 h-11 md:w- md:h- flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500">✕</button>
             </div>
             <form onSubmit={handleAddUser} className="p-5 space-y-4">
               <div>
@@ -469,11 +469,11 @@ export default function Settings() {
 
       {/* Edit Account Modal */}
       {editUserItem && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm">
-            <div className="flex items-center justify-between p-5 border-b border-slate-100">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 sm:p-4">
+          <div className="bg-white sm:rounded-2xl shadow-2xl overflow-y-auto w-full h-full sm:h-auto max-w-sm">
+            <div className="flex items-center justify-between p-5 border-b border-slate-100 sticky top-0 bg-white z-10">
               <h2 className="text-lg font-bold text-slate-900">Edit Account</h2>
-              <button onClick={() => setEditUserItem(null)} className="w-9 h-9 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500">✕</button>
+              <button onClick={() => setEditUserItem(null)} className="w-11 h-11 md:w- md:h- flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500">✕</button>
             </div>
             <form onSubmit={handleEditUser} className="p-5 space-y-4">
               <div>

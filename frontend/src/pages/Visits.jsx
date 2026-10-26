@@ -93,8 +93,8 @@ const CombinedChart = ({ daily, clicksByDate }) => {
                 className={`flex-1 min-w-0 h-full flex items-end group ${sel === i ? "bg-blue-50 rounded" : ""}`}>
                 <div className="w-full relative" style={{ height: `${(d.views / max) * 100}%`, minHeight: d.views ? 3 : 0 }}>
                   {labelled && d.views > 0 && (dense
-                    ? <span className="absolute bottom-full mb-0.5 left-1/2 -translate-x-1/2 text-[9px] font-semibold text-slate-700 leading-none" style={{ writingMode: "vertical-rl", transform: "translateX(-50%) rotate(180deg)" }}>{d.views}</span>
-                    : <span className="absolute -top-4 inset-x-0 text-center text-[11px] font-semibold text-slate-700">{d.views}</span>)}
+                    ? <span className="absolute bottom-full mb-0.5 left-1/2 -translate-x-1/2 text-xs font-semibold text-slate-700 leading-none" style={{ writingMode: "vertical-rl", transform: "translateX(-50%) rotate(180deg)" }}>{d.views}</span>
+                    : <span className="absolute -top-4 inset-x-0 text-center text-xs font-semibold text-slate-700">{d.views}</span>)}
                   <div className="absolute inset-0 flex flex-col-reverse rounded-t-sm overflow-hidden">
                     {split ? <>{seg(d, d.direct, "direct")}{seg(d, d.google, "google")}{seg(d, d.other, "other")}</> : seg(d, d.views, "views")}
                   </div>
@@ -111,10 +111,10 @@ const CombinedChart = ({ daily, clicksByDate }) => {
       </div>
       <div className={`flex mt-1.5 ${dense ? "gap-px" : "gap-1"}`}>
         {daily.map((d, i) => (
-          <div key={d.date} className="flex-1 min-w-0 text-center leading-tight text-[10px] text-slate-500">
+          <div key={d.date} className="flex-1 min-w-0 text-center leading-tight text-xs text-slate-500">
             {i % step === 0 ? <span className="whitespace-nowrap inline-block">{fmtDay(d)}</span> : <span>&nbsp;</span>}
             {!dense && split && (
-              <div className="mt-1 flex flex-col sm:flex-row justify-center sm:gap-1 text-[10px] font-semibold">
+              <div className="mt-1 flex flex-col sm:flex-row justify-center sm:gap-1 text-xs font-semibold">
                 <span className="text-indigo-600">{d.direct}</span><span className="text-emerald-600">{d.google}</span><span className="text-amber-500">{d.other}</span>
               </div>
             )}
@@ -198,9 +198,9 @@ const VisitTile = ({ v, onOpen }) => {
       <span className={`flex items-center gap-1.5 text-sm font-bold whitespace-nowrap md:w-36 shrink-0 ${quick ? "text-slate-400" : "text-slate-900"}`} style={FONT}><Clock size={13} className="text-slate-400" />{fmtDuration(v.seconds)}</span>
       <span className="text-xs text-slate-500 whitespace-nowrap md:w-16 shrink-0">{v.pages} {v.pages === 1 ? "page" : "pages"}</span>
       <span className="text-xs text-slate-600 truncate flex-1 min-w-[140px] basis-full md:basis-0" title={v.paths.join(", ")}>{v.paths.join("  ›  ")}</span>
-      <span className="text-[11px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 whitespace-nowrap shrink-0 max-w-[140px] truncate">{v.source}</span>
-      <span className="text-[11px] text-slate-500 capitalize whitespace-nowrap shrink-0 md:w-16">{v.device}</span>
-      <span className="font-mono text-[11px] text-slate-400 shrink-0">{v.visitor}</span>
+      <span className="text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 whitespace-nowrap shrink-0 max-w-[140px] truncate">{v.source}</span>
+      <span className="text-xs text-slate-500 capitalize whitespace-nowrap shrink-0 md:w-16">{v.device}</span>
+      <span className="font-mono text-xs text-slate-400 shrink-0">{v.visitor}</span>
     </button>
   );
 };

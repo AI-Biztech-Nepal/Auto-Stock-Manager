@@ -57,7 +57,7 @@ export function PhotoCropperModal({ imageSrc, onCancel, onConfirm }) {
           <h3 className="text-sm font-bold text-slate-900" style={{ fontFamily: "Manrope, sans-serif" }}>
             Position the vehicle in frame
           </h3>
-          <button type="button" onClick={onCancel} className="w-9 h-9 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500">✕</button>
+          <button type="button" onClick={onCancel} className="w-11 h-11 md:w- md:h- flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500">✕</button>
         </div>
 
         <div className="relative w-full aspect-[4/3] bg-slate-900">
@@ -86,7 +86,7 @@ export function PhotoCropperModal({ imageSrc, onCancel, onConfirm }) {
               className="w-full accent-blue-600"
             />
           </div>
-          <p className="text-[11px] text-slate-400 text-center">Drag to reposition &middot; use the slider to zoom</p>
+          <p className="text-xs text-slate-400 text-center">Drag to reposition &middot; use the slider to zoom</p>
         </div>
 
         <div className="flex gap-3 p-4 pt-2">

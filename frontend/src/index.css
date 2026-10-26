@@ -71,6 +71,15 @@ h1, h2, h3, h4, h5, h6 {
   background: #94A3B8;
 }
 
+/* App-shell height: 100vh on mobile browsers is taller than the visible area (the URL bar
+   overlaps it), so prefer dynamic viewport units where supported. */
+.h-app { height: 100vh; height: 100dvh; }
+/* Notch / status-bar / gesture-bar padding; env() is 0 where there is no inset. */
+.pt-safe { padding-top: env(safe-area-inset-top); }
+.pb-safe { padding-bottom: env(safe-area-inset-bottom); }
+.pl-safe { padding-left: env(safe-area-inset-left); }
+.pr-safe { padding-right: env(safe-area-inset-right); }
+
 /* Table hover */
 .table-row-hover:hover { background: #F8FAFC; }
 

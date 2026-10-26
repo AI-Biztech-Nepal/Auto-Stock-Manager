@@ -111,7 +111,7 @@ export default function Offers() {
                     <td className="px-4 py-2"><input type="number" min="0" value={p.weight} onChange={e => setPrize(i, "weight", e.target.value)} className={inp} /></td>
                     <td className="px-4 py-2 text-slate-600">{live && totalWeight ? `${Math.round((Number(p.weight) / totalWeight) * 100)}%` : <span className="text-slate-400">never</span>}</td>
                     <td className="px-4 py-2"><input type="number" min="0" value={p.stock} onChange={e => setPrize(i, "stock", e.target.value)} className={inp} /></td>
-                    <td className="px-4 py-2"><button onClick={() => setPrizes(ps => ps.filter((_, j) => j !== i))} className="w-9 h-9 flex items-center justify-center hover:bg-red-50 rounded-lg" title="Remove prize"><Trash2 size={14} className="text-red-400" /></button></td>
+                    <td className="px-4 py-2"><button onClick={() => setPrizes(ps => ps.filter((_, j) => j !== i))} className="w-11 h-11 md:w- md:h- flex items-center justify-center hover:bg-red-50 rounded-lg" title="Remove prize"><Trash2 size={14} className="text-red-400" /></button></td>
                   </tr>
                 );
               })}

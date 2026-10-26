@@ -466,7 +466,7 @@ export default function SaleDetail() {
               >
                 <div className="text-xs text-slate-500 mb-1 truncate">{c.label}</div>
                 <div className={`text-lg font-bold truncate ${c.highlight ? "text-red-600" : "text-slate-900"}`} style={{ fontFamily: "Manrope" }}>{c.value}</div>
-                {c.sub && <div className="text-[11px] text-slate-400 mt-0.5 truncate">{c.sub}</div>}
+                {c.sub && <div className="text-xs text-slate-400 mt-0.5 truncate">{c.sub}</div>}
               </div>
             ))}
           </div>
@@ -568,9 +568,9 @@ export default function SaleDetail() {
       )}
 
       {showReturnModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
-            <div className="flex items-center justify-between p-5 border-b border-slate-100">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 sm:p-4">
+          <div className="bg-white sm:rounded-2xl shadow-2xl overflow-y-auto w-full h-full sm:h-auto max-w-md">
+            <div className="flex items-center justify-between p-5 border-b border-slate-100 sticky top-0 bg-white z-10">
               <h2 className="text-lg font-bold text-slate-900">Record Return</h2>
               <button onClick={() => setShowReturnModal(false)} className="w-11 h-11 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500">✕</button>
             </div>
@@ -604,7 +604,7 @@ export default function SaleDetail() {
               <Field label="Condition Notes">
                 <input value={returnForm.notes} onChange={e => setReturnForm({ ...returnForm, notes: e.target.value })} placeholder="Assessment details..." className={inp} />
               </Field>
-              <div className="flex gap-3">
+              <div className="flex gap-3 sticky bottom-0 bg-white -mx-5 -mb-5 px-5 py-3 border-t border-slate-100 sm:static sm:mx-0 sm:mb-0 sm:px-0 sm:py-0 sm:border-0">
                 <button type="button" onClick={() => setShowReturnModal(false)} className="flex-1 h-11 border border-slate-200 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50">Cancel</button>
                 <button type="submit" disabled={returning} data-testid="submit-return-btn" className="flex-1 h-11 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-sm font-semibold disabled:opacity-60">
                   {returning ? "Recording..." : "Record Return"}

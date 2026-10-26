@@ -53,7 +53,7 @@ export function LetterSection({ letter, children }) {
 export function DueTag({ amount, overdue = false, label = "Due" }) {
   if (!(amount > 0)) return null;
   return (
-    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold whitespace-nowrap ${overdue ? "bg-red-50 text-red-700" : "bg-orange-50 text-orange-700"}`} data-testid="due-tag">
+    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold whitespace-nowrap ${overdue ? "bg-red-50 text-red-700" : "bg-orange-50 text-orange-700"}`} data-testid="due-tag">
       {label} {formatNPR(amount)}{overdue ? " · overdue" : ""}
     </span>
   );
@@ -62,7 +62,7 @@ export function DueTag({ amount, overdue = false, label = "Due" }) {
 // Neutral info pill for a register row (counts, status). tone: slate | green | blue.
 const PILL_TONES = { slate: "bg-slate-100 text-slate-600", green: "bg-green-50 text-green-700", blue: "bg-blue-50 text-blue-700" };
 export function InfoPill({ children, tone = "slate" }) {
-  return <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium whitespace-nowrap ${PILL_TONES[tone]}`}>{children}</span>;
+  return <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap ${PILL_TONES[tone]}`}>{children}</span>;
 }
 
 export function LedgerSkeleton({ rows = 5 }) {

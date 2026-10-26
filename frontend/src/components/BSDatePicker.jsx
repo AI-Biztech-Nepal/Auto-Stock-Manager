@@ -182,7 +182,7 @@ export default function BSDatePicker({ value, onChange, required, className = ""
               <ChevronRight size={16} />
             </button>
           </div>
-          <div className="grid grid-cols-7 gap-1 text-center text-[11px] font-semibold text-slate-400 mb-1">
+          <div className="grid grid-cols-7 gap-1 text-center text-xs font-semibold text-slate-400 mb-1">
             {WEEKDAYS.map(w => <div key={w}>{w}</div>)}
           </div>
           <div className="grid grid-cols-7 gap-1">

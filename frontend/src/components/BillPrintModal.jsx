@@ -11,9 +11,9 @@ export default function BillPrintModal({ bill, vendor, onClose }) {
   const total = bill.total ?? items.reduce((s, it) => s + (qtyOf(it) * it.unit_cost || 0), 0);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col">
-        <div className="no-print flex items-center justify-between p-5 border-b border-slate-100">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 sm:p-4">
+      <div className="bg-white sm:rounded-2xl shadow-2xl overflow-y-auto w-full h-full sm:h-auto max-w-2xl sm:max-h-[90vh] flex flex-col">
+        <div className="no-print flex items-center justify-between p-5 border-b border-slate-100 sticky top-0 bg-white z-10">
           <h2 className="text-lg font-bold text-slate-900">Purchase Bill</h2>
           <div className="flex items-center gap-2">
             <button onClick={() => window.print()} className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg" data-testid="print-bill-btn">

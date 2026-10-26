@@ -378,13 +378,13 @@ export default function JobCards() {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div className="grid grid-cols-3 gap-2 sm:gap-4">
         {[
           { label: "Pending", count: stats.pending, bg: "bg-yellow-50 border-yellow-100", text: "text-yellow-800" },
           { label: "In Progress", count: stats.in_progress, bg: "bg-blue-50 border-blue-100", text: "text-blue-800" },
           { label: "Completed", count: stats.completed, bg: "bg-green-50 border-green-100", text: "text-green-800" },
         ].map(s => (
-          <div key={s.label} className={`${s.bg} border rounded-xl p-4 text-center`} data-testid={`job-stat-${s.label.toLowerCase().replace(" ", "-")}`}>
+          <div key={s.label} className={`${s.bg} border rounded-xl p-2.5 sm:p-4 text-center`} data-testid={`job-stat-${s.label.toLowerCase().replace(" ", "-")}`}>
             <div className={`text-2xl font-bold ${s.text}`} style={{ fontFamily: "Manrope" }}>{s.count}</div>
             <div className={`text-xs font-medium ${s.text} mt-0.5`}>{s.label}</div>
           </div>
@@ -440,10 +440,10 @@ export default function JobCards() {
                 subtitle={`#${job.job_number} · ${job.mechanic_name}${job.registration_number ? ` · ${job.registration_number}` : ""}`}
                 meta={<div className="font-semibold text-slate-800">{formatNPR(jobCost(job))}</div>}
                 pills={<>
-                  {!job.vehicle_id && <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold uppercase tracking-wide bg-orange-100 text-orange-700">External</span>}
-                  {job.is_warranty && <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold uppercase tracking-wide bg-teal-100 text-teal-700">Warranty</span>}
-                  {job.service_no && <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold uppercase tracking-wide bg-indigo-100 text-indigo-700" data-testid="job-service-no">{serviceLabel(job.service_no)}</span>}
-                  <span className={`px-2 py-0.5 rounded-full text-[11px] font-semibold uppercase tracking-wide ${js.bg} ${js.text}`}>{js.label}</span>
+                  {!job.vehicle_id && <span className="px-2 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wide bg-orange-100 text-orange-700">External</span>}
+                  {job.is_warranty && <span className="px-2 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wide bg-teal-100 text-teal-700">Warranty</span>}
+                  {job.service_no && <span className="px-2 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wide bg-indigo-100 text-indigo-700" data-testid="job-service-no">{serviceLabel(job.service_no)}</span>}
+                  <span className={`px-2 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wide ${js.bg} ${js.text}`}>{js.label}</span>
                 </>}
                 actions={<>
                   {canEdit && job.status === "pending" && (
@@ -457,7 +457,7 @@ export default function JobCards() {
                     </button>
                   )}
                   {canEdit && (
-                    <button onClick={() => openEditModal(job)} data-testid="edit-job-button" className="w-9 h-9 flex items-center justify-center hover:bg-slate-100 rounded-lg transition-colors">
+                    <button onClick={() => openEditModal(job)} data-testid="edit-job-button" className="w-11 h-11 md:w- md:h- flex items-center justify-center hover:bg-slate-100 rounded-lg transition-colors">
                       <Pencil size={14} className="text-slate-500" />
                     </button>
                   )}
@@ -480,16 +480,16 @@ export default function JobCards() {
                     <div className="flex items-center gap-1.5">
                       <span className="text-xs font-mono text-slate-400">{job.job_number}</span>
                       {!job.vehicle_id && (
-                        <span className="px-1.5 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide bg-orange-100 text-orange-700">External</span>
+                        <span className="px-1.5 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wide bg-orange-100 text-orange-700">External</span>
                       )}
                       {job.is_warranty && (
-                        <span className="px-1.5 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide bg-teal-100 text-teal-700">Warranty</span>
+                        <span className="px-1.5 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wide bg-teal-100 text-teal-700">Warranty</span>
                       )}
                       {job.service_no && (
-                        <span className="px-1.5 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide bg-indigo-100 text-indigo-700">{serviceLabel(job.service_no)}</span>
+                        <span className="px-1.5 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wide bg-indigo-100 text-indigo-700">{serviceLabel(job.service_no)}</span>
                       )}
                       {vs && (
-                        <span data-testid="job-vehicle-status-badge" className={`px-1.5 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide ${vs.bg} ${vs.text}`}>{vs.label}</span>
+                        <span data-testid="job-vehicle-status-badge" className={`px-1.5 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wide ${vs.bg} ${vs.text}`}>{vs.label}</span>
                       )}
                     </div>
                     <div className="font-bold text-slate-900 text-sm mt-0.5" style={{ fontFamily: "Manrope" }}>
@@ -522,7 +522,7 @@ export default function JobCards() {
                         const isExternal = p.external || !p.part_id;
                         return (
                           <div key={i} className={`flex justify-between text-xs py-0.5 ${isExternal ? "bg-orange-100 text-orange-900 font-semibold -mx-1.5 px-1.5 rounded" : "text-slate-600"}`}>
-                            <span>{p.part_name} × {p.quantity}{isExternal && <span className="ml-1.5 text-[10px] font-bold uppercase tracking-wide text-orange-600">External</span>}</span>
+                            <span>{p.part_name} × {p.quantity}{isExternal && <span className="ml-1.5 text-xs font-bold uppercase tracking-wide text-orange-600">External</span>}</span>
                             <span className="font-medium">{formatNPR(p.quantity * p.unit_cost)}</span>
                           </div>
                         );
@@ -575,9 +575,9 @@ export default function JobCards() {
 
       {/* Create / Edit Job Modal */}
       {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between p-5 border-b border-slate-100">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 sm:p-4">
+          <div className="bg-white sm:rounded-2xl shadow-2xl w-full h-full sm:h-auto max-w-lg sm:max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between p-5 border-b border-slate-100 sticky top-0 bg-white z-10">
               <h2 className="text-lg font-bold text-slate-900">{editingJob ? `Edit Job Card ${editingJob.job_number || ""}` : "Create Job Card"}</h2>
               <button onClick={closeModal} className="w-11 h-11 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500">✕</button>
             </div>
@@ -614,7 +614,7 @@ export default function JobCards() {
 
                   {form.is_external ? (
                     <>
-                      <p className="text-[11px] text-slate-400 -mt-2">For a repair-only vehicle that isn't part of our stock.</p>
+                      <p className="text-xs text-slate-400 -mt-2">For a repair-only vehicle that isn't part of our stock.</p>
                       <div className="grid grid-cols-2 gap-4">
                         <div>
                           <label className="block text-xs font-medium text-slate-600 mb-1">Brand <span className="text-red-500">*</span></label>
@@ -769,7 +769,7 @@ export default function JobCards() {
                         {p.external ? <ShoppingBag size={11} className="text-orange-400 shrink-0" /> : <Package size={11} className="text-slate-400 shrink-0" />}
                         <span className="flex-1 min-w-0">
                           <span className="font-medium text-slate-700 truncate block">{p.part_name}</span>
-                          {p.external && <span className="text-[10px] font-semibold uppercase tracking-wide text-orange-500">Externally bought</span>}
+                          {p.external && <span className="text-xs font-semibold uppercase tracking-wide text-orange-500">Externally bought</span>}
                         </span>
                         <span className="text-slate-400 shrink-0">Qty:</span>
                         <input
@@ -799,7 +799,7 @@ export default function JobCards() {
                 <label className="flex items-center gap-1.5 text-xs font-medium text-slate-600 mb-2">
                   <ShoppingBag size={12} /> Externally Bought Parts <span className="text-slate-400 font-normal">(optional)</span>
                 </label>
-                <p className="text-[11px] text-slate-400 mb-2 -mt-1">For parts bought specifically for this vehicle that aren't in your spare parts inventory.</p>
+                <p className="text-xs text-slate-400 mb-2 -mt-1">For parts bought specifically for this vehicle that aren't in your spare parts inventory.</p>
                 <div className="flex gap-2">
                   <div className="flex-1 min-w-0">
                     <input

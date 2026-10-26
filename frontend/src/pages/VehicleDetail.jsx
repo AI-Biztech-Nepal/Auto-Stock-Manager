@@ -742,7 +742,7 @@ export function VehicleDetailModal({ id, onClose }) {
                               <div>
                                 <div className="text-sm font-medium text-slate-900 flex items-center gap-1.5">
                                   {job.work_description}
-                                  <span className="px-1.5 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide bg-purple-100 text-purple-700">Job Card</span>
+                                  <span className="px-1.5 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wide bg-purple-100 text-purple-700">Job Card</span>
                                 </div>
                                 <div className="text-xs text-slate-500">{job.job_number} · {job.mechanic_name}</div>
                               </div>
@@ -757,7 +757,7 @@ export function VehicleDetailModal({ id, onClose }) {
                                   const isExternal = p.external || !p.part_id;
                                   return (
                                     <div key={i} className={`flex justify-between text-xs py-0.5 ${isExternal ? "bg-orange-100 text-orange-900 font-semibold -mx-1.5 px-1.5 rounded" : "text-slate-600"}`}>
-                                      <span>{p.part_name} × {p.quantity}{isExternal && <span className="ml-1.5 text-[10px] font-bold uppercase tracking-wide text-orange-600">External</span>}</span>
+                                      <span>{p.part_name} × {p.quantity}{isExternal && <span className="ml-1.5 text-xs font-bold uppercase tracking-wide text-orange-600">External</span>}</span>
                                       <span className="font-medium">{formatNPR(p.quantity * p.unit_cost)}</span>
                                     </div>
                                   );
@@ -821,7 +821,7 @@ export function VehicleDetailModal({ id, onClose }) {
                       </div>
                     )}
                     {idx === 0 && !photo.pending && (
-                      <span className="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded-md bg-blue-600 text-white text-[10px] font-semibold uppercase tracking-wide pointer-events-none" data-testid="cover-photo-badge">Cover</span>
+                      <span className="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded-md bg-blue-600 text-white text-xs font-semibold uppercase tracking-wide pointer-events-none" data-testid="cover-photo-badge">Cover</span>
                     )}
                     {canManagePhotos && !photo.pending && photos.length > 1 && (
                       <div className="absolute bottom-1.5 inset-x-1.5 flex justify-between">
