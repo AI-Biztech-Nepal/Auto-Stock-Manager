@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   LayoutDashboard, BookOpen, ArrowDownCircle, ArrowUpCircle, Receipt, ShoppingCart, Wallet, Users, Landmark,
-  FileSpreadsheet, BarChart3, TrendingUp, Package,
+  FileSpreadsheet, BarChart3, TrendingUp, Package, PieChart,
 } from "lucide-react";
 import { BooksProvider, useBooks } from "./finance/BooksContext";
 import Dashboard from "./finance/Dashboard";
@@ -13,13 +13,14 @@ import Ledger from "./finance/Ledger";
 import BankAccounts from "./finance/BankAccounts";
 import ImportStatement from "./finance/ImportStatement";
 import Inventory from "./finance/Inventory";
+import BusinessSummary from "./finance/BusinessSummary";
 import { Report, Totals } from "./finance/Reports";
 import { Card, Notice } from "./finance/ui";
 import { todayStr } from "./finance/money";
 
 // Finance books, ported from the FINANCE project. The whole side panel is visible at once, no dropdowns.
 const GROUPS = [
-  { title: "Overview", items: [["dashboard", "Dashboard", LayoutDashboard], ["daybook", "Day Book", BookOpen]] },
+  { title: "Overview", items: [["summary", "Business Summary", PieChart], ["dashboard", "Dashboard", LayoutDashboard], ["daybook", "Day Book", BookOpen]] },
   { title: "Entries", items: [["received", "Received", ArrowDownCircle], ["paid", "Payment Out", ArrowUpCircle], ["sales", "Sales", Receipt], ["purchases", "Purchases", ShoppingCart], ["expenses", "Expenses", Wallet]] },
   { title: "Accounts", items: [["ledger", "Ledger", Users], ["banks", "Bank Accounts", Landmark], ["import", "Import Statement", FileSpreadsheet]] },
   { title: "Reports", items: [["report", "Report", BarChart3], ["totals", "Totals", TrendingUp], ["inventory", "Inventory", Package]] },
@@ -48,7 +49,7 @@ function FinanceInner() {
   const [params, setParams] = useSearchParams();
   const [bookDate, setBookDate] = useState(todayStr());
   const requested = params.get("tab");
-  const tab = TAB_KEYS.includes(requested) ? requested : "dashboard";
+  const tab = TAB_KEYS.includes(requested) ? requested : "summary";
   const partyId = params.get("party");
 
   const goTab = (t) => setParams({ tab: t }, { replace: false });
@@ -60,6 +61,7 @@ function FinanceInner() {
   if (loadError) return <Notice tone="red">{loadError}</Notice>;
 
   const screens = {
+    summary: <BusinessSummary />,
     dashboard: <Dashboard goTab={goTab} openParty={openParty} />,
     daybook: <DayBook date={bookDate} setDate={setBookDate} goTab={goTab} />,
     received: <Payment direction="received" />,
