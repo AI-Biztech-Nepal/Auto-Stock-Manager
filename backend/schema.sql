@@ -512,6 +512,7 @@ CREATE TABLE IF NOT EXISTS vehicle_photos (
   filename VARCHAR(500),
   content_type VARCHAR(100),
   data LONGTEXT,
+  storage_path VARCHAR(500),  -- set when the file is in Supabase Storage (media_storage.py); data is then empty
   uploaded_at VARCHAR(40),
   size INT,
   sort_order INT,
@@ -529,6 +530,7 @@ CREATE TABLE IF NOT EXISTS legal_documents (
   filename VARCHAR(500),
   content_type VARCHAR(100),
   data LONGTEXT,
+  storage_path VARCHAR(500),  -- set when the file is in Supabase Storage (media_storage.py); data is then empty
   doc_type VARCHAR(30),
   original_name VARCHAR(500),
   uploaded_at VARCHAR(40),

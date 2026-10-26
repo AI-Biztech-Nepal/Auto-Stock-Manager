@@ -125,6 +125,28 @@ The Visits page can also show what people typed into Google and which countries 
 
 Search Console data runs 2 to 3 days behind and only exists from when the site was verified.
 
+## Photos and documents in Supabase Storage
+
+Vehicle photos and legal documents used to live in MySQL as base64 and pass through the backend on every
+view (with up to 300MB of them cached in its memory). With Supabase Storage switched on, they are kept in the
+FINANCE Supabase project instead (`backend/media_storage.py`): photos in the public `asm-photos` bucket, served
+by its CDN; documents in the private `asm-documents` bucket, opened through hour-long signed links. The app's
+`/file` links keep working and redirect there, and the storefront gets the CDN links directly.
+
+1. Supabase (FINANCE project) → SQL Editor: run `FINANCE/supabase/migrations/0013_asm_media_buckets.sql`.
+2. On the VPS, in the backend's `.env`: `SUPABASE_URL=https://boiiqzkkbyzqkqsxuzyp.supabase.co` and
+   `SUPABASE_SERVICE_ROLE_KEY=` (Project Settings → API → service_role; server-side only, never the
+   frontend). Restart the backend. From here on new uploads go to Storage.
+3. Move what is already there, from `~/auto-stock-manager/backend/`:
+   ```bash
+   python migrate_media_to_supabase.py copy     # uploads, keeps the database copy; safe to re-run
+   python migrate_media_to_supabase.py verify   # every file really in Storage?
+   python migrate_media_to_supabase.py purge    # empties the database copies (only if verify passes)
+   ```
+   then in MySQL `OPTIMIZE TABLE vehicle_photos, legal_documents;` to give the disk space back.
+
+Without the two settings nothing changes: uploads keep going into MySQL, as before.
+
 ## Auto-deploy on push to main
 
 A GitHub webhook hits this app's own VPS listener on every push to `main`, which pulls,
@@ -287,6 +309,7 @@ Everyone signs in once more on the new address, because the browser keeps the lo
 | `RESEND_API_KEY` | ❌ (but see below) | Sends email-verification and password-reset emails. Without it, signup/reset still work but no email is ever sent — accounts get stuck unverified. |
 | `RESEND_FROM` | ❌ | Sender address, e.g. `Auto Stock Manager <no-reply@yourdomain.com>`. Defaults to Resend's sandbox address, which can only email your own Resend account — real users won't receive anything until you verify a domain and set this. |
 | `FRONTEND_URL` | ✅ if `RESEND_API_KEY` set | Your deployed frontend's URL (no trailing slash) — used to build the links inside verification/reset emails. Defaults to `http://localhost:3000`, which is wrong for production. |
+| `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` | ❌ | Keeps vehicle photos and legal documents in Supabase Storage instead of MySQL (see **Photos and documents in Supabase Storage**). Without them they stay in MySQL. |
 | `FB_APP_ID` / `FB_APP_SECRET` | ❌ | Turns on "Post to Facebook Page" on the Share tab (see **Facebook Page posting** below). Without them the button is hidden. Also needs `FRONTEND_URL`. |
 
 ### Vercel (Frontend)

@@ -22,6 +22,7 @@ from google import genai
 from google.genai import types as genai_types
 from google.genai import errors as genai_errors
 import httpx
+import media_storage
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
@@ -5577,6 +5578,8 @@ async def _run_startup_tasks():
             ("vehicles", "sanakhat_cost", "DOUBLE"),
             ("settings", "warranty_days_default", "INT"),
             ("vehicle_photos", "sort_order", "INT"),
+            ("vehicle_photos", "storage_path", "VARCHAR(500)"),
+            ("legal_documents", "storage_path", "VARCHAR(500)"),
             ("vendors", "commission_amount", "DOUBLE"),
         ]
         for _tbl, _col, _type in _post_schema_cols:
@@ -5713,12 +5716,26 @@ async def _get_photo_bytes(filt: dict) -> tuple[bytes, str]:
     p = await db.vehicle_photos.find_one(filt, {"_id": 0})
     if not p:
         raise HTTPException(404, "Photo not found")
-    raw = base64.b64decode(p["data"])
+    if p.get("storage_path"):
+        raw = await media_storage.download(media_storage.PHOTO_BUCKET, p["storage_path"])
+    else:
+        raw = base64.b64decode(p["data"])
     cached = (raw, p["content_type"])
     if _PHOTO_BYTES_CACHE_SIZE + len(raw) <= PHOTO_CACHE_MAX_BYTES:
         _PHOTO_BYTES_CACHE[photo_id] = cached
         _PHOTO_BYTES_CACHE_SIZE += len(raw)
     return cached
+
+async def _photo_redirect(filt: dict) -> Optional[RedirectResponse]:
+    """A photo kept in Supabase Storage (see media_storage.py) is sent from there: the browser is pointed at
+    the CDN copy and the bytes never pass through this server. None for one still held in the database."""
+    p = await db.vehicle_photos.find_one(filt, {"_id": 0, "id": 1, "storage_path": 1})
+    if not p:
+        raise HTTPException(404, "Photo not found")
+    if not p.get("storage_path"):
+        return None
+    return RedirectResponse(media_storage.public_url(media_storage.PHOTO_BUCKET, p["storage_path"]), status_code=302,
+                            headers={"Cache-Control": "public, max-age=86400"})
 
 def _evict_photo_cache(photo_id: str):
     global _PHOTO_BYTES_CACHE_SIZE
@@ -5770,15 +5787,15 @@ async def _compress_oversized_photos():
     currently over PHOTO_MAX_BYTES via _compress_photo, so anything uploaded
     before that cap (or before compression existed at all) gets caught too.
     Safe to run every startup — already-small photos are skipped."""
-    photos = await db.vehicle_photos.find({}, {"_id": 0, "id": 1, "size": 1}).to_list(100000)
-    oversized_ids = [p["id"] for p in photos if (p.get("size") or 0) > PHOTO_MAX_BYTES]
+    photos = await db.vehicle_photos.find({}, {"_id": 0, "id": 1, "size": 1, "storage_path": 1}).to_list(100000)
+    oversized_ids = [p["id"] for p in photos if (p.get("size") or 0) > PHOTO_MAX_BYTES and not p.get("storage_path")]
     if not oversized_ids:
         return
     logger.info(f"Compressing {len(oversized_ids)} oversized vehicle photo(s)...")
     succeeded = 0
     for photo_id in oversized_ids:
         p = await db.vehicle_photos.find_one({"id": photo_id})
-        if not p:
+        if not p or not p.get("data"):
             continue
         raw = base64.b64decode(p["data"])
         try:
@@ -5822,7 +5839,8 @@ async def reorder_vehicle_photos(vid: str, body: PhotoOrder, cu: dict = Depends(
 async def get_vehicle_photos(vid: str, cu: dict = Depends(require("vehicle_photos", "view"))):
     v = await db.vehicles.find_one({"id": vid}, {"_id": 0, "id": 1})
     if not v: raise HTTPException(404, "Vehicle not found")
-    photos = await db.vehicle_photos.find({"vehicle_id": vid}, {"_id": 0}).sort(PHOTO_ORDER).to_list(200)
+    # The list needs names and sizes only - never every photo's base64 `data`.
+    photos = await db.vehicle_photos.find({"vehicle_id": vid}, {"_id": 0, "data": 0}).sort(PHOTO_ORDER).to_list(200)
     return [_photo_out(p) for p in photos]
 
 @api_router.get("/vehicle-photos/{photo_id}/file")
@@ -5832,6 +5850,9 @@ async def get_vehicle_photo_file(photo_id: str):
     for every tenant, unlike /public/vehicles/*/photos/* below, which is intentionally locked
     to one storefront company via _scope_to_default_company and would 404 for anyone else's
     vehicles -- this route exists precisely so the in-app photo tab isn't limited to that."""
+    redirect = await _photo_redirect({"id": photo_id})
+    if redirect:
+        return redirect
     content, content_type = await _get_photo_bytes({"id": photo_id})
     return Response(content=content, media_type=content_type,
                      headers={"Cache-Control": "public, max-age=31536000, immutable"})
@@ -5864,14 +5885,24 @@ async def upload_vehicle_photo(vid: str, file: UploadFile = File(...), cu: dict 
         "uploaded_at": datetime.now(timezone.utc).isoformat(), "size": len(content),
         "sort_order": await db.vehicle_photos.count_documents({"vehicle_id": vid}),
     }
+    if media_storage.enabled():
+        path = media_storage.object_path(v.get("company_id"), vid, photo_id, content_type)
+        try:
+            await media_storage.upload(media_storage.PHOTO_BUCKET, path, content, content_type)
+            photo.update(storage_path=path, data=None)
+        except Exception:
+            logger.warning(f"Supabase upload failed for a photo of vehicle {vid}, keeping it in the database", exc_info=True)
     await db.vehicle_photos.insert_one(photo)
     asyncio.create_task(_notify_storefront())
     return _photo_out(photo)
 
 @api_router.delete("/vehicles/{vid}/photos/{photo_id}")
 async def delete_vehicle_photo(vid: str, photo_id: str, cu: dict = Depends(require("vehicle_photos", "delete"))):
+    p = await db.vehicle_photos.find_one({"id": photo_id, "vehicle_id": vid}, {"_id": 0, "storage_path": 1})
     r = await db.vehicle_photos.delete_one({"id": photo_id, "vehicle_id": vid})
     if r.deleted_count == 0: raise HTTPException(404, "Photo not found")
+    if p and p.get("storage_path"):
+        await media_storage.remove(media_storage.PHOTO_BUCKET, p["storage_path"])
     _evict_photo_cache(photo_id)
     asyncio.create_task(_notify_storefront())
     return {"message": "Photo deleted"}
@@ -5903,7 +5934,10 @@ async def _get_doc_bytes(filt: dict) -> tuple[bytes, str]:
     d = await db.legal_documents.find_one(filt, {"_id": 0})
     if not d:
         raise HTTPException(404, "Document not found")
-    raw = base64.b64decode(d["data"])
+    if d.get("storage_path"):
+        raw = await media_storage.download(media_storage.DOC_BUCKET, d["storage_path"])
+    else:
+        raw = base64.b64decode(d["data"])
     cached = (raw, d["content_type"])
     if _DOC_BYTES_CACHE_SIZE + len(raw) <= DOC_CACHE_MAX_BYTES:
         _DOC_BYTES_CACHE[doc_id] = cached
@@ -5992,7 +6026,7 @@ def _doc_out(d: dict) -> dict:
 async def get_legal_documents(vid: str, cu: dict = Depends(require("vehicle_media", "view"))):
     v = await db.vehicles.find_one({"id": vid}, {"_id": 0, "id": 1})
     if not v: raise HTTPException(404, "Vehicle not found")
-    docs = await db.legal_documents.find({"vehicle_id": vid}, {"_id": 0}).sort("uploaded_at", 1).to_list(200)
+    docs = await db.legal_documents.find({"vehicle_id": vid}, {"_id": 0, "data": 0}).sort("uploaded_at", 1).to_list(200)
     return [_doc_out(d) for d in docs]
 
 @api_router.get("/legal-documents/{doc_id}/file")
@@ -6001,7 +6035,16 @@ async def get_legal_document_file(doc_id: str):
     scans and PDFs). Deliberately unauthenticated with no company scoping: doc_id is an
     unguessable UUID (122 bits of randomness), the same trust model this app already uses for
     password-reset tokens -- knowing the exact id is what grants access, same as a Google Docs
-    share link. Not indexed or listed anywhere a stranger could find it."""
+    share link. Not indexed or listed anywhere a stranger could find it.
+
+    A document kept in Supabase Storage sits in a private bucket: the answer is a redirect to a signed link
+    that stops working after an hour, never cached."""
+    d = await db.legal_documents.find_one({"id": doc_id}, {"_id": 0, "id": 1, "storage_path": 1})
+    if not d:
+        raise HTTPException(404, "Document not found")
+    if d.get("storage_path"):
+        url = await media_storage.signed_url(media_storage.DOC_BUCKET, d["storage_path"])
+        return RedirectResponse(url, status_code=302, headers={"Cache-Control": "no-store"})
     content, content_type = await _get_doc_bytes({"id": doc_id})
     return Response(content=content, media_type=content_type,
                      headers={"Cache-Control": "public, max-age=31536000, immutable"})
@@ -6017,15 +6060,15 @@ async def _compress_oversized_documents():
     not just an inter-item sleep(0)), and is safe to run every startup — anything
     already under the cap, or where compressing wouldn't actually shrink it,
     is skipped, so a repeat run does almost nothing."""
-    docs = await db.legal_documents.find({}, {"_id": 0, "id": 1, "size": 1}).to_list(100000)
-    oversized_ids = [d["id"] for d in docs if (d.get("size") or 0) > DOC_MAX_BYTES]
+    docs = await db.legal_documents.find({}, {"_id": 0, "id": 1, "size": 1, "storage_path": 1}).to_list(100000)
+    oversized_ids = [d["id"] for d in docs if (d.get("size") or 0) > DOC_MAX_BYTES and not d.get("storage_path")]
     if not oversized_ids:
         return
     logger.info(f"Compressing {len(oversized_ids)} oversized legal document(s)...")
     succeeded = 0
     for doc_id in oversized_ids:
         d = await db.legal_documents.find_one({"id": doc_id})
-        if not d:
+        if not d or not d.get("data"):
             continue
         raw = base64.b64decode(d["data"])
         content_type = d.get("content_type", "")
@@ -6079,6 +6122,13 @@ async def upload_legal_document(vid: str, file: UploadFile = File(...), doc_type
         "uploaded_at": datetime.now(timezone.utc).isoformat(), "size": len(content),
         "sort_order": await db.vehicle_photos.count_documents({"vehicle_id": vid}),
     }
+    if media_storage.enabled():
+        path = media_storage.object_path(v.get("company_id"), vid, doc_id, content_type)
+        try:
+            await media_storage.upload(media_storage.DOC_BUCKET, path, content, content_type)
+            doc.update(storage_path=path, data=None)
+        except Exception:
+            logger.warning(f"Supabase upload failed for a document of vehicle {vid}, keeping it in the database", exc_info=True)
     await db.legal_documents.insert_one(doc)
     # Update status field
     status_field = f"{doc_type}_status" if doc_type != "other" else None
@@ -6087,8 +6137,11 @@ async def upload_legal_document(vid: str, file: UploadFile = File(...), doc_type
 
 @api_router.delete("/vehicles/{vid}/legal-documents/{doc_id}")
 async def delete_legal_document(vid: str, doc_id: str, cu: dict = Depends(require("vehicle_media", "delete"))):
+    d = await db.legal_documents.find_one({"id": doc_id, "vehicle_id": vid}, {"_id": 0, "storage_path": 1})
     r = await db.legal_documents.delete_one({"id": doc_id, "vehicle_id": vid})
     if r.deleted_count == 0: raise HTTPException(404, "Document not found")
+    if d and d.get("storage_path"):
+        await media_storage.remove(media_storage.DOC_BUCKET, d["storage_path"])
     _evict_doc_cache(doc_id)
     return {"message": "Document deleted"}
 
@@ -6475,7 +6528,8 @@ async def export_for_website(cu: dict = Depends(admin_only)):
                 "bluebook": v.get("bluebook_status"), "insurance": v.get("insurance_status"),
                 "tax": v.get("tax_clearance_status"), "transfer": v.get("transfer_status"),
             },
-            "photos": [f"data:{p['content_type']};base64,{p['data']}" for p in photos],
+            "photos": [media_storage.public_url(media_storage.PHOTO_BUCKET, p["storage_path"]) if p.get("storage_path")
+                       else f"data:{p['content_type']};base64,{p['data']}" for p in photos],
             "contact": contact,
             "source": source,
             "exported_at": datetime.now(timezone.utc).isoformat(),
@@ -6530,7 +6584,7 @@ def _public_vehicle_fields(v: dict) -> dict:
         "created_at": v.get("created_at"),
     }
 
-def _public_photo_url(request: Request, vid: str, photo_id: str) -> str:
+def _public_photo_url(request: Request, vid: str, photo_id: str, storage_path: Optional[str] = None) -> str:
     """Builds an absolute URL from the client-facing scheme/host, not request.base_url —
     that reflects whatever uvicorn itself saw, which is plain http behind an
     nginx/Caddy TLS-terminating reverse proxy (the typical VPS setup) unless
@@ -6539,7 +6593,12 @@ def _public_photo_url(request: Request, vid: str, photo_id: str) -> str:
     http:// on an https:// site, which browsers and next/image's remotePatterns
     block outright. Reading the headers directly sidesteps needing that trust
     config to be right — safe here since this only affects a display URL, not a
-    security decision."""
+    security decision.
+
+    A photo kept in Supabase Storage gets its CDN address instead, so the storefront loads it without
+    touching this server at all."""
+    if storage_path:
+        return media_storage.public_url(media_storage.PHOTO_BUCKET, storage_path)
     scheme = request.headers.get("x-forwarded-proto", request.url.scheme).split(",")[0].strip()
     host = (request.headers.get("x-forwarded-host") or request.headers.get("host") or request.url.netloc).split(",")[0].strip()
     return f"{scheme}://{host}/api/public/vehicles/{vid}/photos/{photo_id}"
@@ -6574,7 +6633,7 @@ async def public_list_vehicles(request: Request):
     # a per-vehicle find_one, then keep the earliest photo per vehicle as its cover.
     all_photos = (
         await db.vehicle_photos.find(
-            {"vehicle_id": {"$in": vehicle_ids}}, {"_id": 0, "id": 1, "vehicle_id": 1, "uploaded_at": 1}
+            {"vehicle_id": {"$in": vehicle_ids}}, {"_id": 0, "id": 1, "vehicle_id": 1, "uploaded_at": 1, "storage_path": 1}
         ).sort(PHOTO_ORDER).to_list(20000)
         if vehicle_ids else []
     )
@@ -6600,7 +6659,7 @@ async def public_list_vehicles(request: Request):
         item = _public_vehicle_fields(v)
         item["view_count"] = views.get(v["id"], 0)
         cover = cover_by_vehicle.get(v["id"])
-        item["cover_photo"] = _public_photo_url(request, v["id"], cover["id"]) if cover else None
+        item["cover_photo"] = _public_photo_url(request, v["id"], cover["id"], cover.get("storage_path")) if cover else None
         item["image_urls"] = [item["cover_photo"]] if cover else []
         out.append(item)
     return {"count": len(out), "vehicles": out}
@@ -6611,8 +6670,9 @@ async def public_get_vehicle(vid: str, request: Request):
     v = await db.vehicles.find_one({"id": vid, **STOREFRONT_VISIBLE}, {"_id": 0})
     if not v: raise HTTPException(404, "Vehicle not found or not available")
     item = _public_vehicle_fields(v)
-    photos = await db.vehicle_photos.find({"vehicle_id": vid}, {"_id": 0}).sort(PHOTO_ORDER).to_list(50)
-    item["image_urls"] = [_public_photo_url(request, vid, p["id"]) for p in photos]
+    # Never the base64 `data`: only what the links are made from.
+    photos = await db.vehicle_photos.find({"vehicle_id": vid}, {"_id": 0, "id": 1, "storage_path": 1, "sort_order": 1, "uploaded_at": 1}).sort(PHOTO_ORDER).to_list(50)
+    item["image_urls"] = [_public_photo_url(request, vid, p["id"], p.get("storage_path")) for p in photos]
     item["photos"] = item["image_urls"]  # kept for backwards compatibility with earlier consumers
     return item
 
@@ -6624,6 +6684,9 @@ async def public_get_photo(vid: str, photo_id: str):
     to handle inline base64 data URIs. Shares its cache (see _get_photo_bytes) with
     get_vehicle_photo_file above — same underlying bytes, just reached via a route that's
     additionally scoped to the storefront's one default company rather than any tenant's."""
+    redirect = await _photo_redirect({"id": photo_id, "vehicle_id": vid})
+    if redirect:
+        return redirect
     content, content_type = await _get_photo_bytes({"id": photo_id, "vehicle_id": vid})
     return Response(
         content=content, media_type=content_type,
