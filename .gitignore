@@ -102,3 +102,6 @@ frontend/node_modules/.cache/default-development/5.pack
 /*.xlsx
 /*.csv
 ~$*
+
+# copy_mysql_to_supabase.py output (generated on the VPS)
+backend/supabase_schema.sql

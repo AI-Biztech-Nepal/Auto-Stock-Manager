@@ -147,6 +147,20 @@ by its CDN; documents in the private `asm-documents` bucket, opened through hour
 
 Without the two settings nothing changes: uploads keep going into MySQL, as before.
 
+## Copying the database to Supabase (MySQL stays as it is)
+
+`backend/copy_mysql_to_supabase.py` copies every MySQL table into the FINANCE Supabase project as
+`asm_<table>` (Row Level Security on, no policies: only the service role key can reach them). It only reads
+MySQL; the app keeps running on it. Re-run any time to bring Supabase up to date. Uses the same two Supabase
+settings as above. From `~/auto-stock-manager/backend/`:
+
+```bash
+venv/bin/python copy_mysql_to_supabase.py schema   # writes supabase_schema.sql
+cat supabase_schema.sql                            # paste into Supabase SQL Editor -> Run
+venv/bin/python copy_mysql_to_supabase.py copy
+venv/bin/python copy_mysql_to_supabase.py check    # row counts side by side
+```
+
 ## Auto-deploy on push to main
 
 A GitHub webhook hits this app's own VPS listener on every push to `main`, which pulls,
