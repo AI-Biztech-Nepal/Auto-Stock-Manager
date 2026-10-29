@@ -52,12 +52,12 @@ export default function Marketing() {
                 aria-selected={active}
                 onClick={() => switchTab(key)}
                 data-testid={`marketing-tab-${key}`}
-                className={`flex items-center justify-center gap-1.5 sm:gap-2 h-11 rounded-lg text-sm font-semibold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
+                className={`relative flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2 h-14 sm:h-11 rounded-lg text-xs sm:text-sm font-semibold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
                   active ? "bg-blue-600 text-white shadow-md" : "text-slate-600 hover:bg-white hover:text-slate-900"
                 }`}
               >
                 <Icon size={18} /> {label}
-                {key === "leads" && newLeads > 0 && <span className="min-w-[20px] h-5 px-1.5 rounded-full bg-red-500 text-white text-[11px] font-bold flex items-center justify-center">{newLeads > 99 ? "99+" : newLeads}</span>}
+                {key === "leads" && newLeads > 0 && <span aria-label={`${newLeads} new`} className="absolute top-1.5 left-1/2 ml-1.5 sm:static sm:ml-0 min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] sm:text-[11px] font-bold leading-none flex items-center justify-center ring-2 ring-slate-100 sm:ring-0">{newLeads > 99 ? "99+" : newLeads}</span>}
               </button>
             );
           })}

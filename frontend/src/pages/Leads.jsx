@@ -74,22 +74,30 @@ export default function Leads() {
 
   return (
     <div className="space-y-4" data-testid="leads-page">
-      <div className="flex flex-wrap gap-2">
-        {[["all", "All"], ...Object.entries(TYPES).map(([k, v]) => [k, v.label])].map(([k, label]) => (
+      {/* One swipeable row on phones (bleeds to the screen edge so the cut-off chip hints at more); wraps from sm up. */}
+      <div role="group" aria-label="Filter leads by type" style={{ scrollbarWidth: "none" }} className="-mx-4 px-4 sm:mx-0 sm:px-0 flex gap-2 overflow-x-scroll sm:overflow-visible sm:flex-wrap [&::-webkit-scrollbar]:hidden">
+        {[["all", "All", null], ...Object.entries(TYPES).map(([k, v]) => [k, v.label, v.Icon])].map(([k, label, Icon]) => (
           <button
             key={k}
             onClick={() => setType(k)}
-            className={`h-9 px-4 rounded-full text-sm font-semibold border transition-colors ${type === k ? "bg-blue-600 text-white border-blue-600" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"}`}
+            aria-pressed={type === k}
+            className={`shrink-0 h-10 px-3.5 inline-flex items-center gap-1.5 whitespace-nowrap rounded-full text-sm font-semibold border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${type === k ? "bg-blue-600 text-white border-blue-600" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"}`}
           >
-            {label}{newCount(k) > 0 && <span className={`ml-2 text-xs px-1.5 py-0.5 rounded-full ${type === k ? "bg-white/25" : "bg-blue-600 text-white"}`}>{newCount(k)}</span>}
+            {Icon && <Icon size={15} />}{label}{newCount(k) > 0 && <span className={`ml-0.5 min-w-[20px] text-center text-xs px-1.5 py-0.5 rounded-full ${type === k ? "bg-white/25" : "bg-blue-600 text-white"}`}>{newCount(k)}</span>}
           </button>
         ))}
       </div>
 
       {shown.length === 0 ? (
-        <div className="bg-white border border-slate-200 rounded-2xl p-10 text-center text-slate-400">
-          <Inbox size={32} className="mx-auto mb-2" />
-          <p className="text-sm">No leads yet. Website form submissions will show up here.</p>
+        <div className="bg-white border border-slate-200 rounded-2xl px-6 py-12 text-center">
+          <span className="mx-auto mb-4 size-12 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center"><Inbox size={22} /></span>
+          <h3 className="text-base font-bold text-slate-900" style={FONT}>{type === "all" ? "No leads yet" : `No ${TYPES[type].label.toLowerCase()} leads`}</h3>
+          <p className="mt-1 text-sm text-slate-600 max-w-xs mx-auto">
+            {type === "all" ? "Sell, exchange and service requests from your website will appear here as they come in." : "Nothing in this group right now."}
+          </p>
+          {type !== "all" && leads.length > 0 && (
+            <button onClick={() => setType("all")} className="mt-4 h-10 px-4 rounded-lg bg-slate-100 hover:bg-slate-200 text-sm font-semibold text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">Show all {leads.length} leads</button>
+          )}
         </div>
       ) : (
         <div className="space-y-3">
