@@ -1,12 +1,13 @@
 import { useState, useEffect, useMemo, useRef, Suspense } from "react";
 import { Outlet, NavLink, useNavigate } from "react-router-dom";
+import { toast } from "sonner";
 import api from "../utils/api";
 import { useAuth } from "../context/AuthContext";
 import { canAccessPath } from "../utils/permissions";
 import { isSanakhatOverdue, sanakhatPendingDays } from "../utils/helpers";
 import {
   LayoutDashboard, Bike, Wrench, BarChart3, Sparkles, Settings, LogOut, Menu, X, Bell,
-  BookOpen, Wallet, Boxes, ShoppingBag, Building2, ImageOff, FileWarning, ShieldCheck, Megaphone
+  BookOpen, Wallet, Boxes, ShoppingBag, Building2, ImageOff, FileWarning, ShieldCheck, Megaphone, Inbox
 } from "lucide-react";
 
 // A vehicle needs at least this many photos before it's considered adequately
@@ -53,6 +54,29 @@ export default function Layout() {
     const id = setInterval(load, 5 * 60 * 1000); // refresh every 5 min — this isn't chat, no need to poll faster
     return () => clearInterval(id);
   }, [user, canSeeInventory]);
+
+  // New website leads (form submissions and WhatsApp/Call taps): admin-only on the backend.
+  // Polled every minute; the Leads screen pings "leads-changed" so the badge clears at once.
+  const [newLeads, setNewLeads] = useState(0);
+  const lastNewLeads = useRef(null);
+  const isAdmin = !user?.role || user.role === "admin";
+  useEffect(() => {
+    if (!user || !isAdmin) return;
+    const load = () => {
+      api.get("/leads").then(r => {
+        const n = r.data.filter(l => l.status === "new").length;
+        if (lastNewLeads.current !== null && n > lastNewLeads.current) {
+          toast.info(`${n - lastNewLeads.current} new website lead${n - lastNewLeads.current > 1 ? "s" : ""}`, { action: { label: "View", onClick: () => navigate("/marketing?tab=leads") } });
+        }
+        lastNewLeads.current = n;
+        setNewLeads(n);
+      }).catch(() => {});
+    };
+    load();
+    const id = setInterval(load, 60 * 1000);
+    window.addEventListener("leads-changed", load);
+    return () => { clearInterval(id); window.removeEventListener("leads-changed", load); };
+  }, [user, isAdmin, navigate]);
 
   const missingDataVehicles = useMemo(() => {
     return notifVehicles
@@ -137,6 +161,9 @@ export default function Layout() {
           >
             <Icon size={17} />
             {label}
+            {path === "/marketing" && newLeads > 0 && (
+              <span className="ml-auto min-w-[20px] h-5 px-1.5 rounded-full bg-red-500 text-white text-[11px] font-bold flex items-center justify-center" data-testid="nav-leads-badge">{newLeads > 99 ? "99+" : newLeads}</span>
+            )}
           </NavLink>
         ))}
       </nav>
@@ -194,9 +221,9 @@ export default function Layout() {
                 title="Vehicles needing attention"
               >
                 <Bell size={17} />
-                {missingDataVehicles.length > 0 && (
+                {missingDataVehicles.length + newLeads > 0 && (
                   <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center leading-none" data-testid="notif-bell-badge">
-                    {missingDataVehicles.length > 99 ? "99+" : missingDataVehicles.length}
+                    {missingDataVehicles.length + newLeads > 99 ? "99+" : missingDataVehicles.length + newLeads}
                   </span>
                 )}
               </button>
@@ -213,6 +240,11 @@ export default function Layout() {
                     )}
                   </div>
                   <div className="max-h-80 overflow-y-auto divide-y divide-slate-50">
+                    {newLeads > 0 && (
+                      <button onClick={() => { setNotifOpen(false); navigate("/marketing?tab=leads"); }} className="w-full text-left px-4 py-2.5 hover:bg-blue-50 bg-blue-50/50 flex items-center gap-2 text-sm font-medium text-blue-700">
+                        <Inbox size={14} /> {newLeads} new website lead{newLeads > 1 ? "s" : ""}
+                      </button>
+                    )}
                     {missingDataVehicles.length === 0 ? (
                       <div className="px-4 py-6 text-center text-sm text-slate-400">Nothing needs attention ✅</div>
                     ) : (
@@ -262,7 +294,7 @@ export default function Layout() {
           {/* Boundary here (not only at the app root) so a lazy page loading keeps the
               sidebar/header on screen instead of swapping the whole layout for a spinner. */}
           <Suspense fallback={<div className="flex items-center justify-center h-64"><div className="animate-spin w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full" /></div>}>
-            <Outlet />
+            <Outlet context={{ newLeads }} />
           </Suspense>
           <div className="pb-safe" aria-hidden="true" />
         </main>

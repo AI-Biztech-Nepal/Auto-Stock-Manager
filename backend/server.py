@@ -6730,6 +6730,24 @@ async def public_create_lead(lead: LeadCreate):
     l.pop("_id", None)
     return l
 
+@api_router.post("/public/leads/click", dependencies=[Depends(_scope_to_default_company)])
+@limiter.limit("30/minute")
+async def public_lead_click(request: Request):
+    """Public -- a storefront visitor tapped a WhatsApp or Call button. Stored as a lead so it
+    shows (and notifies) in the admin Leads screen. Posted as text/plain via sendBeacon."""
+    try:
+        body = json.loads((await request.body()) or b"{}")
+    except Exception:
+        body = {}
+    if not isinstance(body, dict): body = {}
+    kind = body.get("type")
+    if kind not in ("whatsapp", "call"): return {"ok": False}
+    await db.leads.insert_one({
+        "id": str(uuid.uuid4()), "type": kind, "name": "Website visitor", "phone": "",
+        "message": str(body.get("message") or "")[:500], "status": "new",
+        "created_at": datetime.now(timezone.utc).isoformat()})
+    return {"ok": True}
+
 @api_router.get("/public/offers/dashain", dependencies=[Depends(_scope_to_default_company)])
 async def public_dashain_offer():
     """Public, unauthenticated -- what the storefront's Offers tab needs to draw the wheel."""

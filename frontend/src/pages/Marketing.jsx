@@ -1,24 +1,27 @@
 import { Suspense, lazy } from "react";
-import { useSearchParams } from "react-router-dom";
-import { Megaphone, Share2, Gift, Eye } from "lucide-react";
+import { useSearchParams, useOutletContext } from "react-router-dom";
+import { Megaphone, Share2, Gift, Eye, Inbox } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { marketingTabsFor } from "../utils/permissions";
 
-// Everything that brings customers in, in one place: posting vehicles (Share), the festival gift
+// Everything that brings customers in, in one place: website leads (Leads), posting vehicles (Share), the festival gift
 // spin (Offers) and who is visiting the website (Visits). Each tab is the page that used to be its
 // own nav entry -- lazy so opening Marketing only loads the tab shown.
 const Share = lazy(() => import("./Share"));
 const Offers = lazy(() => import("./Offers"));
 const Visits = lazy(() => import("./Visits"));
+const Leads = lazy(() => import("./Leads"));
 
 const TABS = {
   share: { label: "Share", hint: "Post your vehicles to social media", Icon: Share2, Page: Share },
   offers: { label: "Offers", hint: "Run the festival gift spin", Icon: Gift, Page: Offers },
+  leads: { label: "Leads", hint: "Sell, exchange and service requests from your website", Icon: Inbox, Page: Leads },
   visits: { label: "Visits", hint: "See who visits your website", Icon: Eye, Page: Visits },
 };
 
 export default function Marketing() {
   const { user } = useAuth();
+  const { newLeads = 0 } = useOutletContext() || {};
   const [searchParams, setSearchParams] = useSearchParams();
   const allowed = marketingTabsFor(user?.role);
   const requested = searchParams.get("tab");
@@ -54,6 +57,7 @@ export default function Marketing() {
                 }`}
               >
                 <Icon size={18} /> {label}
+                {key === "leads" && newLeads > 0 && <span className="min-w-[20px] h-5 px-1.5 rounded-full bg-red-500 text-white text-[11px] font-bold flex items-center justify-center">{newLeads > 99 ? "99+" : newLeads}</span>}
               </button>
             );
           })}

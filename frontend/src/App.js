@@ -118,6 +118,7 @@ function AppRoutes() {
           <Route path="share" element={<MarketingTab tab="share" />} />
           <Route path="offers" element={<MarketingTab tab="offers" />} />
           <Route path="visits" element={<MarketingTab tab="visits" />} />
+          <Route path="leads" element={<MarketingTab tab="leads" />} />
           <Route path="ai" element={<RoleRoute path="/ai"><AIAssistant /></RoleRoute>} />
           <Route path="settings" element={<Settings />} />
           <Route path="platform" element={<RoleRoute path="/platform"><Platform /></RoleRoute>} />
