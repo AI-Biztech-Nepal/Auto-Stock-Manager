@@ -443,6 +443,7 @@ export default function JobCards() {
                   {!job.vehicle_id && <span className="px-2 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wide bg-orange-100 text-orange-700">External</span>}
                   {job.is_warranty && <span className="px-2 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wide bg-teal-100 text-teal-700">Warranty</span>}
                   {job.service_no && <span className="px-2 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wide bg-indigo-100 text-indigo-700" data-testid="job-service-no">{serviceLabel(job.service_no)}</span>}
+                  {vs && <span data-testid="job-vehicle-status-badge" className={`px-2 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wide ${vs.bg} ${vs.text}`}>{vs.label}</span>}
                   <span className={`px-2 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wide ${js.bg} ${js.text}`}>{js.label}</span>
                 </>}
                 actions={<>

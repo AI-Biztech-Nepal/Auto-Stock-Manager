@@ -7,14 +7,29 @@ import { useEffect, useRef, useState } from "react";
 import { Search, ChevronDown } from "lucide-react";
 import { formatNPR } from "../utils/helpers";
 
-const defaultLabel = (v) =>
-  `${v.brand} ${v.model} ${v.year}${v.registration_number ? ` (${v.registration_number})` : ""}`;
+const normReg = (v) => (v.registration_number || "").replace(/\s+/g, "").toLowerCase();
 
-export default function VehicleComboBox({ vehicles, value, onChange, placeholder = "Search or select a vehicle...", formatLabel = defaultLabel, testId = "vehicle", tagStatus = false, showPrice = false }) {
+// Registration numbers can repeat (a bought-back or re-registered vehicle), so when one is shared
+// by several vehicles in the list, tell them apart by colour, purchase date and chassis tail.
+const makeNamer = (vehicles) => {
+  const counts = {};
+  vehicles.forEach(v => { const r = normReg(v); if (r) counts[r] = (counts[r] || 0) + 1; });
+  return (v) => {
+    if (!(counts[normReg(v)] > 1)) return "";
+    return [v.color, v.purchase_date && `bought ${v.purchase_date}`, v.chassis_number && `chassis …${v.chassis_number.slice(-4)}`].filter(Boolean).join(" · ") || `#${v.id.slice(0, 6)}`;
+  };
+};
+
+export default function VehicleComboBox({ vehicles, value, onChange, placeholder = "Search or select a vehicle...", formatLabel, testId = "vehicle", tagStatus = false, showPrice = false }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const wrapRef = useRef(null);
 
+  const disambiguator = makeNamer(vehicles);
+  const label = formatLabel || ((v) => {
+    const d = disambiguator(v);
+    return `${v.brand} ${v.model} ${v.year}${v.registration_number ? ` (${v.registration_number})` : ""}${d ? ` · ${d}` : ""}`;
+  });
   const selected = vehicles.find(v => v.id === value);
 
   useEffect(() => {
@@ -34,7 +49,7 @@ export default function VehicleComboBox({ vehicles, value, onChange, placeholder
       <div className="relative">
         <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
         <input
-          value={open ? query : (selected ? formatLabel(selected) : "")}
+          value={open ? query : (selected ? label(selected) : "")}
           onChange={e => { setQuery(e.target.value); if (!open) setOpen(true); }}
           onFocus={() => { setQuery(""); setOpen(true); }}
           placeholder={placeholder}
@@ -61,7 +76,7 @@ export default function VehicleComboBox({ vehicles, value, onChange, placeholder
                 {tagStatus && v.status === "sold" && <span className="shrink-0 text-teal-600 font-medium">Sold · Under Warranty</span>}
               </div>
               <div className="flex items-center justify-between gap-2 text-slate-400">
-                {v.registration_number && <span className="font-mono">{v.registration_number}</span>}
+                {v.registration_number && <span><span className="font-mono">{v.registration_number}</span>{disambiguator(v) && <span className="text-amber-600"> · {disambiguator(v)}</span>}</span>}
                 {showPrice && <span>{formatNPR(v.selling_price || v.purchase_price)}</span>}
               </div>
             </button>

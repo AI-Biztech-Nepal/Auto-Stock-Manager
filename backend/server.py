@@ -503,10 +503,27 @@ def _job_card_cost(jc: dict) -> float:
 def _vehicle_sanakhat(v: dict) -> float:
     return v.get("sanakhat_cost") or 0
 
+# A returned vehicle starts a fresh cost cycle: expenses and job cards created before its last
+# return belong to the earlier (returned) sale and must not count against the new entry.
+async def _cycle_cutoffs(vehicle_ids: list) -> dict:
+    if not vehicle_ids:
+        return {}
+    rows = await db.sales.find({"vehicle_id": {"$in": vehicle_ids}, "returned": True}, {"_id": 0, "vehicle_id": 1, "returned_at": 1}).to_list(20000)
+    out: dict = {}
+    for r in rows:
+        if (r.get("returned_at") or "") > out.get(r["vehicle_id"], ""):
+            out[r["vehicle_id"]] = r["returned_at"]
+    return out
+
+def _since(items: list, lower: str = "", upper: str = "") -> list:
+    return [i for i in items if (not lower or (i.get("created_at") or "") >= lower)
+            and (not upper or (i.get("created_at") or "") <= upper)]
+
 async def enrich_vehicle(v: dict) -> dict:
     v["aging"] = stock_aging(v.get("purchase_date", ""))
-    exps = await db.expenses.find({"vehicle_id": v["id"]}, {"_id": 0}).to_list(200)
-    jobs = await db.job_cards.find({"vehicle_id": v["id"]}, {"_id": 0}).to_list(200)
+    cutoff = (await _cycle_cutoffs([v["id"]])).get(v["id"], "")
+    exps = _since(await db.expenses.find({"vehicle_id": v["id"]}, {"_id": 0}).to_list(200), cutoff)
+    jobs = _since(await db.job_cards.find({"vehicle_id": v["id"]}, {"_id": 0}).to_list(200), cutoff)
     total_exp = sum(e["amount"] for e in exps) + sum(_job_card_cost(j) for j in jobs) + _vehicle_sanakhat(v)
     v["total_expenses"] = total_exp
     v["total_investment"] = v.get("purchase_price", 0) + total_exp + v.get("accessories_cost", 0)
@@ -591,10 +608,18 @@ def _warranty_info(vehicle: dict, default_days: int, jobs: list) -> dict:
     return info
 
 # ── Helper: compute total investment for a vehicle ────────────────────
-async def _vehicle_investment(vehicle_id: str, vehicle: dict) -> float:
-    """Returns purchase_price + accessories + all expenses + all job card costs for a vehicle."""
-    exps = await db.expenses.find({"vehicle_id": vehicle_id}, {"_id": 0}).to_list(200)
-    jobs = await db.job_cards.find({"vehicle_id": vehicle_id}, {"_id": 0}).to_list(200)
+async def _vehicle_investment(vehicle_id: str, vehicle: dict, sale: Optional[dict] = None) -> float:
+    """Returns purchase_price + accessories + the expenses and job card costs of the current
+    cycle for a vehicle (or, given a sale, of that sale's own cycle)."""
+    if sale and sale.get("returned") and sale.get("cost_at_return") is not None:
+        return sale["cost_at_return"]
+    lower, upper = (await _cycle_cutoffs([vehicle_id])).get(vehicle_id, ""), ""
+    if sale:
+        prior = await db.sales.find({"vehicle_id": vehicle_id, "returned": True}, {"_id": 0, "returned_at": 1}).to_list(200)
+        lower = max((r["returned_at"] for r in prior if r.get("returned_at") and r["returned_at"] <= (sale.get("created_at") or "")), default="")
+        upper = (sale.get("returned_at") or "") if sale.get("returned") else ""
+    exps = _since(await db.expenses.find({"vehicle_id": vehicle_id}, {"_id": 0}).to_list(200), lower, upper)
+    jobs = _since(await db.job_cards.find({"vehicle_id": vehicle_id}, {"_id": 0}).to_list(200), lower, upper)
     return (vehicle.get("purchase_price", 0) + vehicle.get("accessories_cost", 0) + _vehicle_sanakhat(vehicle)
             + sum(e["amount"] for e in exps) + sum(_job_card_cost(j) for j in jobs))
 
@@ -738,13 +763,17 @@ async def _batch_vehicle_investment(vehicles: list) -> dict:
     vehicle_ids = [v["id"] for v in vehicles]
     if not vehicle_ids:
         return {}
+    cutoffs = await _cycle_cutoffs(vehicle_ids)
     all_exps = await db.expenses.find({"vehicle_id": {"$in": vehicle_ids}}, {"_id": 0}).to_list(20000)
     exps_by_vehicle: dict = {}
     for e in all_exps:
-        exps_by_vehicle.setdefault(e["vehicle_id"], []).append(e)
+        if _since([e], cutoffs.get(e["vehicle_id"], "")):
+            exps_by_vehicle.setdefault(e["vehicle_id"], []).append(e)
     all_jobs = await db.job_cards.find({"vehicle_id": {"$in": vehicle_ids}}, {"_id": 0}).to_list(20000)
     job_cost_by_vehicle: dict = {}
     for j in all_jobs:
+        if not _since([j], cutoffs.get(j["vehicle_id"], "")):
+            continue
         job_cost_by_vehicle[j["vehicle_id"]] = job_cost_by_vehicle.get(j["vehicle_id"], 0) + _job_card_cost(j)
     return {
         v["id"]: v.get("purchase_price", 0) + v.get("accessories_cost", 0) + _vehicle_sanakhat(v)
@@ -2067,16 +2096,19 @@ async def get_vehicles(status: Optional[str] = None, brand: Optional[str] = None
         return []
     # Batch-load all expenses in one query (avoids N+1)
     vehicle_ids = [v["id"] for v in vehicles]
+    cutoffs = await _cycle_cutoffs(vehicle_ids)
     all_exps = await db.expenses.find({"vehicle_id": {"$in": vehicle_ids}}, {"_id": 0}).to_list(10000)
     exps_by_vehicle: dict = {}
     for e in all_exps:
-        exps_by_vehicle.setdefault(e["vehicle_id"], []).append(e)
+        if _since([e], cutoffs.get(e["vehicle_id"], "")):
+            exps_by_vehicle.setdefault(e["vehicle_id"], []).append(e)
     # Batch-load all job cards too — their cost counts toward a vehicle's expense total
     # the same way a plain expense entry does (see _job_card_cost).
     all_jobs = await db.job_cards.find({"vehicle_id": {"$in": vehicle_ids}}, {"_id": 0}).to_list(10000)
     jobs_by_vehicle: dict = {}
     for j in all_jobs:
-        jobs_by_vehicle.setdefault(j["vehicle_id"], []).append(j)
+        if _since([j], cutoffs.get(j["vehicle_id"], "")):
+            jobs_by_vehicle.setdefault(j["vehicle_id"], []).append(j)
     # Batch-load each vehicle's photo ids in one query (never the base64 `data` field — same
     # projection as /public/vehicles), so the frontend can show a few thumbnails directly on the
     # inventory card (and filter for missing/insufficient photos) without an N+1 fetch of
@@ -2831,8 +2863,9 @@ async def get_vehicle(vid: str, cu: dict = Depends(require("vehicles", "view")))
     v = await db.vehicles.find_one({"id": vid}, {"_id": 0})
     if not v: raise HTTPException(404, "Vehicle not found")
     v = await enrich_vehicle(v)
-    v["expenses"] = await db.expenses.find({"vehicle_id": vid}, {"_id": 0}).to_list(200)
-    v["job_cards"] = await db.job_cards.find({"vehicle_id": vid}, {"_id": 0}).to_list(100)
+    cutoff = (await _cycle_cutoffs([vid])).get(vid, "")
+    v["expenses"] = _since(await db.expenses.find({"vehicle_id": vid}, {"_id": 0}).to_list(200), cutoff)
+    v["job_cards"] = _since(await db.job_cards.find({"vehicle_id": vid}, {"_id": 0}).to_list(100), cutoff)
     if v.get("status") == "sold":
         _attach_service_history(v, v["job_cards"], await _default_warranty_days())
     await _attach_active_bookings([v], cu.get("role", "admin"))
@@ -3058,10 +3091,24 @@ async def return_vehicle(vid: str, body: VehicleReturnRequest, cu: dict = Depend
 
     refund_amount = round(body.refund_amount, 2)
     retained_amount = round(total_amount - refund_amount, 2)
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    # Freeze this sale's cost (before the vehicle is reset) so its profit stays what it was.
+    # A vendor-linked vehicle keeps its purchase price: the shop still owes the vendor for it.
+    vendor_linked = bool(existing.get("vendor_id") or existing.get("linked_contact_type") == "vendor")
+    fresh = {"accessories_cost": 0, "sanakhat_cost": 0, "purchase_date": now_iso[:10]}
+    if not vendor_linked:
+        fresh["purchase_price"] = refund_amount  # what the shop paid to take it back
+    # Net cost this sale absorbs = its full cost minus what the vehicle is worth on re-entry, so
+    # (retained revenue - cost_at_return) is the sale's true profit.
+    cost_at_return = await _vehicle_investment(vid, existing, sale) - fresh.get("purchase_price", existing.get("purchase_price") or 0)
 
     await db.sales.update_one({"id": sale["id"]}, {"$set": {
+        "cost_at_return": cost_at_return,
+        "prev_purchase_price": existing.get("purchase_price"), "prev_purchase_date": existing.get("purchase_date"),
+        "prev_accessories_cost": existing.get("accessories_cost"), "prev_sanakhat_cost": existing.get("sanakhat_cost"),
         "returned": True,
-        "returned_at": datetime.now(timezone.utc).isoformat(),
+        "returned_at": now_iso,
         "returned_status": body.new_status,
         "refund_amount": refund_amount,
         "retained_amount": retained_amount,
@@ -3073,7 +3120,8 @@ async def return_vehicle(vid: str, body: VehicleReturnRequest, cu: dict = Depend
         "status": body.new_status,
         "sold_date": None,
         "customer_id": None,
-        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "updated_at": now_iso,
+        **fresh,
     }})
 
     await db.audit_logs.insert_one({"action": "vehicle_returned", "vehicle_id": vid,
@@ -3099,11 +3147,17 @@ async def undo_sale_return(sid: str, cu: dict = Depends(admin_only)):
     await db.sales.update_one({"id": sid}, {"$set": {
         "returned": False, "due_amount": due_amount, "payment_status": payment_status,
         "returned_at": None, "returned_status": None, "refund_amount": None,
-        "retained_amount": None, "return_notes": None,
+        "retained_amount": None, "return_notes": None, "cost_at_return": None,
+        "prev_purchase_price": None, "prev_purchase_date": None,
+        "prev_accessories_cost": None, "prev_sanakhat_cost": None,
     }})
     await db.vehicles.update_one({"id": s["vehicle_id"]}, {"$set": {
         "status": "sold", "sold_date": s.get("sale_date"), "customer_id": s.get("customer_id"),
         "updated_at": datetime.now(timezone.utc).isoformat(),
+        # Put back the cost fields the return reset (absent on returns made before that existed).
+        **({"purchase_price": s["prev_purchase_price"], "purchase_date": s.get("prev_purchase_date"),
+            "accessories_cost": s.get("prev_accessories_cost") or 0, "sanakhat_cost": s.get("prev_sanakhat_cost") or 0}
+           if s.get("prev_purchase_price") is not None else {}),
     }})
     await db.audit_logs.insert_one({"action": "vehicle_return_undone", "vehicle_id": s["vehicle_id"],
         "user": cu["username"], "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -3148,7 +3202,7 @@ async def get_vehicle_qr(vid: str):
 # ── EXPENSES ──────────────────────────────────────────────────────────
 @api_router.get("/vehicles/{vid}/expenses")
 async def get_expenses(vid: str, cu: dict = Depends(require("expenses", "view"))):
-    return await db.expenses.find({"vehicle_id": vid}, {"_id": 0}).to_list(200)
+    return _since(await db.expenses.find({"vehicle_id": vid}, {"_id": 0}).to_list(200), (await _cycle_cutoffs([vid])).get(vid, ""))
 
 @api_router.post("/expenses")
 async def create_expense(exp: ExpenseCreate, cu: dict = Depends(require("expenses", "create"))):
@@ -3602,6 +3656,8 @@ async def get_sales(start_date: Optional[str] = None, end_date: Optional[str] = 
         s["job_card_cost"] = _sale_job_card_cost(s, jobs_by_vehicle.get(s.get("vehicle_id"), []), returns_by_vehicle.get(s.get("vehicle_id"), []))
         if s.get("vehicle_id") in investment_by_vehicle:
             investment = investment_by_vehicle[s["vehicle_id"]]
+            if s.get("returned") and s.get("cost_at_return") is not None:
+                investment = s["cost_at_return"]
             revenue = _sale_revenue(s)
             purchase_price = purchase_price_by_vehicle.get(s["vehicle_id"], 0)
             s["total_investment"] = investment
@@ -3807,7 +3863,7 @@ async def get_sale(sid: str, cu: dict = Depends(require("sales", "view"))):
     # Margin/profit reveal what the shop paid for the vehicle — restricted to Admin
     # to keep that number away from front desk, same as the vehicle-level fields.
     if cu.get("role", "admin") == "admin" and v:
-        investment = await _vehicle_investment(s["vehicle_id"], v)
+        investment = await _vehicle_investment(s["vehicle_id"], v, s)
         total = _sale_revenue(s)
         s["total_investment"] = investment
         s["profit"] = total - investment
@@ -4361,10 +4417,10 @@ async def dashboard_stats(cu: dict = Depends(admin_only)):
     total_profit = 0
     for s in sales_records:
         if s.get("returned"):
-            # The vehicle's investment cost stays attributed to inventory (it'll be
-            # subtracted again on its actual resale) — only the retained refund fee
-            # counts as profit here, so it isn't double-charged against COGS.
-            total_profit += _sale_revenue(s)
+            # The vehicle re-enters stock as a fresh entry, so this sale carries its own cost
+            # (cost_at_return, net of the vehicle's new starting value). Returns made before
+            # that snapshot existed have none and count only the retained fee, as before.
+            total_profit += _sale_revenue(s) - (s.get("cost_at_return") or 0)
             continue
         if s["vehicle_id"] in sold_vehicle_ids_existing:
             total_profit += _sale_revenue(s) - sold_investment_by_vehicle.get(s["vehicle_id"], 0)
@@ -4471,7 +4527,11 @@ async def _enriched_sales_for_closing(start_date: Optional[str] = None, end_date
         customers_by_id = {c["id"]: c for c in cs}
     exps_by_vehicle: dict = {}
     jobs_by_vehicle: dict = {}
+    returned_by_vehicle: dict = {}
     if vehicle_ids:
+        for r in await db.sales.find({"vehicle_id": {"$in": vehicle_ids}, "returned": True}, {"_id": 0, "vehicle_id": 1, "returned_at": 1}).to_list(20000):
+            if r.get("returned_at"):
+                returned_by_vehicle.setdefault(r["vehicle_id"], []).append(r["returned_at"])
         all_exps = await db.expenses.find({"vehicle_id": {"$in": vehicle_ids}}, {"_id": 0}).to_list(20000)
         for e in all_exps:
             exps_by_vehicle.setdefault(e["vehicle_id"], []).append(e)
@@ -4483,9 +4543,13 @@ async def _enriched_sales_for_closing(start_date: Optional[str] = None, end_date
     for s in sales:
         v = vehicles_by_id.get(s.get("vehicle_id"))
         c = customers_by_id.get(s.get("customer_id"))
-        repair_cost = (sum(e.get("amount", 0) for e in exps_by_vehicle.get(s.get("vehicle_id"), []))
-                       + sum(_job_card_cost(j) for j in jobs_by_vehicle.get(s.get("vehicle_id"), [])))
+        lower = max((r for r in returned_by_vehicle.get(s.get("vehicle_id"), []) if r <= (s.get("created_at") or "")), default="")
+        upper = (s.get("returned_at") or "") if s.get("returned") else ""
+        repair_cost = (sum(e.get("amount", 0) for e in _since(exps_by_vehicle.get(s.get("vehicle_id"), []), lower, upper))
+                       + sum(_job_card_cost(j) for j in _since(jobs_by_vehicle.get(s.get("vehicle_id"), []), lower, upper)))
         investment = (v.get("purchase_price", 0) + v.get("accessories_cost", 0) + _vehicle_sanakhat(v) + repair_cost) if v else 0
+        if s.get("returned") and s.get("cost_at_return") is not None:
+            investment = s["cost_at_return"]
         vehicle_label = "Vehicle removed"
         if v:
             parts = [v["brand"], v["model"]]
@@ -5581,6 +5645,13 @@ async def _run_startup_tasks():
             ("vehicle_photos", "storage_path", "VARCHAR(500)"),
             ("legal_documents", "storage_path", "VARCHAR(500)"),
             ("vendors", "commission_amount", "DOUBLE"),
+            # Snapshot taken when a sale is returned: what the vehicle cost for that sale, and the
+            # cost fields it carried, so the vehicle can start fresh (and an undo can restore them).
+            ("sales", "cost_at_return", "DOUBLE"),
+            ("sales", "prev_purchase_price", "DOUBLE"),
+            ("sales", "prev_purchase_date", "VARCHAR(20)"),
+            ("sales", "prev_accessories_cost", "DOUBLE"),
+            ("sales", "prev_sanakhat_cost", "DOUBLE"),
         ]
         for _tbl, _col, _type in _post_schema_cols:
             try:

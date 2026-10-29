@@ -879,7 +879,7 @@ export default function Inventory() {
                 onClick={() => setSelectedVehicleId(v.id)}
                 thumb={photo ? <LazyThumb src={photo.url} /> : <Package size={16} className="text-slate-300" />}
                 title={`${v.brand} ${v.model}`}
-                subtitle={`${v.year} · ${v.registration_number || "No reg."} · ${formatOwnership(v.ownership_number)}${v.status === "reserved" && v.booking?.customer_name ? ` · Booked by ${v.booking.customer_name}` : ""}`}
+                subtitle={`${v.year} · ${v.registration_number || "No reg."} · ${formatOwnership(v.ownership_number)}${v.status === "reserved" && v.booking?.customer_name ? ` · Booked by ${v.booking.customer_name}` : ""}${isAdmin && v.created_by ? ` · by ${v.created_by}` : ""}`}
                 meta={!hideFinancials && (
                   <div className="flex items-baseline gap-x-3 flex-wrap md:block">
                     <div className="font-semibold text-slate-800 text-sm md:text-xs">{formatNPR(v.total_investment)}</div>
@@ -939,6 +939,7 @@ export default function Inventory() {
                     <div className="font-bold text-slate-900 text-sm truncate" style={{ fontFamily: "Manrope" }}>{v.brand} {v.model}</div>
                     <div className="text-xs text-slate-500 mt-0.5">{v.year} · {v.engine_cc}cc · {v.fuel_type} · {formatOwnership(v.ownership_number)}</div>
                     {v.registration_number && <div className="text-xs font-mono text-slate-500 mt-0.5">{v.registration_number}</div>}
+                    {isAdmin && v.created_by && <div className="text-[11px] text-slate-400 mt-0.5" data-testid="vehicle-author">Added by {v.created_by}</div>}
                   </div>
                   <span className="shrink-0 flex flex-col items-end gap-1.5">
                     <span className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wide ${st.bg} ${st.text}`}>
