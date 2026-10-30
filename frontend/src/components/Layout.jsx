@@ -1,19 +1,26 @@
 import { useState, useEffect, useMemo, useRef, Suspense } from "react";
-import { Outlet, NavLink, useNavigate } from "react-router-dom";
+import { Outlet, NavLink, useNavigate, useLocation } from "react-router-dom";
 import { toast } from "sonner";
 import api from "../utils/api";
 import { useAuth } from "../context/AuthContext";
-import { canAccessPath } from "../utils/permissions";
+import { canAccessPath, marketingTabsFor } from "../utils/permissions";
 import { isSanakhatOverdue, sanakhatPendingDays } from "../utils/helpers";
 import {
   LayoutDashboard, Bike, Wrench, BarChart3, Sparkles, Settings, LogOut, Menu, X, Bell,
-  BookOpen, Wallet, Boxes, ShoppingBag, Building2, ImageOff, FileWarning, ShieldCheck, Megaphone, Inbox
+  BookOpen, Wallet, Boxes, ShoppingBag, Building2, ImageOff, FileWarning, ShieldCheck, Megaphone, Inbox, ChevronDown, Share2, Gift, Eye
 } from "lucide-react";
 
 // A vehicle needs at least this many photos before it's considered adequately
 // photographed — mirrors MIN_PHOTOS in Inventory.jsx, kept separate since a shared
 // constant would mean importing a whole page module just for one number.
 const MIN_NOTIFY_PHOTOS = 2;
+
+const MARKETING_NAV = {
+  leads: { label: "Leads", icon: Inbox },
+  share: { label: "Share", icon: Share2 },
+  offers: { label: "Offers", icon: Gift },
+  visits: { label: "Visits", icon: Eye },
+};
 
 const navItems = [
   { path: "/",             label: "Dashboard",    icon: LayoutDashboard },
@@ -35,6 +42,8 @@ export default function Layout() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const { pathname, search } = useLocation();
+  const [marketingOpen, setMarketingOpen] = useState(null); // null = follow the current page
 
   const handleLogout = () => { logout(); navigate("/login"); };
   const visibleNavItems = navItems.filter(({ path }) => canAccessPath(user?.role, path));
@@ -144,28 +153,75 @@ export default function Layout() {
 
       {/* Nav */}
       <nav className="flex-1 py-4 px-3 space-y-0.5 sidebar-nav overflow-y-auto">
-        {visibleNavItems.map(({ path, label, icon: Icon }) => (
-          <NavLink
-            key={path}
-            to={path}
-            end={path === "/"}
-            onClick={() => mobile && setSidebarOpen(false)}
-            className={({ isActive }) =>
-              `flex items-center gap-3 px-3 py-3 rounded-lg text-sm font-medium transition-all duration-150 ${
-                isActive
-                  ? "bg-blue-600 text-white"
-                  : "text-slate-400 hover:text-white hover:bg-slate-800"
-              }`
-            }
-            data-testid={`nav-${label.toLowerCase().replace(" ", "-")}`}
-          >
-            <Icon size={17} />
-            {label}
-            {path === "/marketing" && newLeads > 0 && (
-              <span className="ml-auto min-w-[20px] h-5 px-1.5 rounded-full bg-red-500 text-white text-[11px] font-bold flex items-center justify-center" data-testid="nav-leads-badge">{newLeads > 99 ? "99+" : newLeads}</span>
-            )}
-          </NavLink>
-        ))}
+        {visibleNavItems.map(({ path, label, icon: Icon }) => {
+          const subTabs = path === "/marketing" ? marketingTabsFor(user?.role) : [];
+          const leadsBadge = (
+            <span className="ml-auto min-w-[20px] h-5 px-1.5 rounded-full bg-red-500 text-white text-[11px] font-bold flex items-center justify-center" data-testid="nav-leads-badge">{newLeads > 99 ? "99+" : newLeads}</span>
+          );
+          if (subTabs.length < 2) {
+            return (
+              <NavLink
+                key={path}
+                to={path}
+                end={path === "/"}
+                onClick={() => mobile && setSidebarOpen(false)}
+                className={({ isActive }) =>
+                  `flex items-center gap-3 px-3 py-3 rounded-lg text-sm font-medium transition-all duration-150 ${
+                    isActive
+                      ? "bg-blue-600 text-white"
+                      : "text-slate-400 hover:text-white hover:bg-slate-800"
+                  }`
+                }
+                data-testid={`nav-${label.toLowerCase().replace(" ", "-")}`}
+              >
+                <Icon size={17} />
+                {label}
+                {path === "/marketing" && newLeads > 0 && leadsBadge}
+              </NavLink>
+            );
+          }
+          // Marketing with several tabs: a dropdown, open by default while on a Marketing page.
+          const onMarketing = pathname.startsWith("/marketing");
+          const requested = new URLSearchParams(search).get("tab");
+          const current = subTabs.includes(requested) ? requested : subTabs[0];
+          const open = marketingOpen ?? onMarketing;
+          return (
+            <div key={path} data-testid="nav-marketing-group">
+              <button
+                onClick={() => { setMarketingOpen(!open); if (!onMarketing) navigate(`/marketing?tab=${subTabs[0]}`); }}
+                aria-expanded={open}
+                className={`w-full flex items-center gap-3 px-3 py-3 rounded-lg text-sm font-medium transition-all duration-150 ${onMarketing ? "bg-blue-600 text-white" : "text-slate-400 hover:text-white hover:bg-slate-800"}`}
+                data-testid="nav-marketing"
+              >
+                <Icon size={17} />
+                {label}
+                {newLeads > 0 && !open && leadsBadge}
+                <ChevronDown size={15} className={`${newLeads > 0 && !open ? "" : "ml-auto"} transition-transform ${open ? "rotate-180" : ""}`} />
+              </button>
+              {open && (
+                <div className="mt-0.5 ml-5 pl-3 border-l border-slate-700 space-y-0.5">
+                  {subTabs.map(key => {
+                    const { label: subLabel, icon: SubIcon } = MARKETING_NAV[key];
+                    return (
+                      <NavLink
+                        key={key}
+                        to={`/marketing?tab=${key}`}
+                        replace={onMarketing}
+                        onClick={() => mobile && setSidebarOpen(false)}
+                        className={`flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-150 ${onMarketing && current === key ? "bg-slate-800 text-white" : "text-slate-400 hover:text-white hover:bg-slate-800"}`}
+                        data-testid={`nav-marketing-${key}`}
+                      >
+                        <SubIcon size={15} />
+                        {subLabel}
+                        {key === "leads" && newLeads > 0 && leadsBadge}
+                      </NavLink>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          );
+        })}
       </nav>
 
       {/* User */}
