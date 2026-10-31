@@ -14,7 +14,7 @@ const Leads = lazy(() => import("./Leads"));
 const CRM = lazy(() => import("./CRM"));
 
 const TABS = {
-  crm: { label: "CRM", title: "CRM", hint: "Your customers, how they found the shop, and who referred them", Icon: HeartHandshake, Page: CRM },
+  crm: { label: "CRM", ownHeader: true, hint: "", Icon: HeartHandshake, Page: CRM }, // the CRM draws its own heading and buttons
   share: { label: "Share", hint: "Post your vehicles to social media", Icon: Share2, Page: Share },
   offers: { label: "Offers", hint: "Run the festival gift spin", Icon: Gift, Page: Offers },
   leads: { label: "Leads", hint: "Sell, exchange and service requests from your website", Icon: Inbox, Page: Leads },
@@ -28,14 +28,23 @@ export default function Marketing() {
   const requested = searchParams.get("tab");
   const tab = allowed.includes(requested) ? requested : allowed[0];
   if (!tab) return null;
-  const { Page, hint, title, Icon } = TABS[tab];
-  const HeaderIcon = title ? Icon : Megaphone; // the CRM tab carries its own name; the others sit under Marketing
+  const { Page, hint, ownHeader } = TABS[tab];
+
+  if (ownHeader) {
+    return (
+      <div className="animate-fade-in" data-testid="marketing-page">
+        <Suspense fallback={<div className="h-48 rounded-xl bg-white border border-slate-200 animate-pulse" />}>
+          <Page key={tab} embedded />
+        </Suspense>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-5 animate-fade-in" data-testid="marketing-page">
       <div>
         <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
-          <HeaderIcon size={22} className="text-slate-400" /> {title || "Marketing"}
+          <Megaphone size={22} className="text-slate-400" /> Marketing
         </h1>
         <p className="text-sm text-slate-500">{hint}</p>
       </div>

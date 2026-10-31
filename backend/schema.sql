@@ -126,6 +126,12 @@ CREATE TABLE IF NOT EXISTS customers (
   source VARCHAR(20),
   source_note VARCHAR(255),
   referred_by_id VARCHAR(36),
+  -- CRM lead tracking: new | contacted | interested | lost (Converted is worked out from the sales), the
+  -- vehicle they asked about, and the Team member handling them.
+  lead_status VARCHAR(20),
+  interested_vehicle VARCHAR(255),
+  assigned_to_id VARCHAR(36),
+  assigned_to_name VARCHAR(255),
   INDEX idx_customers_created_at (created_at),
   CONSTRAINT fk_customers_company FOREIGN KEY (company_id) REFERENCES companies(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -288,6 +294,43 @@ CREATE TABLE IF NOT EXISTS sales (
   CONSTRAINT fk_sales_company FOREIGN KEY (company_id) REFERENCES companies(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+
+-- ── CRM follow-ups and contact history ────────────────────────────────────
+-- What to do next for a customer and when, and what has been said so far. Both go when the customer goes.
+CREATE TABLE IF NOT EXISTS crm_followups (
+  id VARCHAR(36) NOT NULL PRIMARY KEY,
+  company_id VARCHAR(36) NOT NULL,
+  INDEX idx_crm_followups_company_id (company_id),
+  customer_id VARCHAR(36) NOT NULL,
+  INDEX idx_crm_followups_customer_id (customer_id),
+  due_at VARCHAR(40),
+  purpose VARCHAR(255),
+  notes TEXT,
+  status VARCHAR(12) DEFAULT 'pending',
+  INDEX idx_crm_followups_status_due (status, due_at),
+  completed_at VARCHAR(40),
+  outcome TEXT,
+  created_by VARCHAR(100),
+  created_at VARCHAR(40),
+  updated_at VARCHAR(40),
+  CONSTRAINT fk_crm_followups_customer FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE,
+  CONSTRAINT fk_crm_followups_company FOREIGN KEY (company_id) REFERENCES companies(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS crm_interactions (
+  id VARCHAR(36) NOT NULL PRIMARY KEY,
+  company_id VARCHAR(36) NOT NULL,
+  INDEX idx_crm_interactions_company_id (company_id),
+  customer_id VARCHAR(36) NOT NULL,
+  INDEX idx_crm_interactions_customer_id (customer_id),
+  kind VARCHAR(12),
+  summary TEXT,
+  occurred_at VARCHAR(40),
+  created_by VARCHAR(100),
+  created_at VARCHAR(40),
+  CONSTRAINT fk_crm_interactions_customer FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE,
+  CONSTRAINT fk_crm_interactions_company FOREIGN KEY (company_id) REFERENCES companies(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- ── Bookings ──────────────────────────────────────────────────────────────
 -- A customer's deposit on a vehicle before the sale (not a sale). Active bookings keep the

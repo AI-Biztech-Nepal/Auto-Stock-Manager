@@ -34,8 +34,9 @@ Built around how a Nepali dealership actually runs: Bikram Sambat dates first, N
 ## Capabilities and Constraints
 
 - Frontend: React (CRA + craco), Tailwind, lucide icons, Recharts. Backend: FastAPI with a SQL-backed store. Frontend on Vercel, backend on a VPS.
-- Navigation: Dashboard, Inventory, Sales (includes sold and returned vehicles), Spare Parts, Ledger (Customers, Vendors, Staff), Job Cards, Warranty, Finance, Reports, AI Assistant, Settings.
-- Leads, EMI, Marketing and Partners were removed from the app (backend data retained).
+- Navigation: Dashboard, Inventory, Marketing (Leads, CRM, Share, Offers, Visits), Sales (includes sold and returned vehicles), Spare Parts, Ledger (Customers, Vendors, Staff), Job Cards, Warranty, Finance, Reports, AI Assistant, Settings.
+- EMI and Partners were removed from the app (backend data retained). Marketing came back as a group: Leads (website forms), Share, Offers, Visits, and the CRM.
+- CRM (Marketing > CRM, admin only): every customer is a lead with a status (New, Contacted, Interested, Converted, Lost), a source, an assigned salesperson, follow-ups and a contact history. Converted is never typed in: it is what a customer is once a sale stands. The salesperson assigned to a customer is credited as the sale's Sold By. Backend: `backend/crm.py`.
 - Role permissions are enforced on the backend; the frontend mirrors them in `frontend/src/utils/permissions.js`.
 - Staff records carry no money balances (role, contact, commission rate, joining date, job counts only).
 

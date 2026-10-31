@@ -23,6 +23,7 @@ from google.genai import types as genai_types
 from google.genai import errors as genai_errors
 import httpx
 import media_storage
+import crm
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
@@ -78,7 +79,7 @@ TENANT_COLLECTIONS = {
     "leads", "legal_documents", "part_transactions", "partners", "sales", "spare_parts",
     "sync_logs", "team_members", "vehicle_photos", "vehicles", "vendor_payments", "vendors",
     "audit_logs", "ai_chat_sessions", "settings", "facebook_pages", "bookings",
-    "offer_prizes", "offer_codes", "page_views",
+    "offer_prizes", "offer_codes", "page_views", "crm_followups", "crm_interactions",
     # Finance books (see finance_books.py); tables are created by migration_add_finance_books.sql.
     "fin_parties", "fin_bank_accounts", "fin_account_transfers", "fin_expense_categories", "fin_items",
     "fin_transactions", "fin_customer_ledger", "fin_vendor_ledger", "fin_statement_imports",
@@ -1667,7 +1668,7 @@ class SaleCreate(BaseModel):
     witness_address: Optional[str] = None
     witness_phone: Optional[str] = None
     witness_id_number: Optional[str] = None
-    sold_by_id: Optional[str] = None  # the Team member who sold it (checked and named by _resolve_sold_by)
+    sold_by_id: Optional[str] = None  # the Team member who sold it (checked and named by crm.resolve_sold_by)
 
 class SaleUpdate(BaseModel):
     vehicle_id: str
@@ -1685,9 +1686,6 @@ class SaleUpdate(BaseModel):
     notes: Optional[str] = None
     sold_by_id: Optional[str] = None  # only changed when the form sends it
 
-class CustomerSoldByUpdate(BaseModel):
-    sold_by_id: Optional[str] = None  # None clears the seller
-
 class CustomerCreate(BaseModel):
     name: str; contact_number: str
     address: Optional[str] = None
@@ -1702,11 +1700,11 @@ class CustomerCreate(BaseModel):
     source: Optional[str] = None
     source_note: Optional[str] = Field(None, max_length=255)
     referred_by_id: Optional[str] = None
-
-class CustomerSourceUpdate(BaseModel):
-    source: Optional[str] = None  # None clears the tag
-    source_note: Optional[str] = Field(None, max_length=255)
-    referred_by_id: Optional[str] = None
+    # CRM -- where the lead stands (new | contacted | interested | lost; Converted follows the sales), the vehicle
+    # they asked about, and the Team member handling them (the name is filled in from the Team list).
+    lead_status: Optional[str] = None
+    interested_vehicle: Optional[str] = Field(None, max_length=255)
+    assigned_to_id: Optional[str] = None
 
 class TeamMemberCreate(BaseModel):
     name: str; role: str
@@ -1779,6 +1777,43 @@ OFFERS_DDL = [
   created_at VARCHAR(40),
   used_at VARCHAR(40),
   CONSTRAINT fk_offer_codes_company FOREIGN KEY (company_id) REFERENCES companies(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""",
+]
+
+# CRM follow-ups and contact history (see crm.py). Both go when their customer goes.
+CRM_DDL = [
+    """CREATE TABLE IF NOT EXISTS crm_followups (
+  id VARCHAR(36) NOT NULL PRIMARY KEY,
+  company_id VARCHAR(36) NOT NULL,
+  INDEX idx_crm_followups_company_id (company_id),
+  customer_id VARCHAR(36) NOT NULL,
+  INDEX idx_crm_followups_customer_id (customer_id),
+  due_at VARCHAR(40),
+  purpose VARCHAR(255),
+  notes TEXT,
+  status VARCHAR(12) DEFAULT 'pending',
+  INDEX idx_crm_followups_status_due (status, due_at),
+  completed_at VARCHAR(40),
+  outcome TEXT,
+  created_by VARCHAR(100),
+  created_at VARCHAR(40),
+  updated_at VARCHAR(40),
+  CONSTRAINT fk_crm_followups_customer FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE,
+  CONSTRAINT fk_crm_followups_company FOREIGN KEY (company_id) REFERENCES companies(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""",
+    """CREATE TABLE IF NOT EXISTS crm_interactions (
+  id VARCHAR(36) NOT NULL PRIMARY KEY,
+  company_id VARCHAR(36) NOT NULL,
+  INDEX idx_crm_interactions_company_id (company_id),
+  customer_id VARCHAR(36) NOT NULL,
+  INDEX idx_crm_interactions_customer_id (customer_id),
+  kind VARCHAR(12),
+  summary TEXT,
+  occurred_at VARCHAR(40),
+  created_by VARCHAR(100),
+  created_at VARCHAR(40),
+  CONSTRAINT fk_crm_interactions_customer FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE,
+  CONSTRAINT fk_crm_interactions_company FOREIGN KEY (company_id) REFERENCES companies(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""",
 ]
 
@@ -3568,9 +3603,12 @@ async def get_customers(cu: dict = Depends(require("customers", "view"))):
     return customers
 
 @api_router.post("/customers")
-async def create_customer(cust: CustomerCreate, cu: dict = Depends(require("customers", "create"))):
+async def create_customer(cust: CustomerCreate, strict: bool = False, cu: dict = Depends(require("customers", "create"))):
+    # strict (the CRM forms): the phone must be a real one and must not already belong to another customer.
     c = cust.model_dump()
-    c.update(await _clean_customer_source(c, None))
+    c.update(await crm.clean_customer_source(c, None))
+    c.update(await crm.clean_customer_crm(c))
+    if strict: await crm.check_phone(c.get("contact_number"), None)
     c["id"] = str(uuid.uuid4())
     c["created_at"] = datetime.now(timezone.utc).isoformat()
     await db.customers.insert_one(c)
@@ -3597,32 +3635,18 @@ async def get_customer(cid: str, cu: dict = Depends(require("customers", "view")
     return c
 
 @api_router.put("/customers/{cid}")
-async def update_customer(cid: str, cust: CustomerCreate, cu: dict = Depends(require("customers", "edit"))):
-    # Only the fields the form actually sent: a form that doesn't show the ID number or the source
-    # (the Ledger edit form) must not blank what is already saved.
+async def update_customer(cid: str, cust: CustomerCreate, strict: bool = False, cu: dict = Depends(require("customers", "edit"))):
+    # Only the fields the form actually sent: a form that doesn't show the ID number, the source or the lead
+    # details (the Ledger edit form) must not blank what is already saved.
     data = cust.model_dump(exclude_unset=True)
-    if CUSTOMER_SOURCE_FIELDS & cust.model_fields_set:
-        data.update(await _clean_customer_source(data, cid))
+    if crm.CUSTOMER_SOURCE_FIELDS & cust.model_fields_set:
+        data.update(await crm.clean_customer_source(data, cid))
+    if crm.CUSTOMER_CRM_FIELDS & cust.model_fields_set:
+        data.update(await crm.clean_customer_crm(data))
+    if strict: await crm.check_phone(data.get("contact_number"), cid)
     r = await db.customers.update_one({"id": cid}, {"$set": data})
     if r.matched_count == 0: raise HTTPException(404, "Not found")
     return await db.customers.find_one({"id": cid}, {"_id": 0})
-
-@api_router.put("/customers/{cid}/source")
-async def set_customer_source(cid: str, body: CustomerSourceUpdate, cu: dict = Depends(require("customers", "edit"))):
-    """Tag (or re-tag) how a customer found the shop, without touching their other details."""
-    clean = await _clean_customer_source(body.model_dump(), cid)
-    r = await db.customers.update_one({"id": cid}, {"$set": clean})
-    if r.matched_count == 0: raise HTTPException(404, "Not found")
-    return await db.customers.find_one({"id": cid}, {"_id": 0})
-
-@api_router.put("/customers/{cid}/sold-by")
-async def set_customer_sold_by(cid: str, body: CustomerSoldByUpdate, cu: dict = Depends(admin_only)):
-    """Set who sold a customer's latest vehicle (the CRM's Sold By column), without opening the sale."""
-    sale = _crm_latest_sale(await db.sales.find({"customer_id": cid}, {"_id": 0, "id": 1, "returned": 1, "sale_date": 1, "created_at": 1}).to_list(500))
-    if not sale: raise HTTPException(404, "This customer has no sale to attach a seller to")
-    seller = await _resolve_sold_by(body.sold_by_id)
-    await db.sales.update_one({"id": sale["id"]}, {"$set": seller})
-    return seller
 
 @api_router.delete("/customers/{cid}")
 async def delete_customer(cid: str, cu: dict = Depends(require("customers", "delete"))):
@@ -3630,100 +3654,10 @@ async def delete_customer(cid: str, cu: dict = Depends(require("customers", "del
     if r.deleted_count == 0: raise HTTPException(404, "Not found")
     # Anyone they referred keeps their source, but no longer points at a customer that is gone.
     await db.customers.update_many({"referred_by_id": cid}, {"$set": {"referred_by_id": None}})
+    await crm.cleanup_customer(cid)
     return {"message": "Deleted"}
 
-# ── CRM (where customers come from) ──────────────────────────────────
-# Every customer can carry a source -- walk-in, website, Facebook, referral or other -- and, for a
-# referral, the customer who referred them. Referrals can chain (A refers B, B refers C), which is
-# what the CRM's referral view follows. The analysis below is plain functions over lists of rows,
-# so it can be checked without a database; the endpoints only fetch rows and call them.
-CRM_SOURCES = ("walk_in", "website", "facebook", "referral", "other")
-CUSTOMER_SOURCE_FIELDS = {"source", "source_note", "referred_by_id"}
-
-async def _clean_customer_source(data: dict, own_id: Optional[str]) -> dict:
-    """Checks and tidies the source fields of a customer payload. The note is kept only where it
-    means something (a referral not in the list, or "other"), the referrer only for referrals, and a
-    referral may never loop back to the customer being saved."""
-    source = (data.get("source") or "").strip().lower() or None
-    if source and source not in CRM_SOURCES:
-        raise HTTPException(422, "Unknown source")
-    note = (data.get("source_note") or "").strip()[:255] or None
-    ref = (data.get("referred_by_id") or None) if source == "referral" else None
-    if source not in ("referral", "other"): note = None
-    cur, hops = ref, 0
-    while cur and hops < 50:  # walk up the chain of who referred whom
-        if own_id and cur == own_id:
-            raise HTTPException(422, "A customer can't be referred by themselves or by someone they referred")
-        row = await db.customers.find_one({"id": cur}, {"_id": 0, "id": 1, "referred_by_id": 1})
-        if not row:
-            if cur == ref: raise HTTPException(422, "The customer who referred them wasn't found")
-            break
-        cur, hops = row.get("referred_by_id"), hops + 1
-    return {"source": source, "source_note": note, "referred_by_id": ref}
-
-async def _resolve_sold_by(member_id: Optional[str]) -> dict:
-    """The seller fields to store on a sale: the Team member's id and their name as it is today. The name
-    comes from the Team list, never from the client, and stays on the sale if the member is removed later."""
-    member_id = (member_id or "").strip()
-    if not member_id: return {"sold_by_id": None, "sold_by_name": None}
-    m = await db.team_members.find_one({"id": member_id}, {"_id": 0, "id": 1, "name": 1})
-    if not m: raise HTTPException(422, "That team member was not found")
-    return {"sold_by_id": m["id"], "sold_by_name": (m.get("name") or "").strip() or None}
-
-def _crm_latest_sale(sales: list) -> Optional[dict]:
-    """A customer's most recent sale that still stands (not returned): the one 'Sold By' speaks for."""
-    live = [s for s in sales if not s.get("returned")]
-    return max(live, key=lambda s: (s.get("sale_date") or "", s.get("created_at") or "")) if live else None
-
-def _crm_source_of(customer: Optional[dict]) -> Optional[str]:
-    s = (customer or {}).get("source")
-    return s if s in CRM_SOURCES else None
-
-def _crm_customer_rows(customers: list, sales: list, bookings: list) -> list:
-    """The CRM table: every customer with how they found the shop and what they have given it.
-    `amount` is read the way the Dashboard reads revenue (_sale_revenue: a returned sale counts only
-    what was retained), so the two pages agree; `purchases` is the vehicles they currently have from
-    us; `booked` is the deposit on a vehicle they have reserved but not bought yet; `referral_count`
-    is how many customers they referred (open that person to follow the chain: refer-of-refer); `sold_by_*`
-    is who sold their latest vehicle."""
-    names = {c["id"]: c.get("name") or "" for c in customers}
-    amount, purchases, booked, referred, theirs = {}, {}, {}, {}, {}
-    for s in sales:
-        cid = s.get("customer_id")
-        if cid not in names: continue
-        theirs.setdefault(cid, []).append(s)
-        amount[cid] = amount.get(cid, 0) + (_sale_revenue(s) or 0)
-        if not s.get("returned"): purchases[cid] = purchases.get(cid, 0) + 1
-    for b in bookings:
-        cid = b.get("customer_id")
-        if cid in names and b.get("status") == "active": booked[cid] = booked.get(cid, 0) + (b.get("booking_amount") or 0)
-    for c in customers:
-        if c.get("referred_by_id") in names: referred[c["referred_by_id"]] = referred.get(c["referred_by_id"], 0) + 1
-    rows = []
-    for c in customers:
-        ref = c.get("referred_by_id") if c.get("referred_by_id") in names else None
-        latest = _crm_latest_sale(theirs.get(c["id"], [])) or {}
-        rows.append({
-            "id": c["id"], "name": c.get("name") or "", "contact_number": c.get("contact_number") or "", "address": c.get("address") or "",
-            "source": _crm_source_of(c), "source_note": c.get("source_note"),
-            "referred_by_id": ref, "referred_by_name": names[ref] if ref else None,
-            "amount": round(amount.get(c["id"], 0), 2), "purchases": purchases.get(c["id"], 0),
-            "booked": round(booked.get(c["id"], 0), 2), "referral_count": referred.get(c["id"], 0),
-            "sold_by_id": latest.get("sold_by_id"), "sold_by_name": latest.get("sold_by_name"),
-            "created_at": c.get("created_at"),
-        })
-    return rows
-
-@api_router.get("/crm/customers")
-async def crm_customers(cu: dict = Depends(admin_only)):
-    """Everything the CRM table shows, read live from the customers, sales and bookings already posted,
-    so a customer added from any form appears here with no extra step."""
-    customers = await db.customers.find({}, {"_id": 0, "id": 1, "name": 1, "contact_number": 1, "address": 1, "source": 1, "source_note": 1,
-                                             "referred_by_id": 1, "created_at": 1}).sort("created_at", -1).to_list(50000)
-    sales = await db.sales.find({}, {"_id": 0, "customer_id": 1, "returned": 1, "retained_amount": 1, "sale_price": 1,
-                                     "sale_date": 1, "created_at": 1, "sold_by_id": 1, "sold_by_name": 1}).to_list(50000)
-    bookings = await db.bookings.find({"status": "active"}, {"_id": 0, "customer_id": 1, "booking_amount": 1, "status": 1}).to_list(50000)
-    return _crm_customer_rows(customers, sales, bookings)
+# The CRM (lead status, follow-ups, history, import, summary) lives in crm.py; see register() at the bottom.
 
 # ── SALES ─────────────────────────────────────────────────────────────
 @api_router.get("/sales")
@@ -3850,8 +3784,8 @@ async def create_sale(sale: SaleCreate, cu: dict = Depends(require("sales", "cre
         "ownership_transfer_date": sale.ownership_transfer_date,
         "notes": sale.notes,
         **_witness,
-        # Only when a seller was picked, so a sale without one never touches the sold_by columns.
-        **(await _resolve_sold_by(sale.sold_by_id) if (sale.sold_by_id or "").strip() else {}),
+        # The seller picked on the form, else the salesperson assigned to the customer; a sale with neither never touches the sold_by columns.
+        **await crm.seller_for_sale(sale.sold_by_id, sale.customer_id),
         "created_by": cu.get("username"),
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -4042,7 +3976,7 @@ async def update_sale(sid: str, sale: SaleUpdate, cu: dict = Depends(get_current
     # A form that does not show the seller must not clear it; and nothing is written when there is no seller
     # before or after, so an ordinary edit leaves the sold_by columns alone.
     if "sold_by_id" in sale.model_fields_set and (sale.sold_by_id or existing.get("sold_by_id")):
-        update_doc.update(await _resolve_sold_by(sale.sold_by_id))
+        update_doc.update(await crm.resolve_sold_by(sale.sold_by_id))
     await db.sales.update_one({"id": sid}, {"$set": update_doc})
     # Keep vehicle record in sync (price/date/customer may have changed). Re-saving an active
     # sale also re-asserts status "sold", so a vehicle that drifted out of Sold Stock (e.g.
@@ -5795,6 +5729,11 @@ async def _run_startup_tasks():
             ("customers", "source", "VARCHAR(20)"),
             ("customers", "source_note", "VARCHAR(255)"),
             ("customers", "referred_by_id", "VARCHAR(36)"),
+            # CRM lead tracking (see crm.py).
+            ("customers", "lead_status", "VARCHAR(20)"),
+            ("customers", "interested_vehicle", "VARCHAR(255)"),
+            ("customers", "assigned_to_id", "VARCHAR(36)"),
+            ("customers", "assigned_to_name", "VARCHAR(255)"),
             # Who sold the vehicle (a Team member); the name is kept on the sale so it survives the member being removed.
             ("sales", "sold_by_id", "VARCHAR(36)"),
             ("sales", "sold_by_name", "VARCHAR(255)"),
@@ -5809,7 +5748,7 @@ async def _run_startup_tasks():
             await db.execute_raw(BOOKINGS_DDL)
         except Exception:
             logger.warning("Could not ensure bookings table", exc_info=True)
-        for _ddl in [*OFFERS_DDL, PAGE_VIEWS_DDL]:
+        for _ddl in [*OFFERS_DDL, PAGE_VIEWS_DDL, *CRM_DDL]:
             try:
                 await db.execute_raw(_ddl)
             except Exception:
@@ -7035,5 +6974,6 @@ async def shutdown():
 
 import finance_books
 finance_books.register(api_router, db, admin_only)
+crm.register(api_router, db, admin_only, _sale_revenue)
 
 app.include_router(api_router)
