@@ -43,7 +43,10 @@ TABLES = {
     "auth_tokens": {"columns": {"id", "user_id", "purpose", "token_hash", "expires_at", "used_at", "created_at"}},
     "vendors": {"columns": {"id", "company_id", "name", "phone", "address", "notes", "vendor_type", "commission_amount", "created_at"}},
     "customers": {"columns": {"id", "company_id", "name", "contact_number", "address", "id_number", "occupation", "budget_min",
-                               "budget_max", "interested_brands", "notes", "created_at", "last_purchase_date"}},
+                               "budget_max", "interested_brands", "notes", "created_at", "last_purchase_date",
+                               # CRM (crm.py): how they found the shop, who referred them, where the lead stands.
+                               "source", "source_note", "referred_by_id", "lead_status", "interested_vehicle",
+                               "assigned_to_id", "assigned_to_name"}},
     "team_members": {"columns": {"id", "company_id", "name", "role", "contact", "specialization", "commission_rate",
                                   "joining_date", "is_active", "created_at"}, "bool_cols": {"is_active"}},
     "partners": {"columns": {"id", "company_id", "name", "capital_contribution", "stake_percentage", "contact", "created_at"}},
@@ -65,7 +68,8 @@ TABLES = {
                            "updated_by", "updated_at", "returned", "returned_at", "returned_status",
                            "refund_amount", "retained_amount", "return_notes",
                            "witness_name", "witness_address", "witness_phone", "witness_id_number", "witness_relation",
-                           "helmet_given", "imported", "needs_review", "review_note", "reviewed_by", "reviewed_at"},
+                           "helmet_given", "imported", "needs_review", "review_note", "reviewed_by", "reviewed_at",
+                           "sold_by_id", "sold_by_name"},
               "bool_cols": {"returned", "helmet_given", "imported", "needs_review"}, "json_cols": {"extra_expenses"}},
     "bookings": {"columns": {"id", "company_id", "vehicle_id", "customer_id", "booking_amount", "payment_method", "booking_date",
                               "expected_sale_date", "agreed_price", "status", "notes", "sale_id", "cancelled_at",
@@ -111,6 +115,11 @@ TABLES = {
     "offer_codes": {"columns": {"id", "company_id", "code", "status", "customer_name", "phone", "prize", "created_by",
                                  "created_at", "used_at"}},
     "page_views": {"columns": {"id", "company_id", "visitor_id", "path", "referrer", "device", "created_at"}},
+    # CRM follow-ups and contact history (crm.py)
+    "crm_followups": {"columns": {"id", "company_id", "customer_id", "due_at", "purpose", "notes", "status", "completed_at",
+                                   "outcome", "created_by", "created_at", "updated_at"}},
+    "crm_interactions": {"columns": {"id", "company_id", "customer_id", "kind", "summary", "occurred_at", "created_by",
+                                      "created_at"}},
     # Finance books (finance_books.py)
     "fin_parties": {"columns": {"id", "company_id", "name", "phone", "address", "created_at", "updated_at"}},
     "fin_bank_accounts": {"columns": {"id", "company_id", "name", "bank_name", "account_number", "account_holder_name",

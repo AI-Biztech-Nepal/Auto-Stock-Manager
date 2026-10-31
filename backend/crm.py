@@ -512,9 +512,9 @@ async def check_phone(phone, own_id: Optional[str]) -> None:
 
 async def cleanup_customer(cid: str) -> None:
     """A customer is going: so are their follow-ups and history (the database cascades too; the other backend does not)."""
-    for coll in (db.crm_followups, db.crm_interactions):
-        try: await coll.delete_many({"customer_id": cid})
-        except Exception: pass
+    for name in ("crm_followups", "crm_interactions"):
+        try: await getattr(db, name).delete_many({"customer_id": cid})
+        except Exception: pass  # never let tidying up fail the deletion itself
 
 
 async def _bump_contacted(customer_id: str) -> None:
@@ -598,7 +598,7 @@ def register(api_router, database, admin_only, sale_revenue):
         bookings = await db.bookings.find({"customer_id": cid}, {"_id": 0}).sort("booking_date", -1).to_list(200)
         interactions = await db.crm_interactions.find({"customer_id": cid}, {"_id": 0}).sort("occurred_at", -1).to_list(2000)
         followups = await db.crm_followups.find({"customer_id": cid}, {"_id": 0}).sort("due_at", -1).to_list(2000)
-        referred = await db.customers.find({"referred_by_id": cid}, {"_id": 0, "id": 1, "name": 1, "contact_number": 1, "source": 1}).to_list(500)
+        referred = await db.customers.find({"referred_by_id": cid}, {"_id": 0, "id": 1, "name": 1, "contact_number": 1, "source": 1}).sort("name", 1).to_list(500)
         referrer = await db.customers.find_one({"id": c.get("referred_by_id")}, {"_id": 0, "id": 1, "name": 1}) if c.get("referred_by_id") else None
         veh_ids = [s for s in sales] + [{"vehicle_id": b.get("vehicle_id")} for b in bookings]
         vehicles = await _vehicles_for(veh_ids)
