@@ -1667,6 +1667,7 @@ class SaleCreate(BaseModel):
     witness_address: Optional[str] = None
     witness_phone: Optional[str] = None
     witness_id_number: Optional[str] = None
+    sold_by_id: Optional[str] = None  # the Team member who sold it (checked and named by _resolve_sold_by)
 
 class SaleUpdate(BaseModel):
     vehicle_id: str
@@ -1682,6 +1683,10 @@ class SaleUpdate(BaseModel):
     sale_date: Optional[str] = None
     ownership_transfer_date: Optional[str] = None
     notes: Optional[str] = None
+    sold_by_id: Optional[str] = None  # only changed when the form sends it
+
+class CustomerSoldByUpdate(BaseModel):
+    sold_by_id: Optional[str] = None  # None clears the seller
 
 class CustomerCreate(BaseModel):
     name: str; contact_number: str
@@ -3610,6 +3615,15 @@ async def set_customer_source(cid: str, body: CustomerSourceUpdate, cu: dict = D
     if r.matched_count == 0: raise HTTPException(404, "Not found")
     return await db.customers.find_one({"id": cid}, {"_id": 0})
 
+@api_router.put("/customers/{cid}/sold-by")
+async def set_customer_sold_by(cid: str, body: CustomerSoldByUpdate, cu: dict = Depends(admin_only)):
+    """Set who sold a customer's latest vehicle (the CRM's Sold By column), without opening the sale."""
+    sale = _crm_latest_sale(await db.sales.find({"customer_id": cid}, {"_id": 0, "id": 1, "returned": 1, "sale_date": 1, "created_at": 1}).to_list(500))
+    if not sale: raise HTTPException(404, "This customer has no sale to attach a seller to")
+    seller = await _resolve_sold_by(body.sold_by_id)
+    await db.sales.update_one({"id": sale["id"]}, {"$set": seller})
+    return seller
+
 @api_router.delete("/customers/{cid}")
 async def delete_customer(cid: str, cu: dict = Depends(require("customers", "delete"))):
     r = await db.customers.delete_one({"id": cid})
@@ -3647,6 +3661,20 @@ async def _clean_customer_source(data: dict, own_id: Optional[str]) -> dict:
         cur, hops = row.get("referred_by_id"), hops + 1
     return {"source": source, "source_note": note, "referred_by_id": ref}
 
+async def _resolve_sold_by(member_id: Optional[str]) -> dict:
+    """The seller fields to store on a sale: the Team member's id and their name as it is today. The name
+    comes from the Team list, never from the client, and stays on the sale if the member is removed later."""
+    member_id = (member_id or "").strip()
+    if not member_id: return {"sold_by_id": None, "sold_by_name": None}
+    m = await db.team_members.find_one({"id": member_id}, {"_id": 0, "id": 1, "name": 1})
+    if not m: raise HTTPException(422, "That team member was not found")
+    return {"sold_by_id": m["id"], "sold_by_name": (m.get("name") or "").strip() or None}
+
+def _crm_latest_sale(sales: list) -> Optional[dict]:
+    """A customer's most recent sale that still stands (not returned): the one 'Sold By' speaks for."""
+    live = [s for s in sales if not s.get("returned")]
+    return max(live, key=lambda s: (s.get("sale_date") or "", s.get("created_at") or "")) if live else None
+
 def _crm_source_of(customer: Optional[dict]) -> Optional[str]:
     s = (customer or {}).get("source")
     return s if s in CRM_SOURCES else None
@@ -3656,12 +3684,14 @@ def _crm_customer_rows(customers: list, sales: list, bookings: list) -> list:
     `amount` is read the way the Dashboard reads revenue (_sale_revenue: a returned sale counts only
     what was retained), so the two pages agree; `purchases` is the vehicles they currently have from
     us; `booked` is the deposit on a vehicle they have reserved but not bought yet; `referral_count`
-    is how many customers they referred (open that person to follow the chain: refer-of-refer)."""
+    is how many customers they referred (open that person to follow the chain: refer-of-refer); `sold_by_*`
+    is who sold their latest vehicle."""
     names = {c["id"]: c.get("name") or "" for c in customers}
-    amount, purchases, booked, referred = {}, {}, {}, {}
+    amount, purchases, booked, referred, theirs = {}, {}, {}, {}, {}
     for s in sales:
         cid = s.get("customer_id")
         if cid not in names: continue
+        theirs.setdefault(cid, []).append(s)
         amount[cid] = amount.get(cid, 0) + (_sale_revenue(s) or 0)
         if not s.get("returned"): purchases[cid] = purchases.get(cid, 0) + 1
     for b in bookings:
@@ -3672,12 +3702,14 @@ def _crm_customer_rows(customers: list, sales: list, bookings: list) -> list:
     rows = []
     for c in customers:
         ref = c.get("referred_by_id") if c.get("referred_by_id") in names else None
+        latest = _crm_latest_sale(theirs.get(c["id"], [])) or {}
         rows.append({
             "id": c["id"], "name": c.get("name") or "", "contact_number": c.get("contact_number") or "", "address": c.get("address") or "",
             "source": _crm_source_of(c), "source_note": c.get("source_note"),
             "referred_by_id": ref, "referred_by_name": names[ref] if ref else None,
             "amount": round(amount.get(c["id"], 0), 2), "purchases": purchases.get(c["id"], 0),
             "booked": round(booked.get(c["id"], 0), 2), "referral_count": referred.get(c["id"], 0),
+            "sold_by_id": latest.get("sold_by_id"), "sold_by_name": latest.get("sold_by_name"),
             "created_at": c.get("created_at"),
         })
     return rows
@@ -3688,7 +3720,8 @@ async def crm_customers(cu: dict = Depends(admin_only)):
     so a customer added from any form appears here with no extra step."""
     customers = await db.customers.find({}, {"_id": 0, "id": 1, "name": 1, "contact_number": 1, "address": 1, "source": 1, "source_note": 1,
                                              "referred_by_id": 1, "created_at": 1}).sort("created_at", -1).to_list(50000)
-    sales = await db.sales.find({}, {"_id": 0, "customer_id": 1, "returned": 1, "retained_amount": 1, "sale_price": 1}).to_list(50000)
+    sales = await db.sales.find({}, {"_id": 0, "customer_id": 1, "returned": 1, "retained_amount": 1, "sale_price": 1,
+                                     "sale_date": 1, "created_at": 1, "sold_by_id": 1, "sold_by_name": 1}).to_list(50000)
     bookings = await db.bookings.find({"status": "active"}, {"_id": 0, "customer_id": 1, "booking_amount": 1, "status": 1}).to_list(50000)
     return _crm_customer_rows(customers, sales, bookings)
 
@@ -3817,6 +3850,8 @@ async def create_sale(sale: SaleCreate, cu: dict = Depends(require("sales", "cre
         "ownership_transfer_date": sale.ownership_transfer_date,
         "notes": sale.notes,
         **_witness,
+        # Only when a seller was picked, so a sale without one never touches the sold_by columns.
+        **(await _resolve_sold_by(sale.sold_by_id) if (sale.sold_by_id or "").strip() else {}),
         "created_by": cu.get("username"),
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -4004,6 +4039,10 @@ async def update_sale(sid: str, sale: SaleUpdate, cu: dict = Depends(get_current
         "updated_by": cu.get("username"),
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
+    # A form that does not show the seller must not clear it; and nothing is written when there is no seller
+    # before or after, so an ordinary edit leaves the sold_by columns alone.
+    if "sold_by_id" in sale.model_fields_set and (sale.sold_by_id or existing.get("sold_by_id")):
+        update_doc.update(await _resolve_sold_by(sale.sold_by_id))
     await db.sales.update_one({"id": sid}, {"$set": update_doc})
     # Keep vehicle record in sync (price/date/customer may have changed). Re-saving an active
     # sale also re-asserts status "sold", so a vehicle that drifted out of Sold Stock (e.g.
@@ -5756,6 +5795,9 @@ async def _run_startup_tasks():
             ("customers", "source", "VARCHAR(20)"),
             ("customers", "source_note", "VARCHAR(255)"),
             ("customers", "referred_by_id", "VARCHAR(36)"),
+            # Who sold the vehicle (a Team member); the name is kept on the sale so it survives the member being removed.
+            ("sales", "sold_by_id", "VARCHAR(36)"),
+            ("sales", "sold_by_name", "VARCHAR(255)"),
         ]
         for _tbl, _col, _type in _post_schema_cols:
             try:

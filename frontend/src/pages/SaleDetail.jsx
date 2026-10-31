@@ -8,6 +8,7 @@ import HoverADDate from "../components/HoverADDate";
 import BSDatePicker from "../components/BSDatePicker";
 import VehicleComboBox from "../components/VehicleComboBox";
 import SourceField from "../components/SourceField";
+import SoldBySelect from "../components/SoldBySelect";
 import { EMPTY_SOURCE, isSourceComplete, sourcePayload } from "../utils/crm";
 import { useAuth } from "../context/AuthContext";
 
@@ -109,6 +110,7 @@ export default function SaleDetail() {
       due_date: sale.due_date || "",
       sale_date: sale.sale_date || "",
       ownership_transfer_date: sale.ownership_transfer_date || "",
+      sold_by_id: sale.sold_by_id || "",
       notes: sale.notes || "",
     });
     setExpenseItems(others);
@@ -188,6 +190,7 @@ export default function SaleDetail() {
         due_date: editForm.due_date || undefined,
         sale_date: editForm.sale_date || undefined,
         ownership_transfer_date: editForm.ownership_transfer_date || undefined,
+        sold_by_id: editForm.sold_by_id || null,
         notes: editForm.notes,
       };
       await api.put(`/sales/${id}`, payload);
@@ -305,6 +308,10 @@ export default function SaleDetail() {
                 <BSDatePicker value={editForm.ownership_transfer_date} onChange={val => setEditForm({ ...editForm, ownership_transfer_date: val })} />
               </Field>
             </div>
+
+            <Field label="Sold by">
+              <SoldBySelect value={editForm.sold_by_id} onChange={v => setEditForm({ ...editForm, sold_by_id: v })} fallbackName={sale.sold_by_name} className={sel} testid="edit-sale-sold-by-select" />
+            </Field>
 
             <Field label="Customer">
               <div className="flex gap-2">
@@ -532,6 +539,7 @@ export default function SaleDetail() {
             <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
               <h3 className="text-sm font-bold text-slate-900 mb-1">Payment</h3>
               <Row label="Sale Date"><span className="text-sm font-medium text-slate-900 sm:text-right"><HoverADDate date={sale.sale_date} /></span></Row>
+              {sale.sold_by_name && <Row label="Sold By"><span className="text-sm font-medium text-slate-900 sm:text-right" data-testid="sale-sold-by">{sale.sold_by_name}</span></Row>}
               {sale.ownership_transfer_date && (
                 <Row label="Vehicle Pass Date"><span className="text-sm font-medium text-slate-900 sm:text-right"><HoverADDate date={sale.ownership_transfer_date} /></span></Row>
               )}

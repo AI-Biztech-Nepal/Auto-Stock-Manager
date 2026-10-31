@@ -13,6 +13,7 @@ import WarrantyBadge from "../components/WarrantyBadge";
 import Bookings from "./Bookings";
 import DateRangeFilter, { resolveDateFilter } from "../components/DateRangeFilter";
 import SourceField from "../components/SourceField";
+import SoldBySelect from "../components/SoldBySelect";
 import { EMPTY_SOURCE, isSourceComplete, sourcePayload } from "../utils/crm";
 
 const PRESET_EXPENSES = [
@@ -60,6 +61,7 @@ const EMPTY_FORM = {
   vehicle_id: "", customer_id: "", sale_price: "",
   payment_method: "Cash", paid_cash: "", paid_bank: "", advance_payment: "",
   due_amount: "", due_date: "", sale_date: "", ownership_transfer_date: "", notes: "",
+  sold_by_id: "",
   sanakhat_cost: "", resanakhat_cost: "",
   witness_name: "", witness_address: "", witness_phone: "", witness_id_number: "",
 };
@@ -373,6 +375,7 @@ export default function Sales() {
         due_date: form.due_date || undefined,
         sale_date: form.sale_date || undefined,
         ownership_transfer_date: form.ownership_transfer_date || undefined,
+        sold_by_id: form.sold_by_id || null,
         notes: form.notes,
         ...(showAddCust ? {
           witness_name: form.witness_name.trim(),
@@ -804,6 +807,10 @@ export default function Sales() {
                   <BSDatePicker value={form.ownership_transfer_date} onChange={val => setForm({...form, ownership_transfer_date: val})} data-testid="vehicle-pass-date-input" />
                 </Field>
               </div>
+
+              <Field label="Sold by">
+                <SoldBySelect value={form.sold_by_id} onChange={v => setForm({ ...form, sold_by_id: v })} className={sel} testid="sale-sold-by-select" />
+              </Field>
 
               {/* Customer */}
               <Field label="Customer">

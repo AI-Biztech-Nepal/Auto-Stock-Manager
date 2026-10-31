@@ -254,6 +254,9 @@ CREATE TABLE IF NOT EXISTS sales (
   witness_phone VARCHAR(50),
   witness_id_number VARCHAR(100),
   witness_relation VARCHAR(100),
+  -- Who sold the vehicle: a team_members.id, plus their name as it was when picked.
+  sold_by_id VARCHAR(36),
+  sold_by_name VARCHAR(255),
   helmet_given TINYINT(1),
   imported TINYINT(1),
   needs_review TINYINT(1),

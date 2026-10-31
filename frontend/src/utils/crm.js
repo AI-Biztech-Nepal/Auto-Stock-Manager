@@ -21,12 +21,15 @@ export const SOURCE_STYLE = {
   unknown: { pill: "bg-red-50 text-red-600", bar: "bg-slate-300" },
 };
 
-// What the "Referred by" column reads: the source, or for a referral the name of who referred them.
+// The "Referred by" column is just a name: who referred them, or for "Other" the detail typed in
+// ("TikTok", "signboard"). The kind of lead itself lives in the "Lead" dropdown.
 export const referredByLabel = (c) => {
-  if (c.source === "referral") return c.referred_by_name || c.source_note || "Referral";
-  if (c.source === "other") return c.source_note || "Other";
-  return c.source ? SOURCE_LABEL[c.source] : "";
+  if (c.source === "referral") return c.referred_by_name || c.source_note || "";
+  if (c.source === "other") return c.source_note || "";
+  return "";
 };
+
+export const leadLabel = (c) => (c.source ? SOURCE_LABEL[c.source] : "");
 
 export const EMPTY_SOURCE ={ source: "", source_note: "", referred_by_id: "" };
 
