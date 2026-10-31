@@ -5284,6 +5284,30 @@ OFFER_DEFAULT_PRIZES = [
     ("Rider Bag", 10, 10), ("Rider Jacket", 4, 4), ("Recharge Card", 23, 100),
 ]
 
+# The big gifts (Induction Stove, Rs. 2000 Cash, Accessories) are only ever given on every Nth spin
+# -- the 20th, 40th, 60th ... spin of the wheel -- and never in between. A prize counts as "big" by
+# its name, so renaming it in the admin panel keeps the rule working. OFFER_BIG_EVERY=0 turns the
+# rule off (every prize can be won on any spin).
+OFFER_BIG_EVERY = int(os.environ.get("OFFER_BIG_EVERY", "20"))
+_OFFER_BIG_NAME = re.compile(r"induction|accessor|\b2000\b", re.IGNORECASE)
+# Held from counting the spins to recording this one, so two phones spinning at the same moment
+# can't both be handed the 20th spin's big gift.
+_offer_spin_lock = asyncio.Lock()
+
+def _offer_spin_pool(prizes: list, spins_so_far: int) -> list:
+    """The prizes this spin is allowed to win: those with a chance and stock left, narrowed to the
+    big gifts on every OFFER_BIG_EVERY-th spin and to the everyday ones on all the others. If the big
+    gifts are out of stock on their spin, the customer wins an everyday one instead; if the everyday
+    ones run out, nothing is handed out early (the caller says the gifts are being restocked)."""
+    live = [p for p in prizes if (p.get("weight") or 0) > 0 and (p.get("stock") or 0) > 0]
+    if OFFER_BIG_EVERY <= 0:
+        return live
+    big = [p for p in live if _OFFER_BIG_NAME.search(p.get("name") or "")]
+    everyday = [p for p in live if p not in big]
+    if (spins_so_far + 1) % OFFER_BIG_EVERY == 0:
+        return big or everyday
+    return everyday
+
 async def _offer_prizes() -> list:
     """This company's wheel, in display order -- seeded with the defaults the first time."""
     prizes = await db.offer_prizes.find({}, {"_id": 0}).sort([("sort_order", 1), ("created_at", 1)]).to_list(100)
@@ -6941,30 +6965,33 @@ async def public_dashain_spin(request: Request, req: OfferSpin):
         return await already_won()
 
     # Each step is one guarded write (same pattern as the spare-parts stock guard, see
-    # sqldb.py), so two phones spinning at once can never share the last gift or one bike.
-    pool = [p for p in prizes if (p.get("weight") or 0) > 0 and (p.get("stock") or 0) > 0]
-    won = None
-    while pool and won is None:
-        pick = secrets.SystemRandom().choices(pool, weights=[p["weight"] for p in pool])[0]
-        r = await db.offer_prizes.update_one({"id": pick["id"], "stock": {"$gt": 0}}, {"$inc": {"stock": -1}})
-        if r.matched_count: won = pick
-        else: pool.remove(pick)
-    if won is None:
-        return {"ok": False, "msg": "Gifts are being restocked. Please ask our staff."}
+    # sqldb.py), so two phones spinning at once can never share the last gift or one bike. The
+    # lock also keeps the spin count steady, so only the 20th (40th, ...) spin gets a big gift.
+    async with _offer_spin_lock:
+        spins_so_far = await db.offer_codes.count_documents({"status": "USED"})
+        pool = _offer_spin_pool(prizes, spins_so_far)
+        won = None
+        while pool and won is None:
+            pick = secrets.SystemRandom().choices(pool, weights=[p["weight"] for p in pool])[0]
+            r = await db.offer_prizes.update_one({"id": pick["id"], "stock": {"$gt": 0}}, {"$inc": {"stock": -1}})
+            if r.matched_count: won = pick
+            else: pool.remove(pick)
+        if won is None:
+            return {"ok": False, "msg": "Gifts are being restocked. Please ask our staff."}
 
-    now = datetime.now(timezone.utc).isoformat()
-    try:
-        # The UNIQUE (company_id, code) key makes this the claim: only one spin per bike gets in.
-        await db.offer_codes.insert_one({
-            "id": str(uuid.uuid4()), "code": bike_no, "status": "USED", "customer_name": name, "phone": phone[:20],
-            "prize": won["name"], "created_by": "storefront", "created_at": now, "used_at": now})
-    except Exception:
-        # Lost a race against another spin of the same bike (or the write failed) -- put the gift back.
-        await db.offer_prizes.update_one({"id": won["id"]}, {"$inc": {"stock": 1}})
-        if await db.offer_codes.find_one({"code": bike_no}, {"_id": 0}):
-            return await already_won()
-        logger.error("Could not record Dashain spin for %s", bike_no, exc_info=True)
-        return {"ok": False, "msg": "Something went wrong. Please ask our staff."}
+        now = datetime.now(timezone.utc).isoformat()
+        try:
+            # The UNIQUE (company_id, code) key makes this the claim: only one spin per bike gets in.
+            await db.offer_codes.insert_one({
+                "id": str(uuid.uuid4()), "code": bike_no, "status": "USED", "customer_name": name, "phone": phone[:20],
+                "prize": won["name"], "created_by": "storefront", "created_at": now, "used_at": now})
+        except Exception:
+            # Lost a race against another spin of the same bike (or the write failed) -- put the gift back.
+            await db.offer_prizes.update_one({"id": won["id"]}, {"$inc": {"stock": 1}})
+            if await db.offer_codes.find_one({"code": bike_no}, {"_id": 0}):
+                return await already_won()
+            logger.error("Could not record Dashain spin for %s", bike_no, exc_info=True)
+            return {"ok": False, "msg": "Something went wrong. Please ask our staff."}
     return {"ok": True, "prize": won["name"], "prize_index": prizes.index(won)}
 
 @app.on_event("shutdown")
