@@ -3651,178 +3651,46 @@ def _crm_source_of(customer: Optional[dict]) -> Optional[str]:
     s = (customer or {}).get("source")
     return s if s in CRM_SOURCES else None
 
-def _crm_in_range(day: Optional[str], start: str, end: str) -> bool:
-    return bool(day) and start <= str(day)[:10] <= end
-
-def _crm_source_breakdown(customers: list, sales: list, investment_by_vehicle: dict, start: str, end: str) -> list:
-    """One row per source (plus 'unknown' for untagged customers and sales with no customer record):
-    how many customers, how many joined in the range, and what the range's sales brought in. Revenue and
-    profit are counted exactly as the Dashboard counts them -- returned sales contribute only what was
-    retained, less their frozen cost -- so the rows add up to the Dashboard's figures for the same dates."""
-    rows = {k: {"source": k or "unknown", "customers": 0, "new_customers": 0, "buyers": set(), "sold": 0, "revenue": 0.0, "profit": 0.0}
-            for k in (*CRM_SOURCES, None)}
-    src_by_id = {c["id"]: _crm_source_of(c) for c in customers}
-    for c in customers:
-        r = rows[src_by_id[c["id"]]]
-        r["customers"] += 1
-        if _crm_in_range(c.get("created_at"), start, end): r["new_customers"] += 1
-    for s in sales:
-        if not _crm_in_range(s.get("sale_date"), start, end): continue
-        r = rows[src_by_id.get(s.get("customer_id"))]
-        revenue = _sale_revenue(s) or 0
-        r["revenue"] += revenue
-        if s.get("returned"):
-            r["profit"] += revenue - (s.get("cost_at_return") or 0)
-        else:
-            r["sold"] += 1
-            if s.get("customer_id"): r["buyers"].add(s["customer_id"])
-            if s.get("vehicle_id") in investment_by_vehicle:
-                r["profit"] += revenue - investment_by_vehicle[s["vehicle_id"]]
-    out = []
-    for r in rows.values():
-        r["buyers"] = len(r["buyers"])
-        r["revenue"], r["profit"] = round(r["revenue"], 2), round(r["profit"], 2)
-        out.append(r)
-    return out
-
-def _crm_referrals(customers: list, sales: list, start: str, end: str) -> dict:
-    """Who brings customers in, following the chain: the people a customer referred, the people THEY
-    referred, and so on. 'via' counts everyone further down a person's chain, 'refer_of_refer' is
-    the customers whose referrer was themselves referred."""
-    by_id = {c["id"]: c for c in customers}
-    children = {}
-    for c in customers:
-        ref = c.get("referred_by_id")
-        if ref and ref in by_id and ref != c["id"]:
-            children.setdefault(ref, []).append(c["id"])
-    revenue, bought = {}, set()
+def _crm_customer_rows(customers: list, sales: list, bookings: list) -> list:
+    """The CRM table: every customer with how they found the shop and what they have given it.
+    `amount` is read the way the Dashboard reads revenue (_sale_revenue: a returned sale counts only
+    what was retained), so the two pages agree; `purchases` is the vehicles they currently have from
+    us; `booked` is the deposit on a vehicle they have reserved but not bought yet; `referral_count`
+    is how many customers they referred (open that person to follow the chain: refer-of-refer)."""
+    names = {c["id"]: c.get("name") or "" for c in customers}
+    amount, purchases, booked, referred = {}, {}, {}, {}
     for s in sales:
         cid = s.get("customer_id")
-        if cid not in by_id or not _crm_in_range(s.get("sale_date"), start, end): continue
-        revenue[cid] = revenue.get(cid, 0) + (_sale_revenue(s) or 0)
-        if not s.get("returned"): bought.add(cid)
-
-    def depth(cid):  # referral hops up to the start of the chain
-        d, seen = 0, {cid}
-        cur = by_id[cid].get("referred_by_id")
-        while cur in by_id and cur not in seen:
-            seen.add(cur); d += 1; cur = by_id[cur].get("referred_by_id")
-        return d
-
-    def descendants(cid):
-        found, stack = [], list(children.get(cid, []))
-        seen = {cid}
-        while stack:
-            x = stack.pop()
-            if x in seen: continue
-            seen.add(x); found.append(x); stack.extend(children.get(x, []))
-        return found
-
-    def tree(cid, level, budget):
-        node = {"id": cid, "name": by_id[cid].get("name") or "", "bought": cid in bought, "children": []}
-        if level < 4:
-            for k in sorted(children.get(cid, []), key=lambda k: by_id[k].get("name") or ""):
-                if budget[0] <= 0: break
-                budget[0] -= 1
-                node["children"].append(tree(k, level + 1, budget))
-        return node
-
-    top = []
-    for rid in children:
-        down = descendants(rid)
-        top.append({
-            "id": rid, "name": by_id[rid].get("name") or "", "phone": by_id[rid].get("contact_number") or "",
-            "direct": len(children[rid]), "via": len(down) - len(children[rid]),
-            "buyers": sum(1 for x in down if x in bought), "revenue": round(sum(revenue.get(x, 0) for x in down), 2),
-            "tree": tree(rid, 0, [30]),
+        if cid not in names: continue
+        amount[cid] = amount.get(cid, 0) + (_sale_revenue(s) or 0)
+        if not s.get("returned"): purchases[cid] = purchases.get(cid, 0) + 1
+    for b in bookings:
+        cid = b.get("customer_id")
+        if cid in names and b.get("status") == "active": booked[cid] = booked.get(cid, 0) + (b.get("booking_amount") or 0)
+    for c in customers:
+        if c.get("referred_by_id") in names: referred[c["referred_by_id"]] = referred.get(c["referred_by_id"], 0) + 1
+    rows = []
+    for c in customers:
+        ref = c.get("referred_by_id") if c.get("referred_by_id") in names else None
+        rows.append({
+            "id": c["id"], "name": c.get("name") or "", "contact_number": c.get("contact_number") or "", "address": c.get("address") or "",
+            "source": _crm_source_of(c), "source_note": c.get("source_note"),
+            "referred_by_id": ref, "referred_by_name": names[ref] if ref else None,
+            "amount": round(amount.get(c["id"], 0), 2), "purchases": purchases.get(c["id"], 0),
+            "booked": round(booked.get(c["id"], 0), 2), "referral_count": referred.get(c["id"], 0),
+            "created_at": c.get("created_at"),
         })
-    top.sort(key=lambda t: (-t["revenue"], -(t["direct"] + t["via"]), t["name"]))
-    depths = [depth(c["id"]) for c in customers]
-    return {
-        "referral_customers": sum(1 for c in customers if _crm_source_of(c) == "referral"),
-        "named_referrer": sum(1 for c in customers if c.get("referred_by_id") in by_id),
-        "refer_of_refer": sum(1 for c in customers if c.get("referred_by_id") in by_id and by_id[c["referred_by_id"]].get("referred_by_id") in by_id),
-        "longest_chain": (max(depths) + 1) if depths and max(depths) > 0 else 0,
-        "top_referrers": top[:15],
-    }
-
-def _crm_visit_group(host: str) -> str:
-    """Which kind of site sent a storefront visitor (page_views.referrer holds the bare host)."""
-    h = (host or "").lower()
-    if not h: return "direct"
-    if "google." in h or "googlequicksearchbox" in h: return "google"
-    if "facebook." in h or h in ("fb.com", "fb.me", "m.me") or h.endswith(".fb.com"): return "facebook"
-    if "instagram." in h: return "instagram"
-    if "tiktok." in h: return "tiktok"
-    if "whatsapp." in h or h == "wa.me": return "whatsapp"
-    if any(x in h for x in ("bing.", "yahoo.", "duckduckgo.", "yandex.", "baidu.", "ecosia.")): return "other_search"
-    return "other"
-
-def _crm_website(page_views: list, leads: list) -> dict:
-    """Storefront visitors by where they arrived from (a visitor counts once, under the site they
-    first arrived from in the range) next to the enquiries the website produced."""
-    first = {}
-    for r in sorted(page_views, key=lambda r: r.get("created_at") or ""):
-        if r.get("visitor_id") and r["visitor_id"] not in first: first[r["visitor_id"]] = r
-    groups = {}
-    for r in first.values():
-        g = _crm_visit_group(r.get("referrer"))
-        groups[g] = groups.get(g, 0) + 1
-    types = {}
-    for l in leads: types[l.get("type") or "other"] = types.get(l.get("type") or "other", 0) + 1
-    forms = sum(n for t, n in types.items() if t in ("sell", "exchange", "service"))
-    return {"visitors": len(first), "by_source": groups, "leads": {"forms": forms, "taps": sum(n for t, n in types.items() if t in ("whatsapp", "call")), "by_type": types}}
-
-_CRM_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-
-@api_router.get("/crm/summary")
-async def crm_summary(start: str = "1900-01-01", end: str = "2999-12-31", cu: dict = Depends(admin_only)):
-    if not (_CRM_DATE.match(start) and _CRM_DATE.match(end)) or start > end:
-        raise HTTPException(422, "Give the dates as YYYY-MM-DD, start before end")
-    customers = await db.customers.find({}, {"_id": 0, "id": 1, "name": 1, "contact_number": 1, "source": 1, "referred_by_id": 1, "created_at": 1}).to_list(50000)
-    sales = await db.sales.find({}, {"_id": 0, "customer_id": 1, "vehicle_id": 1, "sale_date": 1, "returned": 1, "retained_amount": 1, "sale_price": 1, "cost_at_return": 1}).to_list(50000)
-    live_ids = list({s["vehicle_id"] for s in sales if s.get("vehicle_id") and not s.get("returned") and _crm_in_range(s.get("sale_date"), start, end)})
-    vehicles = await db.vehicles.find({"id": {"$in": live_ids}}, {"_id": 0}).to_list(50000) if live_ids else []
-    investment = await _batch_vehicle_investment(vehicles)
-
-    # Storefront visits are stored in UTC; the range is the shop's (Nepal) days.
-    npt = timezone(timedelta(hours=5, minutes=45))
-    d0, d1 = datetime.fromisoformat(start), datetime.fromisoformat(end)
-    lo = datetime(d0.year, d0.month, d0.day, tzinfo=npt).astimezone(timezone.utc).isoformat()
-    hi = (datetime(d1.year, d1.month, d1.day, tzinfo=npt) + timedelta(days=1)).astimezone(timezone.utc).isoformat()
-    page_views = await db.page_views.find({"created_at": {"$gte": lo, "$lt": hi}}, {"_id": 0, "visitor_id": 1, "referrer": 1, "created_at": 1}).to_list(200000)
-    leads = await db.leads.find({"created_at": {"$gte": lo, "$lt": hi}}, {"_id": 0, "type": 1}).to_list(20000)
-
-    tagged = sum(1 for c in customers if _crm_source_of(c))
-    return {
-        "start": start, "end": end,
-        "customers": len(customers), "tagged": tagged, "untagged": len(customers) - tagged,
-        "sources": _crm_source_breakdown(customers, sales, investment, start, end),
-        "referrals": _crm_referrals(customers, sales, start, end),
-        "website": _crm_website(page_views, leads),
-    }
+    return rows
 
 @api_router.get("/crm/customers")
 async def crm_customers(cu: dict = Depends(admin_only)):
-    """Every customer with their source and what they've bought, for the CRM list and the tagging screen."""
+    """Everything the CRM table shows, read live from the customers, sales and bookings already posted,
+    so a customer added from any form appears here with no extra step."""
     customers = await db.customers.find({}, {"_id": 0, "id": 1, "name": 1, "contact_number": 1, "address": 1, "source": 1, "source_note": 1,
                                              "referred_by_id": 1, "created_at": 1}).sort("created_at", -1).to_list(50000)
-    sales = await db.sales.find({}, {"_id": 0, "customer_id": 1, "sale_date": 1, "returned": 1, "sale_price": 1}).to_list(50000)
-    names = {c["id"]: c.get("name") or "" for c in customers}
-    bought, referred = {}, {}
-    for s in sales:
-        if s.get("customer_id") and not s.get("returned"): bought.setdefault(s["customer_id"], []).append(s)
-    for c in customers:
-        if c.get("referred_by_id"): referred[c["referred_by_id"]] = referred.get(c["referred_by_id"], 0) + 1
-    for c in customers:
-        mine = bought.get(c["id"], [])
-        c["source"] = _crm_source_of(c)
-        c["referred_by_name"] = names.get(c.get("referred_by_id")) if c.get("referred_by_id") else None
-        c["purchases"] = len(mine)
-        c["spent"] = round(sum(s.get("sale_price") or 0 for s in mine), 2)
-        c["last_sale_date"] = max((s.get("sale_date") or "" for s in mine), default="") or None
-        c["referral_count"] = referred.get(c["id"], 0)
-    return customers
+    sales = await db.sales.find({}, {"_id": 0, "customer_id": 1, "returned": 1, "retained_amount": 1, "sale_price": 1}).to_list(50000)
+    bookings = await db.bookings.find({"status": "active"}, {"_id": 0, "customer_id": 1, "booking_amount": 1, "status": 1}).to_list(50000)
+    return _crm_customer_rows(customers, sales, bookings)
 
 # ── SALES ─────────────────────────────────────────────────────────────
 @api_router.get("/sales")

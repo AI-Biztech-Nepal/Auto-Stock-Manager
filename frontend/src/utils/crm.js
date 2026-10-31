@@ -21,7 +21,14 @@ export const SOURCE_STYLE = {
   unknown: { pill: "bg-red-50 text-red-600", bar: "bg-slate-300" },
 };
 
-export const EMPTY_SOURCE = { source: "", source_note: "", referred_by_id: "" };
+// What the "Referred by" column reads: the source, or for a referral the name of who referred them.
+export const referredByLabel = (c) => {
+  if (c.source === "referral") return c.referred_by_name || c.source_note || "Referral";
+  if (c.source === "other") return c.source_note || "Other";
+  return c.source ? SOURCE_LABEL[c.source] : "";
+};
+
+export const EMPTY_SOURCE ={ source: "", source_note: "", referred_by_id: "" };
 
 export const sourceFromCustomer = (c) => ({
   source: c?.source || "",
