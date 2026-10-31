@@ -1,6 +1,6 @@
 import { Suspense, lazy } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Megaphone, Share2, Gift, Eye, Inbox } from "lucide-react";
+import { Megaphone, Share2, Gift, Eye, Inbox, HeartHandshake } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { marketingTabsFor } from "../utils/permissions";
 
@@ -11,8 +11,10 @@ const Share = lazy(() => import("./Share"));
 const Offers = lazy(() => import("./Offers"));
 const Visits = lazy(() => import("./Visits"));
 const Leads = lazy(() => import("./Leads"));
+const CRM = lazy(() => import("./CRM"));
 
 const TABS = {
+  crm: { label: "CRM", hint: "Where your customers come from, and who refers them", Icon: HeartHandshake, Page: CRM },
   share: { label: "Share", hint: "Post your vehicles to social media", Icon: Share2, Page: Share },
   offers: { label: "Offers", hint: "Run the festival gift spin", Icon: Gift, Page: Offers },
   leads: { label: "Leads", hint: "Sell, exchange and service requests from your website", Icon: Inbox, Page: Leads },

@@ -121,6 +121,11 @@ CREATE TABLE IF NOT EXISTS customers (
   notes TEXT,
   created_at VARCHAR(40),
   last_purchase_date VARCHAR(20),
+  -- CRM: how the customer found the shop (walk_in | website | facebook | referral | other), a free-text
+  -- note for "other" / an unlisted referrer, and the customer who referred them (another customers.id).
+  source VARCHAR(20),
+  source_note VARCHAR(255),
+  referred_by_id VARCHAR(36),
   INDEX idx_customers_created_at (created_at),
   CONSTRAINT fk_customers_company FOREIGN KEY (company_id) REFERENCES companies(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

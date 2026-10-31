@@ -7,6 +7,8 @@ import { formatNPR, splitSanakhatExpenses, withSanakhatExpenses } from "../utils
 import HoverADDate from "../components/HoverADDate";
 import BSDatePicker from "../components/BSDatePicker";
 import VehicleComboBox from "../components/VehicleComboBox";
+import SourceField from "../components/SourceField";
+import { EMPTY_SOURCE, isSourceComplete, sourcePayload } from "../utils/crm";
 import { useAuth } from "../context/AuthContext";
 
 const PRESET_EXPENSES = [
@@ -74,6 +76,7 @@ export default function SaleDetail() {
   const [customers, setCustomers] = useState([]);
   const [showAddCust, setShowAddCust] = useState(false);
   const [newCust, setNewCust] = useState({ name: "", contact_number: "", address: "" });
+  const [newCustSource, setNewCustSource] = useState(EMPTY_SOURCE);
   const [addingCust, setAddingCust] = useState(false);
 
   const [showReturnModal, setShowReturnModal] = useState(false);
@@ -112,6 +115,7 @@ export default function SaleDetail() {
     setPresetToAdd(""); setNewExpName(""); setNewExpAmt("");
     setShowAddCust(false);
     setNewCust({ name: "", contact_number: "", address: "" });
+    setNewCustSource(EMPTY_SOURCE);
     setIsEditing(true);
     try {
       const [v, c] = await Promise.all([api.get("/vehicles"), api.get("/customers")]);
@@ -123,13 +127,15 @@ export default function SaleDetail() {
 
   const saveNewCustomer = async () => {
     if (!newCust.name || !newCust.contact_number) { toast.error("Name and phone are required"); return; }
+    if (!isSourceComplete(newCustSource)) { toast.error(newCustSource.source === "referral" ? "Say who referred them" : "Tell us how they found the shop"); return; }
     setAddingCust(true);
     try {
-      const r = await api.post("/customers", newCust);
+      const r = await api.post("/customers", { ...newCust, ...sourcePayload(newCustSource) });
       setCustomers(prev => [r.data, ...prev]);
       setEditForm(f => ({ ...f, customer_id: r.data.id }));
       setShowAddCust(false);
       setNewCust({ name: "", contact_number: "", address: "" });
+      setNewCustSource(EMPTY_SOURCE);
       toast.success("Customer added!");
     } catch (err) { toast.error(err.response?.data?.detail || "Failed to add customer"); }
     finally { setAddingCust(false); }
@@ -318,6 +324,7 @@ export default function SaleDetail() {
                     <input value={newCust.contact_number} onChange={e => setNewCust({ ...newCust, contact_number: e.target.value })} placeholder="Phone *" className="h-8 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 bg-white" />
                   </div>
                   <input value={newCust.address} onChange={e => setNewCust({ ...newCust, address: e.target.value })} placeholder="Address (optional)" className="w-full h-8 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 bg-white" />
+                  <SourceField value={newCustSource} onChange={setNewCustSource} customers={customers} required />
                   <div className="flex gap-2 justify-end">
                     <button type="button" onClick={() => setShowAddCust(false)} className="px-3 h-7 text-xs text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">Cancel</button>
                     <button type="button" onClick={saveNewCustomer} disabled={addingCust} className="px-3 h-7 text-xs bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-60 font-medium">{addingCust ? "Saving..." : "Create & Select"}</button>

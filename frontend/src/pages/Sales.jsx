@@ -12,6 +12,8 @@ import HoverADDate from "../components/HoverADDate";
 import WarrantyBadge from "../components/WarrantyBadge";
 import Bookings from "./Bookings";
 import DateRangeFilter, { resolveDateFilter } from "../components/DateRangeFilter";
+import SourceField from "../components/SourceField";
+import { EMPTY_SOURCE, isSourceComplete, sourcePayload } from "../utils/crm";
 
 const PRESET_EXPENSES = [
   { name: "Registration Transfer Fee", amount: 2000 },
@@ -176,6 +178,7 @@ export default function Sales() {
   // which is required whenever this panel is in use.
   const [showAddCust, setShowAddCust] = useState(false);
   const [buyer, setBuyer] = useState(EMPTY_BUYER);
+  const [buyerSource, setBuyerSource] = useState(EMPTY_SOURCE); // how a NEW buyer found the shop
   const [addingCust, setAddingCust] = useState(false);
 
   // Extra expenses state
@@ -240,6 +243,7 @@ export default function Sales() {
     setPresetToAdd("");
     setNewExpName(""); setNewExpAmt("");
     setBuyer(EMPTY_BUYER);
+    setBuyerSource(EMPTY_SOURCE);
     setShowAddCust(false);
     setShowModal(true);
     try {
@@ -269,8 +273,11 @@ export default function Sales() {
   const buyerComplete = buyer.name.trim() && buyer.address.trim() && buyer.contact_number.trim();
   const witnessComplete = form.witness_name.trim() && form.witness_address.trim() && form.witness_phone.trim();
 
+  const sourceMissing = () => (buyerSource.source === "referral" ? "Say who referred the buyer" : "Tell us how the buyer found the shop");
+
   const saveNewCustomer = async () => {
     if (!buyerComplete) { toast.error("Fill in the buyer's name, address, and phone number"); return; }
+    if (!isSourceComplete(buyerSource)) { toast.error(sourceMissing()); return; }
     setAddingCust(true);
     try {
       const r = await api.post("/customers", {
@@ -278,6 +285,7 @@ export default function Sales() {
         contact_number: buyer.contact_number.trim(),
         address: buyer.address.trim() || null,
         id_number: buyer.id_number.trim() || null,
+        ...sourcePayload(buyerSource),
       });
       setCustomers(prev => [r.data, ...prev]);
       setForm(f => ({ ...f, customer_id: r.data.id }));
@@ -326,6 +334,9 @@ export default function Sales() {
       if (enteringNewBuyer && !buyerComplete) {
         toast.error("Fill in the buyer's name, address, and phone number"); return;
       }
+      if (enteringNewBuyer && !isSourceComplete(buyerSource)) {
+        toast.error(sourceMissing()); return;
+      }
       if (!witnessComplete) {
         toast.error("Fill in the witness's name, address, and phone number"); return;
       }
@@ -339,6 +350,7 @@ export default function Sales() {
           contact_number: buyer.contact_number.trim(),
           address: buyer.address.trim() || null,
           id_number: buyer.id_number.trim() || null,
+          ...sourcePayload(buyerSource),
         });
         setCustomers(prev => [r.data, ...prev]);
         customerId = r.data.id;
@@ -831,6 +843,12 @@ export default function Sales() {
                           </MiniField>
                         </div>
                       ))}
+
+                      {!selectedCustomer && (
+                        <div className="pt-1" data-testid="buyer-source">
+                          <SourceField value={buyerSource} onChange={setBuyerSource} customers={customers} label="How did the buyer find us?" required />
+                        </div>
+                      )}
 
                       {selectedCustomer && (
                         <button type="button" onClick={() => setForm({ ...form, customer_id: "" })} className="text-xs text-blue-600 hover:underline">

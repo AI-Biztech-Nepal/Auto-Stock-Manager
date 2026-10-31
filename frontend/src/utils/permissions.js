@@ -41,7 +41,7 @@ const MARKETING_TABS = {
 };
 
 export function marketingTabsFor(role) {
-  if (!role || role === "admin") return ["leads", "share", "offers", "visits"];
+  if (!role || role === "admin") return ["leads", "crm", "share", "offers", "visits"];
   return MARKETING_TABS[role] || [];
 }
 

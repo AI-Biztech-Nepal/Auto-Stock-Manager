@@ -6,6 +6,8 @@ import api from "../utils/api";
 import { formatNPR } from "../utils/helpers";
 import { getTodayAD } from "../utils/nepali-date";
 import HoverADDate from "../components/HoverADDate";
+import SourceField from "../components/SourceField";
+import { EMPTY_SOURCE, isSourceComplete, sourceFromCustomer, sourcePayload } from "../utils/crm";
 import { LedgerToolbar, groupByLetter, LetterSection, DueTag, InfoPill, LedgerSkeleton, LedgerEmpty } from "../components/LedgerParts";
 
 // What a customer bought, inline under their entry.
@@ -110,6 +112,7 @@ export default function Customers() {
   const [showModal, setShowModal] = useState(false);
   const [editItem, setEditItem] = useState(null);
   const [form, setForm] = useState({ name: "", contact_number: "", address: "", notes: "" });
+  const [src, setSrc] = useState(EMPTY_SOURCE);
   const [saving, setSaving] = useState(false);
 
   const fetchCustomers = useCallback(async () => {
@@ -119,16 +122,20 @@ export default function Customers() {
 
   useEffect(() => { fetchCustomers(); }, [fetchCustomers]);
 
-  const openAdd = () => { setEditItem(null); setForm({ name: "", contact_number: "", address: "", notes: "" }); setShowModal(true); };
-  const openEdit = (c) => { setEditItem(c); setForm({ name: c.name, contact_number: c.contact_number, address: c.address || "", notes: c.notes || "" }); setShowModal(true); };
+  const openAdd = () => { setEditItem(null); setForm({ name: "", contact_number: "", address: "", notes: "" }); setSrc(EMPTY_SOURCE); setShowModal(true); };
+  const openEdit = (c) => { setEditItem(c); setForm({ name: c.name, contact_number: c.contact_number, address: c.address || "", notes: c.notes || "" }); setSrc(sourceFromCustomer(c)); setShowModal(true); };
 
   const handleSave = async (e) => {
     e.preventDefault();
     if (!form.name || !form.contact_number) { toast.error("Name and contact number are required"); return; }
+    // A new customer must say how they found us; an old one can be saved without (it's tagged later from Marketing → CRM).
+    if (!editItem && !isSourceComplete(src)) { toast.error(src.source === "referral" ? "Say who referred them" : "Tell us how they found the shop"); return; }
+    if (src.source === "referral" && !isSourceComplete(src)) { toast.error("Say who referred them"); return; }
     setSaving(true);
     try {
-      if (editItem) { await api.put(`/customers/${editItem.id}`, form); toast.success("Customer updated"); }
-      else { await api.post("/customers", form); toast.success("Customer added"); }
+      const body = { ...form, ...sourcePayload(src) };
+      if (editItem) { await api.put(`/customers/${editItem.id}`, body); toast.success("Customer updated"); }
+      else { await api.post("/customers", body); toast.success("Customer added"); }
       setShowModal(false); fetchCustomers();
     } catch { toast.error("Couldn't save the customer — try again"); } finally { setSaving(false); }
   };
@@ -266,6 +273,7 @@ export default function Customers() {
                   <input type={type} value={form[key]} onChange={e => setForm({...form, [key]: e.target.value})} placeholder={ph} className={inp} data-testid={`customer-${key}-input`} />
                 </div>
               ))}
+              <SourceField value={src} onChange={setSrc} excludeId={editItem?.id} required={!editItem} />
               <div>
                 <label className="block text-xs font-medium text-slate-600 mb-1">Notes</label>
                 <textarea value={form.notes} onChange={e => setForm({...form, notes: e.target.value})} rows={2} placeholder="Any notes about this customer..." className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" />

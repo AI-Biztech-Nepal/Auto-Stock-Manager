@@ -8,6 +8,8 @@ import VehicleComboBox from "../components/VehicleComboBox";
 import BSDatePicker from "../components/BSDatePicker";
 import HoverADDate from "../components/HoverADDate";
 import BookingReceipt from "../components/BookingReceipt";
+import SourceField from "../components/SourceField";
+import { EMPTY_SOURCE, isSourceComplete, sourcePayload } from "../utils/crm";
 import { useAuth } from "../context/AuthContext";
 
 const inp = "w-full h-9 px-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500";
@@ -68,6 +70,7 @@ export default function Bookings({ embedded = false, onRecordSale: onRecordSaleP
   const [form, setForm] = useState(EMPTY_BOOKING);
   const [vehicles, setVehicles] = useState([]);
   const [newCust, setNewCust] = useState({ name: "", contact_number: "" }); // bookings are always for new customers
+  const [newCustSource, setNewCustSource] = useState(EMPTY_SOURCE);
   const [saving, setSaving] = useState(false);
 
   const [receipt, setReceipt] = useState(null); // booking whose receipt is open for printing
@@ -85,6 +88,7 @@ export default function Bookings({ embedded = false, onRecordSale: onRecordSaleP
   const openForm = async (booking = null) => {
     setEditing(booking);
     setNewCust({ name: "", contact_number: "" });
+    setNewCustSource(EMPTY_SOURCE);
     setForm(booking ? {
       vehicle_id: booking.vehicle_id, customer_id: booking.customer_id || "",
       booking_amount: String(booking.booking_amount ?? ""), payment_method: booking.payment_method || "Cash",
@@ -105,11 +109,12 @@ export default function Bookings({ embedded = false, onRecordSale: onRecordSaleP
     if (!form.vehicle_id) { toast.error("Select a vehicle"); return; }
     if (!(amount > 0)) { toast.error("Enter the booking amount"); return; }
     if (!editing && !(newCust.name.trim() && newCust.contact_number.trim())) { toast.error("Enter the customer's name and phone"); return; }
+    if (!editing && !isSourceComplete(newCustSource)) { toast.error(newCustSource.source === "referral" ? "Say who referred them" : "Tell us how the customer found the shop"); return; }
     setSaving(true);
     try {
       let customerId = editing ? editing.customer_id : "";
       if (!customerId) {
-        const r = await api.post("/customers", { name: newCust.name.trim(), contact_number: newCust.contact_number.trim() });
+        const r = await api.post("/customers", { name: newCust.name.trim(), contact_number: newCust.contact_number.trim(), ...sourcePayload(newCustSource) });
         customerId = r.data.id;
       }
       const payload = {
@@ -333,6 +338,7 @@ export default function Bookings({ embedded = false, onRecordSale: onRecordSaleP
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     <input value={newCust.name} onChange={e => setNewCust({ ...newCust, name: e.target.value })} placeholder="Full name" className={inp} data-testid="booking-new-cust-name" />
                     <input value={newCust.contact_number} onChange={e => setNewCust({ ...newCust, contact_number: e.target.value })} placeholder="Phone number" inputMode="tel" className={inp} data-testid="booking-new-cust-phone" />
+                    <div className="sm:col-span-2"><SourceField value={newCustSource} onChange={setNewCustSource} required /></div>
                   </div>
                 )}
               </Field>

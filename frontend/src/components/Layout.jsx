@@ -7,7 +7,7 @@ import { canAccessPath, marketingTabsFor } from "../utils/permissions";
 import { isSanakhatOverdue, sanakhatPendingDays } from "../utils/helpers";
 import {
   LayoutDashboard, Bike, Wrench, BarChart3, Sparkles, Settings, LogOut, Menu, X, Bell,
-  BookOpen, Wallet, Boxes, ShoppingBag, Building2, ImageOff, FileWarning, ShieldCheck, Megaphone, Inbox, ChevronDown, Share2, Gift, Eye
+  BookOpen, Wallet, Boxes, ShoppingBag, Building2, ImageOff, FileWarning, ShieldCheck, Megaphone, Inbox, ChevronDown, Share2, Gift, Eye, HeartHandshake
 } from "lucide-react";
 
 // A vehicle needs at least this many photos before it's considered adequately
@@ -17,6 +17,7 @@ const MIN_NOTIFY_PHOTOS = 2;
 
 const MARKETING_NAV = {
   leads: { label: "Leads", icon: Inbox },
+  crm: { label: "CRM", icon: HeartHandshake },
   share: { label: "Share", icon: Share2 },
   offers: { label: "Offers", icon: Gift },
   visits: { label: "Visits", icon: Eye },
