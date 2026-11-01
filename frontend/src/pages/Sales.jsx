@@ -63,6 +63,7 @@ const EMPTY_FORM = {
   due_amount: "", due_date: "", sale_date: "", ownership_transfer_date: "", notes: "",
   sold_by_id: "",
   sanakhat_cost: "", resanakhat_cost: "",
+  exchange_valuation: "", exchange_brand: "", exchange_model: "", exchange_reg_no: "", exchange_year: "",
   witness_name: "", witness_address: "", witness_phone: "", witness_id_number: "",
 };
 
@@ -301,7 +302,8 @@ export default function Sales() {
   const extraExpenses = withSanakhatExpenses(expenseItems, form.sanakhat_cost, form.resanakhat_cost);
   const expensesTotal = extraExpenses.reduce((s, e) => s + Number(e.amount || 0), 0);
   const grandTotal = (Number(form.sale_price) || 0) + expensesTotal;
-  const amountPaid = (Number(form.paid_cash) || 0) + (Number(form.paid_bank) || 0) + (Number(form.advance_payment) || 0);
+  const exchangeValuation = Number(form.exchange_valuation) || 0; // old vehicle taken in part payment
+  const amountPaid = (Number(form.paid_cash) || 0) + (Number(form.paid_bank) || 0) + (Number(form.advance_payment) || 0) + exchangeValuation;
   const autoDue = Math.max(Number((grandTotal - amountPaid).toFixed(2)), 0);
   // Due Amount field: shows the auto figure until the user types over it (blank ⇒ auto).
   const amountDue = form.due_amount === "" ? autoDue : Math.max(Number(form.due_amount) || 0, 0);
@@ -377,6 +379,11 @@ export default function Sales() {
         ownership_transfer_date: form.ownership_transfer_date || undefined,
         sold_by_id: form.sold_by_id || null,
         notes: form.notes,
+        exchange_valuation: exchangeValuation,
+        exchange_brand: form.exchange_brand.trim() || undefined,
+        exchange_model: form.exchange_model.trim() || undefined,
+        exchange_reg_no: form.exchange_reg_no.trim() || undefined,
+        exchange_year: form.exchange_year.trim() || undefined,
         ...(showAddCust ? {
           witness_name: form.witness_name.trim(),
           witness_address: form.witness_address.trim(),
@@ -893,6 +900,28 @@ export default function Sales() {
                 </Field>
               </div>
 
+              {/* Exchange: the customer's old vehicle; its valuation is deducted from what they owe */}
+              <div className="border border-slate-200 rounded-xl p-4 space-y-3" data-testid="exchange-section">
+                <p className="text-sm font-semibold text-slate-700">Exchange</p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <Field label="Valuation (NPR)">
+                    <input type="text" inputMode="numeric" value={form.exchange_valuation} onChange={e => setForm({...form, exchange_valuation: e.target.value})} placeholder="0" className={inp} data-testid="exchange-valuation-input" />
+                  </Field>
+                  <Field label="Reg No.">
+                    <input value={form.exchange_reg_no} onChange={e => setForm({...form, exchange_reg_no: e.target.value})} className={inp} data-testid="exchange-reg-input" />
+                  </Field>
+                  <Field label="Brand">
+                    <input value={form.exchange_brand} onChange={e => setForm({...form, exchange_brand: e.target.value})} className={inp} data-testid="exchange-brand-input" />
+                  </Field>
+                  <Field label="Model">
+                    <input value={form.exchange_model} onChange={e => setForm({...form, exchange_model: e.target.value})} className={inp} data-testid="exchange-model-input" />
+                  </Field>
+                  <Field label="Year">
+                    <input value={form.exchange_year} onChange={e => setForm({...form, exchange_year: e.target.value})} inputMode="numeric" className={inp} data-testid="exchange-year-input" />
+                  </Field>
+                </div>
+              </div>
+
               {/* Extra Expenses */}
               <div className="border border-slate-200 rounded-xl overflow-hidden">
                 <button type="button" onClick={() => setShowPresets(!showPresets)} className="w-full flex items-center justify-between px-4 py-3 bg-slate-50 text-sm font-semibold text-slate-700 hover:bg-slate-100 transition-colors">
@@ -972,6 +1001,7 @@ export default function Sales() {
                 <div className="text-sm text-slate-600">
                   <div>Sale Price: <span className="font-medium text-slate-800">{formatNPR(Number(form.sale_price) || 0)}</span></div>
                   <div>Advance Payment: <span className="font-medium text-green-700">{formatNPR(Number(form.advance_payment) || 0)}</span></div>
+                  {exchangeValuation > 0 && <div>Exchange valuation: <span className="font-medium text-green-700">− {formatNPR(exchangeValuation)}</span></div>}
                   {expensesTotal > 0 && <div>Extra Expenses: <span className="font-medium text-orange-700">{formatNPR(expensesTotal)}</span></div>}
                   {(Number(form.paid_cash) || 0) + (Number(form.paid_bank) || 0) > 0 && (
                     <div>Paid (cash + bank): <span className="font-medium text-green-700">{formatNPR((Number(form.paid_cash) || 0) + (Number(form.paid_bank) || 0))}</span></div>

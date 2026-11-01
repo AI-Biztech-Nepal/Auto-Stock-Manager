@@ -1670,6 +1670,12 @@ class SaleCreate(BaseModel):
     witness_phone: Optional[str] = None
     witness_id_number: Optional[str] = None
     sold_by_id: Optional[str] = None  # the Team member who sold it (checked and named by crm.resolve_sold_by)
+    # Exchange: the customer's old vehicle taken in part payment. Its valuation counts as paid.
+    exchange_valuation: float = 0
+    exchange_brand: Optional[str] = None
+    exchange_model: Optional[str] = None
+    exchange_reg_no: Optional[str] = None
+    exchange_year: Optional[str] = None
 
 class SaleUpdate(BaseModel):
     vehicle_id: str
@@ -3763,7 +3769,8 @@ async def create_sale(sale: SaleCreate, cu: dict = Depends(require("sales", "cre
     }
     expenses_total = sum(float(e.get("amount", 0)) for e in sale.extra_expenses)
     total_amount = sale.sale_price + expenses_total
-    paid_total = (sale.paid_cash or 0) + (sale.paid_bank or 0) + (sale.advance_payment or 0)
+    exchange_valuation = max(sale.exchange_valuation or 0, 0)
+    paid_total = (sale.paid_cash or 0) + (sale.paid_bank or 0) + (sale.advance_payment or 0) + exchange_valuation
     # Due amount: use the explicit value the form sent if any, otherwise auto (total − paid).
     due_amount = round(sale.due_amount, 2) if sale.due_amount is not None else max(round(total_amount - paid_total, 2), 0)
     payment_status = "Paid" if due_amount <= 0 else ("Partial" if paid_total > 0 else "Unpaid")
@@ -3786,6 +3793,11 @@ async def create_sale(sale: SaleCreate, cu: dict = Depends(require("sales", "cre
         "sale_date": sale_date,
         "ownership_transfer_date": sale.ownership_transfer_date,
         "notes": sale.notes,
+        "exchange_valuation": exchange_valuation,
+        "exchange_brand": (sale.exchange_brand or "").strip() or None,
+        "exchange_model": (sale.exchange_model or "").strip() or None,
+        "exchange_reg_no": (sale.exchange_reg_no or "").strip() or None,
+        "exchange_year": (sale.exchange_year or "").strip() or None,
         **_witness,
         # The seller picked on the form, else the salesperson assigned to the customer; a sale with neither never touches the sold_by columns.
         **await crm.seller_for_sale(sale.sold_by_id, sale.customer_id),
@@ -3952,7 +3964,7 @@ async def update_sale(sid: str, sale: SaleUpdate, cu: dict = Depends(get_current
     if not v: raise HTTPException(404, "Vehicle not found")
     expenses_total = sum(float(e.get("amount", 0)) for e in sale.extra_expenses)
     total_amount = sale.sale_price + expenses_total
-    paid_total = (sale.paid_cash or 0) + (sale.paid_bank or 0) + (sale.advance_payment or 0)
+    paid_total = (sale.paid_cash or 0) + (sale.paid_bank or 0) + (sale.advance_payment or 0) + (existing.get("exchange_valuation") or 0)
     due_amount = round(sale.due_amount, 2) if sale.due_amount is not None else max(round(total_amount - paid_total, 2), 0)
     payment_status = "Paid" if due_amount <= 0 else ("Partial" if paid_total > 0 else "Unpaid")
     sale_date = sale.sale_date or existing.get("sale_date")
@@ -5878,6 +5890,12 @@ async def _run_startup_tasks():
             # Who sold the vehicle (a Team member); the name is kept on the sale so it survives the member being removed.
             ("sales", "sold_by_id", "VARCHAR(36)"),
             ("sales", "sold_by_name", "VARCHAR(255)"),
+            # Exchange: the old vehicle taken in part payment (valuation counts as paid).
+            ("sales", "exchange_valuation", "DOUBLE"),
+            ("sales", "exchange_brand", "VARCHAR(100)"),
+            ("sales", "exchange_model", "VARCHAR(100)"),
+            ("sales", "exchange_reg_no", "VARCHAR(50)"),
+            ("sales", "exchange_year", "VARCHAR(10)"),
         ]
         for _tbl, _col, _type in _post_schema_cols:
             try:

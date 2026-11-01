@@ -263,6 +263,11 @@ CREATE TABLE IF NOT EXISTS sales (
   -- Who sold the vehicle: a team_members.id, plus their name as it was when picked.
   sold_by_id VARCHAR(36),
   sold_by_name VARCHAR(255),
+  exchange_valuation DOUBLE,
+  exchange_brand VARCHAR(100),
+  exchange_model VARCHAR(100),
+  exchange_reg_no VARCHAR(50),
+  exchange_year VARCHAR(10),
   helmet_given TINYINT(1),
   imported TINYINT(1),
   needs_review TINYINT(1),

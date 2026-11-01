@@ -147,7 +147,7 @@ export default function SaleDetail() {
   const allExpenses = withSanakhatExpenses(expenseItems, editForm.sanakhat_cost, editForm.resanakhat_cost);
   const expensesTotal = allExpenses.reduce((s, e) => s + Number(e.amount || 0), 0);
   const grandTotal = (Number(editForm.sale_price) || 0) + expensesTotal;
-  const amountPaid = (Number(editForm.paid_cash) || 0) + (Number(editForm.paid_bank) || 0) + (Number(editForm.advance_payment) || 0);
+  const amountPaid = (Number(editForm.paid_cash) || 0) + (Number(editForm.paid_bank) || 0) + (Number(editForm.advance_payment) || 0) + (Number(sale?.exchange_valuation) || 0);
   const autoDue = Math.max(Number((grandTotal - amountPaid).toFixed(2)), 0);
   const amountDue = editForm.due_amount === "" ? autoDue : Math.max(Number(editForm.due_amount) || 0, 0);
   const availablePresets = PRESET_EXPENSES.filter(p => !expenseItems.some(e => e.name === p.name));
@@ -551,6 +551,7 @@ export default function SaleDetail() {
                 <Row label="From Booking"><span className="text-sm font-medium text-slate-900 sm:text-right" data-testid="sale-booking-info">Deposit {formatNPR(booking.booking_amount)} on <HoverADDate date={booking.booking_date} /></span></Row>
               )}
               <Row label="Paid by Cash"><span className="text-sm font-medium text-slate-900 sm:text-right">{formatNPR(sale.paid_cash || 0)}</span></Row>
+              {sale.exchange_valuation > 0 && <Row label="Exchange"><span className="text-sm font-medium text-slate-900 sm:text-right" data-testid="sale-exchange-info">{[sale.exchange_brand, sale.exchange_model, sale.exchange_year, sale.exchange_reg_no && `(${sale.exchange_reg_no})`].filter(Boolean).join(" ") || "Vehicle"} · {formatNPR(sale.exchange_valuation)}</span></Row>}
               <Row label="Paid by Bank"><span className="text-sm font-medium text-slate-900 sm:text-right">{formatNPR(sale.paid_bank || 0)}</span></Row>
               <Row label="Due Amount"><span className={`text-sm font-medium sm:text-right ${sale.due_amount > 0 ? "text-red-600" : "text-slate-900"}`}>{formatNPR(sale.due_amount || 0)}</span></Row>
               {sale.due_amount > 0 && (
