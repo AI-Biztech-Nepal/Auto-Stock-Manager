@@ -1,8 +1,9 @@
 import { useEffect, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { Phone, MessageCircle, Trash2, Inbox, Wrench, Repeat, Bike, X, Mail, MapPin, Check, Ban, Users } from "lucide-react";
+import { Phone, MessageCircle, Trash2, Inbox, Wrench, Repeat, Bike, X, Mail, MapPin, Check, Ban, Users, ExternalLink } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
+import { formatNPR } from "../utils/helpers";
 
 // Sell / Exchange / Book Service forms from the public website land here (POST /public/leads), and so do WhatsApp / Call
 // taps (the website asks who they are first). Every lead is decided once: Accept (the person goes into the CRM) or
@@ -172,7 +173,22 @@ export default function Leads() {
                     ))}
                   </dl>
                 )}
-                {l.message && <p className="mt-3 text-sm text-slate-700 whitespace-pre-line">{l.message}</p>}
+                {l.vehicle && (
+                  <div className="mt-3 flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 p-2.5" data-testid="lead-vehicle">
+                    {l.vehicle.photo
+                      ? <img src={l.vehicle.photo} alt="" className="size-14 shrink-0 rounded-lg object-cover bg-slate-200" loading="lazy" />
+                      : <span className="size-14 shrink-0 rounded-lg bg-slate-200 text-slate-400 inline-flex items-center justify-center"><Bike size={22} /></span>}
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Was looking at</p>
+                      <p className="truncate text-sm font-bold text-slate-900" style={FONT}>{l.vehicle.label}</p>
+                      <p className="truncate text-xs text-slate-500">
+                        {[l.vehicle.registration_number, l.vehicle.price ? formatNPR(l.vehicle.price) : "", l.vehicle.status && l.vehicle.status !== "available" ? l.vehicle.status : ""].filter(Boolean).join(" · ")}
+                      </p>
+                    </div>
+                    <a href={l.vehicle.website_url} target="_blank" rel="noopener noreferrer" className="shrink-0 h-9 px-3 rounded-lg border border-slate-200 bg-white text-xs font-semibold text-slate-700 hover:bg-slate-50 inline-flex items-center gap-1.5" data-testid="lead-vehicle-link"><ExternalLink size={13} /> View on website</a>
+                  </div>
+                )}
+                {l.message && !(l.vehicle && /\/inventory\//.test(l.message)) && <p className="mt-3 text-sm text-slate-700 whitespace-pre-line">{l.message}</p>}
                 {images.length > 0 && (
                   <div className="mt-3 flex flex-wrap gap-2">
                     {images.map((src, i) => (

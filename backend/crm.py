@@ -528,13 +528,17 @@ async def customer_from_lead(lead: dict):
     key = phone_key(phone)
     for c in await db.customers.find({}, {"_id": 0, "id": 1, "name": 1, "contact_number": 1}).to_list(50000):
         if phone_key(c.get("contact_number")) == key: return c, False
+    interested = ""
+    if lead.get("vehicle_id"):  # the bike they were looking at becomes the customer's "interested vehicle"
+        interested = vehicle_label(await db.vehicles.find_one({"id": lead["vehicle_id"]}, {"_id": 0, "brand": 1, "model": 1, "year": 1})) or ""
     lines = [f"Website lead: {LEAD_TYPE_LABEL.get(lead.get('type'), lead.get('type') or 'enquiry')}"]
+    if interested: lines.append(f"Vehicle: {interested}")
     if lead.get("message"): lines.append(f"Message: {lead['message']}")
     extra = [x for x in (lead.get("requested_service"), lead.get("vehicle_type"), lead.get("preferred_date")) if x]
     if extra: lines.append("Service: " + ", ".join(extra))
     if lead.get("email"): lines.append(f"Email: {lead['email']}")
     c = {"id": str(uuid.uuid4()), "name": (lead.get("name") or "").strip() or "Website visitor", "contact_number": phone,
-         "address": (lead.get("address") or "").strip() or None, "notes": "\n".join(lines)[:2000],
+         "address": (lead.get("address") or "").strip() or None, "interested_vehicle": interested[:255] or None, "notes": "\n".join(lines)[:2000],
          "source": "website", "lead_status": "new", "created_at": now_iso()}
     await db.customers.insert_one(c)
     c.pop("_id", None)

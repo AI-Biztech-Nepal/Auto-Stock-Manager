@@ -5279,8 +5279,23 @@ async def get_audit_logs(cu: dict = Depends(admin_only)):
 
 # ── LEADS (storefront Sell / Exchange / Book Service submissions) ─────
 @api_router.get("/leads")
-async def get_leads(cu: dict = Depends(admin_only)):
-    return await db.leads.find({}, {"_id": 0}).sort("created_at", -1).to_list(1000)
+async def get_leads(request: Request, cu: dict = Depends(admin_only)):
+    """Every lead, newest first. A lead from a vehicle's WhatsApp / Call button also carries that vehicle (name, plate,
+    price, cover photo and its page on the website), so staff can see which bike the person was looking at."""
+    leads = await db.leads.find({}, {"_id": 0}).sort("created_at", -1).to_list(1000)
+    ids = list({l["vehicle_id"] for l in leads if l.get("vehicle_id")})
+    if not ids: return leads
+    vehicles = {v["id"]: v for v in await db.vehicles.find({"id": {"$in": ids}}, {"_id": 0, "id": 1, "brand": 1, "model": 1, "year": 1, "registration_number": 1, "selling_price": 1, "status": 1}).to_list(len(ids))}
+    cover = {}
+    for p in await db.vehicle_photos.find({"vehicle_id": {"$in": ids}}, {"_id": 0, "id": 1, "vehicle_id": 1, "uploaded_at": 1, "storage_path": 1}).sort(PHOTO_ORDER).to_list(20000):
+        cover.setdefault(p["vehicle_id"], p)  # sorted earliest first, so the first one seen is the cover
+    for l in leads:
+        v = vehicles.get(l.get("vehicle_id"))
+        l["vehicle"] = None if not v else {
+            "id": v["id"], "label": crm.vehicle_label(v), "registration_number": v.get("registration_number") or "", "price": v.get("selling_price") or 0,
+            "status": v.get("status"), "website_url": f"{STOREFRONT_URL}/inventory/{v['id']}",
+            "photo": _public_photo_url(request, v["id"], cover[v["id"]]["id"], cover[v["id"]].get("storage_path")) if v["id"] in cover else None}
+    return leads
 
 # ── LEADS: every website lead is either accepted or rejected ─────────────
 # A new lead is pending (status "new"). Accepting it puts the person in the CRM (source: Website; someone who is already
@@ -5818,6 +5833,7 @@ async def _run_startup_tasks():
             ("leads", "decided_by", "VARCHAR(100)"),
             ("leads", "decided_at", "VARCHAR(40)"),
             ("leads", "customer_id", "VARCHAR(36)"),
+            ("leads", "vehicle_id", "VARCHAR(36)"),  # the vehicle the visitor was looking at when they tapped WhatsApp / Call
             # Who sold the vehicle (a Team member); the name is kept on the sale so it survives the member being removed.
             ("sales", "sold_by_id", "VARCHAR(36)"),
             ("sales", "sold_by_name", "VARCHAR(255)"),
@@ -6994,6 +7010,9 @@ async def public_lead_click(request: Request):
     text = lambda k, n: str(body.get(k) or "").strip()[:n]
     name, phone, address, message = text("name", 255), text("phone", 50), text("address", 500), text("message", 500)
     if phone and not crm.valid_phone(phone): return {"ok": False, "error": "phone"}
+    # The vehicle whose WhatsApp / Call button it was (the website sends its id); an id that isn't one of ours is dropped.
+    vehicle_id = text("vehicle_id", 36)
+    if vehicle_id and not await db.vehicles.find_one({"id": vehicle_id}, {"_id": 0, "id": 1}): vehicle_id = ""
     if phone:
         # the same person tapping the same button again within the hour is one lead, not several
         cutoff = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
@@ -7001,7 +7020,7 @@ async def public_lead_click(request: Request):
             return {"ok": True, "duplicate": True}
     await db.leads.insert_one({
         "id": str(uuid.uuid4()), "type": kind, "name": name or "Website visitor", "phone": phone, "email": _lead_email(body.get("email")),
-        "address": address or None, "message": message, "status": "new",
+        "address": address or None, "message": message, "vehicle_id": vehicle_id or None, "status": "new",
         "created_at": datetime.now(timezone.utc).isoformat()})
     return {"ok": True}
 
