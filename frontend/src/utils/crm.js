@@ -1,5 +1,6 @@
 import { Footprints, Globe, Facebook, Users, MoreHorizontal, Phone, MessageCircle, Store, StickyNote, CalendarCheck } from "lucide-react";
 import { adToBsDate, BS_MONTHS, getBSMonthRange, getCurrentBSDate } from "./nepali-date";
+import { formatNPR } from "./helpers";
 
 // How a customer found the shop. The keys are what the backend stores (CRM_SOURCES in server.py).
 export const SOURCES = [
@@ -118,6 +119,15 @@ export const bsMonthRanges = () => {
   const prev = getBSMonthRange(prevYear, bs.month === 1 ? 12 : bs.month - 1);
   const cur = getBSMonthRange(bs.year, bs.month);
   return cur && prev ? { month_start: cur.start, month_end: cur.end, prev_start: prev.start, prev_end: prev.end } : null;
+};
+
+// An amount short enough for a chip: Rs. 1.9 Cr, Rs. 31.2 L, or the full figure below a lakh. The full figure goes in the title.
+const oneDecimal = (x) => (x >= 100 ? Math.round(x) : Math.round(x * 10) / 10);
+export const shortNPR = (n) => {
+  const v = Math.round(n || 0);
+  if (v >= 10000000) return `Rs. ${oneDecimal(v / 10000000)} Cr`;
+  if (v >= 100000) return `Rs. ${oneDecimal(v / 100000)} L`;
+  return formatNPR(v);
 };
 
 export const phoneLooksValid = (p) => /^\+?[\d\s\-()]{7,20}$/.test((p || "").trim()) && (p.match(/\d/g) || []).length >= 7 && (p.match(/\d/g) || []).length <= 15;

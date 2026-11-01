@@ -420,6 +420,12 @@ class InteractionCreate(BaseModel):
     occurred_at: Optional[str] = None
 
 
+class InteractionUpdate(BaseModel):
+    kind: Optional[str] = None
+    summary: Optional[str] = Field(None, max_length=2000)
+    occurred_at: Optional[str] = None
+
+
 class FollowupCreate(BaseModel):
     due_at: str
     purpose: str = Field("Follow-up", max_length=255)
@@ -510,11 +516,48 @@ async def check_phone(phone, own_id: Optional[str]) -> None:
             raise HTTPException(409, {"message": f"{c.get('name') or 'A customer'} already has this phone number", "existing_id": c["id"], "existing_name": c.get("name") or ""})
 
 
+LEAD_TYPE_LABEL = {"sell": "Sell bike", "exchange": "Exchange", "service": "Service", "whatsapp": "WhatsApp tap", "call": "Call tap"}
+
+
+async def customer_from_lead(lead: dict):
+    """Accepting a website lead puts that person in the CRM with source 'Website'. Someone who already has that phone
+    number is reused, not added twice. A lead with no usable phone (an old anonymous tap) can't be added.
+    Returns (customer, created); customer is None when there is no phone to go on."""
+    phone = str(lead.get("phone") or "").strip()
+    if not valid_phone(phone): return None, False
+    key = phone_key(phone)
+    for c in await db.customers.find({}, {"_id": 0, "id": 1, "name": 1, "contact_number": 1}).to_list(50000):
+        if phone_key(c.get("contact_number")) == key: return c, False
+    lines = [f"Website lead: {LEAD_TYPE_LABEL.get(lead.get('type'), lead.get('type') or 'enquiry')}"]
+    if lead.get("message"): lines.append(f"Message: {lead['message']}")
+    extra = [x for x in (lead.get("requested_service"), lead.get("vehicle_type"), lead.get("preferred_date")) if x]
+    if extra: lines.append("Service: " + ", ".join(extra))
+    if lead.get("email"): lines.append(f"Email: {lead['email']}")
+    c = {"id": str(uuid.uuid4()), "name": (lead.get("name") or "").strip() or "Website visitor", "contact_number": phone,
+         "address": (lead.get("address") or "").strip() or None, "notes": "\n".join(lines)[:2000],
+         "source": "website", "lead_status": "new", "created_at": now_iso()}
+    await db.customers.insert_one(c)
+    c.pop("_id", None)
+    return c, True
+
+
 async def cleanup_customer(cid: str) -> None:
     """A customer is going: so are their follow-ups and history (the database cascades too; the other backend does not)."""
     for name in ("crm_followups", "crm_interactions"):
         try: await getattr(db, name).delete_many({"customer_id": cid})
         except Exception: pass  # never let tidying up fail the deletion itself
+
+
+def followup_text(purpose, outcome) -> str:
+    return (f"Follow-up done: {purpose or 'Follow-up'}" + (f". {outcome}" if outcome else ""))[:2000]
+
+
+async def _linked_interaction(f: dict) -> Optional[dict]:
+    """Completing a follow-up writes a history entry stamped with the same time; this finds it again, so reopening,
+    editing or deleting the follow-up keeps the history (and the 'last contact') in step."""
+    if not f.get("completed_at"): return None
+    rows = await db.crm_interactions.find({"customer_id": f["customer_id"], "kind": "followup", "occurred_at": f["completed_at"]}, {"_id": 0, "id": 1}).to_list(5)
+    return rows[0] if rows else None
 
 
 async def _bump_contacted(customer_id: str) -> None:
@@ -575,6 +618,9 @@ def register(api_router, database, admin_only, sale_revenue):
         info = {c["id"]: {"name": c.get("name") or "", "phone": c.get("contact_number") or ""} for c in customers}
         return {
             "customers": rows,
+            # Sales amount the customers above don't account for (sold without customer details), so their totals can be
+            # reconciled with the Dashboard's revenue.
+            "sales_without_customer": round(sum((_sale_revenue(s) or 0) for s in sales if s.get("customer_id") not in info), 2),
             "summary": summary_stats(rows, open_followups, now, _range(month_start, month_end), _range(prev_start, prev_end)),
             "followups": bucket_followups(open_followups, done_today, info, now),
         }
@@ -644,16 +690,22 @@ def register(api_router, database, admin_only, sale_revenue):
         return {"assigned_to_id": m["id"] if m else None, "assigned_to_name": m["name"] if m else None}
 
     @api_router.delete("/crm/customers/{cid}")
-    async def delete_crm_customer(cid: str, cu: dict = Depends(admin_only)):
+    async def delete_crm_customer(cid: str, force: bool = False, cu: dict = Depends(admin_only)):
+        """Delete a customer with their follow-ups and history. One who has bought or booked is only deleted when forced:
+        their sales and bookings stay on record, just no longer linked to anyone."""
         if not await db.customers.find_one({"id": cid}, {"_id": 0, "id": 1}): raise HTTPException(404, "Customer not found")
         n_sales = len(await db.sales.find({"customer_id": cid}, {"_id": 0, "id": 1}).to_list(500))
         n_book = len(await db.bookings.find({"customer_id": cid}, {"_id": 0, "id": 1}).to_list(500))
+        if (n_sales or n_book) and not force:
+            raise HTTPException(409, {"message": f"This customer has {n_sales} sale(s) and {n_book} booking(s) on record. Deleting them keeps those records, but they will no longer be linked to anyone.",
+                                      "sales": n_sales, "bookings": n_book, "needs_force": True})
         if n_sales or n_book:
-            raise HTTPException(409, f"This customer has {n_sales} sale(s) and {n_book} booking(s) on record, so they can't be deleted. Mark them Lost instead.")
+            for coll in ("sales", "bookings", "vehicles"):
+                await getattr(db, coll).update_many({"customer_id": cid}, {"$set": {"customer_id": None}})
         await cleanup_customer(cid)
         await db.customers.delete_one({"id": cid})
         await db.customers.update_many({"referred_by_id": cid}, {"$set": {"referred_by_id": None}})
-        return {"message": "Deleted"}
+        return {"message": "Deleted", "unlinked_sales": n_sales, "unlinked_bookings": n_book}
 
     @api_router.post("/crm/customers/{cid}/interactions")
     async def add_interaction(cid: str, body: InteractionCreate, cu: dict = Depends(admin_only)):
@@ -671,6 +723,26 @@ def register(api_router, database, admin_only, sale_revenue):
         if kind in CONTACT_KINDS: await _bump_contacted(cid)
         doc.pop("_id", None)
         return doc
+
+    @api_router.put("/crm/interactions/{iid}")
+    async def update_interaction(iid: str, body: InteractionUpdate, cu: dict = Depends(admin_only)):
+        """Change what a history entry says, when it happened, or what kind of contact it was."""
+        i = await db.crm_interactions.find_one({"id": iid}, {"_id": 0})
+        if not i: raise HTTPException(404, "Not found")
+        sent, kind = body.model_fields_set, i.get("kind")
+        if "kind" in sent:
+            kind = (body.kind or "").strip().lower()
+            if kind not in INTERACTION_KINDS or (kind == "followup" and i.get("kind") != "followup"): raise HTTPException(422, "Unknown kind of contact")
+        summary = ((body.summary or "") if "summary" in sent else (i.get("summary") or "")).strip()
+        if not summary:
+            if kind in ("call", "whatsapp"): summary = "Call" if kind == "call" else "WhatsApp message"
+            else: raise HTTPException(422, "Write a short note about it")
+        at = i.get("occurred_at")
+        if "occurred_at" in sent:
+            try: at = parse_dt(body.occurred_at)
+            except ValueError: raise HTTPException(422, "That date and time is not valid")
+        await db.crm_interactions.update_one({"id": iid}, {"$set": {"kind": kind, "summary": summary[:2000], "occurred_at": at}})
+        return await db.crm_interactions.find_one({"id": iid}, {"_id": 0})
 
     @api_router.delete("/crm/interactions/{iid}")
     async def delete_interaction(iid: str, cu: dict = Depends(admin_only)):
@@ -701,27 +773,38 @@ def register(api_router, database, admin_only, sale_revenue):
             except ValueError: raise HTTPException(422, "Pick a valid date and time")
         if "purpose" in sent: upd["purpose"] = (body.purpose or "").strip() or "Follow-up"
         if "notes" in sent: upd["notes"] = (body.notes or "").strip() or None
-        completing = False
+        was_done = f.get("status") == "done"
+        completing = reopening = False
         if "status" in sent:
             if body.status not in ("pending", "done"): raise HTTPException(422, "Status must be pending or done")
-            if body.status == "done" and f.get("status") != "done":
+            if body.status == "done" and not was_done:
                 completing = True
                 upd.update(status="done", completed_at=now_iso(), outcome=(body.outcome or "").strip() or None)
-            elif body.status == "pending":
+            elif body.status == "pending" and was_done:
+                reopening = True
                 upd.update(status="pending", completed_at=None, outcome=None)
+        if "outcome" in sent and was_done and not reopening:
+            upd["outcome"] = (body.outcome or "").strip() or None
+        link = await _linked_interaction(f) if was_done else None
         await db.crm_followups.update_one({"id": fid}, {"$set": upd})
         if completing:  # finishing a follow-up is a conversation: it goes in the history and counts as the last contact
-            purpose = upd.get("purpose") or f.get("purpose") or "Follow-up"
-            text = f"Follow-up done: {purpose}" + (f". {upd['outcome']}" if upd.get("outcome") else "")
-            await db.crm_interactions.insert_one({"id": str(uuid.uuid4()), "customer_id": f["customer_id"], "kind": "followup", "summary": text[:2000],
+            await db.crm_interactions.insert_one({"id": str(uuid.uuid4()), "customer_id": f["customer_id"], "kind": "followup",
+                                                  "summary": followup_text(upd.get("purpose") or f.get("purpose"), upd.get("outcome")),
                                                   "occurred_at": upd["completed_at"], "created_by": cu.get("username"), "created_at": now_iso()})
             await _bump_contacted(f["customer_id"])
+        elif reopening and link:  # no longer done, so it is no longer a contact that happened
+            await db.crm_interactions.delete_one({"id": link["id"]})
+        elif was_done and link and ("outcome" in sent or "purpose" in sent):  # keep the history's wording in step with the edit
+            await db.crm_interactions.update_one({"id": link["id"]}, {"$set": {"summary": followup_text(upd.get("purpose", f.get("purpose")), upd["outcome"] if "outcome" in upd else f.get("outcome"))}})
         return await db.crm_followups.find_one({"id": fid}, {"_id": 0})
 
     @api_router.delete("/crm/followups/{fid}")
     async def delete_followup(fid: str, cu: dict = Depends(admin_only)):
-        r = await db.crm_followups.delete_one({"id": fid})
-        if r.deleted_count == 0: raise HTTPException(404, "Not found")
+        f = await db.crm_followups.find_one({"id": fid}, {"_id": 0})
+        if not f: raise HTTPException(404, "Not found")
+        link = await _linked_interaction(f) if f.get("status") == "done" else None
+        await db.crm_followups.delete_one({"id": fid})
+        if link: await db.crm_interactions.delete_one({"id": link["id"]})
         return {"message": "Deleted"}
 
     @api_router.post("/crm/import")

@@ -1,4 +1,5 @@
 import { useEffect, useId } from "react";
+import { createPortal } from "react-dom";
 import { X, AlertTriangle } from "lucide-react";
 import { STATUS_BY_KEY, avatarTone, initialsOf } from "../../utils/crm";
 
@@ -19,10 +20,12 @@ function useEscape(onClose) {
 
 const SIZES = { sm: "sm:max-w-md", md: "sm:max-w-lg", lg: "sm:max-w-2xl", xl: "sm:max-w-4xl" };
 
+// Dialogs and the drawer are drawn straight into <body>: inside the page they would inherit its spacing (space-y-*
+// puts a top margin on every child, which pushes a fixed overlay down and cuts off its bottom edge).
 // A dialog: full screen on a phone, centred card from sm up. Esc and the backdrop close it.
 export function Modal({ title, subtitle, onClose, children, footer, size = "md", testid }) {
   useEscape(onClose);
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/50 sm:p-4" onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }} data-testid={testid}>
       <div role="dialog" aria-modal="true" aria-label={title} className={`bg-white w-full ${SIZES[size]} sm:rounded-2xl shadow-2xl flex flex-col h-[100dvh] sm:h-auto sm:max-h-[90vh]`}>
         <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-slate-100">
@@ -35,16 +38,18 @@ export function Modal({ title, subtitle, onClose, children, footer, size = "md",
         <div className="flex-1 overflow-y-auto px-5 py-4">{children}</div>
         {footer && <div className="px-5 py-3 border-t border-slate-100 bg-slate-50/60 sm:rounded-b-2xl flex flex-wrap items-center justify-end gap-2">{footer}</div>}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
 export function Drawer({ onClose, children, testid }) {
   useEscape(onClose);
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-50 flex justify-end bg-slate-900/40" onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }} data-testid={testid}>
       <aside role="dialog" aria-modal="true" aria-label="Customer profile" className="bg-white w-full sm:w-[640px] h-[100dvh] shadow-2xl flex flex-col animate-[slideIn_0.2s_ease-out]">{children}</aside>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

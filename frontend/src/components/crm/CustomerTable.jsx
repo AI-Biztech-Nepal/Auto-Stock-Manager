@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Eye, Pencil, Phone, MessageCircle, Search, Check, X, ChevronDown, ArrowUp, ArrowDown, BookmarkCheck } from "lucide-react";
+import { Eye, Pencil, Phone, MessageCircle, Search, Check, X, ChevronDown, ChevronRight, ArrowUp, ArrowDown, BookmarkCheck } from "lucide-react";
 import { formatNPR } from "../../utils/helpers";
 import {
   SOURCES, SOURCE_STYLE, STATUS_BY_KEY, PICKABLE_STATUSES, referredByLabel,
@@ -211,17 +211,21 @@ function Actions({ c, onView, onEdit, onContact }) {
   );
 }
 
-function CustomerName({ c, onView, onShowReferred }) {
+// The whole customer cell opens their profile (every action is in there): the avatar, the name and the space around them.
+// The name is a real button too, so the keyboard reaches it; its click is the cell's click. "Referred N" is its own button.
+function CustomerName({ c, onShowReferred }) {
   return (
-    <div className="flex items-center gap-2.5 min-w-0">
+    <div className="flex items-center gap-2 min-w-0 w-full">
       <Avatar name={c.name} size={8} />
-      <div className="min-w-0">
-        <button onClick={() => onView(c)} className="block max-w-[140px] truncate text-left font-semibold text-slate-900 hover:text-blue-700 hover:underline" title={c.name}>{c.name}</button>
+      <div className="min-w-0 flex-1">
+        <button type="button" title={`Open ${c.name}'s profile`} data-testid="crm-customer"
+          className="block max-w-[118px] truncate text-left font-semibold text-slate-900 group-hover/name:text-blue-700 group-hover/name:underline focus-visible:outline-none focus-visible:underline">{c.name}</button>
         {c.referral_count > 0 && (
-          <button onClick={() => onShowReferred(c)} title="Show everyone they referred" data-testid="crm-referred-badge"
+          <button type="button" onClick={e => { e.stopPropagation(); onShowReferred(c); }} title="Show everyone they referred" data-testid="crm-referred-badge"
             className="text-[10px] font-bold px-1.5 py-px rounded-full bg-amber-50 text-amber-700 hover:bg-amber-100">Referred {c.referral_count}</button>
         )}
       </div>
+      <ChevronRight size={15} aria-hidden="true" className="shrink-0 text-slate-300 group-hover/name:text-blue-600" />
     </div>
   );
 }
@@ -265,7 +269,7 @@ export default function CustomerTable({
           return (
             <div key={c.id} className={`bg-white border rounded-2xl p-4 shadow-[0_1px_3px_rgba(15,23,42,0.06)] ${c.source ? "border-slate-200/80" : "border-amber-300"}`} data-testid="crm-card">
               <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0 flex-1"><CustomerName c={c} onView={onView} onShowReferred={onShowReferred} /></div>
+                <div className="group/name min-w-0 flex-1 cursor-pointer rounded-lg -m-1 p-1 hover:bg-blue-50" onClick={() => onView(c)} data-testid="crm-customer-cell"><CustomerName c={c} onShowReferred={onShowReferred} /></div>
                 <div className="text-sm text-right"><Amount c={c} /></div>
               </div>
               <div className="mt-2 flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-xs text-slate-500">
@@ -324,7 +328,7 @@ export default function CustomerTable({
             return (
               <tr key={c.id} className={`group h-[58px] transition-colors hover:bg-blue-50 ${c.source ? "bg-white" : "bg-amber-50"}`} data-testid="crm-row">
                 <td className={`sticky left-0 z-10 bg-inherit px-2.5 text-slate-400 tabular-nums ${c.source ? "" : "shadow-[inset_3px_0_0_0_#f59e0b]"}`}>{i + 1}</td>
-                <td className="sticky left-10 z-10 bg-inherit px-2.5 shadow-[2px_0_4px_-2px_rgba(15,23,42,0.15)]"><CustomerName c={c} onView={onView} onShowReferred={onShowReferred} /></td>
+                <td onClick={() => onView(c)} data-testid="crm-customer-cell" className="group/name sticky left-10 z-10 bg-inherit px-2.5 cursor-pointer transition-colors group-hover:bg-blue-50 hover:!bg-blue-100 shadow-[2px_0_4px_-2px_rgba(15,23,42,0.15)]"><CustomerName c={c} onShowReferred={onShowReferred} /></td>
                 <td className="px-2.5 whitespace-nowrap font-medium text-slate-700 tabular-nums">{c.contact_number || <span className="text-slate-300">—</span>}</td>
                 <td className="px-2.5 max-w-[110px] truncate text-slate-600" title={c.address}>{c.address || <span className="text-slate-300">—</span>}</td>
                 <td className="px-2.5"><VehicleCell c={c} /></td>

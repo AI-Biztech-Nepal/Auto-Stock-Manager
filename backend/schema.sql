@@ -612,6 +612,12 @@ CREATE TABLE IF NOT EXISTS leads (
   preferred_date VARCHAR(20),
   status VARCHAR(20) DEFAULT 'new',
   created_at VARCHAR(40),
+  email VARCHAR(255),
+  address VARCHAR(500),
+  remark TEXT,
+  decided_by VARCHAR(100),
+  decided_at VARCHAR(40),
+  customer_id VARCHAR(36),
   INDEX idx_leads_created_at (created_at),
   CONSTRAINT fk_leads_company FOREIGN KEY (company_id) REFERENCES companies(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

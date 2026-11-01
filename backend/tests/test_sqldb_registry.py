@@ -14,7 +14,6 @@ BACKEND = Path(__file__).resolve().parent.parent
 
 # Older gaps (not yet fixed): see the note in each line. Remove an entry when the column is added to TABLES.
 KNOWN_MISSING = {
-    ("bookings", "receipt_no"),            # booking receipt numbers are generated but never stored
     ("sales", "cost_at_return"),           # the "fresh cost cycle on return" snapshot is never stored
     ("sales", "prev_purchase_price"),
     ("sales", "prev_purchase_date"),

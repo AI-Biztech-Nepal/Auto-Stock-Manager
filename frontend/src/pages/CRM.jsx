@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Plus, Upload, Download, Search, ChevronDown, X, UserCheck, RefreshCw, AlertCircle } from "lucide-react";
 import { notify } from "../utils/notify";
 import api from "../utils/api";
+import { formatNPR } from "../utils/helpers";
 import useSellers from "../hooks/useSellers";
 import DateRangeFilter, { resolveDateFilter } from "../components/DateRangeFilter";
 import StatCards from "../components/crm/StatCards";
@@ -12,7 +13,7 @@ import CustomerFormModal from "../components/crm/CustomerFormModal";
 import CustomerProfile from "../components/crm/CustomerProfile";
 import ImportModal from "../components/crm/ImportModal";
 import { FONT, ConfirmModal, EmptyState, Skeleton, btnPrimary, btnGhost } from "../components/crm/ui";
-import { SOURCES, LEAD_STATUSES, bsMonthRanges, localDateOf, referredByLabel, leadLabel, timeOf } from "../utils/crm";
+import { SOURCES, LEAD_STATUSES, bsMonthRanges, localDateOf, referredByLabel, leadLabel, shortNPR, timeOf } from "../utils/crm";
 
 // Customer Relationship Management: every customer on one page with where they stand, who handles them, what is due
 // next, and what was said. All of it is read live from what has already been posted (customers, sales, bookings)
@@ -63,11 +64,13 @@ export default function CRM() {
   const [savingId, setSavingId] = useState(null);
 
   const [profileId, setProfileId] = useState(null);
+  const [profileEdit, setProfileEdit] = useState(false); // open the profile with the edit form showing
   const [profileKey, setProfileKey] = useState(0);
-  const [form, setForm] = useState(null); // { mode, customer }
+  const [adding, setAdding] = useState(false);
   const [fu, setFu] = useState(null); // { mode, followup?, customer? }
   const [importOpen, setImportOpen] = useState(false);
   const [toDelete, setToDelete] = useState(null);
+  const [needsForce, setNeedsForce] = useState(null); // the 409 detail: this customer has sales / bookings on record
   const [deleting, setDeleting] = useState(false);
 
   const load = useCallback(async (silent) => {
@@ -89,11 +92,15 @@ export default function CRM() {
   useEffect(() => { setShown(PAGE_SIZE); }, [filter, status, assigned, dateRange, search, referrer, sort]);
 
   const customers = data?.customers;
-  const counts = useMemo(() => {
-    const n = { all: 0, needs: 0 };
-    SOURCES.forEach(s => { n[s.key] = 0; });
-    (customers || []).forEach(c => { n.all += 1; if (c.source) n[c.source] += 1; else n.needs += 1; });
-    return n;
+  // How many customers, and how much they have bought (the Transaction Amount column), per lead source.
+  const { counts, amounts } = useMemo(() => {
+    const n = { all: 0, needs: 0 }, a = { all: 0, needs: 0 };
+    SOURCES.forEach(s => { n[s.key] = 0; a[s.key] = 0; });
+    (customers || []).forEach(c => {
+      const k = c.source || "needs";
+      n.all += 1; n[k] += 1; a.all += c.amount; a[k] += c.amount;
+    });
+    return { counts: n, amounts: a };
   }, [customers]);
 
   const assignees = useMemo(() => {
@@ -126,6 +133,7 @@ export default function CRM() {
     s.key !== key ? { key, dir: FIRST_DIR[key] }
       : s.dir === FIRST_DIR[key] ? { key, dir: FIRST_DIR[key] === "asc" ? "desc" : "asc" }
         : { key: "newest", dir: "desc" }));
+  const openProfile = (id, edit = false) => { setProfileEdit(edit); setProfileId(id); };
   const clearFilters = () => { setFilter("all"); setStatus("all"); setAssigned("all"); setReferrer(null); setDateRange({ key: "all", custom: null }); setSearch(""); };
 
   // ── things done to a customer ──
@@ -149,15 +157,22 @@ export default function CRM() {
   const reopenFollowup = async (f) => {
     try { await api.put(`/crm/followups/${f.id}`, { status: "pending" }); notify.success("Follow-up reopened"); refresh(); } catch { notify.error("Couldn't reopen that follow-up"); }
   };
+  // Deleting asks once. A customer with sales or bookings on record asks a second time (the server says so with a 409
+  // and the counts): those records stay, they just stop belonging to anyone.
+  const closeDelete = () => { setToDelete(null); setNeedsForce(null); };
   const confirmDelete = async () => {
     setDeleting(true);
     try {
-      await api.delete(`/crm/customers/${toDelete.id}`);
-      notify.success(`${toDelete.name} deleted`);
-      setToDelete(null); setForm(null); setProfileId(null);
+      const { data: r } = await api.delete(`/crm/customers/${toDelete.id}`, { params: needsForce ? { force: true } : {}, suppressErrorToast: true });
+      const kept = (r.unlinked_sales || 0) + (r.unlinked_bookings || 0);
+      notify.success(`${toDelete.name} deleted${kept ? ` · ${kept} sale/booking record${kept === 1 ? "" : "s"} kept` : ""}`);
+      closeDelete(); setAdding(false); setProfileId(null);
       await load(true);
-    } catch (ex) { notify.error(errText(ex, "Couldn't delete that customer")); setToDelete(null); }
-    finally { setDeleting(false); }
+    } catch (ex) {
+      const d = ex.response?.data?.detail;
+      if (ex.response?.status === 409 && d?.needs_force) setNeedsForce(d);
+      else { notify.error(errText(ex, "Couldn't delete that customer")); closeDelete(); }
+    } finally { setDeleting(false); }
   };
 
   const exportCsv = () => {
@@ -176,7 +191,7 @@ export default function CRM() {
 
   const panelProps = {
     followups: data?.followups, onAdd: () => setFu({ mode: "schedule" }), onComplete: f => setFu({ mode: "complete", followup: f }), onReopen: reopenFollowup,
-    onReschedule: f => setFu({ mode: "reschedule", followup: f }), onNote: f => setFu({ mode: "note", followup: f }), onView: id => setProfileId(id),
+    onReschedule: f => setFu({ mode: "reschedule", followup: f }), onNote: f => setFu({ mode: "note", followup: f }), onView: id => openProfile(id),
   };
   const visible = list.slice(0, shown);
   const chips = [["all", "All"], ["needs", "Not Tagged"], ...SOURCES.map(s => [s.key, s.label])];
@@ -184,13 +199,13 @@ export default function CRM() {
   const table = !customers ? null : list.length === 0 ? (
     <div className="bg-white border border-slate-200 rounded-2xl">
       {counts.all === 0
-        ? <EmptyState icon={UserCheck} title="No customers yet" action={<button onClick={() => setForm({ mode: "add" })} className={btnPrimary}><Plus size={16} /> Add your first customer</button>}>Customers appear here as soon as they are added from Sales, Bookings or the Ledger, or you can add or import them here.</EmptyState>
+        ? <EmptyState icon={UserCheck} title="No customers yet" action={<button onClick={() => setAdding(true)} className={btnPrimary}><Plus size={16} /> Add your first customer</button>}>Customers appear here as soon as they are added from Sales, Bookings or the Ledger, or you can add or import them here.</EmptyState>
         : <EmptyState icon={UserCheck} title="No customers match" action={anyFilter && <button onClick={clearFilters} className={btnGhost}>Clear filters</button>}>Try another filter or search.</EmptyState>}
     </div>
   ) : (
     <>
       <CustomerTable rows={visible} customers={customers} sellers={sellers} wide={wide} sort={sort} onSort={toggleSort} total={total} count={list.length} savingId={savingId}
-        onSaveLead={saveLead} onStatus={changeStatus} onAssign={assign} onView={c => setProfileId(c.id)} onEdit={c => setForm({ mode: "edit", customer: c })} onContact={logContact}
+        onSaveLead={saveLead} onStatus={changeStatus} onAssign={assign} onView={c => openProfile(c.id)} onEdit={c => openProfile(c.id, true)} onContact={logContact}
         onShowReferred={c => { setReferrer({ id: c.id, name: c.name }); setFilter("all"); setSearch(""); }} />
       {list.length > shown && <button onClick={() => setShown(s => s + PAGE_SIZE)} className="mt-3 w-full h-11 rounded-xl border border-slate-200 bg-white text-sm font-semibold text-slate-600 hover:bg-slate-50" data-testid="crm-more">Show more ({list.length - shown} left)</button>}
     </>
@@ -204,7 +219,7 @@ export default function CRM() {
           <p className="text-sm text-slate-500 mt-1">Manage customers, leads and follow-ups in one place</p>
         </div>
         <div className="flex gap-2">
-          <button onClick={() => setForm({ mode: "add" })} className={btnPrimary} data-testid="crm-add"><Plus size={17} /> Add Customer</button>
+          <button onClick={() => setAdding(true)} className={btnPrimary} data-testid="crm-add"><Plus size={17} /> Add Customer</button>
           <button onClick={() => setImportOpen(true)} className={btnGhost} data-testid="crm-import"><Upload size={16} /> Import</button>
         </div>
       </div>
@@ -241,11 +256,18 @@ export default function CRM() {
           <div role="group" aria-label="Quick filter by lead source" style={{ scrollbarWidth: "none" }} className="-mx-4 px-4 sm:mx-0 sm:px-0 flex gap-2 overflow-x-scroll sm:overflow-visible sm:flex-wrap [&::-webkit-scrollbar]:hidden">
             {chips.map(([k, label]) => (
               <button key={k} onClick={() => setFilter(k)} aria-pressed={filter === k} data-testid={`crm-filter-${k}`}
+                title={customers ? `${label}: ${counts[k].toLocaleString()} customer${counts[k] === 1 ? "" : "s"} · ${formatNPR(amounts[k])} in sales` : undefined}
                 className={`shrink-0 h-10 px-3.5 inline-flex items-center gap-1.5 whitespace-nowrap rounded-full text-sm font-semibold border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${filter === k ? "bg-blue-600 text-white border-blue-600 shadow-sm" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"}`}>
-                {label}<span className={`text-xs px-1.5 py-0.5 rounded-full ${filter === k ? "bg-white/25" : k === "needs" && counts.needs ? "bg-amber-100 text-amber-700" : "bg-slate-100 text-slate-500"}`}>{customers ? counts[k] : "–"}</span>
+                {label}<span data-testid={`crm-filter-${k}-count`} className={`text-xs px-1.5 py-0.5 rounded-full ${filter === k ? "bg-white/25" : k === "needs" && counts.needs ? "bg-amber-100 text-amber-700" : "bg-slate-100 text-slate-500"}`}>{customers ? counts[k] : "–"}</span>
+                {customers && amounts[k] > 0 && <span className={`text-xs font-medium tabular-nums ${filter === k ? "text-white/85" : "text-slate-400"}`} data-testid={`crm-filter-${k}-amount`}>{shortNPR(amounts[k])}</span>}
               </button>
             ))}
           </div>
+          {data && data.sales_without_customer > 0 && (
+            <p className="text-xs text-slate-400 -mt-1.5" data-testid="crm-unlinked-note">
+              Amounts are what each group of customers has bought. A further <span className="font-semibold text-slate-500" title={formatNPR(data.sales_without_customer)}>{shortNPR(data.sales_without_customer)}</span> of sales was made without customer details, so it isn't in any group.
+            </p>
+          )}
 
           {referrer && (
             <div className="flex items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-900" data-testid="crm-referrer-banner">
@@ -268,20 +290,22 @@ export default function CRM() {
       )}
 
       {profileId && (
-        <CustomerProfile customerId={profileId} reloadKey={profileKey} onClose={() => setProfileId(null)} onChanged={() => load(true)}
-          onEdit={c => setForm({ mode: "edit", customer: (customers || []).find(x => x.id === c.id) || c })} onOpenCustomer={id => setProfileId(id)}
-          onFollowup={(mode, followup, customer) => setFu({ mode, followup, customer })} onDelete={c => setToDelete(c)} />
+        <CustomerProfile key={profileId} customerId={profileId} customers={customers || []} startEditing={profileEdit} reloadKey={profileKey} onClose={() => setProfileId(null)} onChanged={() => load(true)}
+          onOpenCustomer={id => openProfile(id)} onDelete={c => setToDelete(c)} />
       )}
-      {form && (
-        <CustomerFormModal mode={form.mode} customer={form.customer} customers={customers || []} onClose={() => setForm(null)}
-          onSaved={() => { setForm(null); refresh(); }} onOpenExisting={id => { setForm(null); setProfileId(id); }} onDelete={c => setToDelete(c)} />
+      {adding && (
+        <CustomerFormModal customers={customers || []} onClose={() => setAdding(false)}
+          onSaved={() => { setAdding(false); refresh(); }} onOpenExisting={id => { setAdding(false); openProfile(id); }} />
       )}
       {fu && <FollowUpModal mode={fu.mode} followup={fu.followup} customer={fu.customer} customers={customers || []} onClose={() => setFu(null)} onSaved={() => { setFu(null); refresh(); }} />}
       {importOpen && <ImportModal onClose={() => setImportOpen(false)} onImported={() => load(true)} />}
-      {toDelete && (
-        <ConfirmModal title="Delete customer?" confirmLabel="Delete customer" busy={deleting} onClose={() => setToDelete(null)} onConfirm={confirmDelete}
-          message={`${toDelete.name} will be removed together with their follow-ups and contact history. This can't be undone. (A customer who has bought or booked a vehicle can't be deleted: mark them Lost instead.)`} />
-      )}
+      {toDelete && (needsForce ? (
+        <ConfirmModal title="Delete anyway?" confirmLabel="Delete anyway" busy={deleting} onClose={closeDelete} onConfirm={confirmDelete}
+          message={`${toDelete.name} has ${needsForce.sales} sale${needsForce.sales === 1 ? "" : "s"} and ${needsForce.bookings} booking${needsForce.bookings === 1 ? "" : "s"} on record. Those records stay in Sales, Bookings and the Dashboard, but will no longer be linked to any customer. The customer's follow-ups and history are deleted. This can't be undone.`} />
+      ) : (
+        <ConfirmModal title="Delete customer?" confirmLabel="Delete customer" busy={deleting} onClose={closeDelete} onConfirm={confirmDelete}
+          message={`${toDelete.name} will be removed together with their follow-ups and contact history. This can't be undone.`} />
+      ))}
     </div>
   );
 }

@@ -4,7 +4,7 @@ import { Megaphone, Share2, Gift, Eye, Inbox, HeartHandshake } from "lucide-reac
 import { useAuth } from "../context/AuthContext";
 import { marketingTabsFor } from "../utils/permissions";
 
-// Everything that brings customers in, in one place: website leads (Leads), posting vehicles (Share), the festival gift
+// Everything that brings customers in, in one place: website leads, each accepted or rejected (Leads), posting vehicles (Share), the festival gift
 // spin (Offers) and who is visiting the website (Visits). Each tab is the page that used to be its
 // own nav entry -- lazy so opening Marketing only loads the tab shown.
 const Share = lazy(() => import("./Share"));
@@ -17,7 +17,7 @@ const TABS = {
   crm: { label: "CRM", ownHeader: true, hint: "", Icon: HeartHandshake, Page: CRM }, // the CRM draws its own heading and buttons
   share: { label: "Share", hint: "Post your vehicles to social media", Icon: Share2, Page: Share },
   offers: { label: "Offers", hint: "Run the festival gift spin", Icon: Gift, Page: Offers },
-  leads: { label: "Leads", hint: "Sell, exchange and service requests from your website", Icon: Inbox, Page: Leads },
+  leads: { label: "Leads", hint: "Enquiries from your website, including WhatsApp and Call taps: accept or reject each one", Icon: Inbox, Page: Leads },
   visits: { label: "Visits", hint: "See who visits your website", Icon: Eye, Page: Visits },
 };
 

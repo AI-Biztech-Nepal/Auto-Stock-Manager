@@ -1745,6 +1745,8 @@ class EMIPaymentCreate(BaseModel):
 class LeadCreate(BaseModel):
     type: str  # "sell" | "exchange" | "service"
     name: str; phone: str
+    email: Optional[str] = None
+    address: Optional[str] = None
     message: Optional[str] = None
     images: Optional[List[str]] = None
     requested_service: Optional[str] = None  # "service" leads: e.g. "Oil Change"
@@ -1850,8 +1852,8 @@ class OfferSpin(BaseModel):
     name: str = Field(max_length=200)
     phone: str = Field(max_length=40)
 
-class LeadUpdate(BaseModel):
-    status: str  # "new" | "contacted" | "closed"
+class LeadReject(BaseModel):
+    remark: str  # why the lead is turned down: required
 
 class SettingsUpdate(BaseModel):
     logo_url: Optional[str] = None
@@ -4071,6 +4073,26 @@ async def _enrich_bookings(bookings: list) -> list:
         b["customer_contact"] = c.get("contact_number") if c else None
     return bookings
 
+_booking_receipt_lock = asyncio.Lock()
+
+async def _backfill_booking_receipt_numbers():
+    """Bookings made before receipt numbers were saved have none. Number them in the order they were made, continuing
+    each company's own series, so every booking receipt can print its Receipt No. Only bookings without a number are
+    touched, so this is safe to run at every start-up (it does nothing once they all have one)."""
+    rows = await db.bookings.find({}, {"_id": 0, "id": 1, "company_id": 1, "receipt_no": 1, "created_at": 1}).to_list(100000)
+    by_company = {}
+    for b in rows:
+        by_company.setdefault(b.get("company_id"), []).append(b)
+    done = 0
+    for items in by_company.values():
+        top = max([b["receipt_no"] for b in items if b.get("receipt_no")] or [0])
+        for b in sorted((b for b in items if not b.get("receipt_no")), key=lambda b: (b.get("created_at") or "", b["id"])):
+            top += 1
+            await db.bookings.update_one({"id": b["id"]}, {"$set": {"receipt_no": top}})
+            done += 1
+    if done:
+        logger.info(f"Gave {done} earlier booking(s) a receipt number")
+
 @api_router.get("/bookings")
 async def get_bookings(status: Optional[str] = None, cu: dict = Depends(require("sales", "view"))):
     q = {"status": status} if status else {}
@@ -4085,16 +4107,19 @@ async def create_booking(body: BookingCreate, cu: dict = Depends(require("sales"
     if not await db.customers.find_one({"id": body.customer_id}, {"_id": 0, "id": 1}): raise HTTPException(404, "Customer not found")
     if body.booking_amount <= 0: raise HTTPException(400, "Booking amount must be greater than 0")
     now = datetime.now(timezone.utc).isoformat()
-    last = await db.bookings.find({}, {"_id": 0, "receipt_no": 1}).sort("receipt_no", -1).to_list(1)
-    doc = {
-        "id": str(uuid.uuid4()), "vehicle_id": body.vehicle_id, "customer_id": body.customer_id,
-        "receipt_no": ((last[0].get("receipt_no") or 0) if last else 0) + 1,
-        "booking_amount": round(body.booking_amount, 2), "payment_method": body.payment_method,
-        "booking_date": body.booking_date or datetime.now(timezone.utc).date().isoformat(),
-        "expected_sale_date": body.expected_sale_date, "agreed_price": body.agreed_price,
-        "status": "active", "notes": body.notes, "created_by": cu.get("username"), "created_at": now,
-    }
-    await db.bookings.insert_one(doc)
+    # The receipt number is the next one in this company's own series (1, 2, 3 ...). Reading the last number and saving
+    # the booking happen under one lock so two bookings made at the same moment can never get the same number.
+    async with _booking_receipt_lock:
+        last = await db.bookings.find({}, {"_id": 0, "receipt_no": 1}).sort("receipt_no", -1).to_list(1)
+        doc = {
+            "id": str(uuid.uuid4()), "vehicle_id": body.vehicle_id, "customer_id": body.customer_id,
+            "receipt_no": ((last[0].get("receipt_no") or 0) if last else 0) + 1,
+            "booking_amount": round(body.booking_amount, 2), "payment_method": body.payment_method,
+            "booking_date": body.booking_date or datetime.now(timezone.utc).date().isoformat(),
+            "expected_sale_date": body.expected_sale_date, "agreed_price": body.agreed_price,
+            "status": "active", "notes": body.notes, "created_by": cu.get("username"), "created_at": now,
+        }
+        await db.bookings.insert_one(doc)
     doc.pop("_id", None)
     await db.vehicles.update_one({"id": body.vehicle_id}, {"$set": {"status": "reserved", "updated_at": now}})
     await db.audit_logs.insert_one({"action": "booking_created", "vehicle_id": body.vehicle_id, "user": cu["username"],
@@ -5257,10 +5282,38 @@ async def get_audit_logs(cu: dict = Depends(admin_only)):
 async def get_leads(cu: dict = Depends(admin_only)):
     return await db.leads.find({}, {"_id": 0}).sort("created_at", -1).to_list(1000)
 
-@api_router.put("/leads/{lid}")
-async def update_lead(lid: str, lead: LeadUpdate, cu: dict = Depends(admin_only)):
-    r = await db.leads.update_one({"id": lid}, {"$set": {"status": lead.status}})
-    if r.matched_count == 0: raise HTTPException(404, "Lead not found")
+# ── LEADS: every website lead is either accepted or rejected ─────────────
+# A new lead is pending (status "new"). Accepting it puts the person in the CRM (source: Website; someone who is already
+# a customer, by phone number, is linked instead of added twice). Rejecting it needs a remark saying why. Either way the
+# decision is kept on the lead with who made it and when. A lead with no phone (a tap from an older website) can be
+# accepted but cannot be added to the CRM.
+_lead_decision_lock = asyncio.Lock()
+
+def _lead_email(v) -> Optional[str]:
+    e = str(v or "").strip()[:255]
+    return e if re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", e) else None
+
+@api_router.post("/leads/{lid}/accept")
+async def accept_lead(lid: str, cu: dict = Depends(admin_only)):
+    async with _lead_decision_lock:
+        lead = await db.leads.find_one({"id": lid}, {"_id": 0})
+        if not lead: raise HTTPException(404, "Lead not found")
+        if lead.get("status") in ("accepted", "rejected"): raise HTTPException(409, f"This lead was already {lead['status']}")
+        customer, created = await crm.customer_from_lead(lead)
+        await db.leads.update_one({"id": lid}, {"$set": {"status": "accepted", "remark": None, "decided_by": cu.get("username"),
+                                                         "decided_at": datetime.now(timezone.utc).isoformat(), "customer_id": customer["id"] if customer else None}})
+    return {"lead": await db.leads.find_one({"id": lid}, {"_id": 0}), "customer_id": customer["id"] if customer else None, "customer_created": created}
+
+@api_router.post("/leads/{lid}/reject")
+async def reject_lead(lid: str, body: LeadReject, cu: dict = Depends(admin_only)):
+    remark = (body.remark or "").strip()[:1000]
+    if len(remark) < 3: raise HTTPException(422, "Please write why you are rejecting this lead")
+    async with _lead_decision_lock:
+        lead = await db.leads.find_one({"id": lid}, {"_id": 0, "status": 1})
+        if not lead: raise HTTPException(404, "Lead not found")
+        if lead.get("status") in ("accepted", "rejected"): raise HTTPException(409, f"This lead was already {lead['status']}")
+        await db.leads.update_one({"id": lid}, {"$set": {"status": "rejected", "remark": remark, "decided_by": cu.get("username"),
+                                                         "decided_at": datetime.now(timezone.utc).isoformat()}})
     return await db.leads.find_one({"id": lid}, {"_id": 0})
 
 @api_router.delete("/leads/{lid}")
@@ -5758,6 +5811,13 @@ async def _run_startup_tasks():
             ("customers", "interested_vehicle", "VARCHAR(255)"),
             ("customers", "assigned_to_id", "VARCHAR(36)"),
             ("customers", "assigned_to_name", "VARCHAR(255)"),
+            # Website leads: who the visitor is, and what was decided about the lead (Accept / Reject, see LEADS below).
+            ("leads", "email", "VARCHAR(255)"),
+            ("leads", "address", "VARCHAR(500)"),
+            ("leads", "remark", "TEXT"),
+            ("leads", "decided_by", "VARCHAR(100)"),
+            ("leads", "decided_at", "VARCHAR(40)"),
+            ("leads", "customer_id", "VARCHAR(36)"),
             # Who sold the vehicle (a Team member); the name is kept on the sale so it survives the member being removed.
             ("sales", "sold_by_id", "VARCHAR(36)"),
             ("sales", "sold_by_name", "VARCHAR(255)"),
@@ -5777,6 +5837,10 @@ async def _run_startup_tasks():
                 await db.execute_raw(_ddl)
             except Exception:
                 logger.warning("Could not ensure offers tables", exc_info=True)
+    try:
+        await _backfill_booking_receipt_numbers()
+    except Exception:
+        logger.warning("Could not number earlier bookings", exc_info=True)  # never let this stop the app starting
     await db.vehicles.update_many({"ownership_termination_status": "ok"}, {"$set": {"ownership_termination_status": "yes"}})
     await db.vehicles.update_many({"ownership_termination_status": "missing"}, {"$set": {"ownership_termination_status": "no"}})
     if not await db.settings.find_one({"id": "general"}):
@@ -6903,6 +6967,9 @@ async def public_create_lead(lead: LeadCreate):
     """Public, unauthenticated — Sell / Exchange / Book Service form submissions
     from the storefront. Reviewed and managed from the admin Leads screen."""
     l = lead.model_dump()
+    l["name"], l["phone"] = (l["name"] or "").strip()[:255], (l["phone"] or "").strip()[:50]
+    l["email"] = _lead_email(l.get("email"))
+    l["address"] = (l.get("address") or "").strip()[:500] or None
     l["id"] = str(uuid.uuid4())
     l["status"] = "new"
     l["created_at"] = datetime.now(timezone.utc).isoformat()
@@ -6913,8 +6980,10 @@ async def public_create_lead(lead: LeadCreate):
 @api_router.post("/public/leads/click", dependencies=[Depends(_scope_to_default_company)])
 @limiter.limit("30/minute")
 async def public_lead_click(request: Request):
-    """Public -- a storefront visitor tapped a WhatsApp or Call button. Stored as a lead so it
-    shows (and notifies) in the admin Leads screen. Posted as text/plain via sendBeacon."""
+    """Public -- a storefront visitor tapped a WhatsApp or Call button. The website first asks who they are (name and a
+    phone number are required there, address and e-mail are optional) and sends those with the tap, so the lead can be
+    answered; it is stored as a lead in the admin Leads screen. Taps from an older website, with no details, are still
+    stored (as 'Website visitor', no phone). Posted as text/plain via sendBeacon."""
     try:
         body = json.loads((await request.body()) or b"{}")
     except Exception:
@@ -6922,9 +6991,17 @@ async def public_lead_click(request: Request):
     if not isinstance(body, dict): body = {}
     kind = body.get("type")
     if kind not in ("whatsapp", "call"): return {"ok": False}
+    text = lambda k, n: str(body.get(k) or "").strip()[:n]
+    name, phone, address, message = text("name", 255), text("phone", 50), text("address", 500), text("message", 500)
+    if phone and not crm.valid_phone(phone): return {"ok": False, "error": "phone"}
+    if phone:
+        # the same person tapping the same button again within the hour is one lead, not several
+        cutoff = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+        if await db.leads.find_one({"phone": phone, "type": kind, "message": message, "created_at": {"$gte": cutoff}}, {"_id": 0, "id": 1}):
+            return {"ok": True, "duplicate": True}
     await db.leads.insert_one({
-        "id": str(uuid.uuid4()), "type": kind, "name": "Website visitor", "phone": "",
-        "message": str(body.get("message") or "")[:500], "status": "new",
+        "id": str(uuid.uuid4()), "type": kind, "name": name or "Website visitor", "phone": phone, "email": _lead_email(body.get("email")),
+        "address": address or None, "message": message, "status": "new",
         "created_at": datetime.now(timezone.utc).isoformat()})
     return {"ok": True}
 
