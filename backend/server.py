@@ -5278,6 +5278,38 @@ async def get_audit_logs(cu: dict = Depends(admin_only)):
     return logs
 
 # ── LEADS (storefront Sell / Exchange / Book Service submissions) ─────
+_LEAD_VEHICLE_ID = re.compile(r"/inventory/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})", re.I)
+
+async def _backfill_lead_vehicles():
+    """WhatsApp / Call taps recorded before the website sent the bike's id (so they have no vehicle) usually still name it
+    in their text: the bike's page address (/inventory/<id>) or its registration number in brackets. Link those taps to the
+    bike. Only the same company's vehicles count, a registration number shared by two vehicles is left alone, and a tap that
+    names nothing stays as it is. Who tapped (name, phone) was never collected before, so that can't be recovered."""
+    leads = await db.leads.find({}, {"_id": 0, "id": 1, "company_id": 1, "type": 1, "message": 1, "vehicle_id": 1}).to_list(100000)
+    todo = [l for l in leads if not l.get("vehicle_id") and l.get("type") in ("whatsapp", "call") and l.get("message")]
+    if not todo: return
+    vehicles = await db.vehicles.find({}, {"_id": 0, "id": 1, "company_id": 1, "registration_number": 1}).to_list(100000)
+    ids = {(v.get("company_id"), v["id"].lower()): v["id"] for v in vehicles}
+    by_reg = {}
+    for v in vehicles:
+        reg = (v.get("registration_number") or "").strip().lower()
+        if reg: by_reg.setdefault((v.get("company_id"), reg), []).append(v["id"])
+    done = 0
+    for l in todo:
+        vid = None
+        m = _LEAD_VEHICLE_ID.search(l["message"])
+        if m: vid = ids.get((l.get("company_id"), m.group(1).lower()))
+        if not vid:
+            for reg in re.findall(r"\(([^()]{3,40})\)", l["message"]):
+                found = by_reg.get((l.get("company_id"), reg.strip().lower()))
+                if found and len(found) == 1:
+                    vid = found[0]
+                    break
+        if vid:
+            await db.leads.update_one({"id": l["id"]}, {"$set": {"vehicle_id": vid}})
+            done += 1
+    if done: logger.info(f"Linked {done} earlier website tap(s) to the bike they were about")
+
 @api_router.get("/leads")
 async def get_leads(request: Request, cu: dict = Depends(admin_only)):
     """Every lead, newest first. A lead from a vehicle's WhatsApp / Call button also carries that vehicle (name, plate,
@@ -5857,6 +5889,10 @@ async def _run_startup_tasks():
         await _backfill_booking_receipt_numbers()
     except Exception:
         logger.warning("Could not number earlier bookings", exc_info=True)  # never let this stop the app starting
+    try:
+        await _backfill_lead_vehicles()
+    except Exception:
+        logger.warning("Could not link earlier website taps to their bikes", exc_info=True)
     await db.vehicles.update_many({"ownership_termination_status": "ok"}, {"$set": {"ownership_termination_status": "yes"}})
     await db.vehicles.update_many({"ownership_termination_status": "missing"}, {"$set": {"ownership_termination_status": "no"}})
     if not await db.settings.find_one({"id": "general"}):
