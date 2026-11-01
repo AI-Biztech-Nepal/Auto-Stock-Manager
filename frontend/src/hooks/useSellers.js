@@ -18,6 +18,8 @@ const loadSellers = () => {
   return cached;
 };
 
+export const resetSellers = () => { cached = null; };
+
 export default function useSellers() {
   const [sellers, setSellers] = useState([]);
   useEffect(() => {

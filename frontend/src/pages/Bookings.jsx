@@ -97,7 +97,10 @@ export default function Bookings({ embedded = false, onRecordSale: onRecordSaleP
     } : EMPTY_BOOKING);
     setShowForm(true);
     try {
-      if (!booking) setVehicles((await api.get("/vehicles?status=available")).data);
+      const avail = (await api.get("/vehicles?status=available")).data;
+      // The booked vehicle is "reserved", so it isn't in the available list — add it so it stays selectable.
+      const current = booking ? (await api.get(`/vehicles/${booking.vehicle_id}`)).data : null;
+      setVehicles(current ? [current, ...avail.filter(v => v.id !== current.id)] : avail);
     } catch { toast.error("Failed to load vehicles"); }
   };
 
@@ -127,7 +130,7 @@ export default function Bookings({ embedded = false, onRecordSale: onRecordSaleP
         notes: form.notes,
       };
       let created = null;
-      if (editing) await api.put(`/bookings/${editing.id}`, payload);
+      if (editing) await api.put(`/bookings/${editing.id}`, { ...payload, vehicle_id: form.vehicle_id });
       else created = (await api.post("/bookings", { ...payload, vehicle_id: form.vehicle_id })).data;
       toast.success(editing ? "Booking updated" : "Vehicle booked");
       closeForm();
@@ -321,14 +324,10 @@ export default function Bookings({ embedded = false, onRecordSale: onRecordSaleP
             </div>
             <form onSubmit={saveForm} className="p-4 sm:p-5 space-y-4">
               <Field label="Vehicle" required>
-                {editing ? (
-                  <div className="h-9 px-3 flex items-center text-sm bg-slate-50 border border-slate-200 rounded-lg text-slate-700">{editing.vehicle_info}</div>
-                ) : (
-                  <VehicleComboBox vehicles={vehicles} value={form.vehicle_id} onChange={id => {
-                    const v = vehicles.find(x => x.id === id);
-                    setForm(f => ({ ...f, vehicle_id: id, agreed_price: f.agreed_price || (v?.selling_price ? String(v.selling_price) : "") }));
-                  }} placeholder="Search or select available vehicle..." testId="booking-vehicle" showPrice />
-                )}
+                <VehicleComboBox vehicles={vehicles} value={form.vehicle_id} onChange={id => {
+                  const v = vehicles.find(x => x.id === id);
+                  setForm(f => ({ ...f, vehicle_id: id, agreed_price: f.agreed_price || (v?.selling_price ? String(v.selling_price) : "") }));
+                }} placeholder="Search or select available vehicle..." testId="booking-vehicle" showPrice />
               </Field>
 
               <Field label="Customer" required>

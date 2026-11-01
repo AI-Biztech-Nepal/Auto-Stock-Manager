@@ -1607,6 +1607,7 @@ class BookingCreate(BaseModel):
     notes: Optional[str] = None
 
 class BookingUpdate(BaseModel):
+    vehicle_id: Optional[str] = None
     customer_id: Optional[str] = None
     booking_amount: Optional[float] = None
     payment_method: Optional[str] = None
@@ -4139,7 +4140,15 @@ async def update_booking(bid: str, body: BookingUpdate, cu: dict = Depends(requi
     if "customer_id" in upd and not await db.customers.find_one({"id": upd["customer_id"]}, {"_id": 0, "id": 1}):
         raise HTTPException(404, "Customer not found")
     upd["updated_at"] = datetime.now(timezone.utc).isoformat()
+    swap = upd.get("vehicle_id") and upd["vehicle_id"] != b["vehicle_id"]
+    if swap:
+        nv = await db.vehicles.find_one({"id": upd["vehicle_id"]}, {"_id": 0, "status": 1})
+        if not nv: raise HTTPException(404, "Vehicle not found")
+        if nv.get("status") != "available": raise HTTPException(400, f"Vehicle is {nv.get('status')} — only available vehicles can be booked")
+        await db.vehicles.update_one({"id": b["vehicle_id"]}, {"$set": {"status": "available", "updated_at": upd["updated_at"]}})
+        await db.vehicles.update_one({"id": upd["vehicle_id"]}, {"$set": {"status": "reserved", "updated_at": upd["updated_at"]}})
     await db.bookings.update_one({"id": bid}, {"$set": upd})
+    if swap: asyncio.create_task(_notify_storefront())
     return (await _enrich_bookings([await db.bookings.find_one({"id": bid}, {"_id": 0})]))[0]
 
 @api_router.post("/bookings/{bid}/cancel")
