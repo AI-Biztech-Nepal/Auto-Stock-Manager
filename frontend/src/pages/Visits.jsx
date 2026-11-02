@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
-import { Eye, Users, Smartphone, Monitor, Globe, FileText, ExternalLink, Search, Clock, TrendingUp, Layers } from "lucide-react";
+import { Eye, Users, Smartphone, Monitor, Globe, FileText, ExternalLink, Search, Clock, TrendingUp, Layers, Lightbulb } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
 
@@ -190,6 +190,31 @@ const SearchTable = ({ title, icon, rows: allRows, empty, linkBase }) => {
   );
 };
 
+// Searches where Google already shows the website, a little below the top 3, yet hardly anyone clicks: the cheapest SEO
+// wins, since the page is nearly there. Most-shown first.
+const seoOpportunities = queries => (queries || [])
+  .filter(q => q.impressions >= 5 && q.position > 3 && q.position <= 12 && q.clicks / q.impressions < 0.05)
+  .sort((a, b) => b.impressions - a.impressions);
+
+const SeoTip = ({ queries }) => {
+  const [best, ...rest] = seoOpportunities(queries);
+  if (!best) return null;
+  const close = rest.slice(0, 3);
+  return (
+    <div className="flex gap-3 rounded-2xl border border-amber-200 bg-amber-50/60 px-4 py-3.5" data-testid="seo-tip">
+      <span className="size-9 shrink-0 rounded-lg bg-amber-100 text-amber-700 flex items-center justify-center"><Lightbulb size={18} /></span>
+      <div className="min-w-0 space-y-1 text-sm text-slate-700">
+        <p className="font-bold text-slate-900" style={FONT}>SEO tip</p>
+        <p>
+          People searched <b>&ldquo;{best.name}&rdquo;</b> and Google showed your website {best.impressions} times (rank {best.position}), but {best.clicks === 0 ? "nobody clicked" : `only ${best.clicks} clicked`}.
+          Using these exact words in a page title or heading on your website, and in your bike descriptions, helps it climb and win those clicks.
+        </p>
+        {close.length > 0 && <p className="text-xs text-slate-500">Also close to the top: {close.map(q => `“${q.name}” (rank ${q.position})`).join(", ")}.</p>}
+      </div>
+    </div>
+  );
+};
+
 // One visit as a single full-width clickable line with every detail; click it to open the page-by-page timeline.
 const VisitTile = ({ v, onOpen }) => {
   const Dev = v.device === "mobile" ? Smartphone : Monitor;
@@ -303,6 +328,8 @@ export default function Visits({ embedded = false }) {
           ))}
         </div>
       </div>
+
+      {search?.configured && <SeoTip queries={search.queries} />}
 
       <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
         <Stat icon={Users} value={data.unique_visitors} label={`Visitors, ${range.short}`} />
