@@ -3,7 +3,7 @@ import { useParams, useNavigate, Link } from "react-router-dom";
 import { ArrowLeft, Undo2, ExternalLink, Lock, Store, User, Pencil, Trash2, ShieldCheck, ShieldOff, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
-import { formatNPR, formatOwnership, TRANSFER_STATUS_OPTIONS, getTransferStatusStyle, formatWarrantyLength, splitSanakhatExpenses } from "../utils/helpers";
+import { formatNPR, formatOwnership, TRANSFER_STATUS_OPTIONS, getTransferStatusStyle, formatWarrantyLength, splitSanakhatExpenses, deleteSaleConfirm } from "../utils/helpers";
 import { ReturnModal } from "./VehicleModals";
 import HoverADDate from "../components/HoverADDate";
 import WarrantyBadge, { serviceLabel } from "../components/WarrantyBadge";
@@ -64,10 +64,10 @@ export default function SoldStockDetail() {
 
   const deleteSale = async () => {
     if (!activeSale) return;
-    if (!window.confirm("Delete this sale? The vehicle will be restored to available.")) return;
+    if (!window.confirm(deleteSaleConfirm(activeSale))) return;
     try {
-      await api.delete(`/sales/${activeSale.id}`);
-      toast.success("Sale deleted, vehicle restored");
+      const r = await api.delete(`/sales/${activeSale.id}`);
+      toast.success(r.data?.message || "Sale deleted, vehicle restored");
       navigate("/sales");
     } catch (err) { toast.error(err.response?.data?.detail || "Failed to delete sale"); }
   };

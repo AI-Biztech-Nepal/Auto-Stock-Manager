@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from "react-router-dom";
 import { Plus, Search, Trash2, Eye, TrendingUp, DollarSign, Calendar, ShoppingBag, X, ChevronDown, ChevronUp, UserPlus, AlertTriangle, UploadCloud, FileSpreadsheet, CheckCircle2, Undo2, BookmarkCheck, ArrowRight } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
-import { formatNPR, splitSanakhatExpenses, withSanakhatExpenses, TRANSFER_STATUS_OPTIONS, getTransferStatusStyle } from "../utils/helpers";
+import { formatNPR, splitSanakhatExpenses, withSanakhatExpenses, deleteSaleConfirm, TRANSFER_STATUS_OPTIONS, getTransferStatusStyle } from "../utils/helpers";
 import { getCurrentBSMonthRange } from "../utils/nepali-date";
 import { useAuth } from "../context/AuthContext";
 import VehicleComboBox from "../components/VehicleComboBox";
@@ -417,10 +417,10 @@ export default function Sales() {
   const closeImport = () => { setShowImport(false); setImportFile(null); setImportResult(null); };
 
   const handleDelete = async (id) => {
-    if (!window.confirm("Delete this sale? The vehicle will be restored to available.")) return;
+    if (!window.confirm(deleteSaleConfirm(sales.find(s => s.id === id)))) return;
     try {
-      await api.delete(`/sales/${id}`);
-      toast.success("Sale deleted, vehicle restored");
+      const r = await api.delete(`/sales/${id}`);
+      toast.success(r.data?.message || "Sale deleted, vehicle restored");
       fetchAll();
     } catch (err) { toast.error(getErrMsg(err, "Failed to delete")); }
   };
@@ -902,7 +902,10 @@ export default function Sales() {
 
               {/* Exchange: the customer's old vehicle; its valuation is deducted from what they owe */}
               <div className="border border-slate-200 rounded-xl p-4 space-y-3" data-testid="exchange-section">
-                <p className="text-sm font-semibold text-slate-700">Exchange</p>
+                <div>
+                  <p className="text-sm font-semibold text-slate-700">Exchange</p>
+                  <p className="text-xs text-slate-400 mt-0.5">The old vehicle is added to Inventory when you save, at its valuation, unlisted until you set a selling price.</p>
+                </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <Field label="Valuation (NPR)">
                     <input type="text" inputMode="numeric" value={form.exchange_valuation} onChange={e => setForm({...form, exchange_valuation: e.target.value})} placeholder="0" className={inp} data-testid="exchange-valuation-input" />
