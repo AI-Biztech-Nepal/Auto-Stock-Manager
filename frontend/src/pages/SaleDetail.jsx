@@ -1,9 +1,9 @@
 import { useEffect, useState, useCallback } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, Link } from "react-router-dom";
 import { ArrowLeft, Pencil, Trash2, X, ChevronDown, ChevronUp, UserPlus, Lock, Undo2, AlertTriangle, CheckCircle2 } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
-import { formatNPR, splitSanakhatExpenses, withSanakhatExpenses } from "../utils/helpers";
+import { formatNPR, splitSanakhatExpenses, withSanakhatExpenses, deleteSaleConfirm } from "../utils/helpers";
 import HoverADDate from "../components/HoverADDate";
 import BSDatePicker from "../components/BSDatePicker";
 import VehicleComboBox from "../components/VehicleComboBox";
@@ -202,10 +202,10 @@ export default function SaleDetail() {
   };
 
   const deleteSale = async () => {
-    if (!window.confirm("Delete this sale? The vehicle will be restored to available.")) return;
+    if (!window.confirm(deleteSaleConfirm(sale))) return;
     try {
-      await api.delete(`/sales/${id}`);
-      toast.success("Sale deleted, vehicle restored");
+      const r = await api.delete(`/sales/${id}`);
+      toast.success(r.data?.message || "Sale deleted, vehicle restored");
       navigate("/sales");
     } catch (err) { toast.error(getErrMsg(err, "Failed to delete")); }
   };
@@ -551,7 +551,7 @@ export default function SaleDetail() {
                 <Row label="From Booking"><span className="text-sm font-medium text-slate-900 sm:text-right" data-testid="sale-booking-info">Deposit {formatNPR(booking.booking_amount)} on <HoverADDate date={booking.booking_date} /></span></Row>
               )}
               <Row label="Paid by Cash"><span className="text-sm font-medium text-slate-900 sm:text-right">{formatNPR(sale.paid_cash || 0)}</span></Row>
-              {sale.exchange_valuation > 0 && <Row label="Exchange"><span className="text-sm font-medium text-slate-900 sm:text-right" data-testid="sale-exchange-info">{[sale.exchange_brand, sale.exchange_model, sale.exchange_year, sale.exchange_reg_no && `(${sale.exchange_reg_no})`].filter(Boolean).join(" ") || "Vehicle"} · {formatNPR(sale.exchange_valuation)}</span></Row>}
+              {sale.exchange_valuation > 0 && <Row label="Exchange"><span className="text-sm font-medium text-slate-900 sm:text-right" data-testid="sale-exchange-info">{[sale.exchange_brand, sale.exchange_model, sale.exchange_year, sale.exchange_reg_no && `(${sale.exchange_reg_no})`].filter(Boolean).join(" ") || "Vehicle"} · {formatNPR(sale.exchange_valuation)}{sale.exchange_vehicle_id && <> · <Link to={`/inventory/${sale.exchange_vehicle_id}`} className="text-blue-600 hover:underline" data-testid="sale-exchange-inventory-link">In inventory</Link></>}</span></Row>}
               <Row label="Paid by Bank"><span className="text-sm font-medium text-slate-900 sm:text-right">{formatNPR(sale.paid_bank || 0)}</span></Row>
               <Row label="Due Amount"><span className={`text-sm font-medium sm:text-right ${sale.due_amount > 0 ? "text-red-600" : "text-slate-900"}`}>{formatNPR(sale.due_amount || 0)}</span></Row>
               {sale.due_amount > 0 && (
