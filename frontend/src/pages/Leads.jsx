@@ -6,9 +6,9 @@ import api from "../utils/api";
 import { formatNPR } from "../utils/helpers";
 
 // Sell / Exchange / Book Service forms from the public website land here (POST /public/leads), and so do WhatsApp / Call
-// taps (the website asks who they are first). Every lead is decided once: Accept (the person goes into the CRM) or
-// Reject (a remark saying why is required).
-// Tabs: "All" is the inbox of pending leads. Accepting one moves it out of All into the tab for its type; rejecting
+// taps (the website asks who they are first). Every lead is decided once: Add to CRM (the lead is accepted and the person
+// goes into the CRM) or Reject (a remark saying why is required).
+// Tabs: "All" is the inbox of pending leads. Adding one to the CRM moves it out of All into the tab for its type; rejecting
 // one moves it to the Rejected tab. A registered account also shows in Accounts while it is still pending. A lead is never
 // deleted: Reject is the only way to put one aside.
 const TYPES = {
@@ -79,10 +79,10 @@ export default function Leads() {
     try {
       const { data } = await api.post(`/leads/${lead.id}/accept`, null, { suppressErrorToast: true });
       replaceLead(data.lead);
-      toast.success(!data.customer_id ? "Accepted. It has no phone number, so it was not added to the CRM"
-        : data.customer_created ? `Accepted. ${lead.name} was added to the CRM` : `Accepted. ${lead.name} is already a customer, linked in the CRM`,
+      toast.success(!data.customer_id ? "Accepted, but it has no phone number, so it was not added to the CRM"
+        : data.customer_created ? `${lead.name} was added to the CRM` : `${lead.name} is already a customer, linked in the CRM`,
       { description: `Moved to the ${tabLabel(tabOf(data.lead))} tab` });
-    } catch (ex) { toast.error(errText(ex, "Couldn't accept that lead")); load(); }
+    } catch (ex) { toast.error(errText(ex, "Couldn't add that lead to the CRM")); load(); }
     finally { setBusyId(null); }
   };
 
@@ -104,13 +104,13 @@ export default function Leads() {
   }
 
   const shown = leads.filter(l => inTab(l, tab));
-  const pendingCount = leads.filter(l => tabOf(l) === "all" && state(l) === "new").length;
+  const countOf = key => leads.filter(l => inTab(l, key)).length; // the number of cards that tab shows
   const [emptyTitle, emptyText] = leads.length === 0
     ? ["No leads yet", "Sell, exchange and service requests, and people who tap WhatsApp or Call on your website, will appear here as they come in."]
-    : tab === "all" ? ["Nothing waiting for a decision", "New leads from your website appear here. Accept one to move it to its own tab, or reject it to move it to Rejected."]
+    : tab === "all" ? ["Nothing waiting for a decision", "New leads from your website appear here. Add one to the CRM to move it to its own tab, or reject it to move it to Rejected."]
     : tab === "rejected" ? ["No rejected leads", "Leads you reject are kept here, with your reason."]
     : tab === "signup" ? ["No registered accounts yet", "People who sign in with Google on your website and add their phone number appear here."]
-    : [`No accepted leads in ${tabLabel(tab)}`, "Accept a lead in the All tab and it moves here."];
+    : [`Nothing added to the CRM from ${tabLabel(tab)} yet`, "Add a lead to the CRM in the All tab and it moves here."];
 
   return (
     <div className="space-y-4" data-testid="leads-page">
@@ -124,7 +124,9 @@ export default function Leads() {
             data-testid={`leads-tab-${key}`}
             className={`shrink-0 h-10 px-3.5 inline-flex items-center gap-1.5 whitespace-nowrap rounded-full text-sm font-semibold border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${tab === key ? "bg-blue-600 text-white border-blue-600" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"}`}
           >
-            {Icon && <Icon size={15} />}{label}{key === "all" && pendingCount > 0 && <span className={`ml-0.5 min-w-[20px] text-center text-xs px-1.5 py-0.5 rounded-full ${tab === key ? "bg-white/25" : "bg-blue-600 text-white"}`}>{pendingCount}</span>}
+            {Icon && <Icon size={15} />}{label}
+            {/* Every tab shows how many leads it holds; All is blue while anything waits for a decision. */}
+            <span data-testid={`leads-count-${key}`} className={`ml-0.5 min-w-[20px] text-center text-xs px-1.5 py-0.5 rounded-full ${tab === key ? "bg-white/25 text-white" : key === "all" && countOf(key) > 0 ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-600"}`}>{countOf(key)}</span>
           </button>
         ))}
       </div>
@@ -205,7 +207,7 @@ export default function Leads() {
                   ) : (
                     <div className="mt-3 grid grid-cols-2 gap-2 sm:flex sm:justify-end">
                       <button onClick={() => setRejecting({ id: l.id, remark: "" })} disabled={busyId === l.id} className="h-10 px-5 rounded-lg border border-red-200 bg-white text-red-700 hover:bg-red-50 text-sm font-semibold inline-flex items-center justify-center gap-1.5 disabled:opacity-60" data-testid="lead-reject"><Ban size={15} /> Reject</button>
-                      <button onClick={() => accept(l)} disabled={busyId === l.id} className="h-10 px-5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold inline-flex items-center justify-center gap-1.5 disabled:opacity-60" data-testid="lead-accept"><Check size={16} /> {busyId === l.id ? "Accepting..." : "Accept"}</button>
+                      <button onClick={() => accept(l)} disabled={busyId === l.id} className="h-10 px-5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold inline-flex items-center justify-center gap-1.5 disabled:opacity-60" data-testid="lead-accept"><UserPlus size={16} /> {busyId === l.id ? "Adding..." : "Add to CRM"}</button>
                     </div>
                   )
                 ) : l.status === "accepted" ? (

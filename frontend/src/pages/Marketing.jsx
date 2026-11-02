@@ -17,7 +17,7 @@ const TABS = {
   crm: { label: "CRM", ownHeader: true, hint: "", Icon: HeartHandshake, Page: CRM }, // the CRM draws its own heading and buttons
   share: { label: "Share", hint: "Post your vehicles to social media", Icon: Share2, Page: Share },
   offers: { label: "Offers", hint: "Run the festival gift spin", Icon: Gift, Page: Offers },
-  leads: { label: "Leads", hint: "Enquiries from your website, including WhatsApp and Call taps: accept or reject each one", Icon: Inbox, Page: Leads },
+  leads: { label: "Leads", hint: "Enquiries from your website, including WhatsApp and Call taps: add each one to the CRM or reject it", Icon: Inbox, Page: Leads },
   visits: { label: "Visits", hint: "See who visits your website", Icon: Eye, Page: Visits },
 };
 
