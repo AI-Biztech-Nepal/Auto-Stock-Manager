@@ -5995,6 +5995,10 @@ async def _run_startup_tasks():
                 await db.execute_raw(_ddl)
             except Exception:
                 logger.warning("Could not ensure offers tables", exc_info=True)
+        try:
+            await finance_books.ensure_schema(db)  # Finance's Rent tables and bill-service columns (never raises)
+        except Exception:
+            logger.warning("Could not ensure the Finance rent tables", exc_info=True)
     try:
         await _backfill_booking_receipt_numbers()
     except Exception:

@@ -25,6 +25,7 @@ every endpoint answers 503 with a clear message and the Finance screens show a "
 """
 import asyncio
 import functools
+import logging
 import re
 import uuid
 from datetime import date, datetime, timedelta, timezone
@@ -34,15 +35,83 @@ from zoneinfo import ZoneInfo
 from fastapi import Depends, HTTPException
 from pydantic import BaseModel, Field
 
+logger = logging.getLogger(__name__)
+
 SETUP_MESSAGE = ("Finance books are not set up yet. Run backend/migration_add_finance_books.sql "
                  "on the database once, then reload this page.")
 
-UPGRADE_MESSAGE = ("Finance books need one more update. Run backend/migration_add_finance_rent.sql "
-                   "on the database once, then reload this page.")
+UPGRADE_MESSAGE = ("Rent and bill services need one more database update, which the server applies when it starts "
+                   "and could not. Run backend/migration_add_finance_rent.sql on the database once, then reload this page.")
 
 RENT_SOURCE = "rental_rent"
 _RENT_NS = uuid.UUID("5b0c6a4e-8f3a-4c57-9f0e-2a6c1d7b9e10")
 _rent_lock = asyncio.Lock()
+
+# ── the second half's schema, applied at start-up ─────────────────────────
+# Same idempotent pattern server.py uses for its other post-schema additions (CREATE TABLE IF NOT EXISTS,
+# ADD COLUMN IF NOT EXISTS), so no step is left to do by hand. migration_add_finance_rent.sql is the same
+# statements for running by hand if the database user may not alter tables. Every statement is additive and a
+# failure only logs a warning: Finance keeps working without Rent / services (see ensure_schema).
+RENT_DDL = [
+    "CREATE TABLE IF NOT EXISTS fin_rentals ("
+    "id VARCHAR(36) NOT NULL PRIMARY KEY, company_id VARCHAR(36) NOT NULL, car VARCHAR(250) NOT NULL, "
+    "model VARCHAR(150) NULL, customer_id VARCHAR(36) NULL, customer_name VARCHAR(200) NULL, "
+    "start_date VARCHAR(20) NOT NULL, end_date VARCHAR(20) NULL, returned_on VARCHAR(20) NULL, "
+    "rate_per_day DOUBLE NOT NULL DEFAULT 0, note VARCHAR(500) NULL, created_at VARCHAR(40), updated_at VARCHAR(40), "
+    "INDEX idx_fin_rentals_company (company_id, start_date), "
+    "CONSTRAINT fk_fin_rentals_company FOREIGN KEY (company_id) REFERENCES companies(id), "
+    "CONSTRAINT fk_fin_rentals_party FOREIGN KEY (customer_id) REFERENCES fin_parties(id) ON DELETE SET NULL"
+    ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
+    "CREATE TABLE IF NOT EXISTS fin_cash_account ("
+    "id VARCHAR(36) NOT NULL PRIMARY KEY, company_id VARCHAR(36) NOT NULL, name VARCHAR(150) NULL, "
+    "bank_name VARCHAR(150) NULL, account_number VARCHAR(60) NULL, account_holder_name VARCHAR(150) NULL, "
+    "address VARCHAR(300) NULL, updated_at VARCHAR(40), UNIQUE KEY uq_fin_cash_company (company_id), "
+    "CONSTRAINT fk_fin_cash_company FOREIGN KEY (company_id) REFERENCES companies(id)"
+    ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
+]
+# Services on sale / purchase bills: two columns on an existing table.
+SERVICE_COLUMNS = (("installation_charge", "DOUBLE NOT NULL DEFAULT 0"), ("service_charges", "LONGTEXT NULL"))
+
+# Whether fin_transactions can hold services. sqldb.TABLES only lists those two columns once they are known to
+# exist (every read selects every listed column, so listing a missing one would break ALL of Finance). Starts
+# True for a backend with no schema to check (the Mongo one, and the tests); ensure_schema decides for MySQL.
+_services_ready = True
+
+
+async def ensure_schema(db, registry=None):
+    """Called once from server.py's start-up on MySQL. `db` is the real database object (execute_raw /
+    fetch_raw). Creates what the Rent screen needs, adds the two service columns, and only then tells the SQL
+    layer's table registry about them. Never raises: a database user that cannot alter tables simply leaves
+    Rent and services off, and the rest of Finance exactly as it was."""
+    global _services_ready
+    if registry is None:
+        import sqldb
+        registry = sqldb.TABLES
+    _services_ready = False
+    for ddl in RENT_DDL:
+        try:
+            await db.execute_raw(ddl)
+        except Exception:  # noqa: BLE001
+            logger.warning("Could not ensure the Rent tables", exc_info=True)
+    for col, kind in SERVICE_COLUMNS:
+        try:
+            await db.execute_raw(f"ALTER TABLE fin_transactions ADD COLUMN IF NOT EXISTS {col} {kind}")
+        except Exception:  # noqa: BLE001
+            logger.warning("Could not ensure fin_transactions.%s", col, exc_info=True)
+    try:
+        rows = await db.fetch_raw("SELECT COLUMN_NAME FROM information_schema.COLUMNS "
+                                  "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'fin_transactions'")
+        have = {r["COLUMN_NAME"] for r in rows}
+    except Exception:  # noqa: BLE001
+        logger.warning("Could not check fin_transactions' columns", exc_info=True)
+        have = set()
+    if all(col in have for col, _ in SERVICE_COLUMNS):
+        meta = registry["fin_transactions"]
+        meta["columns"].update(col for col, _ in SERVICE_COLUMNS)
+        meta.setdefault("json_cols", set()).add("service_charges")
+        _services_ready = True
+    else:
+        logger.warning("Finance services are off: fin_transactions has no installation_charge / service_charges columns")
 
 LEDGER_SIDES = {"customer": ("fin_customer_ledger", "customer_id"),
                 "vendor": ("fin_vendor_ledger", "vendor_id")}
@@ -369,8 +438,9 @@ def register(api_router, db, admin_only):
             "vendor_ledger": await _all(db.fin_vendor_ledger),
             "rentals": rentals or [],
             "cash_account": (cash_rows or [None])[0],
-            # False until migration_add_finance_rent.sql has been run: the Rent screen says so.
+            # False while the Rent tables / service columns are not in the database: the screens say so.
             "rent_ready": rentals is not None and cash_rows is not None,
+            "services_ready": _services_ready,
         }
 
     # ── parties ────────────────────────────────────────────────────────────
@@ -569,8 +639,7 @@ def register(api_router, db, admin_only):
                 name, value = _clean(line.name), _money(line.amount, "A service amount")
                 if name and value > 0:
                     services.append({"name": name, "amount": value})
-        return {
-            "service_charges": services, "installation_charge": round(sum(s["amount"] for s in services), 2),
+        doc = {
             "type": body.type, "amount": amount, "note": _clean(body.note), "party_name": _clean(body.party_name),
             "customer_id": body.customer_id or None, "bill_no": _clean(body.bill_no), "bill_date": _clean(body.bill_date),
             "party_address": _clean(body.party_address), "vat_pan_no": _clean(body.vat_pan_no),
@@ -578,6 +647,12 @@ def register(api_router, db, admin_only):
             "discount_amount": max(0.0, float(body.discount_amount or 0)), "vat_amount": max(0.0, float(body.vat_amount or 0)),
             "expense_category_id": body.expense_category_id or None, "payment_mode": mode, "bank_account_id": bank,
         }
+        if _services_ready:
+            doc.update({"service_charges": services, "installation_charge": round(sum(s["amount"] for s in services), 2)})
+        elif services:
+            # The columns are not there: say so rather than quietly saving the bill without its services.
+            raise HTTPException(503, UPGRADE_MESSAGE)
+        return doc
 
     @api_router.post("/fin/transactions")
     @_safe

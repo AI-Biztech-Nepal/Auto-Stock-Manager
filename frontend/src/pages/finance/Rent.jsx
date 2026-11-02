@@ -21,7 +21,7 @@ function NotReady() {
   return (
     <Card className="p-6 space-y-3 max-w-2xl">
       <h2 className="text-lg font-bold text-slate-900">Rent is not set up yet</h2>
-      <p className="text-sm text-slate-600">The table behind it has not been created on the database.</p>
+      <p className="text-sm text-slate-600">The server creates its table when it starts, so restart the backend once. If that does not do it, the database user may not be allowed to create tables:</p>
       <ol className="text-sm text-slate-600 list-decimal pl-5 space-y-1">
         <li>Open <code className="bg-slate-100 px-1 rounded">backend/migration_add_finance_rent.sql</code> from the project.</li>
         <li>Run it once on the database. It only adds two new tables and two columns on <code className="bg-slate-100 px-1 rounded">fin_transactions</code>.</li>

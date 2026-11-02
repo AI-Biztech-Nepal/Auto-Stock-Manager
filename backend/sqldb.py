@@ -137,8 +137,10 @@ TABLES = {
     "fin_transactions": {"columns": {"id", "company_id", "type", "amount", "note", "party_name", "customer_id", "bill_no",
                                       "bill_date", "party_address", "vat_pan_no", "items", "discount_amount", "vat_amount",
                                       "expense_category_id", "payment_mode", "bank_account_id", "source_type", "source_id",
-                                      "installation_charge", "service_charges",
-                                      "created_at", "updated_at"}, "json_cols": {"items", "service_charges"}},
+                                      "created_at", "updated_at"}, "json_cols": {"items"}},
+    # fin_transactions.installation_charge / service_charges are NOT listed here: every read selects every listed
+    # column, so one missing from the database would break all of Finance. finance_books.ensure_schema adds them to
+    # this entry at start-up once it has confirmed they exist.
     "fin_customer_ledger": {"columns": {"id", "company_id", "customer_id", "entry_type", "amount", "note", "source", "source_type", "source_id",
                                      "bank_account_id", "entry_date", "receipt_no", "created_at"}},
     "fin_vendor_ledger": {"columns": {"id", "company_id", "vendor_id", "entry_type", "amount", "note", "source", "source_type", "source_id",
@@ -272,6 +274,14 @@ class MySQLDatabase:
                         client_flag=CLIENT.FOUND_ROWS,
                     )
         return self._pool
+
+    async def fetch_raw(self, sql: str):
+        """Run one literal read-only statement and return its rows as dicts (start-up schema checks)."""
+        pool = await self.get_pool()
+        async with pool.acquire() as conn:
+            async with conn.cursor(aiomysql.DictCursor) as cur:
+                await cur.execute(sql)
+                return await cur.fetchall()
 
     async def execute_raw(self, sql: str):
         """Run one literal SQL statement — schema migrations only, no user data. server.py's

@@ -6,6 +6,8 @@ stand-in for the database -- no MySQL and no running server needed:
 The stand-in understands only what finance_books.py asks of it: equality, $in and $ne filters, sort,
 insert, update and delete.
 """
+import asyncio
+import re
 import sys
 import unittest
 from datetime import date, timedelta
@@ -248,6 +250,114 @@ class FinanceRentTests(unittest.TestCase):
             r = self.api.post("/api/fin/transactions", json={"type": "expense", "amount": 5})
         self.assertEqual(r.status_code, 503)
         self.assertIn("migration_add_finance_rent.sql", r.json()["detail"])
+
+
+# ── the schema step the server runs at start-up ───────────────────────────
+class _RawDB:
+    """The real database object's two raw-SQL methods, recording what they were asked to run."""
+    def __init__(self, columns=(), fail_on=(), fail_fetch=False):
+        self.ran, self.columns, self.fail_on, self.fail_fetch = [], list(columns), fail_on, fail_fetch
+
+    async def execute_raw(self, sql):
+        self.ran.append(sql)
+        if any(f in sql for f in self.fail_on):
+            raise Exception("(1142, \"ALTER command denied to user\")")
+
+    async def fetch_raw(self, sql):
+        if self.fail_fetch:
+            raise Exception("information_schema unavailable")
+        return [{"COLUMN_NAME": c} for c in self.columns]
+
+
+def _registry_stub():
+    return {"fin_transactions": {"columns": {"id", "type", "amount"}, "json_cols": {"items"}}}
+
+
+def _ddl_columns(sql, table):
+    """Column names of `CREATE TABLE IF NOT EXISTS <table> (...)` in a statement or a file, comments ignored."""
+    sql = re.sub(r"--[^\n]*", "", sql)
+    body = re.search(rf"CREATE TABLE IF NOT EXISTS {table} \((.*?)\)\s*ENGINE", sql, re.S).group(1)
+    parts, depth, cur = [], 0, ""
+    for ch in body:
+        depth += ch == "("
+        depth -= ch == ")"
+        if ch == "," and depth == 0:
+            parts.append(cur)
+            cur = ""
+        else:
+            cur += ch
+    parts.append(cur)
+    return {p.split()[0] for p in parts if p.split() and p.split()[0].upper() not in ("INDEX", "CONSTRAINT", "UNIQUE", "PRIMARY", "KEY")}
+
+
+class FinanceSchemaTests(unittest.TestCase):
+    def setUp(self):
+        finance_books._services_ready = True
+
+    def tearDown(self):
+        finance_books._services_ready = True
+
+    def _api(self):
+        db = _DB()
+        router = APIRouter(prefix="/api")
+
+        async def admin_only():
+            return {"company_id": "c1"}
+
+        finance_books.register(router, db, admin_only)
+        app = FastAPI()
+        app.include_router(router)
+        return TestClient(app), db
+
+    def test_startup_creates_the_tables_adds_the_columns_and_lists_them(self):
+        raw, registry = _RawDB(columns=["id", "installation_charge", "service_charges"]), _registry_stub()
+        asyncio.run(finance_books.ensure_schema(raw, registry))
+        self.assertEqual(len([q for q in raw.ran if q.startswith("CREATE TABLE IF NOT EXISTS")]), 2)
+        self.assertTrue(all("ADD COLUMN IF NOT EXISTS" in q for q in raw.ran if q.startswith("ALTER")))
+        self.assertEqual(len([q for q in raw.ran if q.startswith("ALTER")]), 2)
+        meta = registry["fin_transactions"]
+        self.assertTrue({"installation_charge", "service_charges"} <= meta["columns"])
+        self.assertEqual(meta["json_cols"], {"items", "service_charges"})
+        self.assertTrue(finance_books._services_ready)
+
+    def test_if_the_database_refuses_finance_still_works_without_services(self):
+        raw, registry = _RawDB(columns=["id", "type"], fail_on=("ALTER", "CREATE TABLE")), _registry_stub()
+        asyncio.run(finance_books.ensure_schema(raw, registry))     # does not raise
+        self.assertEqual(registry["fin_transactions"]["columns"], {"id", "type", "amount"}, "a missing column is never listed")
+        self.assertFalse(finance_books._services_ready)
+        api, db = self._api()
+        party = api.post("/api/fin/parties", json={"name": "Ram"}).json()
+        books = api.get("/api/fin/books").json()
+        self.assertFalse(books["services_ready"])
+        plain = api.post("/api/fin/transactions", json={"type": "sale", "amount": 500, "customer_id": party["id"], "party_name": "Ram"})
+        self.assertEqual(plain.status_code, 200, plain.text)
+        self.assertNotIn("service_charges", db.fin_transactions.rows[0])
+        self.assertNotIn("installation_charge", db.fin_transactions.rows[0])
+        self.assertEqual(len(db.fin_customer_ledger.rows), 1, "the bill still books its debt")
+        with_services = api.post("/api/fin/transactions", json={"type": "sale", "amount": 600, "customer_id": party["id"],
+                                                                "service_charges": [{"name": "Fitting", "amount": 100}]})
+        self.assertEqual(with_services.status_code, 503)
+        self.assertIn("migration_add_finance_rent.sql", with_services.json()["detail"])
+        self.assertEqual(len(db.fin_transactions.rows), 1, "the refused bill was not saved without its services")
+
+    def test_a_failed_check_leaves_services_off_and_never_raises(self):
+        raw, registry = _RawDB(fail_fetch=True), _registry_stub()
+        asyncio.run(finance_books.ensure_schema(raw, registry))
+        self.assertFalse(finance_books._services_ready)
+        self.assertNotIn("service_charges", registry["fin_transactions"]["columns"])
+
+    def test_the_startup_statements_the_sql_file_and_the_sql_layer_agree(self):
+        sql_file = (Path(__file__).resolve().parent.parent / "migration_add_finance_rent.sql").read_text(encoding="utf-8")
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from test_sqldb_registry import _registry
+        registry = _registry()
+        for table in ("fin_rentals", "fin_cash_account"):
+            in_python = _ddl_columns(" ".join(finance_books.RENT_DDL), table)
+            self.assertEqual(in_python, _ddl_columns(sql_file, table), f"{table}: start-up DDL and the .sql file differ")
+            self.assertEqual(in_python, registry[table], f"{table}: DDL and sqldb.TABLES differ")
+        for col, _kind in finance_books.SERVICE_COLUMNS:
+            self.assertIn(col, sql_file)
+            self.assertNotIn(col, registry["fin_transactions"], "listed statically it would break every read if the column is missing")
 
 
 if __name__ == "__main__":

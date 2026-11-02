@@ -40,7 +40,7 @@ export const COLORS = { in: "#047857", out: "#B91C1C", sale: "#1D4ED8", purchase
 export const emptyBooks = () => ({
   parties: [], accounts: [], transfers: [], categories: [], items: [],
   transactions: [], customer_ledger: [], vendor_ledger: [],
-  rentals: [], cash_account: null, rent_ready: false,
+  rentals: [], cash_account: null, rent_ready: false, services_ready: false,
 });
 
 export const partyName = (books, id, fallback = "") => books.parties.find((p) => p.id === id)?.name || fallback;

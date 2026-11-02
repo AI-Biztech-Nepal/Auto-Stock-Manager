@@ -117,7 +117,7 @@ function ItemisedBill({ type }) {
         <datalist id="fin-item-names">{books.items.map((i) => <option key={i.id} value={i.name} />)}</datalist>
         <div className="flex flex-wrap gap-2 mt-3">
           <button type="button" onClick={() => setLines((ls) => [...ls, newLine()])} className={btnGhost}><Plus size={16} /> Add item</button>
-          <button type="button" onClick={() => setServices((ss) => [...ss, newService()])} className={btnGhost} data-testid="add-service"><Wrench size={15} /> Add service</button>
+          {books.services_ready && <button type="button" onClick={() => setServices((ss) => [...ss, newService()])} className={btnGhost} data-testid="add-service"><Wrench size={15} /> Add service</button>}
         </div>
         {services.length > 0 && (
           <div className="mt-3 space-y-2">

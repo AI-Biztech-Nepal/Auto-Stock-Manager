@@ -26,13 +26,16 @@ import { todayStr } from "./finance/money";
 const PRINT_CSS = "@media print { aside, header, .fin-no-print { display: none !important; } main { padding: 0 !important; overflow: visible !important; } }";
 
 function SetupNotice({ message }) {
+  // The message names the file to run (the first migration, or the later rent one).
+  const file = (message.match(/backend\/migration_[a-z_]+\.sql/) || ["backend/migration_add_finance_books.sql"])[0];
+  const rentFile = file.includes("rent");
   return (
     <Card className="p-6 space-y-3 max-w-2xl">
       <h2 className="text-lg font-bold text-slate-900">Finance books are not set up yet</h2>
       <p className="text-sm text-slate-600">{message}</p>
       <ol className="text-sm text-slate-600 list-decimal pl-5 space-y-1">
-        <li>Open the file <code className="bg-slate-100 px-1 rounded">backend/migration_add_finance_books.sql</code> from the project.</li>
-        <li>Run it once on the database. It only adds nine new tables named <code className="bg-slate-100 px-1 rounded">fin_*</code> and changes nothing that exists.</li>
+        <li>Open the file <code className="bg-slate-100 px-1 rounded">{file}</code> from the project.</li>
+        <li>Run it once on the database. {rentFile ? "It only adds two tables and two columns for Rent and bill services, and changes nothing that exists." : <>It only adds nine new tables named <code className="bg-slate-100 px-1 rounded">fin_*</code> and changes nothing that exists.</>}</li>
         <li>Reload this page.</li>
       </ol>
     </Card>

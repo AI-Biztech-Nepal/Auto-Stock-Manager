@@ -1,9 +1,10 @@
 -- Finance books, second half: Rent, services on bills and the Cash account's details.
 -- Ported from the FINANCE-NEPAL project (its migrations 0009-0025), rewritten for MySQL.
 --
--- RUN BY HAND, ONCE, AFTER migration_add_finance_books.sql and BEFORE deploying the matching backend
--- (the backend reads the new fin_transactions columns on every Finance screen, so a backend deployed
--- first answers 503 "run migration_add_finance_rent.sql" until this file has been run).
+-- YOU NORMALLY DO NOT NEED TO RUN THIS. The backend applies these same statements itself when it starts
+-- (finance_books.ensure_schema, the same way server.py adds its other post-schema columns), and until they
+-- are in the database Finance keeps working without Rent and bill services. Run this file by hand only if
+-- the server logs "Could not ensure the Rent tables" (a database user that may not create or alter tables):
 --
 --   mysql -u <user> -p <db>  < migration_add_finance_rent.sql
 --
