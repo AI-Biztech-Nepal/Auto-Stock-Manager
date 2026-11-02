@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { Phone, MessageCircle, Trash2, Inbox, Wrench, Repeat, Bike, X, Mail, MapPin, Check, Ban, Users, ExternalLink, UserPlus } from "lucide-react";
+import { Phone, MessageCircle, Inbox, Wrench, Repeat, Bike, X, Mail, MapPin, Check, Ban, Users, ExternalLink, UserPlus } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
 import { formatNPR } from "../utils/helpers";
@@ -9,18 +9,19 @@ import { formatNPR } from "../utils/helpers";
 // taps (the website asks who they are first). Every lead is decided once: Accept (the person goes into the CRM) or
 // Reject (a remark saying why is required).
 // Tabs: "All" is the inbox of pending leads. Accepting one moves it out of All into the tab for its type; rejecting
-// one moves it to the Rejected tab.
+// one moves it to the Rejected tab. A registered account also shows in Accounts while it is still pending. A lead is never
+// deleted: Reject is the only way to put one aside.
 const TYPES = {
   sell: { label: "Sell bike", Icon: Bike, cls: "bg-emerald-50 text-emerald-700" },
   exchange: { label: "Exchange", Icon: Repeat, cls: "bg-indigo-50 text-indigo-700" },
   service: { label: "Service", Icon: Wrench, cls: "bg-amber-50 text-amber-700" },
   whatsapp: { label: "WhatsApp tap", Icon: MessageCircle, cls: "bg-green-50 text-green-700" },
   call: { label: "Call tap", Icon: Phone, cls: "bg-sky-50 text-sky-700" },
-  signup: { label: "New account", Icon: UserPlus, cls: "bg-violet-50 text-violet-700" },
+  signup: { label: "Account", tab: "Accounts", Icon: UserPlus, cls: "bg-violet-50 text-violet-700" },
 };
 const TABS = [
   { key: "all", label: "All" },
-  ...Object.entries(TYPES).map(([key, v]) => ({ key, label: v.label, Icon: v.Icon })),
+  ...Object.entries(TYPES).map(([key, v]) => ({ key, label: v.tab || v.label, Icon: v.Icon })),
   { key: "rejected", label: "Rejected" },
 ];
 const MIN_REMARK = 3;
@@ -40,6 +41,8 @@ const state = l => (l.status === "accepted" || l.status === "rejected" ? l.statu
 // The one tab a lead lives in, so none can go missing. An accepted lead of a type with no tab of its own stays in All.
 const tabOf = l => (state(l) === "new" ? "all" : state(l) === "rejected" ? "rejected" : TYPES[l.type] ? l.type : "all");
 const tabLabel = key => TABS.find(t => t.key === key)?.label;
+// Where a lead is listed: its home tab, plus Accounts for a registered account that is still pending (it shows there at once).
+const inTab = (l, key) => tabOf(l) === key || (key === "signup" && l.type === "signup" && state(l) === "new");
 
 export default function Leads() {
   const navigate = useNavigate();
@@ -96,27 +99,17 @@ export default function Leads() {
     finally { setBusyId(null); }
   };
 
-  const remove = async lead => {
-    if (!window.confirm(`Delete the lead from ${lead.name}?`)) return;
-    try {
-      await api.delete(`/leads/${lead.id}`);
-      setLeads(ls => ls.filter(l => l.id !== lead.id));
-      window.dispatchEvent(new Event("leads-changed"));
-    } catch {
-      toast.error("Failed to delete lead");
-    }
-  };
-
   if (loading) {
     return <div className="flex items-center justify-center h-48"><div className="animate-spin w-7 h-7 border-4 border-blue-600 border-t-transparent rounded-full" /></div>;
   }
 
-  const shown = leads.filter(l => tabOf(l) === tab);
+  const shown = leads.filter(l => inTab(l, tab));
   const pendingCount = leads.filter(l => tabOf(l) === "all" && state(l) === "new").length;
   const [emptyTitle, emptyText] = leads.length === 0
     ? ["No leads yet", "Sell, exchange and service requests, and people who tap WhatsApp or Call on your website, will appear here as they come in."]
     : tab === "all" ? ["Nothing waiting for a decision", "New leads from your website appear here. Accept one to move it to its own tab, or reject it to move it to Rejected."]
     : tab === "rejected" ? ["No rejected leads", "Leads you reject are kept here, with your reason."]
+    : tab === "signup" ? ["No registered accounts yet", "People who sign in with Google on your website and add their phone number appear here."]
     : [`No accepted leads in ${tabLabel(tab)}`, "Accept a lead in the All tab and it moves here."];
 
   return (
@@ -164,7 +157,6 @@ export default function Leads() {
                   <div className="flex items-center gap-2">
                     {l.phone && <a href={`tel:${l.phone}`} className="h-9 px-3 rounded-lg border border-slate-200 text-sm font-semibold text-slate-700 hover:bg-slate-50 inline-flex items-center gap-1.5"><Phone size={14} /> {l.phone}</a>}
                     {l.phone && <a href={`https://wa.me/${waNumber(l.phone)}`} target="_blank" rel="noopener noreferrer" aria-label="WhatsApp" className="h-9 w-9 rounded-lg bg-green-600 text-white hover:bg-green-700 inline-flex items-center justify-center"><MessageCircle size={16} /></a>}
-                    <button onClick={() => remove(l)} aria-label="Delete lead" className="h-9 w-9 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 inline-flex items-center justify-center"><Trash2 size={16} /></button>
                   </div>
                 </div>
 

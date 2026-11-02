@@ -5396,11 +5396,7 @@ async def reject_lead(lid: str, body: LeadReject, cu: dict = Depends(admin_only)
                                                          "decided_at": datetime.now(timezone.utc).isoformat()}})
     return await db.leads.find_one({"id": lid}, {"_id": 0})
 
-@api_router.delete("/leads/{lid}")
-async def delete_lead(lid: str, cu: dict = Depends(admin_only)):
-    r = await db.leads.delete_one({"id": lid})
-    if r.deleted_count == 0: raise HTTPException(404, "Lead not found")
-    return {"message": "Deleted"}
+# There is no delete: a lead is kept for good, and Reject (with a remark) is the only way to put one aside.
 
 # ── OFFERS (storefront "Offers" tab: Dashain Spin & Win) ───────────────
 # A customer who buys a vehicle enters their name, mobile number and the bike's number plate
