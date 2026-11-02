@@ -5,9 +5,10 @@ import { useBooks } from "./BooksContext";
 import Feed from "./Feed";
 import { Card, Field, DateField, AccountSelect, PartyPicker, inputCls, btnPrimary, btnGhost } from "./ui";
 import { todayStr, nextReceiptNo, COLORS } from "./money";
+import { noteWithItem, vehicleNames } from "./rentLogic";
 
 let rowSeq = 0;
-const newRow = () => ({ key: ++rowSeq, party: { id: null, name: "" }, amount: "", note: "" });
+const newRow = () => ({ key: ++rowSeq, party: { id: null, name: "" }, item: "", amount: "", note: "" });
 
 // One form, two directions -- and the direction decides the table, which is the bug this design
 // exists to prevent:  Received -> customer ledger credit;  Payment Out -> VENDOR ledger credit.
@@ -35,6 +36,7 @@ export default function Payment({ direction }) {
 
   const setRow = (key, patch) => setRows((rs) => rs.map((r) => (r.key === key ? { ...r, ...patch } : r)));
   const total = rows.reduce((s, r) => s + (Number(r.amount) || 0), 0);
+  const vehicles = useMemo(() => vehicleNames(books), [books]);
 
   const resolveParty = async (p) => {
     if (p.id) return p.id;
@@ -56,7 +58,7 @@ export default function Payment({ direction }) {
       const partyId = await resolveParty(r.party);
       if (!partyId) break;
       const ok = await post(`/fin/ledger/${side}`, {
-        party_id: partyId, entry_type: "credit", amount: Number(r.amount), note: r.note,
+        party_id: partyId, entry_type: "credit", amount: Number(r.amount), note: noteWithItem(r.item, r.note),
         bank_account_id: method, entry_date: date, receipt_no: number,
       });
       if (!ok) break;
@@ -85,9 +87,10 @@ export default function Payment({ direction }) {
 
         <div className="space-y-3">
           {rows.map((r, i) => (
-            <div key={r.key} className="grid sm:grid-cols-[1fr_9rem_1fr_auto] gap-3 items-end">
+            <div key={r.key} className="grid sm:grid-cols-[1fr_11rem_9rem_1fr_auto] gap-3 items-end">
               <PartyPicker label={i === 0 ? (received ? "Received from" : "Paid to") : ""} parties={books.parties} id={r.party.id} name={r.party.name}
                 onChange={(p) => setRow(r.key, { party: { id: p.id, name: p.name } })} />
+              <Field label={i === 0 ? "Item" : ""}><input list="fin-vehicle-names" value={r.item} onChange={(e) => setRow(r.key, { item: e.target.value })} className={inputCls} placeholder="Vehicle (optional)" /></Field>
               <Field label={i === 0 ? "Amount (NPR)" : ""}><input type="number" min="0" value={r.amount} onChange={(e) => setRow(r.key, { amount: e.target.value })} className={inputCls} /></Field>
               <Field label={i === 0 ? "Note" : ""}><input value={r.note} onChange={(e) => setRow(r.key, { note: e.target.value })} className={inputCls} /></Field>
               <button type="button" onClick={() => setRows((rs) => (rs.length > 1 ? rs.filter((x) => x.key !== r.key) : rs))} disabled={rows.length === 1}
@@ -95,6 +98,9 @@ export default function Payment({ direction }) {
             </div>
           ))}
         </div>
+
+        <datalist id="fin-vehicle-names">{vehicles.map((v) => <option key={v} value={v} />)}</datalist>
+        <p className="text-xs text-slate-400">Pick the vehicle in Item when the payment is for a rental: Rent reads what was paid from it.</p>
 
         <div className="flex flex-wrap items-center justify-between gap-3">
           <button type="button" onClick={() => setRows((rs) => [...rs, newRow()])} className={btnGhost}><Plus size={16} /> Add another person</button>

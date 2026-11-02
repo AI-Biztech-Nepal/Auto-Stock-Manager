@@ -83,6 +83,8 @@ TENANT_COLLECTIONS = {
     # Finance books (see finance_books.py); tables are created by migration_add_finance_books.sql.
     "fin_parties", "fin_bank_accounts", "fin_account_transfers", "fin_expense_categories", "fin_items",
     "fin_transactions", "fin_customer_ledger", "fin_vendor_ledger", "fin_statement_imports",
+    # Rent and the Cash account's details; created by migration_add_finance_rent.sql.
+    "fin_rentals", "fin_cash_account",
 }
 
 def company_scope(cu: dict) -> dict:

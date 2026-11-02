@@ -136,12 +136,18 @@ TABLES = {
     "fin_transactions": {"columns": {"id", "company_id", "type", "amount", "note", "party_name", "customer_id", "bill_no",
                                       "bill_date", "party_address", "vat_pan_no", "items", "discount_amount", "vat_amount",
                                       "expense_category_id", "payment_mode", "bank_account_id", "source_type", "source_id",
-                                      "created_at", "updated_at"}, "json_cols": {"items"}},
+                                      "installation_charge", "service_charges",
+                                      "created_at", "updated_at"}, "json_cols": {"items", "service_charges"}},
     "fin_customer_ledger": {"columns": {"id", "company_id", "customer_id", "entry_type", "amount", "note", "source", "source_type", "source_id",
                                      "bank_account_id", "entry_date", "receipt_no", "created_at"}},
     "fin_vendor_ledger": {"columns": {"id", "company_id", "vendor_id", "entry_type", "amount", "note", "source", "source_type", "source_id",
                                      "bank_account_id", "entry_date", "receipt_no", "created_at"}},
     "fin_statement_imports": {"columns": {"id", "company_id", "reference_code", "created_at"}},
+    # Rent and the Cash account's details (migration_add_finance_rent.sql)
+    "fin_rentals": {"columns": {"id", "company_id", "car", "model", "customer_id", "customer_name", "start_date", "end_date",
+                                 "returned_on", "rate_per_day", "note", "created_at", "updated_at"}},
+    "fin_cash_account": {"columns": {"id", "company_id", "name", "bank_name", "account_number", "account_holder_name", "address",
+                                      "updated_at"}},
 }
 
 

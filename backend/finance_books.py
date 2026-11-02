@@ -10,21 +10,39 @@ triggers rewritten as plain code so they run on MySQL:
   * Ledger rows written by a bill (source = "booking") are read-only here; change the bill.
   * Statement lines are remembered by the bank's reference code so a re-import cannot double-count.
 
-The tables are created by migration_add_finance_books.sql, which is run by hand -- nothing in this
-module creates or alters a table. Until it has been run, every endpoint answers 503 with a clear
-message and the Finance screens show a "not set up yet" notice.
+Rent, services on bills and the Cash account's details come from the FINANCE-NEPAL project's
+later migrations and live in migration_add_finance_rent.sql:
+
+  * RENT: a vehicle given out by the day. The renter owes the daily rate for every day it is out
+    (the day it went out and the day it came back both count). Those days are written onto the
+    renter's customer ledger as read-only "Daily rent" debits (source = "booking", source_type =
+    "rental_rent"), kept in step whenever a rental changes and caught up to today whenever the books
+    are read; the renter pays them as ordinary Received entries.
+
+The tables are created by migration_add_finance_books.sql and migration_add_finance_rent.sql,
+which are run by hand -- nothing in this module creates or alters a table. Until they have been run,
+every endpoint answers 503 with a clear message and the Finance screens show a "not set up yet" notice.
 """
+import asyncio
 import functools
 import re
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import List, Optional
+from zoneinfo import ZoneInfo
 
 from fastapi import Depends, HTTPException
 from pydantic import BaseModel, Field
 
 SETUP_MESSAGE = ("Finance books are not set up yet. Run backend/migration_add_finance_books.sql "
                  "on the database once, then reload this page.")
+
+UPGRADE_MESSAGE = ("Finance books need one more update. Run backend/migration_add_finance_rent.sql "
+                   "on the database once, then reload this page.")
+
+RENT_SOURCE = "rental_rent"
+_RENT_NS = uuid.UUID("5b0c6a4e-8f3a-4c57-9f0e-2a6c1d7b9e10")
+_rent_lock = asyncio.Lock()
 
 LEDGER_SIDES = {"customer": ("fin_customer_ledger", "customer_id"),
                 "vendor": ("fin_vendor_ledger", "vendor_id")}
@@ -60,8 +78,55 @@ def _amount(v) -> float:
     return round(v, 2)
 
 
+def _today_np() -> str:
+    """Today in Nepal -- the day rent is counted up to, whatever time zone the server runs in."""
+    return datetime.now(ZoneInfo("Asia/Kathmandu")).date().isoformat()
+
+
+def _date(v: Optional[str], what: str, required: bool = False) -> Optional[str]:
+    v = (v or "").strip()
+    if not v:
+        if required:
+            raise HTTPException(400, f"{what} is required")
+        return None
+    try:
+        return date.fromisoformat(v[:10]).isoformat()
+    except ValueError:
+        raise HTTPException(400, f"{what} must be a date (YYYY-MM-DD)")
+
+
+def _money(v, what: str) -> float:
+    try:
+        v = float(v or 0)
+    except (TypeError, ValueError):
+        raise HTTPException(400, f"{what} must be a number")
+    if v < 0:
+        raise HTTPException(400, f"{what} cannot be negative")
+    return round(v, 2)
+
+
+def car_key(s: Optional[str]) -> str:
+    """A vehicle's name as bills and payments compare it: trimmed, one space between words, lower case."""
+    return re.sub(r"\s+", " ", (s or "").strip()).lower()
+
+
+def rent_days(rental: dict, today: str) -> List[str]:
+    """Every day a rental has been out, as YYYY-MM-DD: from the day it went out to the day it came back
+    (or today while it is still out; never past today)."""
+    try:
+        start = date.fromisoformat(str(rental.get("start_date"))[:10])
+        last = date.fromisoformat(min(str(rental.get("returned_on") or today)[:10], today))
+    except ValueError:
+        return []
+    return [(start + timedelta(days=i)).isoformat() for i in range((last - start).days + 1)]
+
+
+def _is_missing_table(e: Exception) -> bool:
+    return "1146" in str(e) or "doesn't exist" in str(e)
+
+
 def _safe(fn):
-    """Turn "table doesn't exist" into a clear 503 instead of a 500."""
+    """Turn "table doesn't exist" / "column doesn't exist" into a clear 503 instead of a 500."""
     @functools.wraps(fn)
     async def wrapper(*args, **kwargs):
         try:
@@ -70,8 +135,12 @@ def _safe(fn):
             raise
         except Exception as e:  # noqa: BLE001
             text = str(e)
-            if "1146" in text or "doesn't exist" in text:
-                raise HTTPException(503, SETUP_MESSAGE)
+            if _is_missing_table(e):
+                # fin_rentals / fin_cash_account belong to the second migration.
+                second = any(t in text for t in ("fin_rentals", "fin_cash_account"))
+                raise HTTPException(503, UPGRADE_MESSAGE if second else SETUP_MESSAGE)
+            if "1054" in text or "Unknown column" in text:
+                raise HTTPException(503, UPGRADE_MESSAGE)
             raise
     return wrapper
 
@@ -115,6 +184,11 @@ class LineItem(BaseModel):
     amount: float = 0
 
 
+class ServiceLine(BaseModel):
+    name: str = ""
+    amount: float = 0
+
+
 class BillBody(BaseModel):
     type: str
     amount: float
@@ -131,6 +205,26 @@ class BillBody(BaseModel):
     expense_category_id: Optional[str] = None
     payment_mode: Optional[str] = None
     bank_account_id: Optional[str] = None
+    service_charges: List[ServiceLine] = Field(default_factory=list)  # sale / purchase only; part of `amount`
+
+
+class RentalBody(BaseModel):
+    car: str
+    model: Optional[str] = None
+    customer_id: Optional[str] = None
+    start_date: str
+    end_date: Optional[str] = None       # None keeps the due-back day a rental already has
+    returned_on: Optional[str] = None
+    rate_per_day: float = 0
+    note: Optional[str] = None
+
+
+class CashAccountBody(BaseModel):
+    name: Optional[str] = None
+    bank_name: Optional[str] = None
+    account_number: Optional[str] = None
+    account_holder_name: Optional[str] = None
+    address: Optional[str] = None
 
 
 class LedgerBody(BaseModel):
@@ -207,12 +301,63 @@ def register(api_router, db, admin_only):
             elif existing:
                 await coll.delete_one({"id": existing["id"]})
 
+    async def _sync_rental_rent():
+        """Make the renters' ledgers match their rentals: one "Daily rent" debit per rental per day it has
+        been out, nothing for a rental with no renter or no rate. Lines no longer due (a rental removed or
+        returned earlier, its renter or rate changed) go; changed ones are corrected; missing days are added.
+        Idempotent, so it is safe to call on every write and every read."""
+        async with _rent_lock:
+            today = _today_np()
+            wanted = {}
+            for r in await _all(db.fin_rentals, "start_date"):
+                rate = float(r.get("rate_per_day") or 0)
+                if not r.get("customer_id") or not rate > 0:
+                    continue
+                for day in rent_days(r, today):
+                    sid = str(uuid.uuid5(_RENT_NS, f"{r['id']}:{day}"))
+                    wanted[sid] = {"customer_id": r["customer_id"], "amount": rate,
+                                   "note": f"Daily rent · {r['car']}", "entry_date": day}
+            ledger = db.fin_customer_ledger
+            existing = await ledger.find({"source_type": RENT_SOURCE}, {"_id": 0}).to_list(1000000)
+            kept, stale = set(), []
+            for e in existing:
+                w = wanted.get(e.get("source_id"))
+                if not w or e["source_id"] in kept or e["customer_id"] != w["customer_id"]:
+                    stale.append(e["id"])
+                    continue
+                kept.add(e["source_id"])
+                changed = {k: w[k] for k in ("amount", "note", "entry_date") if e.get(k) != w[k]}
+                if changed:
+                    await ledger.update_one({"id": e["id"]}, {"$set": changed})
+            for i in range(0, len(stale), 500):
+                await ledger.delete_many({"id": {"$in": stale[i:i + 500]}})
+            now = _now()
+            missing = [{"id": _id(), "entry_type": "debit", "source": "booking", "source_type": RENT_SOURCE,
+                        "source_id": sid, "bank_account_id": None, "receipt_no": None, "created_at": now, **w}
+                       for sid, w in wanted.items() if sid not in kept]
+            if missing:
+                await ledger.insert_many(missing)
+
+    async def _optional(coll, sort_field="created_at"):
+        """A table from migration_add_finance_rent.sql: None until that migration has been run, so the
+        rest of the books keep working in the meantime."""
+        try:
+            return await _all(coll, sort_field)
+        except Exception as e:  # noqa: BLE001
+            if _is_missing_table(e):
+                return None
+            raise
+
     # ── everything, in one read ────────────────────────────────────────────
     @api_router.get("/fin/books")
     @_safe
     async def fin_books(cu: dict = Depends(admin_only)):
         """All of the company's books at once. The screens compute balances from this one payload
         with a single shared money module, so two screens can never disagree."""
+        rentals = await _optional(db.fin_rentals, "start_date")
+        cash_rows = await _optional(db.fin_cash_account, "updated_at")
+        if rentals:
+            await _sync_rental_rent()  # catches up the days since the books were last read
         return {
             "parties": await _all(db.fin_parties, "name"),
             "accounts": await _all(db.fin_bank_accounts, "name"),
@@ -222,6 +367,10 @@ def register(api_router, db, admin_only):
             "transactions": await _all(db.fin_transactions),
             "customer_ledger": await _all(db.fin_customer_ledger),
             "vendor_ledger": await _all(db.fin_vendor_ledger),
+            "rentals": rentals or [],
+            "cash_account": (cash_rows or [None])[0],
+            # False until migration_add_finance_rent.sql has been run: the Rent screen says so.
+            "rent_ready": rentals is not None and cash_rows is not None,
         }
 
     # ── parties ────────────────────────────────────────────────────────────
@@ -412,7 +561,16 @@ def register(api_router, db, admin_only):
             await _party_or_404(body.customer_id)
         bank = await _account_ok(body.bank_account_id)
         mode = body.payment_mode if body.payment_mode in ("cash", "bank", "credit") else ("bank" if bank else "cash")
+        # Services (installation, repair, outsourced work ...) belong to sale and purchase bills only. They are
+        # part of `amount` already, so the ledgers and every total that reads it follow without any change.
+        services = []
+        if body.type in ("sale", "purchase"):
+            for line in body.service_charges:
+                name, value = _clean(line.name), _money(line.amount, "A service amount")
+                if name and value > 0:
+                    services.append({"name": name, "amount": value})
         return {
+            "service_charges": services, "installation_charge": round(sum(s["amount"] for s in services), 2),
             "type": body.type, "amount": amount, "note": _clean(body.note), "party_name": _clean(body.party_name),
             "customer_id": body.customer_id or None, "bill_no": _clean(body.bill_no), "bill_date": _clean(body.bill_date),
             "party_address": _clean(body.party_address), "vat_pan_no": _clean(body.vat_pan_no),
@@ -597,3 +755,76 @@ def register(api_router, db, admin_only):
             known.add(ref)
             done += 1
         return {"imported": done, "skipped": skipped}
+
+    # ── rent ───────────────────────────────────────────────────────────────
+    async def _rental_doc(body: RentalBody, own_id: Optional[str] = None) -> dict:
+        car = _clean(body.car)
+        if not car:
+            raise HTTPException(400, "Add the item that is rented out")
+        start = _date(body.start_date, "The day it was rented", required=True)
+        returned = _date(body.returned_on, "Returned on")
+        if returned and returned < start:
+            raise HTTPException(400, "It cannot come back before the day it was rented")
+        party = await _party_or_404(body.customer_id) if body.customer_id else None
+        if not returned:
+            # A vehicle is out with one renter at a time: one still out cannot be rented again.
+            for r in await _all(db.fin_rentals, "start_date"):
+                if r["id"] != own_id and not r.get("returned_on") and car_key(r["car"]) == car_key(car):
+                    with_whom = f" with {r['customer_name']}" if r.get("customer_name") else ""
+                    raise HTTPException(409, f"{r['car']} is out{with_whom} since {r['start_date']}. "
+                                             "Open that rental and set its Returned on date first.")
+        return {"car": car, "model": _clean(body.model), "customer_id": party["id"] if party else None,
+                "customer_name": party["name"] if party else None, "start_date": start, "returned_on": returned,
+                "rate_per_day": _money(body.rate_per_day, "Rate per day"), "note": _clean(body.note)}
+
+    @api_router.post("/fin/rentals")
+    @_safe
+    async def fin_create_rental(body: RentalBody, cu: dict = Depends(admin_only)):
+        doc = await _rental_doc(body)
+        now = _now()
+        doc.update({"id": _id(), "end_date": _date(body.end_date, "Due back"), "created_at": now, "updated_at": now})
+        await db.fin_rentals.insert_one(doc)
+        doc.pop("_id", None)
+        await _sync_rental_rent()
+        return doc
+
+    @api_router.put("/fin/rentals/{rid}")
+    @_safe
+    async def fin_update_rental(rid: str, body: RentalBody, cu: dict = Depends(admin_only)):
+        existing = await db.fin_rentals.find_one({"id": rid}, {"_id": 0})
+        if not existing:
+            raise HTTPException(404, "Rental not found")
+        doc = await _rental_doc(body, own_id=rid)
+        doc["end_date"] = _date(body.end_date, "Due back") if body.end_date is not None else existing.get("end_date")
+        doc["updated_at"] = _now()
+        await db.fin_rentals.update_one({"id": rid}, {"$set": doc})
+        await _sync_rental_rent()
+        return {**existing, **doc}
+
+    @api_router.delete("/fin/rentals/{rid}")
+    @_safe
+    async def fin_delete_rental(rid: str, cu: dict = Depends(admin_only)):
+        """The renter's daily rent lines go with the rental; what they already paid stays."""
+        if not await db.fin_rentals.find_one({"id": rid}, {"_id": 0, "id": 1}):
+            raise HTTPException(404, "Rental not found")
+        await db.fin_rentals.delete_one({"id": rid})
+        await _sync_rental_rent()
+        return {"ok": True}
+
+    # ── the Cash account's label and details ───────────────────────────────
+    @api_router.put("/fin/cash-account")
+    @_safe
+    async def fin_save_cash_account(body: CashAccountBody, cu: dict = Depends(admin_only)):
+        """Cash is never a bank account row (cash is bank_account_id = null), so its label and details are
+        kept in one row of their own and shown on the Bank Accounts page like any other account."""
+        doc = {"name": _clean(body.name), "bank_name": _clean(body.bank_name), "account_number": _clean(body.account_number),
+               "account_holder_name": _clean(body.account_holder_name), "address": _clean(body.address),
+               "updated_at": _now()}
+        existing = await db.fin_cash_account.find_one({}, {"_id": 0})
+        if existing:
+            await db.fin_cash_account.update_one({"id": existing["id"]}, {"$set": doc})
+            return {**existing, **doc}
+        doc["id"] = _id()
+        await db.fin_cash_account.insert_one(doc)
+        doc.pop("_id", None)
+        return doc

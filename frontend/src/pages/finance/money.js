@@ -40,6 +40,7 @@ export const COLORS = { in: "#047857", out: "#B91C1C", sale: "#1D4ED8", purchase
 export const emptyBooks = () => ({
   parties: [], accounts: [], transfers: [], categories: [], items: [],
   transactions: [], customer_ledger: [], vendor_ledger: [],
+  rentals: [], cash_account: null, rent_ready: false,
 });
 
 export const partyName = (books, id, fallback = "") => books.parties.find((p) => p.id === id)?.name || fallback;
@@ -176,11 +177,17 @@ export function nextBillNo(transactions, type) {
 }
 
 // ── bill arithmetic ───────────────────────────────────────────────────────
-export function billTotals(lines, discount, vatPercent) {
-  const subtotal = lines.reduce((s, l) => (l.description?.trim() && Number(l.qty) > 0 && Number(l.rate) >= 0 ? s + Number(l.qty) * Number(l.rate) : s), 0);
+// Services (installation, repair, outsourced work ...) are part of the bill: the discount and VAT apply to
+// the items and the services together, and the grand total already includes them.
+export const serviceLines = (services = []) => services.filter((s) => String(s.name || "").trim() && Number(s.amount) > 0);
+
+export function billTotals(lines, discount, vatPercent, services = []) {
+  const items = lines.reduce((s, l) => (l.description?.trim() && Number(l.qty) > 0 && Number(l.rate) >= 0 ? s + Number(l.qty) * Number(l.rate) : s), 0);
+  const serviceTotal = serviceLines(services).reduce((s, x) => s + Number(x.amount), 0);
+  const subtotal = items + serviceTotal;
   const disc = Math.max(0, Number(discount) || 0);
   const vat = Math.round(((subtotal - disc) * (Number(vatPercent) || 0)) / 100);
-  return { subtotal, discount: disc, vat, total: subtotal - disc + vat };
+  return { items, services: serviceTotal, subtotal, discount: disc, vat, total: subtotal - disc + vat };
 }
 
 // ── Day Book (section 3.1) ────────────────────────────────────────────────

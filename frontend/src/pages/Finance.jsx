@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   LayoutDashboard, BookOpen, ArrowDownCircle, ArrowUpCircle, Receipt, ShoppingCart, Wallet, Users, Landmark,
-  FileSpreadsheet, BarChart3, TrendingUp, Package, PieChart,
+  FileSpreadsheet, BarChart3, TrendingUp, Package, PieChart, Car,
 } from "lucide-react";
 import { BooksProvider, useBooks } from "./finance/BooksContext";
 import Dashboard from "./finance/Dashboard";
@@ -14,14 +14,16 @@ import BankAccounts from "./finance/BankAccounts";
 import ImportStatement from "./finance/ImportStatement";
 import Inventory from "./finance/Inventory";
 import BusinessSummary from "./finance/BusinessSummary";
+import Rent from "./finance/Rent";
 import { Report, Totals } from "./finance/Reports";
 import { Card, Notice } from "./finance/ui";
 import { todayStr } from "./finance/money";
 
-// Finance books, ported from the FINANCE project. The whole side panel is visible at once, no dropdowns.
+// Finance books, ported from the FINANCE project (and its later Rent and service-charge additions from FINANCE-NEPAL). The whole side panel is visible at once, no dropdowns.
 const GROUPS = [
   { title: "Overview", items: [["summary", "Business Summary", PieChart], ["dashboard", "Dashboard", LayoutDashboard], ["daybook", "Day Book", BookOpen]] },
   { title: "Entries", items: [["received", "Received", ArrowDownCircle], ["paid", "Payment Out", ArrowUpCircle], ["sales", "Sales", Receipt], ["purchases", "Purchases", ShoppingCart], ["expenses", "Expenses", Wallet]] },
+  { title: "Vehicles", items: [["rent", "Rent", Car]] },
   { title: "Accounts", items: [["ledger", "Ledger", Users], ["banks", "Bank Accounts", Landmark], ["import", "Import Statement", FileSpreadsheet]] },
   { title: "Reports", items: [["report", "Report", BarChart3], ["totals", "Totals", TrendingUp], ["inventory", "Inventory", Package]] },
 ];
@@ -70,6 +72,7 @@ function FinanceInner() {
     purchases: <Bills type="purchase" />,
     expenses: <Bills type="expense" />,
     ledger: <Ledger partyId={partyId} setPartyId={setPartyId} />,
+    rent: <Rent openParty={openParty} />,
     banks: <BankAccounts />,
     import: <ImportStatement />,
     report: <Report />,

@@ -27,7 +27,7 @@ export function AccountLines({ title, bucket, onClose }) {
   );
 }
 
-function AccountForm({ account, onClose }) {
+function AccountForm({ account, onClose, isCash = false }) {
   const { post, put } = useBooks();
   const [f, setF] = useState({ name: account?.name || "", bank_name: account?.bank_name || "", account_number: account?.account_number || "", account_holder_name: account?.account_holder_name || "", address: account?.address || "" });
   const [busy, setBusy] = useState(false);
@@ -35,14 +35,16 @@ function AccountForm({ account, onClose }) {
   const save = async () => {
     if (!f.name.trim()) return toast.error("Account name is required");
     setBusy(true);
-    const ok = account ? await put(`/fin/accounts/${account.id}`, f, "Saved") : await post("/fin/accounts", f, "Account added");
+    // Cash is never a bank account row (cash is bank_account_id = null): its label and details are one row of their own.
+    const ok = isCash ? await put("/fin/cash-account", f, "Saved")
+      : account ? await put(`/fin/accounts/${account.id}`, f, "Saved") : await post("/fin/accounts", f, "Account added");
     setBusy(false);
     if (ok) onClose();
   };
   return (
-    <Modal title={account ? "Edit account" : "Add bank account"} onClose={onClose}>
+    <Modal title={isCash ? "Edit cash account" : account ? "Edit account" : "Add bank account"} onClose={onClose}>
       <div className="space-y-4">
-        <Field label="Name *" hint="Shown in dropdowns, for example “Nabil”"><input value={f.name} onChange={set("name")} className={inputCls} autoFocus /></Field>
+        <Field label="Name *" hint={isCash ? "How cash in hand is labelled here, for example “Cash”" : "Shown in dropdowns, for example “Nabil”"}><input value={f.name} onChange={set("name")} className={inputCls} autoFocus /></Field>
         <Field label="Bank name"><input value={f.bank_name} onChange={set("bank_name")} className={inputCls} /></Field>
         <Field label="Account number"><input value={f.account_number} onChange={set("account_number")} className={inputCls} /></Field>
         <Field label="Account holder"><input value={f.account_holder_name} onChange={set("account_holder_name")} className={inputCls} /></Field>
@@ -89,19 +91,25 @@ function TransferForm({ onDone }) {
 
 export default function BankAccounts() {
   const { books, del } = useBooks();
-  const [form, setForm] = useState(null);       // null | "new" | account
+  const [form, setForm] = useState(null);       // null | "new" | "cash" | account
   const [lines, setLines] = useState(null);     // { title, bucket }
   const [editing, setEditing] = useState(null); // a transfer row
   const bal = useMemo(() => balances(books), [books]);
+  const cash = books.cash_account || {};
+  const cashName = cash.name || "Cash in hand";
   const transfers = useMemo(() => [...books.transfers].sort((a, b) => (transferDate(a) < transferDate(b) ? 1 : -1)), [books.transfers]);
 
   return (
     <div className="space-y-5">
       <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
-        <button onClick={() => setLines({ title: "Cash in hand", bucket: bal.buckets[CASH] })} className="text-left bg-white border border-slate-200 rounded-xl p-4 shadow-sm hover:border-blue-300 hover:shadow-md transition">
-          <div className="flex items-center gap-2 text-xs font-semibold uppercase text-slate-500"><Banknote size={14} /> Cash in hand</div>
-          <div className="text-xl font-bold mt-1" style={{ color: bal.cash < 0 ? COLORS.out : COLORS.balance, fontFamily: "Manrope" }}>{npr(bal.cash)}</div>
-        </button>
+        <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
+          <button onClick={() => setLines({ title: cashName, bucket: bal.buckets[CASH] })} className="text-left w-full">
+            <div className="flex items-center gap-2 text-xs font-semibold uppercase text-slate-500"><Banknote size={14} /> {cashName}</div>
+            <div className="text-xl font-bold mt-1" style={{ color: bal.cash < 0 ? COLORS.out : COLORS.balance, fontFamily: "Manrope" }}>{npr(bal.cash)}</div>
+            <div className="text-xs text-slate-400 mt-0.5 truncate">{[cash.bank_name, cash.account_number, cash.account_holder_name, cash.address].filter(Boolean).join(" · ") || "No details yet"}</div>
+          </button>
+          <div className="mt-3"><button onClick={() => setForm("cash")} className="text-xs font-semibold text-blue-600 hover:underline">Edit</button></div>
+        </div>
         {books.accounts.map((a) => {
           const total = bal.buckets[a.id]?.total || 0;
           return (
@@ -135,7 +143,8 @@ export default function BankAccounts() {
         ))}
       </Card>
 
-      {form && <AccountForm account={form === "new" ? null : form} onClose={() => setForm(null)} />}
+      {form === "cash" && <AccountForm account={{ ...cash, name: cashName }} isCash onClose={() => setForm(null)} />}
+      {form && form !== "cash" && <AccountForm account={form === "new" ? null : form} onClose={() => setForm(null)} />}
       {lines && <AccountLines title={lines.title} bucket={lines.bucket} onClose={() => setLines(null)} />}
       {editing && <EntryEditor row={editing} onClose={() => setEditing(null)} />}
     </div>

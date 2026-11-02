@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
-import { Plus, Trash2, Percent, Tags } from "lucide-react";
+import { Plus, Trash2, Percent, Tags, Wrench } from "lucide-react";
 import { toast } from "sonner";
 import { useBooks } from "./BooksContext";
 import Feed from "./Feed";
 import { Card, Field, Modal, DateField, AccountSelect, PartyPicker, TwoTapDelete, inputCls, btnPrimary, btnGhost } from "./ui";
-import { todayStr, billTotals, nextBillNo, npr, COLORS } from "./money";
+import { todayStr, billTotals, serviceLines, nextBillNo, npr, COLORS } from "./money";
 
 let seq = 0;
 const newLine = () => ({ key: ++seq, description: "", qty: "1", rate: "" });
+const newService = () => ({ key: ++seq, name: "", amount: "" });
 const newExpenseRow = () => ({ key: ++seq, payee: "", category_id: "", amount: "", note: "" });
 
 // ── Sale / Purchase: an itemised bill against a SAVED party ───────────────
@@ -22,6 +23,7 @@ function ItemisedBill({ type }) {
   const [pan, setPan] = useState("");
   const [address, setAddress] = useState("");
   const [lines, setLines] = useState([newLine()]);
+  const [services, setServices] = useState([]);
   const [showDiscount, setShowDiscount] = useState(false);
   const [discount, setDiscount] = useState("");
   const [showVat, setShowVat] = useState(false);
@@ -32,9 +34,10 @@ function ItemisedBill({ type }) {
   const suggested = useMemo(() => nextBillNo(books.transactions, type), [books.transactions, type]);
   useEffect(() => { if (!touched) setBillNo(suggested); }, [suggested, touched]);
 
-  const t = billTotals(lines, discount, showVat ? vatPercent : 0);
+  const t = billTotals(lines, discount, showVat ? vatPercent : 0, services);
   const discountPct = t.subtotal > 0 && t.discount > 0 ? ((t.discount / t.subtotal) * 100).toFixed(1) : null;
   const setLine = (key, patch) => setLines((ls) => ls.map((l) => (l.key === key ? { ...l, ...patch } : l)));
+  const setService = (key, patch) => setServices((ss) => ss.map((x) => (x.key === key ? { ...x, ...patch } : x)));
 
   const pickParty = (p) => {
     setParty({ id: p.id, name: p.name });
@@ -71,11 +74,12 @@ function ItemisedBill({ type }) {
       party_address: address, vat_pan_no: pan, discount_amount: t.discount, vat_amount: t.vat,
       items: good.map((l) => ({ description: l.description.trim(), qty: Number(l.qty), rate: Number(l.rate), amount: Number(l.qty) * Number(l.rate) })),
       payment_mode: "cash", bank_account_id: null,
+      service_charges: serviceLines(services).map((x) => ({ name: x.name.trim(), amount: Number(x.amount) })),
     });
     setBusy(false);
     if (!ok) return;
     toast.success(`${sale ? "Sale" : "Purchase"} saved${notRemembered ? ". Some item names were not remembered for next time." : ""}`);
-    setParty({ id: null, name: "" }); setPan(""); setAddress(""); setLines([newLine()]); setDiscount(""); setShowDiscount(false);
+    setParty({ id: null, name: "" }); setPan(""); setAddress(""); setLines([newLine()]); setServices([]); setDiscount(""); setShowDiscount(false);
     setShowVat(false); setVatPercent("0"); setNote(""); setTouched(false);
   };
 
@@ -111,7 +115,23 @@ function ItemisedBill({ type }) {
           ))}
         </div>
         <datalist id="fin-item-names">{books.items.map((i) => <option key={i.id} value={i.name} />)}</datalist>
-        <button type="button" onClick={() => setLines((ls) => [...ls, newLine()])} className={`${btnGhost} mt-3`}><Plus size={16} /> Add item</button>
+        <div className="flex flex-wrap gap-2 mt-3">
+          <button type="button" onClick={() => setLines((ls) => [...ls, newLine()])} className={btnGhost}><Plus size={16} /> Add item</button>
+          <button type="button" onClick={() => setServices((ss) => [...ss, newService()])} className={btnGhost} data-testid="add-service"><Wrench size={15} /> Add service</button>
+        </div>
+        {services.length > 0 && (
+          <div className="mt-3 space-y-2">
+            <div className="text-xs font-semibold text-slate-500">{sale ? "Services (installation, repair, labour …)" : "Services bought in (outsourced work …)"}</div>
+            {services.map((x) => (
+              <div key={x.key} className="grid grid-cols-[1fr_8rem_2.5rem] gap-2 items-center">
+                <input placeholder="Service name" value={x.name} onChange={(e) => setService(x.key, { name: e.target.value })} className={inputCls} />
+                <input type="number" min="0" placeholder="Amount" value={x.amount} onChange={(e) => setService(x.key, { amount: e.target.value })} className={inputCls} />
+                <button type="button" onClick={() => setServices((ss) => ss.filter((y) => y.key !== x.key))}
+                  className="h-10 w-10 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 flex items-center justify-center" aria-label="Remove service"><Trash2 size={16} /></button>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="grid md:grid-cols-2 gap-4">
@@ -125,6 +145,8 @@ function ItemisedBill({ type }) {
           {showVat && <Field label="VAT %"><input type="number" min="0" value={vatPercent} onChange={(e) => setVatPercent(e.target.value)} className={inputCls} /></Field>}
         </div>
         <div className="bg-slate-50 rounded-lg p-4 space-y-1.5 text-sm self-start">
+          {t.services > 0 && <div className="flex justify-between"><span className="text-slate-500">Items</span><span>{npr(t.items)}</span></div>}
+          {t.services > 0 && <div className="flex justify-between"><span className="text-slate-500">Services</span><span>+ {npr(t.services)}</span></div>}
           <div className="flex justify-between"><span className="text-slate-500">Subtotal</span><span>{npr(t.subtotal)}</span></div>
           {t.discount > 0 && <div className="flex justify-between"><span className="text-slate-500">Discount</span><span>− {npr(t.discount)}</span></div>}
           {showVat && <div className="flex justify-between"><span className="text-slate-500">VAT ({vatPercent || 0}%)</span><span>+ {npr(t.vat)}</span></div>}
