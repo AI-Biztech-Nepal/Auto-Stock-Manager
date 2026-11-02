@@ -10,6 +10,7 @@ import { npr } from "./money";
 export default function Inventory() {
   const { books } = useBooks();
   const [q, setQ] = useState("");
+  const [inStock, setInStock] = useState(false); // Stock: only what is still in hand
 
   const rows = useMemo(() => {
     const m = new Map();
@@ -30,7 +31,7 @@ export default function Inventory() {
     return [...m.values()].map((r) => ({ ...r, net: r.bought - r.sold })).sort((a, b) => a.name.localeCompare(b.name));
   }, [books]);
 
-  const shown = rows.filter((r) => !q.trim() || r.name.toLowerCase().includes(q.trim().toLowerCase()));
+  const shown = rows.filter((r) => (!inStock || r.net > 0) && (!q.trim() || r.name.toLowerCase().includes(q.trim().toLowerCase())));
   const cols = [{ header: "Item", value: (r) => r.name }, { header: "Rate", value: (r) => r.rate ?? "" }, { header: "Bought", value: (r) => r.bought }, { header: "Sold", value: (r) => r.sold }, { header: "Bought − sold", value: (r) => r.net }];
 
   return (
@@ -38,10 +39,13 @@ export default function Inventory() {
       <Notice tone="blue">Built from the items typed on your sale and purchase bills. “Bought − sold” is a guide to movement, not an exact stock count.</Notice>
       <div className="fin-no-print flex flex-wrap items-center gap-2">
         <div className="relative flex-1 min-w-[200px]"><Search size={15} className="absolute left-3 top-3 text-slate-400" /><input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search items" className={`${inputCls} pl-9`} /></div>
-        <ExportBar onXlsx={() => exportXlsx("inventory", cols, shown)} />
+        <div className="flex gap-1 bg-slate-100 rounded-lg p-1">
+          {[[false, "Inventory"], [true, "Stock (in hand)"]].map(([k, l]) => <button key={l} onClick={() => setInStock(k)} data-testid={k ? "stock-only" : "inventory-all"} className={`h-8 px-3 rounded-md text-sm font-semibold ${inStock === k ? "bg-white shadow-sm text-blue-700" : "text-slate-500"}`}>{l}</button>)}
+        </div>
+        <ExportBar onXlsx={() => exportXlsx(inStock ? "stock" : "inventory", cols, shown)} />
       </div>
       <Card className="overflow-x-auto">
-        {shown.length === 0 ? <Empty>{rows.length ? "No match." : "No items yet. They appear once you add items to a sale or purchase bill."}</Empty> : (
+        {shown.length === 0 ? <Empty>{rows.length ? (inStock && !q.trim() ? "Nothing is in hand: everything bought has been sold." : "No match.") : "No items yet. They appear once you add items to a sale or purchase bill."}</Empty> : (
           <table className="w-full text-sm">
             <thead><tr className="bg-slate-50 text-xs text-slate-500 text-left"><th className="px-4 py-2 font-semibold">Item</th><th className="px-3 py-2 font-semibold text-right">Last rate</th><th className="px-3 py-2 font-semibold text-right">Bought</th><th className="px-3 py-2 font-semibold text-right">Sold</th><th className="px-4 py-2 font-semibold text-right">Bought − sold</th></tr></thead>
             <tbody>{shown.map((r) => (

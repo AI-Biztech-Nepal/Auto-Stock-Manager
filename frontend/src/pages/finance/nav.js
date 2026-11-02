@@ -1,15 +1,17 @@
 // The Finance section of the main side panel, laid out like FINANCE-NEPAL's: Day Book, Ledger, Statement,
 // Stock and Inventory, Bank Accounts, Rent, and Report with its family of reports nested under it.
 // Received, Payment Out, Sales, Purchase and Expense are not in the panel: they open from the Day Book's
-// "New entry" button (and from the Statement's), and Import from the Statement's Import button.
+// "New entry" button (and from the Statement's; so are Journal Voucher and Contra), and Import from the
+// Statement's Import button.
 import {
   PieChart, LayoutDashboard, BookOpen, Users, FileText, Package, Landmark, Car, BarChart3, TrendingUp,
-  ShoppingCart, Receipt, Store,
+  ShoppingCart, Receipt, Store, Scale,
 } from "lucide-react";
 
 export const FINANCE_NAV = [
   { key: "summary", label: "Business Summary", icon: PieChart },
   { key: "dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { key: "balance-sheet", label: "Balance Sheet", icon: Scale },
   { key: "daybook", label: "Day Book", icon: BookOpen },
   { key: "ledger", label: "Ledger", icon: Users },
   { key: "statement", label: "Statement", icon: FileText },
@@ -30,7 +32,7 @@ export const FINANCE_NAV = [
 
 // Pages that are reached from a button, not from the panel, and the panel item each one belongs under.
 export const FINANCE_HIDDEN_TABS = {
-  received: "daybook", paid: "daybook", sales: "daybook", purchases: "daybook", expenses: "daybook",
+  received: "daybook", paid: "daybook", sales: "daybook", purchases: "daybook", expenses: "daybook", voucher: "daybook", contra: "daybook",
   import: "statement", totals: "report",
 };
 

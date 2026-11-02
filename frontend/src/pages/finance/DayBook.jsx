@@ -89,7 +89,7 @@ export default function DayBook({ date, setDate, goTab, businessName }) {
                     <td className="px-3 py-2 hidden xl:table-cell"><span className="text-xs font-bold" style={{ color: k.color }}>{k.label}</span></td>
                     <td className="px-3 py-2 text-slate-500 hidden xl:table-cell">{r.invoiceAmt != null ? num(r.invoiceAmt) : r.invoice || ""}</td>
                     <td className="px-3 py-2 text-right text-slate-500 hidden xl:table-cell">{r.discount ? num(r.discount) : ""}</td>
-                    <td className="px-3 py-2 text-right font-medium" style={{ color: r.bill != null ? k.color : r.transferAmount != null ? COLORS.transfer : undefined }}>
+                    <td className="px-3 py-2 text-right font-medium" style={{ color: r.bill != null ? k.color : r.transferAmount != null ? (r.kind === "journal" ? COLORS.journal : COLORS.transfer) : undefined }}>
                       {r.bill != null ? num(r.bill) : r.transferAmount != null ? num(r.transferAmount) : <span className="md:hidden" style={{ color: r.in ? COLORS.in : COLORS.out }}>{num(amount)}</span>}
                     </td>
                     <td className="px-3 py-2 text-right hidden md:table-cell" style={{ color: COLORS.in }}>{r.in ? num(r.in) : ""}</td>

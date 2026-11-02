@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { useBooks } from "./BooksContext";
 import { Modal, Field, DateField, AccountSelect, PartyPicker, TwoTapDelete, Notice, inputCls, btnPrimary, btnGhost } from "./ui";
-import { entryDate, billDate, transferDate, partyName } from "./money";
+import { entryDate, billDate, transferDate, partyName, journalOf, journalVouchers, npr, COLORS } from "./money";
+import { formatBSDate } from "../../utils/nepali-date";
 
 const TITLES = { sale: "Sale bill", purchase: "Purchase bill", expense: "Expense" };
 
@@ -9,6 +10,41 @@ const TITLES = { sale: "Sale bill", purchase: "Purchase bill", expense: "Expense
 // depends on the row (bill / customer payment / vendor payment / transfer). Rows a bill posted
 // (source != manual) open read-only with the reason, because the bill is what has to change.
 export default function EntryEditor({ row, onClose }) {
+  const { books } = useBooks();
+  // A journal voucher's lines belong together: whichever one was tapped, the whole voucher opens.
+  const code = row.table === "jv" ? row.data.code : journalOf(row.data?.note)?.code;
+  if (code) return <VoucherViewer voucher={journalVouchers(books).find((v) => v.code === code) || (row.table === "jv" ? row.data : null)} onClose={onClose} />;
+  return <EntryForm row={row} onClose={onClose} />;
+}
+
+// A voucher is not edited line by line (that would unbalance it): see it, and delete it to enter it again.
+function VoucherViewer({ voucher, onClose }) {
+  const { del } = useBooks();
+  if (!voucher) return null;
+  const side = (title, lines, color) => (
+    <div>
+      <div className="text-xs font-extrabold mb-1" style={{ color }}>{title}</div>
+      {lines.map((l, i) => <div key={i} className="flex justify-between text-sm py-1 border-t border-slate-100 first:border-t-0"><span className="text-slate-800">{l.name}</span><span className="font-semibold">{npr(l.amount)}</span></div>)}
+    </div>
+  );
+  return (
+    <Modal title={`Journal voucher ${voucher.code}`} onClose={onClose}>
+      <div className="space-y-4">
+        <div className="text-sm text-slate-600">{voucher.date} <span className="text-xs text-slate-400">· {formatBSDate(voucher.date)} BS</span>{voucher.narration ? <div className="mt-1 text-slate-800">{voucher.narration}</div> : null}</div>
+        {side("DEBIT", voucher.debits, COLORS.out)}
+        {side("CREDIT", voucher.credits, COLORS.in)}
+        <div className="flex justify-between border-t-2 border-slate-200 pt-2 text-sm font-bold"><span>Total</span><span style={{ color: COLORS.journal }}>{npr(voucher.total)}</span></div>
+        <Notice tone="blue">No cash or bank account was touched. To change a voucher, delete it and post it again.</Notice>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <TwoTapDelete label="Delete voucher" onConfirm={async () => { if (await del(`/fin/journal/${voucher.code}`, "Voucher deleted")) onClose(); }} />
+          <button onClick={onClose} className={btnGhost}>Close</button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function EntryForm({ row, onClose }) {
   const { books, post, put, del } = useBooks();
   const d = row.data;
   const isTx = row.table === "tx";

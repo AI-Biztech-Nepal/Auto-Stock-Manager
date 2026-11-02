@@ -190,6 +190,36 @@ def rent_days(rental: dict, today: str) -> List[str]:
     return [(start + timedelta(days=i)).isoformat() for i in range((last - start).days + 1)]
 
 
+# ── journal vouchers ──────────────────────────────────────────────────────
+# A journal voucher moves an amount from one person's ledger to another's (or charges an expense head) and
+# touches no cash, bank account or bill. It is kept as ordinary manual entries that all carry the same code in
+# their remark -- "Journal voucher JV-7K3Q9X: Set off against the March order" -- which is how the lines are
+# found again (FINANCE-NEPAL's journalVoucher.ts):
+#   a person CREDITED (their balance goes down)  -> a credit on their customer ledger
+#   a person DEBITED  (their balance goes up)    -> a debit on their customer ledger, or a payment on their
+#                                                   vendor ledger when that is the only ledger they have
+#   an expense head DEBITED                      -> an expense entry paid "on credit" (no cash moves)
+JOURNAL_LABEL = "Journal voucher"
+_JOURNAL_NOTE = re.compile(r"^Journal voucher (JV-[A-Z0-9]{6})(?::\s*([\s\S]*))?$")
+_JOURNAL_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+
+
+def journal_of(note: Optional[str]) -> Optional[dict]:
+    """The code and narration of a voucher's entry, or None for any other entry."""
+    m = _JOURNAL_NOTE.match((note or "").strip())
+    return {"code": m.group(1), "narration": (m.group(2) or "").strip()} if m else None
+
+
+def new_journal_code() -> str:
+    import secrets
+    return "JV-" + "".join(secrets.choice(_JOURNAL_CHARS) for _ in range(6))
+
+
+def journal_note(code: str, narration: Optional[str]) -> str:
+    text = (narration or "").strip()
+    return f"{JOURNAL_LABEL} {code}" + (f": {text}" if text else "")
+
+
 def _is_missing_table(e: Exception) -> bool:
     return "1146" in str(e) or "doesn't exist" in str(e)
 
@@ -286,6 +316,19 @@ class RentalBody(BaseModel):
     returned_on: Optional[str] = None
     rate_per_day: float = 0
     note: Optional[str] = None
+
+
+class JournalLine(BaseModel):
+    side: str                            # "debit" | "credit"
+    party_id: Optional[str] = None       # a person's ledger (either side)
+    head: Optional[str] = None           # an expense head (debit only), made if new
+    amount: float
+
+
+class JournalBody(BaseModel):
+    entry_date: str
+    narration: Optional[str] = None
+    lines: List[JournalLine]
 
 
 class CashAccountBody(BaseModel):
@@ -671,6 +714,8 @@ def register(api_router, db, admin_only):
         existing = await db.fin_transactions.find_one({"id": tid}, {"_id": 0})
         if not existing:
             raise HTTPException(404, "Entry not found")
+        if journal_of(existing.get("note")):
+            raise HTTPException(403, "This belongs to a journal voucher. Delete the voucher and enter it again.")
         doc = await _bill_doc(body)
         doc["updated_at"] = _now()
         await db.fin_transactions.update_one({"id": tid}, {"$set": doc})
@@ -682,6 +727,9 @@ def register(api_router, db, admin_only):
     @_safe
     async def fin_delete_bill(tid: str, cu: dict = Depends(admin_only)):
         """Deleting a bill removes the debt it booked; payments already recorded survive."""
+        existing = await db.fin_transactions.find_one({"id": tid}, {"_id": 0, "note": 1})
+        if existing and journal_of(existing.get("note")):
+            raise HTTPException(403, "This belongs to a journal voucher. Delete the voucher and enter it again.")
         await db.fin_customer_ledger.delete_many({"source_type": "business_transaction", "source_id": tid})
         await db.fin_vendor_ledger.delete_many({"source_type": "business_transaction", "source_id": tid})
         await db.fin_transactions.delete_one({"id": tid})
@@ -720,6 +768,8 @@ def register(api_router, db, admin_only):
             raise HTTPException(404, "Entry not found")
         if e.get("source") != "manual":
             raise HTTPException(403, "This was recorded by a bill. Change it on the bill, and this entry follows.")
+        if journal_of(e.get("note")):
+            raise HTTPException(403, "This belongs to a journal voucher. Delete the voucher and enter it again.")
         return coll, e
 
     @api_router.put("/fin/ledger/{side}/{eid}")
@@ -885,6 +935,89 @@ def register(api_router, db, admin_only):
         await db.fin_rentals.delete_one({"id": rid})
         await _sync_rental_rent()
         return {"ok": True}
+
+    # ── journal vouchers ───────────────────────────────────────────────────
+    async def _journal_expense_head(name: str) -> str:
+        for c in await db.fin_expense_categories.find({}, {"_id": 0}).to_list(10000):
+            if (c["name"] or "").strip().lower() == name.lower():
+                return c["id"]
+        now = _now()
+        doc = {"id": _id(), "name": name, "created_at": now, "updated_at": now}
+        await db.fin_expense_categories.insert_one(doc)
+        return doc["id"]
+
+    @api_router.post("/fin/journal")
+    @_safe
+    async def fin_post_journal(body: JournalBody, cu: dict = Depends(admin_only)):
+        """Post a voucher: any number of debit and credit lines that add up to the same total. No cash or bank
+        account is touched. Every line carries the voucher's code in its remark. If any line fails, the ones
+        already written are taken back, so a voucher is never part of one."""
+        day = _date(body.entry_date, "The voucher date", required=True)
+        if not any(l.side == "debit" for l in body.lines) or not any(l.side == "credit" for l in body.lines):
+            raise HTTPException(400, "A voucher needs at least one Debit and one Credit line")
+        lines = []
+        for n, l in enumerate(body.lines, 1):
+            if l.side not in ("debit", "credit"):
+                raise HTTPException(400, f"Line {n}: side must be debit or credit")
+            amount = _amount(l.amount)
+            head = _clean(l.head)
+            if l.side == "credit" and not l.party_id:
+                raise HTTPException(400, f"Line {n}: choose the person to credit (an expense head can only be debited)")
+            if not l.party_id and not head:
+                raise HTTPException(400, f"Line {n}: choose a person or an expense head")
+            party = await _party_or_404(l.party_id) if l.party_id else None
+            lines.append((l.side, party, head, amount))
+        debit = sum(a for s, _p, _h, a in lines if s == "debit")
+        credit = sum(a for s, _p, _h, a in lines if s == "credit")
+        if abs(debit - credit) >= 0.005:
+            raise HTTPException(400, f"Debit {debit:,.2f} and Credit {credit:,.2f} must be equal (the difference is {abs(debit - credit):,.2f})")
+
+        code = new_journal_code()
+        note = journal_note(code, body.narration)
+        made = []  # (collection, id), to take back on failure
+        try:
+            for side, party, head, amount in lines:
+                now = _now()
+                if party is None:
+                    doc = {"id": _id(), "type": "expense", "amount": amount, "note": note, "party_name": head, "customer_id": None,
+                           "bill_no": None, "bill_date": day, "party_address": None, "vat_pan_no": None, "items": [],
+                           "discount_amount": 0, "vat_amount": 0, "expense_category_id": await _journal_expense_head(head),
+                           "payment_mode": "credit", "bank_account_id": None, "source_type": None, "source_id": None,
+                           "created_at": now, "updated_at": now}
+                    coll = db.fin_transactions
+                else:
+                    # A person debited who only has a vendor ledger is debited there (a payment on it); everyone else
+                    # on their customer ledger.
+                    vendor_only = False
+                    if side == "debit":
+                        vendor_only = bool(await db.fin_vendor_ledger.find_one({"vendor_id": party["id"]}, {"_id": 0, "id": 1})) and                             not await db.fin_customer_ledger.find_one({"customer_id": party["id"]}, {"_id": 0, "id": 1})
+                    base = {"id": _id(), "amount": amount, "note": note, "source": "manual", "source_type": None, "source_id": None,
+                            "bank_account_id": None, "entry_date": day, "receipt_no": None, "created_at": now}
+                    if vendor_only:
+                        doc, coll = {**base, "vendor_id": party["id"], "entry_type": "credit"}, db.fin_vendor_ledger
+                    else:
+                        doc, coll = {**base, "customer_id": party["id"], "entry_type": side}, db.fin_customer_ledger
+                await coll.insert_one(doc)
+                made.append((coll, doc["id"]))
+        except Exception:
+            for coll, eid in made:
+                await coll.delete_one({"id": eid})
+            raise
+        return {"code": code, "entries": len(made)}
+
+    @api_router.delete("/fin/journal/{code}")
+    @_safe
+    async def fin_delete_journal(code: str, cu: dict = Depends(admin_only)):
+        """Delete a voucher as a unit: every entry that carries its code."""
+        removed = 0
+        for coll in (db.fin_customer_ledger, db.fin_vendor_ledger, db.fin_transactions):
+            for e in await coll.find({}, {"_id": 0}).to_list(1000000):
+                if (journal_of(e.get("note")) or {}).get("code") == code:
+                    await coll.delete_one({"id": e["id"]})
+                    removed += 1
+        if not removed:
+            raise HTTPException(404, "Journal voucher not found")
+        return {"ok": True, "removed": removed}
 
     # ── the Cash account's label and details ───────────────────────────────
     @api_router.put("/fin/cash-account")

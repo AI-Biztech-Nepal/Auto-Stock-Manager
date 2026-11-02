@@ -55,7 +55,7 @@ function AccountForm({ account, onClose, isCash = false }) {
   );
 }
 
-function TransferForm({ onDone }) {
+export function TransferForm({ onDone }) {
   const { books, post } = useBooks();
   const [from, setFrom] = useState(null);
   const [to, setTo] = useState(books.accounts[0]?.id || null);

@@ -2,9 +2,9 @@ import { useState } from "react";
 import { Plus } from "lucide-react";
 import { btnPrimary } from "./ui";
 
-// One button with a five-item menu (spec section 3.1): Received, Payment Out, Sale, Purchase, Expense.
-// Each opens its own entry form. Used by the Day Book and the Statement.
-const NEW_ENTRY = [["received", "Received"], ["paid", "Payment Out"], ["sales", "Sale"], ["purchases", "Purchase"], ["expenses", "Expense"]];
+// One button with a menu (spec section 3.1): Received, Payment Out, Sale, Purchase, Expense, then FINANCE-NEPAL's
+// Journal Voucher and Contra. Each opens its own entry form. Used by the Day Book and the Statement.
+const NEW_ENTRY = [["received", "Received"], ["paid", "Payment Out"], ["sales", "Sale"], ["purchases", "Purchase"], ["expenses", "Expense"], ["voucher", "Journal Voucher"], ["contra", "Contra"]];
 
 export default function NewEntryMenu({ goTab }) {
   const [open, setOpen] = useState(false);

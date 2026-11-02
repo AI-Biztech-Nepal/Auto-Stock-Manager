@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useBooks } from "./BooksContext";
 import EntryEditor from "./EntryEditor";
-import { Card, Stat, Empty, ExportBar, exportXlsx, inputCls } from "./ui";
+import { Card, Stat, Empty, Notice, ExportBar, exportXlsx, inputCls } from "./ui";
 import { owedTotals, billDate, partyName, accountName, npr, num, COLORS } from "./money";
 import { getCurrentBSMonthRange, getCurrentBSYearRange, formatBSDate } from "../../utils/nepali-date";
 
@@ -31,6 +31,13 @@ function usePeriod() {
 }
 
 const inRange = (date, range) => !range || (date >= range.start && date <= range.end);
+
+// A report narrowed to one person (opened from their ledger, ?party=): who, and a way back to everyone.
+function PartyBanner({ party, what, onShowAll }) {
+  if (!party) return null;
+  return <Notice tone="blue">Showing {party.name}'s {what} only. <button onClick={onShowAll} className="underline font-semibold">Show everyone's</button></Notice>;
+}
+const sameName = (a, b) => (a || "").trim().toLowerCase() === (b || "").trim().toLowerCase();
 
 // A table with a totals row. `sum` on a column adds that column up in the footer.
 function ReportTable({ columns, rows, onRow, empty, noun = ["entry", "entries"] }) {
@@ -71,17 +78,18 @@ const Dash = () => <span className="text-slate-300">—</span>;
 const money = (v, color) => (v ? <span style={{ color }} className="font-medium">{num(v)}</span> : <Dash />);
 
 // ── Sales / Purchase: the bills of one type for a period ─────────────────
-function BillsReport({ type }) {
+function BillsReport({ type, partyId, onShowAll }) {
   const { books } = useBooks();
+  const party = partyId ? books.parties.find((p) => p.id === partyId) : null;
   const { period, setPeriod, range } = usePeriod();
   const [editing, setEditing] = useState(null);
   const sale = type === "sale";
   const color = sale ? COLORS.sale : COLORS.purchase;
   const rows = useMemo(() => books.transactions
-    .filter((t) => t.type === type && inRange(billDate(t), range))
+    .filter((t) => t.type === type && inRange(billDate(t), range) && (!party || t.customer_id === party.id))
     .map((t) => ({ key: t.id, t, date: billDate(t), who: t.party_name || partyName(books, t.customer_id) || "Walk-in" }))
     .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : (b.t.created_at || "") > (a.t.created_at || "") ? 1 : -1)),
-  [books, type, range?.start, range?.end]); // eslint-disable-line react-hooks/exhaustive-deps
+  [books, type, party, range?.start, range?.end]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const items = (t) => (t.items || []).map((i) => i.description).filter(Boolean).join(", ");
   const columns = [
@@ -100,6 +108,7 @@ function BillsReport({ type }) {
     <div className="space-y-4">
       <PeriodBar period={period} setPeriod={setPeriod} range={range}
         onXlsx={() => exportXlsx(`${sale ? "sales" : "purchase"}-report-${period}`, columns.map((c) => ({ header: c.header, value: c.value })), rows)} />
+      <PartyBanner party={party} what={sale ? "sales" : "purchases"} onShowAll={onShowAll} />
       <div className="grid grid-cols-2 gap-3">
         <Stat label={sale ? "Sales billed" : "Purchases billed"} value={total} color={color} />
         <Stat label="Bills" value={String(rows.length)} />
@@ -110,19 +119,20 @@ function BillsReport({ type }) {
     </div>
   );
 }
-export const SalesReport = () => <BillsReport type="sale" />;
-export const PurchaseReport = () => <BillsReport type="purchase" />;
+export const SalesReport = (props) => <BillsReport type="sale" {...props} />;
+export const PurchaseReport = (props) => <BillsReport type="purchase" {...props} />;
 
 // ── Expenses: paid on the spot, with what each category came to ──────────
-export function ExpenseReport() {
+export function ExpenseReport({ partyId, onShowAll }) {
   const { books } = useBooks();
+  const party = partyId ? books.parties.find((p) => p.id === partyId) : null;
   const { period, setPeriod, range } = usePeriod();
   const [editing, setEditing] = useState(null);
   const rows = useMemo(() => books.transactions
-    .filter((t) => t.type === "expense" && inRange(billDate(t), range))
+    .filter((t) => t.type === "expense" && inRange(billDate(t), range) && (!party || sameName(t.party_name, party.name)))
     .map((t) => ({ key: t.id, t, date: billDate(t), who: t.party_name || "—", category: books.categories.find((c) => c.id === t.expense_category_id)?.name || "No category" }))
     .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0)),
-  [books, range?.start, range?.end]); // eslint-disable-line react-hooks/exhaustive-deps
+  [books, party, range?.start, range?.end]); // eslint-disable-line react-hooks/exhaustive-deps
   const byCategory = useMemo(() => {
     const m = {};
     for (const r of rows) m[r.category] = (m[r.category] || 0) + r.t.amount;
@@ -143,6 +153,7 @@ export function ExpenseReport() {
     <div className="space-y-4">
       <PeriodBar period={period} setPeriod={setPeriod} range={range}
         onXlsx={() => exportXlsx(`expenses-report-${period}`, columns.map((c) => ({ header: c.header, value: c.value })), rows)} />
+      <PartyBanner party={party} what="expenses" onShowAll={onShowAll} />
       <div className="grid grid-cols-2 gap-3">
         <Stat label="Expenses" value={total} color={COLORS.out} />
         <Stat label="Entries" value={String(rows.length)} />

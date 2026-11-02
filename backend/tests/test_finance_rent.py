@@ -360,5 +360,122 @@ class FinanceSchemaTests(unittest.TestCase):
             self.assertNotIn(col, registry["fin_transactions"], "listed statically it would break every read if the column is missing")
 
 
+# ── journal vouchers ──────────────────────────────────────────────────────
+class FinanceJournalTests(unittest.TestCase):
+    def setUp(self):
+        self.db = _DB()
+        router = APIRouter(prefix="/api")
+
+        async def admin_only():
+            return {"company_id": "c1"}
+
+        finance_books.register(router, self.db, admin_only)
+        app = FastAPI()
+        app.include_router(router)
+        self.api = TestClient(app)
+        mk = lambda n: self.api.post("/api/fin/parties", json={"name": n}).json()["id"]  # noqa: E731
+        self.ram, self.sita, self.hari = mk("Ram"), mk("Sita"), mk("Hari")
+
+    def _post(self, lines, narration="Set off against the March order", day="2026-10-05"):
+        return self.api.post("/api/fin/journal", json={"entry_date": day, "narration": narration, "lines": lines})
+
+    def _line(self, side, amount, party=None, head=None):
+        return {"side": side, "amount": amount, "party_id": party, "head": head}
+
+    def _rows(self):
+        return [r for c in (self.db.fin_customer_ledger, self.db.fin_vendor_ledger, self.db.fin_transactions) for r in c.rows]
+
+    def test_note_format_round_trips(self):
+        code = finance_books.new_journal_code()
+        self.assertRegex(code, r"^JV-[A-Z2-9]{6}$")
+        note = finance_books.journal_note(code, "  March  ")
+        self.assertEqual(note, f"Journal voucher {code}: March")
+        self.assertEqual(finance_books.journal_of(note), {"code": code, "narration": "March"})
+        self.assertEqual(finance_books.journal_of(f"Journal voucher {code}"), {"code": code, "narration": ""})
+        for other in ("Hilux · advance", "", None, "Journal voucher JV-abc123", "Paid Journal voucher JV-ABCDEF"):
+            self.assertIsNone(finance_books.journal_of(other))
+
+    def test_person_to_person_moves_ledgers_and_no_cash(self):
+        r = self._post([self._line("debit", 1000, party=self.sita), self._line("credit", 1000, party=self.ram)])
+        self.assertEqual(r.status_code, 200, r.text)
+        code = r.json()["code"]
+        rows = self.db.fin_customer_ledger.rows
+        self.assertEqual(sorted((e["customer_id"], e["entry_type"]) for e in rows), sorted([(self.sita, "debit"), (self.ram, "credit")]))
+        self.assertTrue(all(e["bank_account_id"] is None and e["source"] == "manual" and e["entry_date"] == "2026-10-05" for e in rows))
+        self.assertTrue(all(finance_books.journal_of(e["note"])["code"] == code for e in rows))
+        self.assertEqual(self.db.fin_account_transfers.rows, [])
+
+    def test_expense_head_is_debited_on_credit_and_created_once(self):
+        for _ in range(2):
+            r = self._post([self._line("debit", 5000, head="Salary Expenses"), self._line("credit", 5000, party=self.ram)])
+            self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(len(self.db.fin_expense_categories.rows), 1, "the head is made once, matched ignoring case")
+        exp = self.db.fin_transactions.rows[0]
+        self.assertEqual((exp["type"], exp["payment_mode"], exp["bank_account_id"], exp["amount"]), ("expense", "credit", None, 5000))
+        self.assertEqual(exp["expense_category_id"], self.db.fin_expense_categories.rows[0]["id"])
+        self.assertEqual(self._post([self._line("debit", 1, head="salary EXPENSES"), self._line("credit", 1, party=self.ram)]).status_code, 200)
+        self.assertEqual(len(self.db.fin_expense_categories.rows), 1)
+
+    def test_a_person_with_only_a_vendor_ledger_is_debited_there(self):
+        self.api.post("/api/fin/transactions", json={"type": "purchase", "amount": 900, "customer_id": self.hari, "party_name": "Hari"})
+        before = len(self.db.fin_vendor_ledger.rows)
+        r = self._post([self._line("debit", 400, party=self.hari), self._line("credit", 400, party=self.ram)])
+        self.assertEqual(r.status_code, 200, r.text)
+        added = self.db.fin_vendor_ledger.rows[before:]
+        self.assertEqual([(e["vendor_id"], e["entry_type"], e["amount"]) for e in added], [(self.hari, "credit", 400)])
+        self.assertEqual([e["customer_id"] for e in self.db.fin_customer_ledger.rows if finance_books.journal_of(e["note"])], [self.ram])
+
+    def test_several_lines_per_side_must_balance(self):
+        ok = self._post([self._line("debit", 300, party=self.sita), self._line("debit", 200, head="Tea"),
+                         self._line("credit", 250, party=self.ram), self._line("credit", 250, party=self.hari)])
+        self.assertEqual(ok.status_code, 200, ok.text)
+        self.assertEqual(ok.json()["entries"], 4)
+        bad = self._post([self._line("debit", 500, party=self.sita), self._line("credit", 400, party=self.ram)])
+        self.assertEqual(bad.status_code, 400)
+        self.assertIn("must be equal", bad.json()["detail"])
+
+    def test_validation(self):
+        self.assertEqual(self._post([self._line("debit", 5, party=self.sita)]).status_code, 400, "both sides needed")
+        self.assertEqual(self._post([self._line("debit", 5, party=self.sita), self._line("credit", 5, head="Rent")]).status_code, 400, "a head cannot be credited")
+        self.assertEqual(self._post([self._line("debit", 5), self._line("credit", 5, party=self.ram)]).status_code, 400, "a debit needs a person or a head")
+        self.assertEqual(self._post([self._line("debit", 0, party=self.sita), self._line("credit", 0, party=self.ram)]).status_code, 400)
+        self.assertEqual(self._post([self._line("debit", 5, party="nobody"), self._line("credit", 5, party=self.ram)]).status_code, 404)
+        self.assertEqual(self._post([self._line("debit", 5, party=self.sita), self._line("credit", 5, party=self.ram)], day="soon").status_code, 400)
+        self.assertEqual(self._rows(), [], "nothing is written by a refused voucher")
+
+    def test_a_failure_part_way_takes_back_what_was_written(self):
+        real, calls = _Coll.insert_one, {"n": 0}
+
+        async def flaky(coll, doc):
+            calls["n"] += 1
+            if calls["n"] == 2:
+                raise RuntimeError("database went away")
+            await real(coll, doc)
+
+        with mock.patch.object(_Coll, "insert_one", flaky), self.assertRaises(RuntimeError):
+            self._post([self._line("debit", 7, party=self.sita), self._line("credit", 7, party=self.ram)])
+        self.assertEqual(self._rows(), [], "the first line was taken back")
+
+    def test_a_vouchers_entries_cannot_be_edited_or_deleted_one_by_one(self):
+        self._post([self._line("debit", 800, head="Salary"), self._line("credit", 800, party=self.ram)])
+        entry, bill = self.db.fin_customer_ledger.rows[0], self.db.fin_transactions.rows[0]
+        self.assertEqual(self.api.put(f"/api/fin/ledger/customer/{entry['id']}", json={"amount": 1}).status_code, 403)
+        self.assertEqual(self.api.delete(f"/api/fin/ledger/customer/{entry['id']}").status_code, 403)
+        self.assertEqual(self.api.delete(f"/api/fin/transactions/{bill['id']}").status_code, 403)
+        put = self.api.put(f"/api/fin/transactions/{bill['id']}", json={"type": "expense", "amount": 1})
+        self.assertEqual(put.status_code, 403)
+        self.assertIn("journal voucher", put.json()["detail"])
+
+    def test_deleting_the_voucher_removes_every_line_and_only_that_voucher(self):
+        keep = self._post([self._line("debit", 10, party=self.sita), self._line("credit", 10, party=self.ram)]).json()["code"]
+        code = self._post([self._line("debit", 800, head="Salary"), self._line("credit", 800, party=self.ram)]).json()["code"]
+        self.api.post("/api/fin/ledger/customer", json={"party_id": self.ram, "amount": 50, "note": "Hilux · advance"})
+        r = self.api.delete(f"/api/fin/journal/{code}")
+        self.assertEqual((r.status_code, r.json()["removed"]), (200, 2))
+        left = [(finance_books.journal_of(e["note"]) or {}).get("code") for e in self._rows()]
+        self.assertEqual(sorted(map(str, left)), sorted([keep, keep, "None"]))
+        self.assertEqual(self.api.delete(f"/api/fin/journal/{code}").status_code, 404)
+
+
 if __name__ == "__main__":
     unittest.main()

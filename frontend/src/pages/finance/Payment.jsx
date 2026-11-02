@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import { useBooks } from "./BooksContext";
 import Feed from "./Feed";
 import { Card, Field, DateField, AccountSelect, PartyPicker, inputCls, btnPrimary, btnGhost } from "./ui";
-import { todayStr, nextReceiptNo, COLORS } from "./money";
+import { todayStr, nextReceiptNo, isJournal, COLORS } from "./money";
 import { noteWithItem, vehicleNames } from "./rentLogic";
 
 let rowSeq = 0;
@@ -28,7 +28,7 @@ export default function Payment({ direction }) {
   // Numbers continue from the highest one already used IN THIS DIRECTION; stop auto-filling the
   // moment the user types in the field.
   const used = useMemo(
-    () => (received ? books.customer_ledger : books.vendor_ledger).filter((e) => e.entry_type === "credit" && e.source === "manual"),
+    () => (received ? books.customer_ledger : books.vendor_ledger).filter((e) => e.entry_type === "credit" && e.source === "manual" && !isJournal(e)),
     [books, received],
   );
   const suggested = useMemo(() => nextReceiptNo(used), [used]);

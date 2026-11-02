@@ -7,6 +7,9 @@ import Payment from "./finance/Payment";
 import Bills from "./finance/Bills";
 import Ledger from "./finance/Ledger";
 import Statement from "./finance/Statement";
+import BalanceSheet from "./finance/BalanceSheet";
+import Journal from "./finance/Journal";
+import Contra from "./finance/Contra";
 import BankAccounts from "./finance/BankAccounts";
 import ImportStatement from "./finance/ImportStatement";
 import Inventory from "./finance/Inventory";
@@ -52,6 +55,9 @@ function FinanceInner() {
   const goTab = (t) => setParams({ tab: t }, { replace: false });
   const openParty = (id) => setParams({ tab: "ledger", party: id });
   const setPartyId = (id) => setParams(id ? { tab: "ledger", party: id } : { tab: "ledger" });
+  // A sales / purchase / expenses report of one person, from their ledger (?party= narrows the report).
+  const openReport = (kind, id) => setParams({ tab: `${kind}-report`, party: id });
+  const showEveryone = () => setParams({ tab: tab });
 
   if (loading) return <div className="flex items-center justify-center h-48"><div className="animate-spin w-7 h-7 border-4 border-blue-600 border-t-transparent rounded-full" /></div>;
   if (setupMessage) return <SetupNotice message={setupMessage} />;
@@ -60,22 +66,25 @@ function FinanceInner() {
   const screens = {
     summary: <BusinessSummary />,
     dashboard: <Dashboard goTab={goTab} openParty={openParty} />,
+    "balance-sheet": <BalanceSheet goTab={goTab} />,
     daybook: <DayBook date={bookDate} setDate={setBookDate} goTab={goTab} />,
     statement: <Statement goTab={goTab} />,
+    voucher: <Journal onDone={() => goTab("daybook")} />,
+    contra: <Contra />,
     received: <Payment direction="received" />,
     paid: <Payment direction="paid" />,
     sales: <Bills type="sale" />,
     purchases: <Bills type="purchase" />,
     expenses: <Bills type="expense" />,
     rent: <Rent openParty={openParty} />,
-    ledger: <Ledger partyId={partyId} setPartyId={setPartyId} />,
+    ledger: <Ledger partyId={partyId} setPartyId={setPartyId} openReport={openReport} />,
     banks: <BankAccounts />,
     import: <ImportStatement />,
     report: <Report />,
     totals: <Totals />,
-    "sales-report": <SalesReport />,
-    "purchase-report": <PurchaseReport />,
-    "expense-report": <ExpenseReport />,
+    "sales-report": <SalesReport partyId={partyId} onShowAll={showEveryone} />,
+    "purchase-report": <PurchaseReport partyId={partyId} onShowAll={showEveryone} />,
+    "expense-report": <ExpenseReport partyId={partyId} onShowAll={showEveryone} />,
     "receivable-report": <ReceivableReport openParty={openParty} />,
     "payable-report": <PayableReport openParty={openParty} />,
     inventory: <Inventory />,

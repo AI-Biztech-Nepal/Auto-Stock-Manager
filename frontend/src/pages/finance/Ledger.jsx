@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import { useBooks } from "./BooksContext";
 import EntryEditor from "./EntryEditor";
 import { Card, Field, Modal, Empty, TwoTapDelete, Notice, ExportBar, exportXlsx, inputCls, btnPrimary, btnGhost } from "./ui";
-import { partyBalances, owedTotals, entryDate, npr, COLORS } from "./money";
+import { partyBalances, owedTotals, entryDate, journalOf, npr, COLORS } from "./money";
 
 const PhoneHint = "10-digit phone";
 
@@ -59,7 +59,7 @@ function PartyForm({ party, onClose, onOpenExisting }) {
   );
 }
 
-function PartyDetail({ party, onBack }) {
+function PartyDetail({ party, onBack, openReport }) {
   const { books, del } = useBooks();
   const [editing, setEditing] = useState(false);
   const [openRow, setOpenRow] = useState(null);
@@ -87,7 +87,7 @@ function PartyDetail({ party, onBack }) {
         return (
           <button key={e.id} onClick={() => setOpenRow({ table, data: e })} className="w-full text-left px-4 py-3 border-t border-slate-100 first:border-t-0 hover:bg-slate-50 flex items-center gap-3">
             <div className="flex-1 min-w-0">
-              <div className="text-sm text-slate-800">{debt ? (table === "cl" ? "Sale (debt)" : "Purchase (debt)") : (table === "cl" ? "Payment received" : "Payment out")}{e.receipt_no ? <span className="text-slate-400"> · #{e.receipt_no}</span> : null}</div>
+              <div className="text-sm text-slate-800">{journalOf(e.note) ? "Journal voucher" : debt ? (table === "cl" ? (e.source_type === "rental_rent" ? "Daily rent" : "Sale (debt)") : "Purchase (debt)") : (table === "cl" ? "Payment received" : "Payment out")}{e.receipt_no ? <span className="text-slate-400"> · #{e.receipt_no}</span> : null}</div>
               <div className="text-xs text-slate-400 truncate">{entryDate(e)}{e.note ? ` · ${e.note}` : ""}{e.source !== "manual" ? " · from a bill" : ""}</div>
             </div>
             <div className="text-sm font-semibold shrink-0" style={{ color }}>{npr(e.amount)}</div>
@@ -119,6 +119,9 @@ function PartyDetail({ party, onBack }) {
           </div>
           <div className="fin-no-print flex flex-wrap gap-2">
             <ExportBar onXlsx={() => exportXlsx(`ledger-${party.name}`, cols, allRows)} />
+            {openReport && [["sales", "Sales"], ["purchase", "Purchases"], ["expense", "Expenses"]].map(([k, l]) => (
+              <button key={k} onClick={() => openReport(k, party.id)} className={btnGhost} data-testid={`party-report-${k}`}>{l} report</button>
+            ))}
             <button onClick={() => setEditing(true)} className={btnGhost}>Edit details</button>
             <TwoTapDelete label="Delete party" onConfirm={async () => { if (await del(`/fin/parties/${party.id}`, "Party deleted")) onBack(); }} />
           </div>
@@ -140,7 +143,7 @@ function PartyDetail({ party, onBack }) {
   );
 }
 
-export default function Ledger({ partyId, setPartyId }) {
+export default function Ledger({ partyId, setPartyId, openReport }) {
   const { books } = useBooks();
   const [q, setQ] = useState("");
   const [adding, setAdding] = useState(false);
@@ -153,7 +156,7 @@ export default function Ledger({ partyId, setPartyId }) {
     return books.parties.filter((p) => !s || p.name.toLowerCase().includes(s) || (p.phone || "").includes(s));
   }, [books.parties, q]);
 
-  if (party) return <PartyDetail party={party} onBack={() => setPartyId(null)} />;
+  if (party) return <PartyDetail party={party} onBack={() => setPartyId(null)} openReport={openReport} />;
 
   const cols = [
     { header: "Name", value: (p) => p.name },

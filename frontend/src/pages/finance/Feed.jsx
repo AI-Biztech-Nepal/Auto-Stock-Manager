@@ -5,7 +5,7 @@ import { Card, Empty } from "./ui";
 import { feedRows, KIND_STYLE, npr } from "./money";
 import { formatBSDate } from "../../utils/nepali-date";
 
-const FILTERS = [["all", "All"], ["sale", "Sales"], ["purchase", "Purchases"], ["expense", "Expenses"], ["received", "Received"], ["paid", "Paid out"], ["transfer", "Transfers"]];
+const FILTERS = [["all", "All"], ["sale", "Sales"], ["purchase", "Purchases"], ["expense", "Expenses"], ["received", "Received"], ["paid", "Paid out"], ["transfer", "Transfers"], ["journal", "Journal"]];
 
 // Bills, ledger payments and transfers interleaved, newest day first, filterable by type. Tap a row
 // to open it for editing.

@@ -35,7 +35,62 @@ export const npr = (n) => (n === null || n === undefined || Number.isNaN(n) ? "�
 export const num = (n) => Math.round(n || 0).toLocaleString("en-IN");
 
 // Money in / out / bill / transfer colours, used the same way everywhere.
-export const COLORS = { in: "#047857", out: "#B91C1C", sale: "#1D4ED8", purchase: "#6D28D9", transfer: "#4338CA", balance: "#2563EB" };
+export const COLORS = { in: "#047857", out: "#B91C1C", sale: "#1D4ED8", purchase: "#6D28D9", transfer: "#4338CA", balance: "#2563EB", journal: "#0F766E" };
+
+// ── journal vouchers ─────────────────────────────────────────────────────
+// A voucher moves an amount between people's ledgers (or charges an expense head) and touches no cash: it is
+// kept as ordinary entries that all carry one code in their note, "Journal voucher JV-7K3Q9X: narration"
+// (FINANCE-NEPAL's journalVoucher.ts, and finance_books.journal_of on the server). Cash, Received / Paid
+// totals and the Day Book's cash columns leave these entries out; the people's ledgers do not.
+const JOURNAL_NOTE = /^Journal voucher (JV-[A-Z0-9]{6})(?::\s*([\s\S]*))?$/;
+export const journalOf = (note) => {
+  const m = note ? JOURNAL_NOTE.exec(String(note).trim()) : null;
+  return m ? { code: m[1], narration: (m[2] || "").trim() } : null;
+};
+export const isJournal = (e) => !!journalOf(e.note);
+
+// Every voucher as one record: when, who is debited / credited, the total, and the entries that make it up.
+export function journalVouchers(books) {
+  const by = new Map();
+  const voucher = (j, date, at) => {
+    if (!by.has(j.code)) by.set(j.code, { code: j.code, narration: j.narration, date, at, debits: [], credits: [], total: 0, entries: [] });
+    return by.get(j.code);
+  };
+  const line = (name, amount) => ({ name, amount: Number(amount) });
+  for (const e of books.customer_ledger) {
+    const j = journalOf(e.note);
+    if (!j) continue;
+    const v = voucher(j, e.entry_date || dayOf(e.created_at), e.created_at);
+    v.entries.push({ table: "cl", id: e.id });
+    const who = books.parties.find((p) => p.id === e.customer_id)?.name || "Customer";
+    // Received = the person credited; Paid = the person debited.
+    if (e.entry_type === "credit") v.credits.push(line(who, e.amount));
+    else { v.debits.push(line(who, e.amount)); v.total += Number(e.amount); }
+  }
+  for (const e of books.vendor_ledger) {
+    const j = journalOf(e.note);
+    if (!j) continue;
+    const v = voucher(j, e.entry_date || dayOf(e.created_at), e.created_at);
+    v.entries.push({ table: "vl", id: e.id });
+    const who = books.parties.find((p) => p.id === e.vendor_id)?.name || "Vendor";
+    if (e.entry_type === "credit") { v.debits.push(line(who, e.amount)); v.total += Number(e.amount); }
+    else v.credits.push(line(who, e.amount));
+  }
+  for (const t of books.transactions) {
+    const j = t.type === "expense" ? journalOf(t.note) : null;
+    if (!j) continue;
+    const v = voucher(j, t.bill_date || dayOf(t.created_at), t.created_at);
+    v.entries.push({ table: "tx", id: t.id });
+    v.debits.push(line(books.categories.find((c) => c.id === t.expense_category_id)?.name || t.party_name || "Expense", t.amount));
+    v.total += Number(t.amount);
+  }
+  return [...by.values()];
+}
+
+export const voucherSummary = (v) => [
+  `Dr ${v.debits.map((l) => `${l.name} ${num(l.amount)}`).join(", ") || "…"} · Cr ${v.credits.map((l) => `${l.name} ${num(l.amount)}`).join(", ") || "…"}`,
+  v.narration || null,
+].filter(Boolean).join(" · ");
 
 export const emptyBooks = () => ({
   parties: [], accounts: [], transfers: [], categories: [], items: [],
@@ -89,21 +144,21 @@ export function balances(books, { before, upTo } = {}) {
   };
   for (const t of books.transactions) {
     const d = billDate(t);
-    if (!inRange(d)) continue;
+    if (!inRange(d) || isJournal(t)) continue;
     const who = t.party_name || partyName(books, t.customer_id) || "Walk-in";
     if (isSettledOnTheSpot(t)) add(t.bank_account_id, t.type === "sale" ? t.amount : -t.amount, { date: d, label: `${t.type === "sale" ? "Sale" : "Purchase"} (no party): ${who}`, kind: t.type });
     else if (t.type === "expense") add(t.bank_account_id, -t.amount, { date: d, label: `Expense: ${who || "—"}`, kind: "expense" });
   }
   for (const e of books.customer_ledger) {
     const d = entryDate(e);
-    if (!inRange(d)) continue;
+    if (!inRange(d) || isJournal(e)) continue;
     const who = partyName(books, e.customer_id, "Customer");
     if (e.entry_type === "credit") add(e.bank_account_id, e.amount, { date: d, label: `Received from ${who}`, kind: "in" });
     else if (e.source === "manual") add(e.bank_account_id, -e.amount, { date: d, label: `Refunded to ${who}`, kind: "out" });
   }
   for (const e of books.vendor_ledger) {
     const d = entryDate(e);
-    if (!inRange(d)) continue;
+    if (!inRange(d) || isJournal(e)) continue;
     if (e.entry_type === "credit") add(e.bank_account_id, -e.amount, { date: d, label: `Paid to ${partyName(books, e.vendor_id, "Vendor")}`, kind: "out" });
   }
   // Transfers move money between your own accounts and never change the total.
@@ -122,17 +177,20 @@ export function balances(books, { before, upTo } = {}) {
 export function cashMovements(books) {
   const lines = [];
   for (const t of books.transactions) {
+    if (isJournal(t)) continue;
     const d = billDate(t);
     const who = t.party_name || partyName(books, t.customer_id) || "Walk-in";
     if (isSettledOnTheSpot(t)) lines.push({ id: t.id, date: d, dir: t.type === "sale" ? "in" : "out", amount: t.amount, label: `${t.type === "sale" ? "Sale" : "Purchase"}: ${who}`, table: "tx" });
     else if (t.type === "expense") lines.push({ id: t.id, date: d, dir: "out", amount: t.amount, label: `Expense: ${who}`, table: "tx" });
   }
   for (const e of books.customer_ledger) {
+    if (isJournal(e)) continue;
     const who = partyName(books, e.customer_id, "Customer");
     if (e.entry_type === "credit") lines.push({ id: e.id, date: entryDate(e), dir: "in", amount: e.amount, label: `Received from ${who}`, table: "cl" });
     else if (e.source === "manual") lines.push({ id: e.id, date: entryDate(e), dir: "out", amount: e.amount, label: `Refunded to ${who}`, table: "cl" });
   }
   for (const e of books.vendor_ledger) {
+    if (isJournal(e)) continue;
     if (e.entry_type === "credit") lines.push({ id: e.id, date: entryDate(e), dir: "out", amount: e.amount, label: `Paid to ${partyName(books, e.vendor_id, "Vendor")}`, table: "vl" });
   }
   return lines.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
@@ -197,25 +255,29 @@ export function dayBook(books, date) {
   const opening = balances(books, { before: date }).total;
   const rows = [];
   for (const t of books.transactions) {
-    if (billDate(t) !== date) continue;
+    if (billDate(t) !== date || isJournal(t)) continue;
     const who = t.party_name || partyName(books, t.customer_id) || "";
     if (t.type === "expense") rows.push({ key: `t${t.id}`, at: t.created_at, kind: "expense", label: `Expense${who ? `: ${who}` : ""}`, note: t.note, invoice: t.bill_no, out: t.amount, table: "tx", data: t });
     else if (isSettledOnTheSpot(t)) rows.push({ key: `t${t.id}`, at: t.created_at, kind: t.type, label: `${t.type === "sale" ? "Sale" : "Purchase"}${who ? `: ${who}` : ""} (no party)`, note: t.note, invoice: t.bill_no, bill: t.amount, discount: t.discount_amount, invoiceAmt: t.amount + (t.discount_amount || 0) - (t.vat_amount || 0), [t.type === "sale" ? "in" : "out"]: t.amount, table: "tx", data: t });
     else rows.push({ key: `t${t.id}`, at: t.created_at, kind: t.type, label: `${t.type === "sale" ? "Sale" : "Purchase"}: ${who || "—"}`, note: t.note, invoice: t.bill_no, bill: t.amount, discount: t.discount_amount, invoiceAmt: t.amount + (t.discount_amount || 0) - (t.vat_amount || 0), table: "tx", data: t });
   }
   for (const e of books.customer_ledger) {
-    if (entryDate(e) !== date) continue;
+    if (entryDate(e) !== date || isJournal(e)) continue;
     const isIn = e.entry_type === "credit";
     if (!isIn && e.source !== "manual") continue; // a booking debit IS the sale bill row
     rows.push({ key: `c${e.id}`, at: e.created_at, kind: isIn ? "received" : "paid", label: isIn ? `Received from ${partyName(books, e.customer_id, "Customer")}` : `Paid to ${partyName(books, e.customer_id, "Customer")}`, note: e.note, invoice: e.receipt_no, [isIn ? "in" : "out"]: e.amount, table: "cl", data: e });
   }
   for (const e of books.vendor_ledger) {
-    if (entryDate(e) !== date || e.entry_type !== "credit") continue; // debits are the Purchase itself
+    if (entryDate(e) !== date || e.entry_type !== "credit" || isJournal(e)) continue; // debits are the Purchase itself
     rows.push({ key: `v${e.id}`, at: e.created_at, kind: "paid", label: `Paid to ${partyName(books, e.vendor_id, "Vendor")}`, note: e.note, invoice: e.receipt_no, out: e.amount, table: "vl", data: e });
   }
   for (const t of books.transfers) {
     if (transferDate(t) !== date) continue;
     rows.push({ key: `x${t.id}`, at: t.created_at, kind: "transfer", label: `${accountName(books, t.from_account_id)} → ${accountName(books, t.to_account_id)}`, note: t.note, transferAmount: t.amount, table: "tr", data: t });
+  }
+  for (const v of journalVouchers(books)) {
+    if (v.date !== date) continue;
+    rows.push({ key: `j${v.code}`, at: v.at, kind: "journal", label: `Journal voucher ${v.code}`, note: voucherSummary(v), transferAmount: v.total, table: "jv", data: v });
   }
   rows.sort((a, b) => ((a.at || "") < (b.at || "") ? -1 : (a.at || "") > (b.at || "") ? 1 : 0));
   let running = opening, cashIn = 0, cashOut = 0, salesBilled = 0, purchasesBilled = 0;
@@ -233,20 +295,24 @@ export function dayBook(books, date) {
 export function feedRows(books) {
   const rows = [];
   for (const t of books.transactions) {
+    if (isJournal(t)) continue;
     const who = t.party_name || partyName(books, t.customer_id) || "—";
     rows.push({ key: `t${t.id}`, date: billDate(t), at: t.created_at, kind: t.type, label: `${t.type[0].toUpperCase()}${t.type.slice(1)}: ${who}`, amount: t.amount, number: t.bill_no, table: "tx", data: t });
   }
   for (const e of books.customer_ledger) {
-    if (e.entry_type === "debit" && e.source !== "manual") continue;
+    if ((e.entry_type === "debit" && e.source !== "manual") || isJournal(e)) continue;
     const isIn = e.entry_type === "credit";
     rows.push({ key: `c${e.id}`, date: entryDate(e), at: e.created_at, kind: isIn ? "received" : "paid", label: `${isIn ? "Received from" : "Refunded to"} ${partyName(books, e.customer_id, "Customer")}`, amount: e.amount, number: e.receipt_no, table: "cl", data: e });
   }
   for (const e of books.vendor_ledger) {
-    if (e.entry_type !== "credit") continue;
+    if (e.entry_type !== "credit" || isJournal(e)) continue;
     rows.push({ key: `v${e.id}`, date: entryDate(e), at: e.created_at, kind: "paid", label: `Paid to ${partyName(books, e.vendor_id, "Vendor")}`, amount: e.amount, number: e.receipt_no, table: "vl", data: e });
   }
   for (const t of books.transfers) {
     rows.push({ key: `x${t.id}`, date: transferDate(t), at: t.created_at, kind: "transfer", label: `${accountName(books, t.from_account_id)} → ${accountName(books, t.to_account_id)}`, amount: t.amount, table: "tr", data: t });
+  }
+  for (const v of journalVouchers(books)) {
+    rows.push({ key: `j${v.code}`, date: v.date, at: v.at, kind: "journal", label: `Journal voucher ${v.code}`, amount: v.total, number: null, table: "jv", data: v });
   }
   return rows.sort((a, b) => (a.date === b.date ? ((a.at || "") < (b.at || "") ? 1 : -1) : a.date < b.date ? 1 : -1));
 }
@@ -258,4 +324,5 @@ export const KIND_STYLE = {
   received: { label: "Received", color: COLORS.in },
   paid: { label: "Paid out", color: COLORS.out },
   transfer: { label: "Transfer", color: COLORS.transfer },
+  journal: { label: "Journal", color: COLORS.journal },
 };
