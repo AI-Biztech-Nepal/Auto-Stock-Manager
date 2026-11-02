@@ -516,7 +516,7 @@ async def check_phone(phone, own_id: Optional[str]) -> None:
             raise HTTPException(409, {"message": f"{c.get('name') or 'A customer'} already has this phone number", "existing_id": c["id"], "existing_name": c.get("name") or ""})
 
 
-LEAD_TYPE_LABEL = {"sell": "Sell bike", "exchange": "Exchange", "service": "Service", "whatsapp": "WhatsApp tap", "call": "Call tap"}
+LEAD_TYPE_LABEL = {"sell": "Sell bike", "exchange": "Exchange", "service": "Service", "whatsapp": "WhatsApp tap", "call": "Call tap", "signup": "New account"}
 
 
 async def customer_from_lead(lead: dict):

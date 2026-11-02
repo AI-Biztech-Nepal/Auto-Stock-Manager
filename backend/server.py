@@ -1862,6 +1862,9 @@ class OfferSpin(BaseModel):
 class LeadReject(BaseModel):
     remark: str  # why the lead is turned down: required
 
+class LeadsSeen(BaseModel):
+    ids: List[str] = Field(default_factory=list, max_length=1000)  # the leads that were on screen
+
 class SettingsUpdate(BaseModel):
     logo_url: Optional[str] = None
     business_name: Optional[str] = None
@@ -5361,6 +5364,15 @@ def _lead_email(v) -> Optional[str]:
     e = str(v or "").strip()[:255]
     return e if re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", e) else None
 
+@api_router.post("/leads/seen")
+async def mark_leads_seen(body: LeadsSeen, cu: dict = Depends(admin_only)):
+    """The Leads screen was opened with these leads on it: they stop counting as new in the nav badge and the bell.
+    Only the ids the screen actually showed are marked, so a lead that arrived a moment later still notifies."""
+    if body.ids:
+        await db.leads.update_many({"id": {"$in": body.ids}, "seen_at": {"$exists": False}},
+                                   {"$set": {"seen_at": datetime.now(timezone.utc).isoformat()}})
+    return {"ok": True}
+
 @api_router.post("/leads/{lid}/accept")
 async def accept_lead(lid: str, cu: dict = Depends(admin_only)):
     async with _lead_decision_lock:
@@ -5887,6 +5899,7 @@ async def _run_startup_tasks():
             ("leads", "decided_at", "VARCHAR(40)"),
             ("leads", "customer_id", "VARCHAR(36)"),
             ("leads", "vehicle_id", "VARCHAR(36)"),  # the vehicle the visitor was looking at when they tapped WhatsApp / Call
+            ("leads", "seen_at", "VARCHAR(40)"),  # when staff first opened the lead; unseen pending leads drive the nav badge
             # Who sold the vehicle (a Team member); the name is kept on the sale so it survives the member being removed.
             ("sales", "sold_by_id", "VARCHAR(36)"),
             ("sales", "sold_by_name", "VARCHAR(255)"),

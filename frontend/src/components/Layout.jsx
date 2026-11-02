@@ -66,6 +66,7 @@ export default function Layout() {
   }, [user, canSeeInventory]);
 
   // New website leads (form submissions and WhatsApp/Call taps): admin-only on the backend.
+  // Only pending leads nobody has opened yet count: opening the Leads screen marks what it shows as seen.
   // Polled every minute; the Leads screen pings "leads-changed" so the badge clears at once.
   const [newLeads, setNewLeads] = useState(0);
   const lastNewLeads = useRef(null);
@@ -74,7 +75,7 @@ export default function Layout() {
     if (!user || !isAdmin) return;
     const load = () => {
       api.get("/leads").then(r => {
-        const n = r.data.filter(l => l.status === "new").length;
+        const n = r.data.filter(l => l.status === "new" && !l.seen_at).length;
         if (lastNewLeads.current !== null && n > lastNewLeads.current) {
           toast.info(`${n - lastNewLeads.current} new website lead${n - lastNewLeads.current > 1 ? "s" : ""}`, { action: { label: "View", onClick: () => navigate("/marketing?tab=leads") } });
         }

@@ -106,7 +106,9 @@ TABLES = {
     "leads": {"columns": {"id", "company_id", "type", "name", "phone", "message", "images", "requested_service", "vehicle_type",
                            "preferred_date", "status", "created_at",
                            # who the visitor is, and what was decided about the lead (accepted / rejected + remark)
-                           "email", "address", "remark", "decided_by", "decided_at", "customer_id", "vehicle_id"}, "json_cols": {"images"}},
+                           "email", "address", "remark", "decided_by", "decided_at", "customer_id", "vehicle_id",
+                           # when staff first opened the lead in the Leads screen (drives the new-lead badge)
+                           "seen_at"}, "json_cols": {"images"}},
     "settings": {"columns": {"id", "company_id", "logo_url", "business_name", "contact_phone", "contact_email", "address",
                               "hero_image_url", "service_image_url", "warranty_days_default"}},
     "sync_logs": {"columns": {"id", "company_id", "pushed_at", "count", "status", "message"}},

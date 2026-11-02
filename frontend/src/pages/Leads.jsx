@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { Phone, MessageCircle, Trash2, Inbox, Wrench, Repeat, Bike, X, Mail, MapPin, Check, Ban, Users, ExternalLink } from "lucide-react";
+import { Phone, MessageCircle, Trash2, Inbox, Wrench, Repeat, Bike, X, Mail, MapPin, Check, Ban, Users, ExternalLink, UserPlus } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
 import { formatNPR } from "../utils/helpers";
@@ -8,18 +8,20 @@ import { formatNPR } from "../utils/helpers";
 // Sell / Exchange / Book Service forms from the public website land here (POST /public/leads), and so do WhatsApp / Call
 // taps (the website asks who they are first). Every lead is decided once: Accept (the person goes into the CRM) or
 // Reject (a remark saying why is required).
+// Tabs: "All" is the inbox of pending leads. Accepting one moves it out of All into the tab for its type; rejecting
+// one moves it to the Rejected tab.
 const TYPES = {
   sell: { label: "Sell bike", Icon: Bike, cls: "bg-emerald-50 text-emerald-700" },
   exchange: { label: "Exchange", Icon: Repeat, cls: "bg-indigo-50 text-indigo-700" },
   service: { label: "Service", Icon: Wrench, cls: "bg-amber-50 text-amber-700" },
   whatsapp: { label: "WhatsApp tap", Icon: MessageCircle, cls: "bg-green-50 text-green-700" },
   call: { label: "Call tap", Icon: Phone, cls: "bg-sky-50 text-sky-700" },
+  signup: { label: "New account", Icon: UserPlus, cls: "bg-violet-50 text-violet-700" },
 };
-const STATUS_FILTERS = [
-  { key: "new", label: "Pending" },
-  { key: "accepted", label: "Accepted" },
-  { key: "rejected", label: "Rejected" },
+const TABS = [
   { key: "all", label: "All" },
+  ...Object.entries(TYPES).map(([key, v]) => ({ key, label: v.label, Icon: v.Icon })),
+  { key: "rejected", label: "Rejected" },
 ];
 const MIN_REMARK = 3;
 const FONT = { fontFamily: "Manrope" };
@@ -32,20 +34,30 @@ const waNumber = phone => {
 
 const when = (iso) => (iso ? new Date(iso).toLocaleString() : "");
 
+// A lead is pending until it is accepted or rejected (older ones with another status count as pending too).
+const state = l => (l.status === "accepted" || l.status === "rejected" ? l.status : "new");
+
+// The one tab a lead lives in, so none can go missing. An accepted lead of a type with no tab of its own stays in All.
+const tabOf = l => (state(l) === "new" ? "all" : state(l) === "rejected" ? "rejected" : TYPES[l.type] ? l.type : "all");
+const tabLabel = key => TABS.find(t => t.key === key)?.label;
+
 export default function Leads() {
   const navigate = useNavigate();
   const [leads, setLeads] = useState([]);
-  const [status, setStatusFilter] = useState("new");
   const [rejecting, setRejecting] = useState(null); // { id, remark }: the lead whose reject box is open
   const [busyId, setBusyId] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [type, setType] = useState("all");
+  const [tab, setTab] = useState("all");
   const [zoom, setZoom] = useState(null);
 
   const load = useCallback(async () => {
     try {
       const { data } = await api.get("/leads");
       setLeads(data);
+      // Pending leads are all on screen in the All tab, so they count as seen: this clears the nav badge and the bell.
+      // Done before the ping below so the badge's refetch already sees them as seen.
+      const unseen = data.filter(l => state(l) === "new" && !l.seen_at).map(l => l.id);
+      if (unseen.length) await api.post("/leads/seen", { ids: unseen }, { suppressErrorToast: true }).catch(() => {});
       window.dispatchEvent(new Event("leads-changed"));
     } catch {
       toast.error("Failed to load leads");
@@ -65,7 +77,8 @@ export default function Leads() {
       const { data } = await api.post(`/leads/${lead.id}/accept`, null, { suppressErrorToast: true });
       replaceLead(data.lead);
       toast.success(!data.customer_id ? "Accepted. It has no phone number, so it was not added to the CRM"
-        : data.customer_created ? `Accepted. ${lead.name} was added to the CRM` : `Accepted. ${lead.name} is already a customer, linked in the CRM`);
+        : data.customer_created ? `Accepted. ${lead.name} was added to the CRM` : `Accepted. ${lead.name} is already a customer, linked in the CRM`,
+      { description: `Moved to the ${tabLabel(tabOf(data.lead))} tab` });
     } catch (ex) { toast.error(errText(ex, "Couldn't accept that lead")); load(); }
     finally { setBusyId(null); }
   };
@@ -78,7 +91,7 @@ export default function Leads() {
       const { data } = await api.post(`/leads/${lead.id}/reject`, { remark }, { suppressErrorToast: true });
       replaceLead(data);
       setRejecting(null);
-      toast.success("Lead rejected");
+      toast.success("Lead rejected", { description: "Moved to the Rejected tab" });
     } catch (ex) { toast.error(errText(ex, "Couldn't reject that lead")); load(); }
     finally { setBusyId(null); }
   };
@@ -98,33 +111,27 @@ export default function Leads() {
     return <div className="flex items-center justify-center h-48"><div className="animate-spin w-7 h-7 border-4 border-blue-600 border-t-transparent rounded-full" /></div>;
   }
 
-  // A lead is pending until it is accepted or rejected (older ones with another status count as pending too).
-  const state = l => (l.status === "accepted" || l.status === "rejected" ? l.status : "new");
-  const shown = leads.filter(l => (type === "all" || l.type === type) && (status === "all" || state(l) === status));
-  const newCount = t => leads.filter(l => (t === "all" || l.type === t) && state(l) === "new").length;
-  const statusCount = k => leads.filter(l => (type === "all" || l.type === type) && (k === "all" || state(l) === k)).length;
+  const shown = leads.filter(l => tabOf(l) === tab);
+  const pendingCount = leads.filter(l => tabOf(l) === "all" && state(l) === "new").length;
+  const [emptyTitle, emptyText] = leads.length === 0
+    ? ["No leads yet", "Sell, exchange and service requests, and people who tap WhatsApp or Call on your website, will appear here as they come in."]
+    : tab === "all" ? ["Nothing waiting for a decision", "New leads from your website appear here. Accept one to move it to its own tab, or reject it to move it to Rejected."]
+    : tab === "rejected" ? ["No rejected leads", "Leads you reject are kept here, with your reason."]
+    : [`No accepted leads in ${tabLabel(tab)}`, "Accept a lead in the All tab and it moves here."];
 
   return (
     <div className="space-y-4" data-testid="leads-page">
-      <div role="group" aria-label="Filter leads by decision" className="flex gap-1.5" data-testid="leads-status-filter">
-        {STATUS_FILTERS.map(f => (
-          <button key={f.key} onClick={() => setStatusFilter(f.key)} aria-pressed={status === f.key} data-testid={`leads-filter-${f.key}`}
-            className={`h-9 px-3.5 rounded-lg text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${status === f.key ? "bg-slate-900 text-white" : "bg-white border border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
-            {f.label}<span className={`ml-1.5 text-xs ${status === f.key ? "text-white/70" : "text-slate-400"}`}>{statusCount(f.key)}</span>
-          </button>
-        ))}
-      </div>
-
       {/* One swipeable row on phones (bleeds to the screen edge so the cut-off chip hints at more); wraps from sm up. */}
-      <div role="group" aria-label="Filter leads by type" style={{ scrollbarWidth: "none" }} className="-mx-4 px-4 sm:mx-0 sm:px-0 flex gap-2 overflow-x-scroll sm:overflow-visible sm:flex-wrap [&::-webkit-scrollbar]:hidden">
-        {[["all", "All", null], ...Object.entries(TYPES).map(([k, v]) => [k, v.label, v.Icon])].map(([k, label, Icon]) => (
+      <div role="group" aria-label="Filter leads by tab" style={{ scrollbarWidth: "none" }} className="-mx-4 px-4 sm:mx-0 sm:px-0 flex gap-2 overflow-x-scroll sm:overflow-visible sm:flex-wrap [&::-webkit-scrollbar]:hidden">
+        {TABS.map(({ key, label, Icon }) => (
           <button
-            key={k}
-            onClick={() => setType(k)}
-            aria-pressed={type === k}
-            className={`shrink-0 h-10 px-3.5 inline-flex items-center gap-1.5 whitespace-nowrap rounded-full text-sm font-semibold border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${type === k ? "bg-blue-600 text-white border-blue-600" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"}`}
+            key={key}
+            onClick={() => setTab(key)}
+            aria-pressed={tab === key}
+            data-testid={`leads-tab-${key}`}
+            className={`shrink-0 h-10 px-3.5 inline-flex items-center gap-1.5 whitespace-nowrap rounded-full text-sm font-semibold border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${tab === key ? "bg-blue-600 text-white border-blue-600" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"}`}
           >
-            {Icon && <Icon size={15} />}{label}{newCount(k) > 0 && <span className={`ml-0.5 min-w-[20px] text-center text-xs px-1.5 py-0.5 rounded-full ${type === k ? "bg-white/25" : "bg-blue-600 text-white"}`}>{newCount(k)}</span>}
+            {Icon && <Icon size={15} />}{label}{key === "all" && pendingCount > 0 && <span className={`ml-0.5 min-w-[20px] text-center text-xs px-1.5 py-0.5 rounded-full ${tab === key ? "bg-white/25" : "bg-blue-600 text-white"}`}>{pendingCount}</span>}
           </button>
         ))}
       </div>
@@ -132,13 +139,8 @@ export default function Leads() {
       {shown.length === 0 ? (
         <div className="bg-white border border-slate-200 rounded-2xl px-6 py-12 text-center">
           <span className="mx-auto mb-4 size-12 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center"><Inbox size={22} /></span>
-          <h3 className="text-base font-bold text-slate-900" style={FONT}>{leads.length === 0 ? "No leads yet" : status === "new" ? "Nothing waiting for a decision" : "Nothing here"}</h3>
-          <p className="mt-1 text-sm text-slate-600 max-w-xs mx-auto">
-            {leads.length === 0 ? "Sell, exchange and service requests, and people who tap WhatsApp or Call on your website, will appear here as they come in." : "Try another filter above."}
-          </p>
-          {(type !== "all" || status !== "all") && leads.length > 0 && (
-            <button onClick={() => { setType("all"); setStatusFilter("all"); }} className="mt-4 h-10 px-4 rounded-lg bg-slate-100 hover:bg-slate-200 text-sm font-semibold text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">Show all {leads.length} leads</button>
-          )}
+          <h3 className="text-base font-bold text-slate-900" style={FONT}>{emptyTitle}</h3>
+          <p className="mt-1 text-sm text-slate-600 max-w-xs mx-auto">{emptyText}</p>
         </div>
       ) : (
         <div className="space-y-3">
