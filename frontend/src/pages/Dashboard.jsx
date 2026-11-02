@@ -599,7 +599,7 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Period-scoped: follows the toggle above. Lifetime totals now live on the Finance tab. */}
+      {/* Period-scoped: follows the toggle above. */}
       <AccountingSummary range={range} />
 
       {/* Current stock & workload — a live "right now" snapshot, not affected by the period toggle */}

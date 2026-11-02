@@ -126,7 +126,8 @@ TABLES = {
                                    "outcome", "created_by", "created_at", "updated_at"}},
     "crm_interactions": {"columns": {"id", "company_id", "customer_id", "kind", "summary", "occurred_at", "created_by",
                                       "created_at"}},
-    # Finance books (finance_books.py)
+    # Leftover Finance tables. The Finance section was removed from the app, but the tables remain in the database
+    # (with foreign keys to companies), so they stay registered: server.py's delete-company cascade clears their rows.
     "fin_parties": {"columns": {"id", "company_id", "name", "phone", "address", "created_at", "updated_at"}},
     "fin_bank_accounts": {"columns": {"id", "company_id", "name", "bank_name", "account_number", "account_holder_name",
                                        "address", "created_at", "updated_at"}},
@@ -138,15 +139,11 @@ TABLES = {
                                       "bill_date", "party_address", "vat_pan_no", "items", "discount_amount", "vat_amount",
                                       "expense_category_id", "payment_mode", "bank_account_id", "source_type", "source_id",
                                       "created_at", "updated_at"}, "json_cols": {"items"}},
-    # fin_transactions.installation_charge / service_charges are NOT listed here: every read selects every listed
-    # column, so one missing from the database would break all of Finance. finance_books.ensure_schema adds them to
-    # this entry at start-up once it has confirmed they exist.
     "fin_customer_ledger": {"columns": {"id", "company_id", "customer_id", "entry_type", "amount", "note", "source", "source_type", "source_id",
                                      "bank_account_id", "entry_date", "receipt_no", "created_at"}},
     "fin_vendor_ledger": {"columns": {"id", "company_id", "vendor_id", "entry_type", "amount", "note", "source", "source_type", "source_id",
                                      "bank_account_id", "entry_date", "receipt_no", "created_at"}},
     "fin_statement_imports": {"columns": {"id", "company_id", "reference_code", "created_at"}},
-    # Rent and the Cash account's details (migration_add_finance_rent.sql)
     "fin_rentals": {"columns": {"id", "company_id", "car", "model", "customer_id", "customer_name", "start_date", "end_date",
                                  "returned_on", "rate_per_day", "note", "created_at", "updated_at"}},
     "fin_cash_account": {"columns": {"id", "company_id", "name", "bank_name", "account_number", "account_holder_name", "address",
@@ -274,14 +271,6 @@ class MySQLDatabase:
                         client_flag=CLIENT.FOUND_ROWS,
                     )
         return self._pool
-
-    async def fetch_raw(self, sql: str):
-        """Run one literal read-only statement and return its rows as dicts (start-up schema checks)."""
-        pool = await self.get_pool()
-        async with pool.acquire() as conn:
-            async with conn.cursor(aiomysql.DictCursor) as cur:
-                await cur.execute(sql)
-                return await cur.fetchall()
 
     async def execute_raw(self, sql: str):
         """Run one literal SQL statement — schema migrations only, no user data. server.py's
