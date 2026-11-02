@@ -80,8 +80,8 @@ export default function Dashboard({ goTab, openParty }) {
         <Stat label={month ? "Sales (this month)" : "Sales"} value={pl.sale} color={COLORS.sale} />
         <Stat label={month ? "Purchase (this month)" : "Purchase"} value={pl.purchase} color={COLORS.purchase} />
         <Stat label={month ? "Expense (this month)" : "Expense"} value={pl.expense} color={COLORS.out} />
-        <Stat label="Total received (year)" value={rp.received} color={COLORS.in} />
-        <Stat label="Total paid (year)" value={rp.paid} color={COLORS.out} />
+        <Stat label="Total received (year)" value={rp.received} color={COLORS.in} onClick={() => goTab("totals")} />
+        <Stat label="Total paid (year)" value={rp.paid} color={COLORS.out} onClick={() => goTab("totals")} />
       </div>
 
       <Card className="p-4">

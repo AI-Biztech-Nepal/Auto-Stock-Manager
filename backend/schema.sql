@@ -268,6 +268,8 @@ CREATE TABLE IF NOT EXISTS sales (
   exchange_model VARCHAR(100),
   exchange_reg_no VARCHAR(50),
   exchange_year VARCHAR(10),
+  -- The inventory entry created for the exchanged vehicle when the sale was recorded.
+  exchange_vehicle_id VARCHAR(36),
   helmet_given TINYINT(1),
   imported TINYINT(1),
   needs_review TINYINT(1),

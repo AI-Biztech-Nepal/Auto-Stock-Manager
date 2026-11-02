@@ -1,12 +1,11 @@
 import { useMemo, useState } from "react";
-import { ChevronLeft, ChevronRight, Plus } from "lucide-react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useBooks } from "./BooksContext";
 import EntryEditor from "./EntryEditor";
-import { Card, Stat, Empty, ExportBar, exportXlsx, inputCls, btnPrimary } from "./ui";
+import NewEntryMenu from "./NewEntryMenu";
+import { Card, Stat, Empty, ExportBar, exportXlsx, inputCls } from "./ui";
 import { dayBook, todayStr, addDays, npr, num, COLORS, KIND_STYLE } from "./money";
 import { formatBSDate } from "../../utils/nepali-date";
-
-const NEW_ENTRY = [["received", "Received"], ["paid", "Payment Out"], ["sales", "Sale"], ["purchases", "Purchase"], ["expenses", "Expense"]];
 
 // A paper cash book for one day: opening balance, the day's rows in time order, closing balance
 // with the arithmetic spelled out. Only cash rows advance the running balance; bills and transfers
@@ -14,7 +13,6 @@ const NEW_ENTRY = [["received", "Received"], ["paid", "Payment Out"], ["sales", 
 export default function DayBook({ date, setDate, goTab, businessName }) {
   const { books } = useBooks();
   const [editing, setEditing] = useState(null);
-  const [menu, setMenu] = useState(false);
   const today = todayStr();
   const day = useMemo(() => dayBook(books, date), [books, date]);
 
@@ -41,17 +39,10 @@ export default function DayBook({ date, setDate, goTab, businessName }) {
         </div>
         <div className="fin-no-print flex flex-wrap items-center gap-2">
           <button onClick={() => setDate(addDays(date, -1))} className="h-10 w-10 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 flex items-center justify-center" aria-label="Previous day"><ChevronLeft size={18} /></button>
-          <input type="date" value={date} max={today} onChange={(e) => e.target.value && setDate(e.target.value > today ? today : e.target.value)} className={`${inputCls} w-40`} />
+          <input type="date" value={date} max={today} onChange={(e) => e.target.value && setDate(e.target.value > today ? today : e.target.value)} className={`${inputCls} !w-40`} />
           <button onClick={() => setDate(addDays(date, 1))} disabled={date >= today} className="h-10 w-10 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 disabled:opacity-40 flex items-center justify-center" aria-label="Next day"><ChevronRight size={18} /></button>
           {date !== today && <button onClick={() => setDate(today)} className="h-10 px-3 rounded-lg text-sm font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100">Today</button>}
-          <div className="relative">
-            <button onClick={() => setMenu(!menu)} className={btnPrimary}><Plus size={16} /> New entry</button>
-            {menu && (
-              <div className="absolute right-0 mt-1 w-44 bg-white border border-slate-200 rounded-lg shadow-lg z-20 overflow-hidden">
-                {NEW_ENTRY.map(([k, l]) => <button key={k} onClick={() => { setMenu(false); goTab(k); }} className="w-full text-left px-3 py-2.5 text-sm hover:bg-slate-50">{l}</button>)}
-              </div>
-            )}
-          </div>
+          <NewEntryMenu goTab={goTab} />
           <ExportBar onXlsx={() => exportXlsx(`daybook-${date}`, cols, day.rows)} />
         </div>
       </div>

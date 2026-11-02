@@ -187,6 +187,12 @@ export const withSanakhatExpenses = (others, sanakhat, resanakhat) => [
   ...(Number(resanakhat) > 0 ? [{ name: RESANAKHAT_EXPENSE, amount: Number(resanakhat) }] : []),
 ];
 
+// Confirm text for deleting a sale. A sale that took a vehicle in exchange also takes that vehicle's
+// Inventory entry back out (the server keeps it once it has been priced or worked on).
+export const deleteSaleConfirm = (sale) =>
+  "Delete this sale? The vehicle will be restored to available."
+  + (sale?.exchange_vehicle_id ? " The exchange vehicle added to Inventory is removed too, unless it has been priced or worked on." : "");
+
 // 20000 -> "Twenty Thousand". Nepali/Indian grouping (Lakh, Crore), whole rupees only.
 export const amountInWords = (amount) => {
   let n = Math.floor(Math.abs(Number(amount) || 0));
