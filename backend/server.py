@@ -7058,6 +7058,23 @@ async def public_create_lead(lead: LeadCreate):
     l["name"], l["phone"] = (l["name"] or "").strip()[:255], (l["phone"] or "").strip()[:50]
     l["email"] = _lead_email(l.get("email"))
     l["address"] = (l.get("address") or "").strip()[:500] or None
+    if l["type"] == "signup" and l["email"]:
+        # A registered account. The website sends it the moment someone signs in with Google (no phone yet), then again
+        # when they add their number: both land on one entry. A number is only ever filled in, never overwritten, since
+        # this endpoint is public; a changed number later becomes its own entry, as before.
+        async with _signup_lead_lock:
+            mine = await db.leads.find_one({"type": "signup", "email": l["email"]}, {"_id": 0})
+            if mine and not l["phone"]: return mine  # signed in again
+            if mine and not mine.get("phone"):
+                patch = {"phone": l["phone"], "name": l["name"] or mine.get("name"), "message": l.get("message") or mine.get("message")}
+                await db.leads.update_one({"id": mine["id"]}, {"$set": patch})
+                return {**mine, **patch}
+            return await _insert_lead(l)
+    return await _insert_lead(l)
+
+_signup_lead_lock = asyncio.Lock()
+
+async def _insert_lead(l: dict) -> dict:
     l["id"] = str(uuid.uuid4())
     l["status"] = "new"
     l["created_at"] = datetime.now(timezone.utc).isoformat()
