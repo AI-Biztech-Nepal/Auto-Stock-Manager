@@ -174,7 +174,7 @@ export default function SoldStockDetail() {
         <div className="flex items-center gap-2 flex-wrap">
           <span className="px-2.5 py-1 rounded-full text-xs font-semibold uppercase tracking-wide bg-green-100 text-green-800" data-testid="sold-status-badge">Sold</span>
           {isAdmin && activeSale && (
-            <button onClick={() => navigate(`/sales/${activeSale.id}`)} className="flex items-center gap-1.5 px-3 py-2 border border-slate-200 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50 transition-colors" data-testid="edit-sale-btn"><Pencil size={14} /> Edit Sale</button>
+            <button onClick={() => navigate(`/sales/${activeSale.id}?edit=1`)} className="flex items-center gap-1.5 px-3 py-2 border border-slate-200 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50 transition-colors" data-testid="edit-sale-btn"><Pencil size={14} /> Edit</button>
           )}
           {isAdmin && vehicle.status === "sold" && (
             <button onClick={openReturnModal} className="flex items-center gap-1.5 px-3 py-2 border border-amber-200 text-amber-700 rounded-lg text-sm font-medium hover:bg-amber-50 transition-colors" data-testid="record-return-btn"><Undo2 size={14} /> Record Return</button>

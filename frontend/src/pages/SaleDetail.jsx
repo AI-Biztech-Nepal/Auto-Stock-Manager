@@ -1,5 +1,5 @@
-import { useEffect, useState, useCallback } from "react";
-import { useParams, useNavigate, Link } from "react-router-dom";
+import { useEffect, useState, useCallback, useRef } from "react";
+import { useParams, useNavigate, useLocation, Link } from "react-router-dom";
 import { ArrowLeft, Pencil, Trash2, X, ChevronDown, ChevronUp, UserPlus, Lock, Undo2, AlertTriangle, CheckCircle2 } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
@@ -59,8 +59,13 @@ export default function SaleDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
   const goBack = useGoBack("/sales");
+  const location = useLocation();
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
+  // /sales/:id?edit=1 opens straight into the edit form (the sold-vehicle page's Edit button). Cancel and Save then
+  // return to the page the user came from instead of dropping them on this details view.
+  const wantsEdit = useRef(new URLSearchParams(location.search).get("edit") === "1");
+  const quickEdit = useRef(false);
 
   const [sale, setSale] = useState(null);
   const [booking, setBooking] = useState(null); // the booking this sale completed, if any
@@ -133,7 +138,15 @@ export default function SaleDetail() {
     } catch { toast.error("Failed to load vehicles/customers"); }
   };
 
-  const cancelEdit = () => setIsEditing(false);
+  useEffect(() => {
+    if (!wantsEdit.current || !sale || !isAdmin) return;
+    wantsEdit.current = false;
+    quickEdit.current = true;
+    window.history.replaceState(window.history.state, "", window.location.pathname); // a refresh shouldn't reopen the form
+    startEdit();
+  }, [sale, isAdmin]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const cancelEdit = () => (quickEdit.current ? goBack() : setIsEditing(false));
 
   const saveNewCustomer = async () => {
     if (!newCust.name || !newCust.contact_number) { toast.error("Name and phone are required"); return; }
@@ -207,6 +220,7 @@ export default function SaleDetail() {
       };
       await api.put(`/sales/${id}`, payload);
       toast.success("Sale updated successfully!");
+      if (quickEdit.current) { goBack(); return; }
       setIsEditing(false);
       fetchSale();
     } catch (err) { toast.error(getErrMsg(err, "Failed to save sale")); }
