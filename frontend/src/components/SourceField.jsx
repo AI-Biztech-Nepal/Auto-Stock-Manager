@@ -10,61 +10,66 @@ import { SOURCES } from "../utils/crm";
 // the first time "Referral" is picked.
 const inp = "w-full h-9 px-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white";
 
-function ReferrerPicker({ customers, value, onChange, excludeId }) {
-  const [q, setQ] = useState("");
+// One box for the referrer: type a name and the customers we know that match drop down to pick from. Pick one and they
+// are linked (shown as a chip); leave it typed and it is kept as the plain name of someone who isn't a customer.
+// onChange gets just the fields that changed.
+function ReferrerInput({ customers, value, onChange, excludeId }) {
   const [open, setOpen] = useState(false);
-  const picked = customers.find(c => c.id === value);
+  const [hi, setHi] = useState(-1); // keyboard-highlighted match; -1 keeps Enter from swapping a typed name for a near match
+  const picked = customers.find(c => c.id === value.referred_by_id);
+  const text = value.source_note || "";
   const matches = useMemo(() => {
-    const needle = q.trim().toLowerCase();
+    const needle = text.trim().toLowerCase();
     return customers
       .filter(c => c.id !== excludeId && (!needle || (c.name || "").toLowerCase().includes(needle) || (c.contact_number || "").includes(needle)))
       .slice(0, 6);
-  }, [customers, q, excludeId]);
+  }, [customers, text, excludeId]);
 
   if (picked) {
     return (
-      <div className="flex items-center justify-between gap-2 h-9 px-3 rounded-lg bg-amber-50 border border-amber-200 text-sm text-amber-900">
+      <div className="flex items-center justify-between gap-2 h-9 px-3 rounded-lg bg-amber-50 border border-amber-200 text-sm text-amber-900" data-testid="referrer-picked">
         <span className="truncate font-medium">{picked.name}<span className="font-normal text-amber-700"> · {picked.contact_number}</span></span>
-        <button type="button" onClick={() => onChange("")} aria-label="Remove referrer" className="shrink-0 text-amber-700 hover:text-amber-900"><X size={14} /></button>
+        <button type="button" onClick={() => onChange({ referred_by_id: "" })} aria-label="Remove referrer" className="shrink-0 text-amber-700 hover:text-amber-900"><X size={14} /></button>
       </div>
     );
   }
+
+  const pick = (c) => { onChange({ referred_by_id: c.id, source_note: "" }); setOpen(false); setHi(-1); };
+  const onKeyDown = (e) => {
+    if (e.key === "ArrowDown") { e.preventDefault(); setOpen(true); setHi(i => Math.min(i + 1, matches.length - 1)); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); setHi(i => Math.max(i - 1, 0)); }
+    else if (e.key === "Enter") { e.preventDefault(); if (open && matches[hi]) pick(matches[hi]); } // never submits the form behind it
+    else if (e.key === "Escape") setOpen(false);
+  };
   return (
     <div className="relative">
       <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
       <input
-        value={q}
-        onChange={e => { setQ(e.target.value); setOpen(true); }}
+        value={text}
+        onChange={e => { onChange({ source_note: e.target.value, referred_by_id: "" }); setHi(-1); setOpen(true); }}
         onFocus={() => setOpen(true)}
         onBlur={() => setTimeout(() => setOpen(false), 150)}
-        placeholder="Search the customer who referred them"
+        onKeyDown={onKeyDown}
+        placeholder="Type a name, or pick a customer we know"
+        autoComplete="off"
+        role="combobox"
+        aria-expanded={open}
         className={`${inp} pl-8`}
-        data-testid="referrer-search"
+        data-testid="referrer-input"
       />
-      {open && matches.length > 0 && (
+      {open && (matches.length > 0 || text.trim()) && (
         <ul className="absolute z-30 left-0 right-0 mt-1 max-h-56 overflow-y-auto bg-white border border-slate-200 rounded-lg shadow-lg py-1">
-          {matches.map(c => (
+          {matches.map((c, i) => (
             <li key={c.id}>
-              <button type="button" onMouseDown={e => e.preventDefault()} onClick={() => { onChange(c.id); setQ(""); setOpen(false); }}
-                className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50 flex items-center justify-between gap-2">
+              <button type="button" onMouseDown={e => e.preventDefault()} onClick={() => pick(c)}
+                className={`w-full text-left px-3 py-2 text-sm flex items-center justify-between gap-2 ${i === hi ? "bg-slate-100" : "hover:bg-slate-50"}`}>
                 <span className="truncate text-slate-800">{c.name}</span>
                 <span className="shrink-0 text-xs text-slate-400">{c.contact_number}</span>
               </button>
             </li>
           ))}
+          {matches.length === 0 && <li className="px-3 py-2 text-xs text-slate-500">Not a customer we know &mdash; &ldquo;{text.trim()}&rdquo; will be saved as typed</li>}
         </ul>
-      )}
-    </div>
-  );
-}
-
-// The referrer: a customer from the list, or a typed name for someone who isn't one. onChange gets just the fields that changed.
-function ReferrerInputs({ customers, value, onChange, excludeId }) {
-  return (
-    <div className="space-y-1.5">
-      <ReferrerPicker customers={customers} value={value.referred_by_id} onChange={id => onChange({ referred_by_id: id })} excludeId={excludeId} />
-      {!value.referred_by_id && (
-        <input value={value.source_note} onChange={e => onChange({ source_note: e.target.value })} placeholder="Or type who referred them (if not a customer)" className={inp} data-testid="referrer-note" />
       )}
     </div>
   );
@@ -83,7 +88,7 @@ export function ReferredByField({ value, onChange, customers = [], excludeId }) 
   return (
     <div data-testid="referred-by-field">
       <label className="block text-xs font-medium text-slate-600 mb-1">Referred by</label>
-      <ReferrerInputs customers={customers} value={shown} onChange={set} excludeId={excludeId} />
+      <ReferrerInput customers={customers} value={shown} onChange={set} excludeId={excludeId} />
     </div>
   );
 }
@@ -126,7 +131,7 @@ export default function SourceField({ value, onChange, customers, excludeId, req
       {value.source === "referral" && !hideReferrer && (
         <div className="mt-2 space-y-1.5">
           <p className="text-xs font-medium text-slate-600">Referred by</p>
-          <ReferrerInputs customers={list} value={value} onChange={set} excludeId={excludeId} />
+          <ReferrerInput customers={list} value={value} onChange={set} excludeId={excludeId} />
         </div>
       )}
       {value.source === "other" && (
