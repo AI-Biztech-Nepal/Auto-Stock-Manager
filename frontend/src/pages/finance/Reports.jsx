@@ -3,22 +3,88 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend, Cart
 import { useBooks } from "./BooksContext";
 import EntryEditor from "./EntryEditor";
 import { Card, Stat, Empty, ExportBar, exportXlsx } from "./ui";
-import { balances, profitLoss, cashMovements, receivedPaid, npr, COLORS } from "./money";
+import { balances, tradingAccount, cashMovements, receivedPaid, npr, num, COLORS } from "./money";
 import { getCurrentBSMonthRange, getCurrentBSYearRange, formatBSDate } from "../../utils/nepali-date";
 
 const PERIODS = [["month", "This month"], ["year", "This year"], ["all", "All time"]];
+const BRAND_DARK = "#1E3A8A";
+const BRAND_TINT = "#EFF6FF";
 
-// ── Profit & loss, straight off the bills (billed, not collected) ─────────
-export function Report() {
+// ── pieces of a Tally-style account: two sides that total the same ────────
+const SideHead = ({ title }) => (
+  <div className="mb-1 flex justify-between border-b-2 pb-2" style={{ borderColor: BRAND_DARK }}>
+    <span className="text-[13px] font-bold" style={{ color: BRAND_DARK }}>{title}</span>
+    <span className="text-[11px] font-semibold text-slate-500">NPR</span>
+  </div>
+);
+
+function Line({ label, amount, tone, bold, muted, onOpen }) {
+  const Tag = onOpen ? "button" : "div";
+  return (
+    <Tag onClick={onOpen} className={`w-full flex justify-between border-b border-slate-100 py-2.5 text-[14px] text-left ${onOpen ? "hover:bg-slate-50" : ""} ${tone ? "rounded-md px-2" : ""}`} style={tone ? { backgroundColor: BRAND_TINT } : undefined}>
+      <span className={bold ? "font-bold" : ""} style={{ color: muted ? "#94A3B8" : "#0F172A" }}>{label}</span>
+      <span className={bold ? "font-bold" : "font-semibold"} style={{ color: tone ? BRAND_DARK : muted ? "#94A3B8" : "#0F172A" }}>{num(amount)}</span>
+    </Tag>
+  );
+}
+
+const TotalLine = ({ amount }) => (
+  <div className="my-1 flex justify-between border-y-2 py-2.5 text-[15px] font-bold" style={{ borderColor: BRAND_DARK, color: BRAND_DARK }}>
+    <span>Total</span><span>{num(amount)}</span>
+  </div>
+);
+
+function Group({ id, open, onToggle, label, amount, rows, onOpen }) {
+  const isOpen = open.has(id);
+  return (
+    <div>
+      <div className="flex items-center">
+        {rows.length > 0 && <button onClick={() => onToggle(id)} className="pr-2 py-2.5 text-[14px] font-bold text-slate-900" aria-label={isOpen ? "Collapse" : "Expand"}>{isOpen ? "▾" : "▸"}</button>}
+        <button onClick={onOpen} disabled={!onOpen} className="flex-1 flex justify-between py-2.5 text-[14px] font-bold text-slate-900 hover:bg-slate-50 disabled:hover:bg-transparent">
+          <span>{label}</span><span>{num(amount)}</span>
+        </button>
+      </div>
+      {isOpen && rows.map(([k, v]) => (
+        <button key={k} onClick={onOpen} disabled={!onOpen} className="w-full flex justify-between border-b border-slate-50 py-1.5 pl-5 text-[13px] text-slate-600 hover:bg-slate-50 disabled:hover:bg-transparent">
+          <span className="text-left">{k}</span><span>{num(v)}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// ── Profit & loss in Tally style, straight off the bills (billed, not collected) ──
+export function Report({ goTab }) {
   const { books } = useBooks();
   const [period, setPeriod] = useState("month");
+  const [open, setOpen] = useState(() => new Set(["sales", "dincome", "purchase", "direct", "indirect"]));
+  const toggle = (k) => setOpen((prev) => { const next = new Set(prev); if (next.has(k)) next.delete(k); else next.add(k); return next; });
   const range = period === "month" ? getCurrentBSMonthRange() : period === "year" ? getCurrentBSYearRange() : null;
-  const pl = useMemo(() => profitLoss(books, range?.start, range?.end), [books, range?.start, range?.end]);
+  const pl = useMemo(() => tradingAccount(books, range?.start, range?.end), [books, range?.start, range?.end]);
+  const cash = useMemo(() => receivedPaid(books, range?.start, range?.end), [books, range?.start, range?.end]);
   const bal = useMemo(() => balances(books), [books]);
-  const margin = pl.sale > 0 ? Math.round((pl.net / pl.sale) * 100) : null;
+  const go = goTab ? (tab) => () => goTab(tab) : () => undefined;
 
-  const rows = [["Sales", pl.sale, COLORS.sale], ["Purchases", pl.purchase, COLORS.purchase], ["Gross profit (sales − purchases)", pl.gross, pl.gross < 0 ? COLORS.out : COLORS.in], ["Expenses", pl.expense, COLORS.out], ["Net profit", pl.net, pl.net < 0 ? COLORS.out : COLORS.in]];
-  const cols = [{ header: "Line", value: (r) => r[0] }, { header: "Amount", value: (r) => r[1] }];
+  const gross = pl.gross, net = pl.net;
+  // each side of the trading account totals the same; likewise the second part
+  const tradingTotal = pl.income + (gross < 0 ? -gross : 0);
+  const secondTotal = pl.indirectTotal + (gross < 0 ? -gross : 0) + (net >= 0 ? net : 0);
+  const pct = (v) => (pl.income > 0 ? `${((Math.abs(v) / pl.income) * 100).toFixed(1)}%` : null);
+  const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+
+  const rows = [
+    ["Purchase accounts", pl.purchase],
+    ["Direct expenses", pl.directTotal], ...pl.direct.map(([k, v]) => [`    ${k}`, v]),
+    [gross >= 0 ? "Gross profit c/o" : "Gross loss c/o", Math.abs(gross)],
+    ["Sales accounts", pl.items],
+    ["Direct incomes (services sold)", pl.services],
+    ["Indirect expenses", pl.indirectTotal], ...pl.indirect.map(([k, v]) => [`    ${k}`, v]),
+    [net >= 0 ? "Net profit" : "Net loss", Math.abs(net)],
+    ["Total received", cash.received],
+    ["Total paid", cash.paid],
+  ];
+  const cols = [{ header: "Account", value: (r) => r[0] }, { header: "Amount (NPR)", value: (r) => r[1] }];
+  const periodText = range ? `${formatBSDate(range.start)} to ${formatBSDate(range.end)} BS` : "All time";
 
   return (
     <div className="space-y-4">
@@ -26,22 +92,90 @@ export function Report() {
         <div className="flex gap-1 bg-slate-100 rounded-lg p-1">
           {PERIODS.map(([k, l]) => <button key={k} onClick={() => setPeriod(k)} className={`h-8 px-3 rounded-md text-sm font-semibold ${period === k ? "bg-white shadow-sm text-blue-700" : "text-slate-500"}`}>{l}</button>)}
         </div>
-        <ExportBar onXlsx={() => exportXlsx(`report-${period}`, cols, rows)} />
+        <ExportBar onXlsx={() => exportXlsx(`profit-and-loss-${period}`, cols, rows)} />
       </div>
-      {range && <p className="text-xs text-slate-500">{range.start} to {range.end} · {formatBSDate(range.start)} to {formatBSDate(range.end)} BS</p>}
-      <Card>
-        {rows.map(([label, amount, color], i) => (
-          <div key={label} className={`px-5 py-3.5 flex justify-between items-center ${i ? "border-t border-slate-100" : ""} ${label === "Net profit" ? "bg-slate-50 font-bold" : ""}`}>
-            <span className="text-sm text-slate-700">{label}</span>
-            <span className="text-base font-semibold" style={{ color, fontFamily: "Manrope" }}>{npr(amount)}</span>
+
+      {/* the report heading: one brand-blue band with the period and the key figures */}
+      <div className="overflow-hidden rounded-2xl" style={{ backgroundColor: BRAND_DARK }}>
+        <div className="p-5 space-y-1">
+          <div className="text-[11.5px] font-bold tracking-[0.14em]" style={{ color: "#BFDBFE" }}>FINANCE REPORT</div>
+          <h2 className="text-xl sm:text-2xl font-extrabold text-white tracking-wide">PROFIT &amp; LOSS ACCOUNT</h2>
+          <div className="text-[13px]" style={{ color: "#DBEAFE" }}>{periodText}{range ? ` · ${range.start} to ${range.end}` : ""}</div>
+        </div>
+        <div className="grid grid-cols-2 lg:grid-cols-5 border-t" style={{ borderColor: "rgba(255,255,255,0.18)" }}>
+          {[
+            { label: "Sales & direct income", value: pl.income, sub: plural(pl.bills.sale, "sale bill"), tab: "sales" },
+            { label: "Cost of goods", value: pl.costOfGoods, sub: plural(pl.bills.purchase, "purchase bill"), tab: "purchases" },
+            { label: gross >= 0 ? "Gross profit" : "Gross loss", value: Math.abs(gross), sub: pct(gross) ? `${pct(gross)} of sales` : "No sales", tab: "sales" },
+            { label: "Indirect expenses", value: pl.indirectTotal, sub: plural(pl.indirect.length, "expense head"), tab: "expenses" },
+            { label: net >= 0 ? "Net profit" : "Net loss", value: Math.abs(net), sub: pct(net) ? `${pct(net)} net margin` : "No sales", tab: "expenses" },
+          ].map((k) => (
+            <button key={k.label} onClick={go(k.tab)} className="text-left px-5 py-4 border-l border-t lg:border-t-0 hover:bg-white/5" style={{ borderColor: "rgba(255,255,255,0.18)" }}>
+              <div className="text-[11.5px] font-semibold" style={{ color: "#BFDBFE" }}>{k.label}</div>
+              <div className="mt-0.5 text-[19px] font-bold text-white">NPR {num(k.value)}</div>
+              <div className="text-[11px]" style={{ color: "#93C5FD" }}>{k.sub}</div>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* the account: expenses and cost on the left, income on the right */}
+      <Card className="overflow-hidden">
+        <div className="grid md:grid-cols-2">
+          <div className="p-5 border-b md:border-b-0 md:border-r border-slate-200">
+            <SideHead title="Particulars" />
+            <Group id="purchase" open={open} onToggle={toggle} label="Purchase accounts" amount={pl.purchase} rows={[["Purchase bills (items)", pl.purchase]]} onOpen={go("purchases")} />
+            <Group id="direct" open={open} onToggle={toggle} label="Direct expenses" amount={pl.directTotal} rows={pl.direct} onOpen={go("expenses")} />
+            {gross >= 0 && <Line label="Gross profit c/o" amount={gross} tone bold />}
+            <TotalLine amount={tradingTotal} />
+            {gross < 0 && <Line label="Gross loss b/f" amount={-gross} tone bold />}
+            <Group id="indirect" open={open} onToggle={toggle} label="Indirect expenses" amount={pl.indirectTotal} rows={pl.indirect} onOpen={go("expenses")} />
+            {net >= 0 && <Line label="Net profit" amount={net} tone bold />}
+            <TotalLine amount={secondTotal} />
           </div>
-        ))}
+          <div className="p-5">
+            <SideHead title="Particulars" />
+            <Group id="sales" open={open} onToggle={toggle} label="Sales accounts" amount={pl.items} rows={[["Sales - items", pl.items]]} onOpen={go("sales")} />
+            <Group id="dincome" open={open} onToggle={toggle} label="Direct incomes" amount={pl.services} rows={[["Services sold (labour, repair, installation)", pl.services]]} onOpen={go("sales")} />
+            {gross < 0 && <Line label="Gross loss c/o" amount={-gross} tone bold />}
+            <TotalLine amount={tradingTotal} />
+            {gross >= 0 && <Line label="Gross profit b/f" amount={gross} tone bold />}
+            <Line label="Indirect incomes" amount={0} muted />
+            {net < 0 && <Line label="Net loss" amount={-net} tone bold />}
+            <TotalLine amount={secondTotal} />
+          </div>
+        </div>
+        <p className="border-t border-slate-200 bg-slate-50 px-5 py-3 text-xs text-slate-500">
+          Both sides total the same, as in Tally. Bills dated in the period count whether paid or not. Services sold are direct income; services bought in are a direct expense. An expense head is direct unless it is marked Indirect under Expenses → Categories.
+        </p>
       </Card>
-      {margin !== null && <p className="text-xs text-slate-500">Net margin {margin}% of sales.</p>}
+
+      {/* Total received and total paid: what really moved in the period */}
+      <Card className="overflow-hidden">
+        <div className="grid md:grid-cols-2">
+          <div className="p-5 border-b md:border-b-0 md:border-r border-slate-200">
+            <SideHead title="Total received" />
+            <Line label="Payments from customers" amount={cash.by.customers} onOpen={go("totals")} />
+            <Line label="Walk-in sales paid on the spot" amount={cash.by.walkIn} onOpen={go("totals")} />
+            <TotalLine amount={cash.received} />
+          </div>
+          <div className="p-5">
+            <SideHead title="Total paid" />
+            <Line label="Expenses" amount={cash.by.expense} onOpen={go("totals")} />
+            <Line label="Payments to vendors" amount={cash.by.toVendors} onOpen={go("totals")} />
+            <Line label="Payments to customers and walk-in purchases" amount={cash.by.toCustomers + cash.by.walkInBought} onOpen={go("totals")} />
+            <TotalLine amount={cash.paid} />
+          </div>
+        </div>
+        <div className="flex items-center justify-between border-t border-slate-200 px-5 py-3 text-[13px] font-bold" style={{ backgroundColor: BRAND_TINT, color: BRAND_DARK }}>
+          <span>Net cash movement (received − paid)</span><span>{num(cash.received - cash.paid)}</span>
+        </div>
+      </Card>
+
       <Card className="p-5">
         <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Available balance right now</div>
         <div className="text-2xl font-bold mt-1" style={{ color: bal.total < 0 ? COLORS.out : COLORS.balance, fontFamily: "Manrope" }}>{npr(bal.total)}</div>
-        <p className="text-xs text-slate-400 mt-1">This is billed profit, not collected cash. Sales and purchases are debts until payments are recorded, so profit and balance differ. The difference is what is still to receive or give.</p>
+        <p className="text-xs text-slate-400 mt-1">Profit is billed, not collected. Sales and purchases are debts until payments are recorded, so profit and balance differ. The difference is what is still to receive or give.</p>
       </Card>
     </div>
   );

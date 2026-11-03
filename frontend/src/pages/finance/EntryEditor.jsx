@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useBooks } from "./BooksContext";
 import { Modal, Field, DateField, AccountSelect, PartyPicker, TwoTapDelete, Notice, inputCls, btnPrimary, btnGhost } from "./ui";
-import { entryDate, billDate, transferDate, partyName } from "./money";
+import { entryDate, billDate, transferDate, partyName, billServices, npr } from "./money";
 
 const TITLES = { sale: "Sale bill", purchase: "Purchase bill", expense: "Expense" };
 
@@ -36,7 +36,7 @@ export default function EntryEditor({ row, onClose }) {
     if (isTx) {
       ok = await put(`/fin/transactions/${d.id}`, {
         type: d.type, amount: Number(amount), note, party_name: party.name || null, customer_id: party.id,
-        bill_no: number, bill_date: date, party_address: d.party_address, vat_pan_no: d.vat_pan_no, items: d.items || [],
+        bill_no: number, bill_date: date, party_address: d.party_address, vat_pan_no: d.vat_pan_no, items: d.items || [], service_charges: d.service_charges || [],
         discount_amount: Number(discount) || 0, vat_amount: d.vat_amount || 0, expense_category_id: d.expense_category_id,
         payment_mode: account ? "bank" : "cash", bank_account_id: account,
       }, "Saved");
@@ -74,6 +74,13 @@ export default function EntryEditor({ row, onClose }) {
           <Field label="Amount (NPR)"><input type="number" min="0" value={amount} onChange={(e) => setAmount(e.target.value)} disabled={readOnly} className={inputCls} /></Field>
           {isTx && d.type !== "expense" && <Field label="Discount (NPR)"><input type="number" min="0" value={discount} onChange={(e) => setDiscount(e.target.value)} className={inputCls} /></Field>}
         </div>
+        {isTx && billServices(d) > 0 && (
+          <div className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600 space-y-0.5">
+            <div className="font-semibold text-slate-700">{d.type === "purchase" ? "Services bought" : "Services"} included: {npr(billServices(d))}</div>
+            {d.service_charges.map((s, i) => <div key={i} className="flex justify-between"><span>{s.name}</span><span>{npr(s.amount)}</span></div>)}
+            <div className="text-slate-400">Discount and VAT apply to the items and services together.</div>
+          </div>
+        )}
         <Field label="Note"><textarea value={note} onChange={(e) => setNote(e.target.value)} disabled={readOnly} rows={2} className={`${inputCls} h-auto py-2`} /></Field>
         {!readOnly && (
           <div className="flex flex-wrap items-center justify-between gap-2 pt-1">

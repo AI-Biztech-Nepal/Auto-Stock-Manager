@@ -25,6 +25,10 @@ from pydantic import BaseModel, Field
 
 SETUP_MESSAGE = ("Finance books are not set up yet. Run backend/migration_add_finance_books.sql "
                  "on the database once, then reload this page.")
+# The tables exist but a later column is missing: the follow-up migration has not been run yet.
+UPGRADE_MESSAGE = ("Finance books need a small update. Run backend/migration_add_finance_services.sql "
+                   "on the database once, then reload this page.")
+EXPENSE_GROUPS = {"direct", "indirect"}
 
 LEDGER_SIDES = {"customer": ("fin_customer_ledger", "customer_id"),
                 "vendor": ("fin_vendor_ledger", "vendor_id")}
@@ -72,6 +76,8 @@ def _safe(fn):
             text = str(e)
             if "1146" in text or "doesn't exist" in text:
                 raise HTTPException(503, SETUP_MESSAGE)
+            if "1054" in text or "Unknown column" in text:
+                raise HTTPException(503, UPGRADE_MESSAGE)
             raise
     return wrapper
 
@@ -101,6 +107,7 @@ class TransferBody(BaseModel):
 
 class CategoryBody(BaseModel):
     name: str
+    expense_group: Optional[str] = None  # 'direct' | 'indirect'; left out on a rename, the group is kept
 
 
 class ItemBody(BaseModel):
@@ -115,6 +122,11 @@ class LineItem(BaseModel):
     amount: float = 0
 
 
+class ServiceLine(BaseModel):
+    name: str = ""
+    amount: float = 0
+
+
 class BillBody(BaseModel):
     type: str
     amount: float
@@ -126,6 +138,8 @@ class BillBody(BaseModel):
     party_address: Optional[str] = None
     vat_pan_no: Optional[str] = None
     items: List[LineItem] = Field(default_factory=list)
+    # Services sold (Sale) or bought in (Purchase): part of the bill, so discount and VAT cover them too.
+    service_charges: List[ServiceLine] = Field(default_factory=list)
     discount_amount: float = 0
     vat_amount: float = 0
     expense_category_id: Optional[str] = None
@@ -362,7 +376,8 @@ def register(api_router, db, admin_only):
             raise HTTPException(400, "Category name is required")
         await _category_name_free(name)
         now = _now()
-        doc = {"id": _id(), "name": name, "created_at": now, "updated_at": now}
+        group = body.expense_group if body.expense_group in EXPENSE_GROUPS else None
+        doc = {"id": _id(), "name": name, "expense_group": group, "created_at": now, "updated_at": now}
         await db.fin_expense_categories.insert_one(doc)
         doc.pop("_id", None)
         return doc
@@ -376,7 +391,10 @@ def register(api_router, db, admin_only):
         if not name:
             raise HTTPException(400, "Category name is required")
         await _category_name_free(name, exclude=cid)
-        await db.fin_expense_categories.update_one({"id": cid}, {"$set": {"name": name, "updated_at": _now()}})
+        fields = {"name": name, "updated_at": _now()}
+        if "expense_group" in body.model_fields_set:
+            fields["expense_group"] = body.expense_group if body.expense_group in EXPENSE_GROUPS else None
+        await db.fin_expense_categories.update_one({"id": cid}, {"$set": fields})
         return await db.fin_expense_categories.find_one({"id": cid}, {"_id": 0})
 
     @api_router.delete("/fin/categories/{cid}")
@@ -417,6 +435,9 @@ def register(api_router, db, admin_only):
             "customer_id": body.customer_id or None, "bill_no": _clean(body.bill_no), "bill_date": _clean(body.bill_date),
             "party_address": _clean(body.party_address), "vat_pan_no": _clean(body.vat_pan_no),
             "items": [i.model_dump() for i in body.items],
+            "service_charges": [] if body.type == "expense" else [
+                {"name": s.name.strip(), "amount": round(float(s.amount), 2)}
+                for s in body.service_charges if s.name.strip() and s.amount > 0],
             "discount_amount": max(0.0, float(body.discount_amount or 0)), "vat_amount": max(0.0, float(body.vat_amount or 0)),
             "expense_category_id": body.expense_category_id or None, "payment_mode": mode, "bank_account_id": bank,
         }

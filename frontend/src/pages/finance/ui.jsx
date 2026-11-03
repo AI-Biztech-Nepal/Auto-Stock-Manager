@@ -66,8 +66,11 @@ export const AccountSelect = ({ label = "Payment method", value, onChange, accou
 // Type to search saved parties. Typing a name that isn't saved offers "Add as new" -- on forms that
 // need a real party id it creates it on the spot via onCreate; otherwise the typed name is returned
 // with id null and the caller creates the party when the entry is saved.
-export function PartyPicker({ label = "Party", parties, id, name, onChange, onCreate, placeholder = "Search or type a name" }) {
+// Keyboard: Up / Down move through the list, Enter picks the highlighted one (an exact name match first)
+// or adds the typed name as new. `enterKey` tags the input for a form's Enter-to-next-field walk.
+export function PartyPicker({ label = "Party", parties, id, name, onChange, onCreate, placeholder = "Search or type a name", enterKey }) {
   const [open, setOpen] = useState(false);
+  const [active, setActive] = useState(0);
   const [text, setText] = useState(name || "");
   const box = useRef(null);
   useEffect(() => { setText(name || ""); }, [name, id]);
@@ -88,17 +91,31 @@ export function PartyPicker({ label = "Party", parties, id, name, onChange, onCr
       if (created) pick(created);
     } else { onChange({ id: null, name: typed }); setOpen(false); }
   };
+  const onKeyDown = (e) => {
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      setOpen(true);
+      setActive((a) => Math.max(0, Math.min(matches.length - 1, a + (e.key === "ArrowDown" ? 1 : -1))));
+    } else if (e.key === "Escape") setOpen(false);
+    else if (e.key === "Enter" && q && !(id && text === name)) {
+      const exactMatch = parties.find((p) => p.name.toLowerCase() === q);
+      if (exactMatch) pick(exactMatch);
+      else if (matches[active]) pick(matches[active]);
+      else addNew();
+    }
+  };
   return (
     <div ref={box} className="relative">
       <Field label={label}>
-        <input value={text} placeholder={placeholder} className={inputCls}
-          onFocus={() => setOpen(true)}
-          onChange={(e) => { setText(e.target.value); setOpen(true); onChange({ id: null, name: e.target.value }); }} />
+        <input value={text} placeholder={placeholder} className={inputCls} data-enter={enterKey}
+          onFocus={() => setOpen(true)} onKeyDown={onKeyDown}
+          onBlur={() => setTimeout(() => setOpen(false), 150)}
+          onChange={(e) => { setText(e.target.value); setOpen(true); setActive(0); onChange({ id: null, name: e.target.value }); }} />
       </Field>
       {open && (matches.length > 0 || (q && !exact)) && (
         <div className="absolute z-30 left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg max-h-64 overflow-y-auto">
-          {matches.map((p) => (
-            <button key={p.id} type="button" onClick={() => pick(p)} className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50 flex justify-between gap-2">
+          {matches.map((p, i) => (
+            <button key={p.id} type="button" onClick={() => pick(p)} className={`w-full text-left px-3 py-2 text-sm hover:bg-slate-50 flex justify-between gap-2 ${i === active ? "bg-blue-50" : ""}`}>
               <span className="truncate">{p.name}</span><span className="text-xs text-slate-400">{p.phone || ""}</span>
             </button>
           ))}

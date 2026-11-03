@@ -123,27 +123,30 @@ export function cashMovements(books) {
   for (const t of books.transactions) {
     const d = billDate(t);
     const who = t.party_name || partyName(books, t.customer_id) || "Walk-in";
-    if (isSettledOnTheSpot(t)) lines.push({ id: t.id, date: d, dir: t.type === "sale" ? "in" : "out", amount: t.amount, label: `${t.type === "sale" ? "Sale" : "Purchase"}: ${who}`, table: "tx" });
-    else if (t.type === "expense") lines.push({ id: t.id, date: d, dir: "out", amount: t.amount, label: `Expense: ${who}`, table: "tx" });
+    if (isSettledOnTheSpot(t)) lines.push({ id: t.id, date: d, dir: t.type === "sale" ? "in" : "out", amount: t.amount, label: `${t.type === "sale" ? "Sale" : "Purchase"}: ${who}`, table: "tx", src: t.type === "sale" ? "walkIn" : "walkInBought" });
+    else if (t.type === "expense") lines.push({ id: t.id, date: d, dir: "out", amount: t.amount, label: `Expense: ${who}`, table: "tx", src: "expense" });
   }
   for (const e of books.customer_ledger) {
     const who = partyName(books, e.customer_id, "Customer");
-    if (e.entry_type === "credit") lines.push({ id: e.id, date: entryDate(e), dir: "in", amount: e.amount, label: `Received from ${who}`, table: "cl" });
-    else if (e.source === "manual") lines.push({ id: e.id, date: entryDate(e), dir: "out", amount: e.amount, label: `Refunded to ${who}`, table: "cl" });
+    if (e.entry_type === "credit") lines.push({ id: e.id, date: entryDate(e), dir: "in", amount: e.amount, label: `Received from ${who}`, table: "cl", src: "customers" });
+    else if (e.source === "manual") lines.push({ id: e.id, date: entryDate(e), dir: "out", amount: e.amount, label: `Refunded to ${who}`, table: "cl", src: "toCustomers" });
   }
   for (const e of books.vendor_ledger) {
-    if (e.entry_type === "credit") lines.push({ id: e.id, date: entryDate(e), dir: "out", amount: e.amount, label: `Paid to ${partyName(books, e.vendor_id, "Vendor")}`, table: "vl" });
+    if (e.entry_type === "credit") lines.push({ id: e.id, date: entryDate(e), dir: "out", amount: e.amount, label: `Paid to ${partyName(books, e.vendor_id, "Vendor")}`, table: "vl", src: "toVendors" });
   }
   return lines.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
 }
 
+// Also split by where the money came from / went (src), for the Report's received / paid account.
 export function receivedPaid(books, from, to) {
   let received = 0, paid = 0;
+  const by = { walkIn: 0, customers: 0, expense: 0, toVendors: 0, toCustomers: 0, walkInBought: 0 };
   for (const m of cashMovements(books)) {
     if ((from && m.date < from) || (to && m.date > to)) continue;
     if (m.dir === "in") received += m.amount; else paid += m.amount;
+    by[m.src] += m.amount;
   }
-  return { received, paid };
+  return { received, paid, by };
 }
 
 // ── 2.4 profit & loss, straight off the bills ─────────────────────────────
@@ -176,11 +179,60 @@ export function nextBillNo(transactions, type) {
 }
 
 // ── bill arithmetic ───────────────────────────────────────────────────────
-export function billTotals(lines, discount, vatPercent) {
-  const subtotal = lines.reduce((s, l) => (l.description?.trim() && Number(l.qty) > 0 && Number(l.rate) >= 0 ? s + Number(l.qty) * Number(l.rate) : s), 0);
+// Service lines (a Sale's labour / repair, a Purchase's outsourced work) are part of the bill: the
+// discount and the VAT apply to the items and the services together.
+export function billTotals(lines, discount, vatPercent, services = []) {
+  const items = lines.reduce((s, l) => (l.description?.trim() && Number(l.qty) > 0 && Number(l.rate) >= 0 ? s + Number(l.qty) * Number(l.rate) : s), 0);
+  const serviceTotal = services.reduce((s, r) => (r.name?.trim() ? s + Math.max(0, Number(r.amount) || 0) : s), 0);
+  const subtotal = items + serviceTotal;
   const disc = Math.max(0, Number(discount) || 0);
   const vat = Math.round(((subtotal - disc) * (Number(vatPercent) || 0)) / 100);
-  return { subtotal, discount: disc, vat, total: subtotal - disc + vat };
+  return { items, services: serviceTotal, subtotal, discount: disc, vat, total: subtotal - disc + vat };
+}
+
+// A saved bill's service lines added up.
+export const billServices = (t) => (t.service_charges || []).reduce((s, l) => s + (Number(l.amount) || 0), 0);
+
+// ── Tally-style trading and profit & loss account ─────────────────────────
+// Trading part: sales of items and direct incomes (services sold) against purchases and direct
+// expenses (services bought in, and every expense head not marked indirect), to a gross profit or
+// loss. Then indirect expenses take it to the net result. Bills dated in the period, paid or not.
+// Stock is not valued in these books, so there are no opening / closing stock lines.
+export function tradingAccount(books, from, to) {
+  const names = new Map(books.categories.map((c) => [c.id, c.name]));
+  const indirectNames = new Set(books.categories.filter((c) => c.expense_group === "indirect").map((c) => c.name));
+  let items = 0, services = 0, servicesBought = 0, purchase = 0;
+  const bills = { sale: 0, purchase: 0, expense: 0 };
+  const expenses = new Map();
+  for (const t of books.transactions) {
+    const d = billDate(t);
+    if ((from && d < from) || (to && d > to)) continue;
+    bills[t.type] = (bills[t.type] || 0) + 1;
+    if (t.type === "sale") {
+      const svc = billServices(t);
+      services += svc;
+      items += t.amount - svc;
+    } else if (t.type === "purchase") {
+      const svc = billServices(t);
+      servicesBought += svc;
+      purchase += t.amount - svc;
+    } else if (t.type === "expense") {
+      const name = (t.expense_category_id && names.get(t.expense_category_id)) || "Uncategorised";
+      expenses.set(name, (expenses.get(name) || 0) + t.amount);
+    }
+  }
+  // Two heads only: a head is direct unless it was marked Indirect (or its name says so).
+  const direct = [], indirect = [];
+  [...expenses.entries()].sort((a, b) => b[1] - a[1])
+    .forEach((e) => (indirectNames.has(e[0]) || /indirect/i.test(e[0]) ? indirect : direct).push(e));
+  if (servicesBought > 0) direct.unshift(["Services bought (outsourced work)", servicesBought]);
+  const sum = (list) => list.reduce((s, [, v]) => s + v, 0);
+  const income = items + services;
+  const directTotal = sum(direct);
+  const indirectTotal = sum(indirect);
+  const gross = income - purchase - directTotal;
+  const net = gross - indirectTotal;
+  return { items, services, income, purchase, direct, indirect, directTotal, indirectTotal, gross, net, bills, costOfGoods: purchase + directTotal };
 }
 
 // ── Day Book (section 3.1) ────────────────────────────────────────────────
