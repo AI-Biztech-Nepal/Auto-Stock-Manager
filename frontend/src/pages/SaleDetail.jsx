@@ -11,6 +11,7 @@ import SourceField, { ReferredByField } from "../components/SourceField";
 import SoldBySelect from "../components/SoldBySelect";
 import { EMPTY_REFERRER, EMPTY_SOURCE, SOURCE_LABEL, isSourceComplete, sourcePayload } from "../utils/crm";
 import { useAuth } from "../context/AuthContext";
+import useGoBack from "../hooks/useGoBack";
 
 const PRESET_EXPENSES = [
   { name: "Registration Transfer Fee", amount: 2000 },
@@ -57,6 +58,7 @@ const Field = ({ label, required, children }) => (
 export default function SaleDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const goBack = useGoBack("/sales");
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
 
@@ -273,7 +275,7 @@ export default function SaleDetail() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
         <div className="flex items-center gap-3">
-          <button onClick={() => navigate("/sales")} className="w-11 h-11 flex items-center justify-center hover:bg-slate-100 rounded-lg transition-colors text-slate-500"><ArrowLeft size={18} /></button>
+          <button onClick={goBack} aria-label="Back" className="w-11 h-11 flex items-center justify-center hover:bg-slate-100 rounded-lg transition-colors text-slate-500"><ArrowLeft size={18} /></button>
           <div>
             <h1 className="text-2xl font-bold text-slate-900">{sale.vehicle_info || `${sale.vehicle_brand || ""} ${sale.vehicle_model || ""}`}</h1>
             <p className="text-sm text-slate-500">{sale.registration_number || "No registration on file"}</p>

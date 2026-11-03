@@ -8,6 +8,7 @@ import { ReturnModal } from "./VehicleModals";
 import HoverADDate from "../components/HoverADDate";
 import WarrantyBadge, { serviceLabel } from "../components/WarrantyBadge";
 import { useAuth } from "../context/AuthContext";
+import useGoBack from "../hooks/useGoBack";
 import { canVoidWarranty, canManageWarranty, canEditSaleStatuses } from "../utils/permissions";
 
 const daysToSell = (v) => {
@@ -26,6 +27,7 @@ const Row = ({ label, children }) => (
 export default function SoldStockDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const goBack = useGoBack("/sales");
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
   const isFrontDesk = user?.role === "stock_supervisor";
@@ -163,7 +165,7 @@ export default function SoldStockDetail() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
         <div className="flex items-center gap-3">
-          <button onClick={() => navigate("/sales")} className="w-11 h-11 flex items-center justify-center hover:bg-slate-100 rounded-lg transition-colors text-slate-500"><ArrowLeft size={18} /></button>
+          <button onClick={goBack} aria-label="Back" className="w-11 h-11 flex items-center justify-center hover:bg-slate-100 rounded-lg transition-colors text-slate-500"><ArrowLeft size={18} /></button>
           <div>
             <h1 className="text-2xl font-bold text-slate-900">{vehicle.brand} {vehicle.model}</h1>
             <p className="text-sm text-slate-500">{vehicle.year} · {vehicle.engine_cc}cc · {vehicle.fuel_type}{vehicle.registration_number ? ` · ${vehicle.registration_number}` : ""}</p>
