@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import api from "../utils/api";
 import { formatNPR, formatOwnership, TRANSFER_STATUS_OPTIONS, getTransferStatusStyle, formatWarrantyLength, splitSanakhatExpenses, deleteSaleConfirm } from "../utils/helpers";
 import { ReturnModal } from "./VehicleModals";
+import SaleDetail from "./SaleDetail";
 import HoverADDate from "../components/HoverADDate";
 import WarrantyBadge, { serviceLabel } from "../components/WarrantyBadge";
 import { useAuth } from "../context/AuthContext";
@@ -41,6 +42,7 @@ export default function SoldStockDetail() {
   const [returnForm, setReturnForm] = useState({ refund_amount: "", new_status: "available", notes: "" });
   const [returning, setReturning] = useState(false);
   const [activeSale, setActiveSale] = useState(null);
+  const [editTick, setEditTick] = useState(0); // bumped by the Edit button; opens the edit form in the Sale Details section
 
   const canVoid = canVoidWarranty(user?.role);
   const canManage = canManageWarranty(user?.role);
@@ -63,6 +65,13 @@ export default function SoldStockDetail() {
     if (!isAdmin) return;
     api.get(`/vehicles/${id}/active-sale`).then(r => setActiveSale(r.data)).catch(() => {});
   }, [id, isAdmin]);
+
+  // After the sale is edited in place: the vehicle's figures may have moved, or the sale may now be on another vehicle.
+  const afterSaleSaved = ({ vehicle_id }) => {
+    if (vehicle_id && vehicle_id !== id) { navigate(`/sales/vehicle/${vehicle_id}`, { replace: true }); return; }
+    fetchVehicle();
+    api.get(`/vehicles/${id}/active-sale`).then(r => setActiveSale(r.data)).catch(() => {});
+  };
 
   const deleteSale = async () => {
     if (!activeSale) return;
@@ -174,7 +183,7 @@ export default function SoldStockDetail() {
         <div className="flex items-center gap-2 flex-wrap">
           <span className="px-2.5 py-1 rounded-full text-xs font-semibold uppercase tracking-wide bg-green-100 text-green-800" data-testid="sold-status-badge">Sold</span>
           {isAdmin && activeSale && (
-            <button onClick={() => navigate(`/sales/${activeSale.id}?edit=1`)} className="flex items-center gap-1.5 px-3 py-2 border border-slate-200 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50 transition-colors" data-testid="edit-sale-btn"><Pencil size={14} /> Edit</button>
+            <button onClick={() => setEditTick(t => t + 1)} className="flex items-center gap-1.5 px-3 py-2 border border-slate-200 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50 transition-colors" data-testid="edit-sale-btn"><Pencil size={14} /> Edit</button>
           )}
           {isAdmin && vehicle.status === "sold" && (
             <button onClick={openReturnModal} className="flex items-center gap-1.5 px-3 py-2 border border-amber-200 text-amber-700 rounded-lg text-sm font-medium hover:bg-amber-50 transition-colors" data-testid="record-return-btn"><Undo2 size={14} /> Record Return</button>
@@ -352,6 +361,9 @@ export default function SoldStockDetail() {
           <p className="text-sm text-slate-600">{vehicle.notes}</p>
         </div>
       )}
+
+      {/* The sale itself (buyer, payment, expenses) and its edit form, here instead of on a page of its own. */}
+      {isAdmin && activeSale && <SaleDetail embedded saleId={activeSale.id} editTick={editTick} onSaved={afterSaleSaved} />}
 
       <Link to={`/inventory/${id}`} className="inline-flex items-center gap-1.5 text-sm text-blue-600 hover:underline">
         Open full vehicle record (photos, documents, expenses) <ExternalLink size={13} />

@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from "react";
-import { useParams, useNavigate, useLocation, Link } from "react-router-dom";
+import { useParams, useNavigate, Link } from "react-router-dom";
 import { ArrowLeft, Pencil, Trash2, X, ChevronDown, ChevronUp, UserPlus, Lock, Undo2, AlertTriangle, CheckCircle2 } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
@@ -55,17 +55,18 @@ const Field = ({ label, required, children }) => (
   </div>
 );
 
-export default function SaleDetail() {
-  const { id } = useParams();
+// The sale's details and its edit form. As a page (/sales/:id) it has its own header and buttons. `embedded` is the
+// sold-vehicle page's "Sale Details" section: no header (that page has Edit / Return / Delete), `saleId` says which
+// sale, bumping `editTick` opens the edit form in place, and `onSaved` lets that page refresh after a save.
+export default function SaleDetail({ saleId, embedded = false, editTick = 0, onSaved } = {}) {
+  const params = useParams();
+  const id = saleId || params.id;
   const navigate = useNavigate();
   const goBack = useGoBack("/sales");
-  const location = useLocation();
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
-  // /sales/:id?edit=1 opens straight into the edit form (the sold-vehicle page's Edit button). Cancel and Save then
-  // return to the page the user came from instead of dropping them on this details view.
-  const wantsEdit = useRef(new URLSearchParams(location.search).get("edit") === "1");
-  const quickEdit = useRef(false);
+  const rootRef = useRef(null);
+  const handledTick = useRef(0);
 
   const [sale, setSale] = useState(null);
   const [booking, setBooking] = useState(null); // the booking this sale completed, if any
@@ -98,9 +99,9 @@ export default function SaleDetail() {
       const r = await api.get(`/sales/${id}`);
       api.get("/bookings?status=converted").then(b => setBooking(b.data.find(x => x.sale_id === id) || null)).catch(() => {});
       setSale(r.data);
-    } catch { toast.error("Sale not found"); navigate("/sales"); }
+    } catch { toast.error("Sale not found"); if (!embedded) navigate("/sales"); }
     finally { setLoading(false); }
-  }, [id, navigate]);
+  }, [id, embedded, navigate]);
 
   useEffect(() => { fetchSale(); }, [fetchSale]);
 
@@ -138,15 +139,15 @@ export default function SaleDetail() {
     } catch { toast.error("Failed to load vehicles/customers"); }
   };
 
+  // Embedded: the host page's Edit button bumps editTick. Waits for the sale to load, and only reacts to a new tick.
   useEffect(() => {
-    if (!wantsEdit.current || !sale || !isAdmin) return;
-    wantsEdit.current = false;
-    quickEdit.current = true;
-    window.history.replaceState(window.history.state, "", window.location.pathname); // a refresh shouldn't reopen the form
+    if (!editTick || editTick === handledTick.current || !sale || !isAdmin) return;
+    handledTick.current = editTick;
     startEdit();
-  }, [sale, isAdmin]); // eslint-disable-line react-hooks/exhaustive-deps
+    rootRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [editTick, sale, isAdmin]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const cancelEdit = () => (quickEdit.current ? goBack() : setIsEditing(false));
+  const cancelEdit = () => setIsEditing(false);
 
   const saveNewCustomer = async () => {
     if (!newCust.name || !newCust.contact_number) { toast.error("Name and phone are required"); return; }
@@ -220,9 +221,9 @@ export default function SaleDetail() {
       };
       await api.put(`/sales/${id}`, payload);
       toast.success("Sale updated successfully!");
-      if (quickEdit.current) { goBack(); return; }
       setIsEditing(false);
       fetchSale();
+      onSaved?.({ vehicle_id: editForm.vehicle_id });
     } catch (err) { toast.error(getErrMsg(err, "Failed to save sale")); }
     finally { setSaving(false); }
   };
@@ -279,14 +280,22 @@ export default function SaleDetail() {
     finally { setReturning(false); }
   };
 
-  if (loading) return <div className="flex items-center justify-center h-64"><div className="animate-spin w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full" /></div>;
+  if (loading) return <div className={`flex items-center justify-center ${embedded ? "h-24" : "h-64"}`}><div className="animate-spin w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full" /></div>;
   if (!sale) return null;
 
   const ps = paymentStatusStyle(sale.payment_status);
 
   return (
-    <div className="space-y-5 animate-fade-in">
+    <div ref={rootRef} className="space-y-5 animate-fade-in scroll-mt-4" data-testid={embedded ? "sale-details-section" : undefined}>
+      {embedded && (
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="text-lg font-bold text-slate-900" style={{ fontFamily: "Manrope" }}>{isEditing ? "Edit Sale" : "Sale Details"}</h2>
+          <span className={`px-2.5 py-1 rounded-full text-xs font-semibold uppercase tracking-wide ${ps.bg} ${ps.text}`} data-testid="payment-status-badge">{sale.returned ? "Returned" : sale.payment_status}</span>
+        </div>
+      )}
+
       {/* Header */}
+      {!embedded && (
       <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
         <div className="flex items-center gap-3">
           <button onClick={goBack} aria-label="Back" className="w-11 h-11 flex items-center justify-center hover:bg-slate-100 rounded-lg transition-colors text-slate-500"><ArrowLeft size={18} /></button>
@@ -311,6 +320,7 @@ export default function SaleDetail() {
           )}
         </div>
       </div>
+      )}
 
       {isEditing ? (
         <form onSubmit={saveEdit} className="space-y-4">
@@ -518,7 +528,7 @@ export default function SaleDetail() {
           </div>
 
           {/* Admin only: margin / profit */}
-          {isAdmin && sale.profit_margin !== undefined && (
+          {isAdmin && !embedded && sale.profit_margin !== undefined && (
             <div className="bg-purple-50 border border-purple-200 rounded-xl p-4">
               <div className="flex items-center gap-1.5 text-xs font-semibold text-purple-700 uppercase tracking-wide mb-3">
                 <Lock size={12} /> Admin Only
