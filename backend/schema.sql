@@ -121,7 +121,7 @@ CREATE TABLE IF NOT EXISTS customers (
   notes TEXT,
   created_at VARCHAR(40),
   last_purchase_date VARCHAR(20),
-  -- CRM: how the customer found the shop (walk_in | website | facebook | referral | other), a free-text
+  -- CRM: how the customer found the shop (walk_in | website | facebook | tiktok | referral | other), a free-text
   -- note for "other" / an unlisted referrer, and the customer who referred them (another customers.id).
   source VARCHAR(20),
   source_note VARCHAR(255),
@@ -263,8 +263,8 @@ CREATE TABLE IF NOT EXISTS sales (
   -- Who sold the vehicle: a team_members.id, plus their name as it was when picked.
   sold_by_id VARCHAR(36),
   sold_by_name VARCHAR(255),
-  -- How the buyer found the shop (walk_in | website | facebook | referral | other), a free-text note, and the
-  -- customer who referred them (customers.id) with their name as it was when picked.
+  -- How the buyer found the shop (walk_in | website | facebook | tiktok | other) with a note for "other", and
+  -- separately who referred them: a customers.id, plus their name (typed in when they aren't a customer).
   lead_source VARCHAR(20),
   lead_note VARCHAR(255),
   referred_by_id VARCHAR(36),

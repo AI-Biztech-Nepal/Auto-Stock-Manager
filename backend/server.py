@@ -1672,11 +1672,12 @@ class SaleCreate(BaseModel):
     witness_phone: Optional[str] = None
     witness_id_number: Optional[str] = None
     sold_by_id: Optional[str] = None  # the Team member who sold it (checked and named by crm.resolve_sold_by)
-    # How the buyer found the shop (one of CRM_SOURCES); referred_by_id (a customer) only goes with "referral",
-    # lead_note is free text ("TikTok", or a referrer who isn't a customer). Checked by crm.lead_for_sale.
+    # How the buyer found the shop (one of CRM_SOURCES; lead_note is the detail for "other"), and separately who
+    # referred them: a customer (referred_by_id) or a name typed in (referred_by_name). Checked by crm.lead_for_sale.
     lead_source: Optional[str] = None
     lead_note: Optional[str] = Field(None, max_length=255)
     referred_by_id: Optional[str] = None
+    referred_by_name: Optional[str] = Field(None, max_length=255)
     # Exchange: the customer's old vehicle taken in part payment. Its valuation counts as paid.
     exchange_valuation: float = 0
     exchange_brand: Optional[str] = None

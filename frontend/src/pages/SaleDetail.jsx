@@ -540,8 +540,8 @@ export default function SaleDetail() {
               <h3 className="text-sm font-bold text-slate-900 mb-1">Payment</h3>
               <Row label="Sale Date"><span className="text-sm font-medium text-slate-900 sm:text-right"><HoverADDate date={sale.sale_date} /></span></Row>
               {sale.sold_by_name && <Row label="Sold By"><span className="text-sm font-medium text-slate-900 sm:text-right" data-testid="sale-sold-by">{sale.sold_by_name}</span></Row>}
-              {sale.lead_source && <Row label="Lead"><span className="text-sm font-medium text-slate-900 sm:text-right" data-testid="sale-lead">{SOURCE_LABEL[sale.lead_source] || sale.lead_source}</span></Row>}
-              {(sale.referred_by_name || sale.lead_note) && <Row label={sale.lead_source === "referral" ? "Referred By" : "Lead Detail"}><span className="text-sm font-medium text-slate-900 sm:text-right" data-testid="sale-referred-by">{sale.referred_by_name || sale.lead_note}</span></Row>}
+              {sale.lead_source && <Row label="Lead"><span className="text-sm font-medium text-slate-900 sm:text-right" data-testid="sale-lead">{SOURCE_LABEL[sale.lead_source] || sale.lead_source}{sale.lead_note ? ` · ${sale.lead_note}` : ""}</span></Row>}
+              {sale.referred_by_name && <Row label="Referred By"><span className="text-sm font-medium text-slate-900 sm:text-right" data-testid="sale-referred-by">{sale.referred_by_name}</span></Row>}
               {sale.ownership_transfer_date && (
                 <Row label="Vehicle Pass Date"><span className="text-sm font-medium text-slate-900 sm:text-right"><HoverADDate date={sale.ownership_transfer_date} /></span></Row>
               )}

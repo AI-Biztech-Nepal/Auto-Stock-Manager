@@ -75,25 +75,19 @@ function ReferrerInput({ customers, value, onChange, excludeId }) {
   );
 }
 
-// "Referred by" as a section of its own, on the same { source, source_note, referred_by_id } value as SourceField
-// (pass that field `hideReferrer`). Naming a referrer makes the lead a Referral; clearing it again takes that back.
+// "Referred by" as a section of its own, independent of the lead: value is { referred_by_id, source_note } where
+// source_note is the typed name of a referrer who isn't a customer.
 export function ReferredByField({ value, onChange, customers = [], excludeId }) {
-  const shown = value.source === "referral" ? value : { ...value, referred_by_id: "", source_note: "" };
-  const set = (patch) => {
-    const next = { ...shown, ...patch };
-    if (patch.referred_by_id) next.source_note = "";
-    const named = !!next.referred_by_id || !!(next.source_note || "").trim();
-    onChange({ ...value, referred_by_id: next.referred_by_id, source_note: next.source_note, source: named ? "referral" : value.source === "referral" ? "" : value.source });
-  };
   return (
     <div data-testid="referred-by-field">
       <label className="block text-xs font-medium text-slate-600 mb-1">Referred by</label>
-      <ReferrerInput customers={customers} value={shown} onChange={set} excludeId={excludeId} />
+      <ReferrerInput customers={customers} value={value} onChange={patch => onChange({ ...value, ...patch })} excludeId={excludeId} />
     </div>
   );
 }
 
-export default function SourceField({ value, onChange, customers, excludeId, required = false, label = "How did they find us?", hideReferrer = false }) {
+// `hideReferral` drops the Referral button, for a form that asks "Referred by" separately.
+export default function SourceField({ value, onChange, customers, excludeId, required = false, label = "How did they find us?", hideReferral = false }) {
   const [loaded, setLoaded] = useState(null);
   const list = customers || loaded || [];
   const needList = value.source === "referral" && !customers && !loaded;
@@ -112,7 +106,7 @@ export default function SourceField({ value, onChange, customers, excludeId, req
     <div data-testid="source-field">
       <label className="block text-xs font-medium text-slate-600 mb-1">{label}{required && <span className="text-red-500 ml-0.5">*</span>}</label>
       <div className="flex flex-wrap gap-1.5" role="group" aria-label={label}>
-        {SOURCES.map(({ key, label: l, Icon }) => {
+        {SOURCES.filter(s => !(hideReferral && s.key === "referral")).map(({ key, label: l, Icon }) => {
           const on = value.source === key;
           return (
             <button
@@ -128,14 +122,14 @@ export default function SourceField({ value, onChange, customers, excludeId, req
           );
         })}
       </div>
-      {value.source === "referral" && !hideReferrer && (
+      {value.source === "referral" && (
         <div className="mt-2 space-y-1.5">
           <p className="text-xs font-medium text-slate-600">Referred by</p>
           <ReferrerInput customers={list} value={value} onChange={set} excludeId={excludeId} />
         </div>
       )}
       {value.source === "other" && (
-        <input value={value.source_note} onChange={e => set({ source_note: e.target.value })} placeholder="Where? e.g. TikTok, signboard, Hamro Bazar" className={`${inp} mt-2`} data-testid="source-note" />
+        <input value={value.source_note} onChange={e => set({ source_note: e.target.value })} placeholder="Where? e.g. Instagram, signboard, Hamro Bazar" className={`${inp} mt-2`} data-testid="source-note" />
       )}
     </div>
   );

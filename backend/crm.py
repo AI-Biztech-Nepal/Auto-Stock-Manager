@@ -25,7 +25,7 @@ from typing import Optional
 from fastapi import Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
-CRM_SOURCES = ("walk_in", "website", "facebook", "referral", "other")
+CRM_SOURCES = ("walk_in", "website", "facebook", "tiktok", "referral", "other")
 CUSTOMER_SOURCE_FIELDS = {"source", "source_note", "referred_by_id"}
 CUSTOMER_CRM_FIELDS = {"lead_status", "interested_vehicle", "assigned_to_id"}
 LEAD_STATUSES = ("new", "contacted", "interested", "converted", "lost")
@@ -278,7 +278,7 @@ IMPORT_HEADERS = {
 }
 SOURCE_WORDS = {
     "walk in": "walk_in", "walkin": "walk_in", "showroom": "walk_in", "visit": "walk_in", "website": "website", "web": "website", "online": "website",
-    "facebook": "facebook", "fb": "facebook", "referral": "referral", "referred": "referral", "refer": "referral", "other": "other",
+    "facebook": "facebook", "fb": "facebook", "tiktok": "tiktok", "tik tok": "tiktok", "referral": "referral", "referred": "referral", "refer": "referral", "other": "other",
 }
 _DATE_FORMATS = ["%Y-%m-%d", "%Y/%m/%d", "%d-%m-%Y", "%d/%m/%Y", "%m/%d/%Y", "%d-%b-%Y", "%d %b %Y", "%b %d, %Y", "%B %d, %Y", "%d-%m-%y", "%d/%m/%y"]
 
@@ -480,14 +480,25 @@ async def resolve_sold_by(member_id: Optional[str]) -> dict:
 
 
 async def lead_for_sale(data: dict) -> dict:
-    """The lead fields to store on a sale: how the buyer found the shop and, for a referral, who referred them.
-    The referrer's name stays on the sale if that customer is deleted later. A sale with no lead never touches the columns."""
-    clean = await clean_customer_source({"source": data.get("lead_source"), "source_note": data.get("lead_note"),
-                                         "referred_by_id": data.get("referred_by_id")}, None)
-    if not clean["source"]: return {}
-    ref = await db.customers.find_one({"id": clean["referred_by_id"]}, {"_id": 0, "name": 1}) if clean["referred_by_id"] else None
-    return {"lead_source": clean["source"], "lead_note": clean["source_note"],
-            "referred_by_id": clean["referred_by_id"], "referred_by_name": ref["name"] if ref else None}
+    """The lead fields to store on a sale: how the buyer found the shop (lead_source, plus lead_note for "other") and,
+    separately, who referred them -- a customer (referred_by_id) or a name typed in (referred_by_name). The referrer's
+    name comes from the customer record, never the client, and stays on the sale if that customer is deleted later.
+    A part left empty is left out, so a sale with neither never touches the columns."""
+    out = {}
+    source = (data.get("lead_source") or "").strip().lower()
+    if source:
+        if source not in CRM_SOURCES: raise HTTPException(422, "Unknown source")
+        note = (data.get("lead_note") or "").strip()[:255] or None
+        out.update({"lead_source": source, "lead_note": note if source == "other" else None})
+    ref_id = (data.get("referred_by_id") or "").strip()
+    if ref_id:
+        ref = await db.customers.find_one({"id": ref_id}, {"_id": 0, "name": 1})
+        if not ref: raise HTTPException(422, "The customer who referred them wasn't found")
+        out.update({"referred_by_id": ref_id, "referred_by_name": ref.get("name")})
+    else:
+        name = (data.get("referred_by_name") or "").strip()[:255]
+        if name: out.update({"referred_by_id": None, "referred_by_name": name})
+    return out
 
 
 async def seller_for_sale(explicit_id: Optional[str], customer_id: Optional[str]) -> dict:
