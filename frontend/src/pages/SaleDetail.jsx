@@ -284,12 +284,14 @@ export default function SaleDetail({ saleId, embedded = false, editTick = 0, onS
   if (!sale) return null;
 
   const ps = paymentStatusStyle(sale.payment_status);
+  const buyerWide = !sale.witness_name; // no witness card beside it: let the buyer card use the whole row
+  const twoCols = "grid grid-cols-1 sm:grid-cols-2 gap-x-8";
 
   return (
-    <div ref={rootRef} className="space-y-5 animate-fade-in scroll-mt-4" data-testid={embedded ? "sale-details-section" : undefined}>
+    <div ref={rootRef} className={`flex flex-col gap-5 animate-fade-in scroll-mt-4 ${embedded ? "pt-6 border-t border-slate-200" : ""}`} data-testid={embedded ? "sale-details-section" : undefined}>
       {embedded && (
-        <div className="flex items-center justify-between gap-2">
-          <h2 className="text-lg font-bold text-slate-900" style={{ fontFamily: "Manrope" }}>{isEditing ? "Edit Sale" : "Sale Details"}</h2>
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="text-xl font-bold text-slate-900" style={{ fontFamily: "Manrope" }}>{isEditing ? "Edit Sale" : "Sale Details"}</h2>
           <span className={`px-2.5 py-1 rounded-full text-xs font-semibold uppercase tracking-wide ${ps.bg} ${ps.text}`} data-testid="payment-status-badge">{sale.returned ? "Returned" : sale.payment_status}</span>
         </div>
       )}
@@ -562,12 +564,14 @@ export default function SaleDetail({ saleId, embedded = false, editTick = 0, onS
 
           {/* Details */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
+            <div className={`bg-white rounded-xl border border-slate-200 shadow-sm p-5 ${buyerWide ? "sm:col-span-2" : ""}`}>
               <h3 className="text-sm font-bold text-slate-900 mb-1">Buyer</h3>
-              <Row label="Name"><span className="text-sm font-medium text-slate-900 sm:text-right">{sale.customer_name}</span></Row>
-              <Row label="Phone No."><span className="text-sm font-medium text-slate-900 sm:text-right">{sale.customer_contact || "—"}</span></Row>
-              <Row label="Address"><span className="text-sm font-medium text-slate-900 sm:text-right">{sale.customer_address || "—"}</span></Row>
-              <Row label="Licence / Citizenship No."><span className="text-sm font-medium text-slate-900 sm:text-right">{sale.customer_id_number || "—"}</span></Row>
+              <div className={buyerWide ? twoCols : undefined}>
+                <Row label="Name"><span className="text-sm font-medium text-slate-900 sm:text-right">{sale.customer_name}</span></Row>
+                <Row label="Phone No."><span className="text-sm font-medium text-slate-900 sm:text-right">{sale.customer_contact || "—"}</span></Row>
+                <Row label="Address"><span className="text-sm font-medium text-slate-900 sm:text-right">{sale.customer_address || "—"}</span></Row>
+                <Row label="Licence / Citizenship No."><span className="text-sm font-medium text-slate-900 sm:text-right">{sale.customer_id_number || "—"}</span></Row>
+              </div>
             </div>
             {sale.witness_name && (
               <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5" data-testid="sale-witness-card">
@@ -578,29 +582,31 @@ export default function SaleDetail({ saleId, embedded = false, editTick = 0, onS
                 <Row label="Licence / Citizenship No."><span className="text-sm font-medium text-slate-900 sm:text-right">{sale.witness_id_number || "—"}</span></Row>
               </div>
             )}
-            <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
+            <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 sm:col-span-2">
               <h3 className="text-sm font-bold text-slate-900 mb-1">Payment</h3>
-              <Row label="Sale Date"><span className="text-sm font-medium text-slate-900 sm:text-right"><HoverADDate date={sale.sale_date} /></span></Row>
-              {sale.sold_by_name && <Row label="Sold By"><span className="text-sm font-medium text-slate-900 sm:text-right" data-testid="sale-sold-by">{sale.sold_by_name}</span></Row>}
-              {sale.lead_source && <Row label="Lead"><span className="text-sm font-medium text-slate-900 sm:text-right" data-testid="sale-lead">{SOURCE_LABEL[sale.lead_source] || sale.lead_source}{sale.lead_note ? ` · ${sale.lead_note}` : ""}</span></Row>}
-              {sale.referred_by_name && <Row label="Referred By"><span className="text-sm font-medium text-slate-900 sm:text-right" data-testid="sale-referred-by">{sale.referred_by_name}</span></Row>}
-              {sale.ownership_transfer_date && (
-                <Row label="Vehicle Pass Date"><span className="text-sm font-medium text-slate-900 sm:text-right"><HoverADDate date={sale.ownership_transfer_date} /></span></Row>
-              )}
-              <Row label="Payment Method"><span className="text-sm font-medium text-slate-900 sm:text-right">{sale.payment_method}</span></Row>
-              {sale.advance_payment > 0 && (
-                <Row label="Advance Payment"><span className="text-sm font-medium text-slate-900 sm:text-right">{formatNPR(sale.advance_payment)}</span></Row>
-              )}
-              {booking && (
-                <Row label="From Booking"><span className="text-sm font-medium text-slate-900 sm:text-right" data-testid="sale-booking-info">Deposit {formatNPR(booking.booking_amount)} on <HoverADDate date={booking.booking_date} /></span></Row>
-              )}
-              <Row label="Paid by Cash"><span className="text-sm font-medium text-slate-900 sm:text-right">{formatNPR(sale.paid_cash || 0)}</span></Row>
-              {sale.exchange_valuation > 0 && <Row label="Exchange"><span className="text-sm font-medium text-slate-900 sm:text-right" data-testid="sale-exchange-info">{[sale.exchange_brand, sale.exchange_model, sale.exchange_year, sale.exchange_reg_no && `(${sale.exchange_reg_no})`].filter(Boolean).join(" ") || "Vehicle"} · {formatNPR(sale.exchange_valuation)}{sale.exchange_vehicle_id && <> · <Link to={`/inventory/${sale.exchange_vehicle_id}`} className="text-blue-600 hover:underline" data-testid="sale-exchange-inventory-link">In inventory</Link></>}</span></Row>}
-              <Row label="Paid by Bank"><span className="text-sm font-medium text-slate-900 sm:text-right">{formatNPR(sale.paid_bank || 0)}</span></Row>
-              <Row label="Due Amount"><span className={`text-sm font-medium sm:text-right ${sale.due_amount > 0 ? "text-red-600" : "text-slate-900"}`}>{formatNPR(sale.due_amount || 0)}</span></Row>
-              {sale.due_amount > 0 && (
-                <Row label="Due Date"><span className="text-sm font-medium text-red-600 sm:text-right">{sale.due_date ? <HoverADDate date={sale.due_date} /> : "Not set"}</span></Row>
-              )}
+              <div className={twoCols}>
+                <Row label="Sale Date"><span className="text-sm font-medium text-slate-900 sm:text-right"><HoverADDate date={sale.sale_date} /></span></Row>
+                {sale.sold_by_name && <Row label="Sold By"><span className="text-sm font-medium text-slate-900 sm:text-right" data-testid="sale-sold-by">{sale.sold_by_name}</span></Row>}
+                {sale.lead_source && <Row label="Lead"><span className="text-sm font-medium text-slate-900 sm:text-right" data-testid="sale-lead">{SOURCE_LABEL[sale.lead_source] || sale.lead_source}{sale.lead_note ? ` · ${sale.lead_note}` : ""}</span></Row>}
+                {sale.referred_by_name && <Row label="Referred By"><span className="text-sm font-medium text-slate-900 sm:text-right" data-testid="sale-referred-by">{sale.referred_by_name}</span></Row>}
+                {sale.ownership_transfer_date && (
+                  <Row label="Vehicle Pass Date"><span className="text-sm font-medium text-slate-900 sm:text-right"><HoverADDate date={sale.ownership_transfer_date} /></span></Row>
+                )}
+                <Row label="Payment Method"><span className="text-sm font-medium text-slate-900 sm:text-right">{sale.payment_method}</span></Row>
+                {sale.advance_payment > 0 && (
+                  <Row label="Advance Payment"><span className="text-sm font-medium text-slate-900 sm:text-right">{formatNPR(sale.advance_payment)}</span></Row>
+                )}
+                {booking && (
+                  <Row label="From Booking"><span className="text-sm font-medium text-slate-900 sm:text-right" data-testid="sale-booking-info">Deposit {formatNPR(booking.booking_amount)} on <HoverADDate date={booking.booking_date} /></span></Row>
+                )}
+                <Row label="Paid by Cash"><span className="text-sm font-medium text-slate-900 sm:text-right">{formatNPR(sale.paid_cash || 0)}</span></Row>
+                {sale.exchange_valuation > 0 && <Row label="Exchange"><span className="text-sm font-medium text-slate-900 sm:text-right" data-testid="sale-exchange-info">{[sale.exchange_brand, sale.exchange_model, sale.exchange_year, sale.exchange_reg_no && `(${sale.exchange_reg_no})`].filter(Boolean).join(" ") || "Vehicle"} · {formatNPR(sale.exchange_valuation)}{sale.exchange_vehicle_id && <> · <Link to={`/inventory/${sale.exchange_vehicle_id}`} className="text-blue-600 hover:underline" data-testid="sale-exchange-inventory-link">In inventory</Link></>}</span></Row>}
+                <Row label="Paid by Bank"><span className="text-sm font-medium text-slate-900 sm:text-right">{formatNPR(sale.paid_bank || 0)}</span></Row>
+                <Row label="Due Amount"><span className={`text-sm font-medium sm:text-right ${sale.due_amount > 0 ? "text-red-600" : "text-slate-900"}`}>{formatNPR(sale.due_amount || 0)}</span></Row>
+                {sale.due_amount > 0 && (
+                  <Row label="Due Date"><span className="text-sm font-medium text-red-600 sm:text-right">{sale.due_date ? <HoverADDate date={sale.due_date} /> : "Not set"}</span></Row>
+                )}
+              </div>
             </div>
           </div>
 
