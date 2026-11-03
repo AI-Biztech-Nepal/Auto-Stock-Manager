@@ -66,6 +66,7 @@ export default function SaleDetail({ saleId, embedded = false, editTick = 0, onS
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
   const handledTick = useRef(0);
+  const pressedOnBackdrop = useRef(false); // a click closes the pop-up only if the press began outside it too (not a text-select drag)
 
   const [sale, setSale] = useState(null);
   const [booking, setBooking] = useState(null); // the booking this sale completed, if any
@@ -323,7 +324,12 @@ export default function SaleDetail({ saleId, embedded = false, editTick = 0, onS
       )}
 
       {isEditing && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 sm:p-4" data-testid="edit-sale-modal">
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 sm:p-4"
+          data-testid="edit-sale-modal"
+          onMouseDown={e => { pressedOnBackdrop.current = e.target === e.currentTarget; }}
+          onClick={e => { if (e.target === e.currentTarget && pressedOnBackdrop.current) cancelEdit(); }}
+        >
           <div className="bg-white sm:rounded-2xl shadow-2xl w-full h-full sm:h-auto sm:max-w-xl sm:max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between p-4 sm:p-5 border-b border-slate-100 sticky top-0 bg-white z-10">
               <h2 className="text-lg font-bold text-slate-900">Edit Sale</h2>
