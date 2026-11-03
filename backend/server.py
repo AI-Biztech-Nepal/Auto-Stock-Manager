@@ -1700,6 +1700,11 @@ class SaleUpdate(BaseModel):
     ownership_transfer_date: Optional[str] = None
     notes: Optional[str] = None
     sold_by_id: Optional[str] = None  # only changed when the form sends it
+    # Lead and referrer, as on SaleCreate. Replaced whole when the form sends any of them (an empty one clears it).
+    lead_source: Optional[str] = None
+    lead_note: Optional[str] = Field(None, max_length=255)
+    referred_by_id: Optional[str] = None
+    referred_by_name: Optional[str] = Field(None, max_length=255)
 
 class CustomerCreate(BaseModel):
     name: str; contact_number: str
@@ -4062,6 +4067,12 @@ async def update_sale(sid: str, sale: SaleUpdate, cu: dict = Depends(get_current
     # before or after, so an ordinary edit leaves the sold_by columns alone.
     if "sold_by_id" in sale.model_fields_set and (sale.sold_by_id or existing.get("sold_by_id")):
         update_doc.update(await crm.resolve_sold_by(sale.sold_by_id))
+    # Same for the lead and referrer: a form that does not show them leaves them alone, and nothing is written when
+    # there is none before or after.
+    if sale.model_fields_set & crm.SALE_LEAD_FIELDS:
+        lead = await crm.lead_for_sale(sale.model_dump(), replace=True)
+        if any(lead.values()) or any(existing.get(k) for k in lead):
+            update_doc.update(lead)
     await db.sales.update_one({"id": sid}, {"$set": update_doc})
     # Keep vehicle record in sync (price/date/customer may have changed). Re-saving an active
     # sale also re-asserts status "sold", so a vehicle that drifted out of Sold Stock (e.g.

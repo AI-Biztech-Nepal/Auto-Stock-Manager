@@ -7,9 +7,9 @@ import { formatNPR, splitSanakhatExpenses, withSanakhatExpenses, deleteSaleConfi
 import HoverADDate from "../components/HoverADDate";
 import BSDatePicker from "../components/BSDatePicker";
 import VehicleComboBox from "../components/VehicleComboBox";
-import SourceField from "../components/SourceField";
+import SourceField, { ReferredByField } from "../components/SourceField";
 import SoldBySelect from "../components/SoldBySelect";
-import { EMPTY_SOURCE, SOURCE_LABEL, isSourceComplete, sourcePayload } from "../utils/crm";
+import { EMPTY_REFERRER, EMPTY_SOURCE, SOURCE_LABEL, isSourceComplete, sourcePayload } from "../utils/crm";
 import { useAuth } from "../context/AuthContext";
 
 const PRESET_EXPENSES = [
@@ -79,6 +79,8 @@ export default function SaleDetail() {
   const [newCust, setNewCust] = useState({ name: "", contact_number: "", address: "" });
   const [newCustSource, setNewCustSource] = useState(EMPTY_SOURCE);
   const [addingCust, setAddingCust] = useState(false);
+  const [leadSource, setLeadSource] = useState(EMPTY_SOURCE);   // how the buyer found the shop, as saved on this sale
+  const [referrer, setReferrer] = useState(EMPTY_REFERRER);     // who referred them: a customer, or a typed name
 
   const [showReturnModal, setShowReturnModal] = useState(false);
   const [returnForm, setReturnForm] = useState({ refund_amount: "", new_status: "available", notes: "" });
@@ -118,10 +120,14 @@ export default function SaleDetail() {
     setShowAddCust(false);
     setNewCust({ name: "", contact_number: "", address: "" });
     setNewCustSource(EMPTY_SOURCE);
+    setLeadSource({ ...EMPTY_SOURCE, source: sale.lead_source === "referral" ? "" : sale.lead_source || "", source_note: sale.lead_note || "" });
+    setReferrer({ referred_by_id: sale.referred_by_id || "", source_note: sale.referred_by_id ? "" : sale.referred_by_name || "" });
     setIsEditing(true);
     try {
       const [v, c] = await Promise.all([api.get("/vehicles"), api.get("/customers")]);
       setVehicles(v.data); setCustomers(c.data);
+      // A referrer who has since been deleted stays on the sale by name only.
+      if (sale.referred_by_id && !c.data.some(x => x.id === sale.referred_by_id)) setReferrer({ referred_by_id: "", source_note: sale.referred_by_name || "" });
     } catch { toast.error("Failed to load vehicles/customers"); }
   };
 
@@ -191,6 +197,10 @@ export default function SaleDetail() {
         sale_date: editForm.sale_date || undefined,
         ownership_transfer_date: editForm.ownership_transfer_date || undefined,
         sold_by_id: editForm.sold_by_id || null,
+        lead_source: leadSource.source || null,
+        lead_note: leadSource.source_note.trim() || null,
+        referred_by_id: referrer.referred_by_id || null,
+        referred_by_name: referrer.source_note.trim() || null,
         notes: editForm.notes,
       };
       await api.put(`/sales/${id}`, payload);
@@ -312,6 +322,12 @@ export default function SaleDetail() {
             <Field label="Sold by">
               <SoldBySelect value={editForm.sold_by_id} onChange={v => setEditForm({ ...editForm, sold_by_id: v })} fallbackName={sale.sold_by_name} className={sel} testid="edit-sale-sold-by-select" />
             </Field>
+
+            <div data-testid="edit-sale-lead">
+              <SourceField value={leadSource} onChange={setLeadSource} customers={customers} label="Lead" hideReferral />
+            </div>
+
+            <ReferredByField value={referrer} onChange={setReferrer} customers={customers} />
 
             <Field label="Customer">
               <div className="flex gap-2">

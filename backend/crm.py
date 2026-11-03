@@ -479,17 +479,23 @@ async def resolve_sold_by(member_id: Optional[str]) -> dict:
     return {"sold_by_id": m["id"], "sold_by_name": m["name"]} if m else {"sold_by_id": None, "sold_by_name": None}
 
 
-async def lead_for_sale(data: dict) -> dict:
+SALE_LEAD_FIELDS = {"lead_source", "lead_note", "referred_by_id", "referred_by_name"}
+
+
+async def lead_for_sale(data: dict, replace: bool = False) -> dict:
     """The lead fields to store on a sale: how the buyer found the shop (lead_source, plus lead_note for "other") and,
     separately, who referred them -- a customer (referred_by_id) or a name typed in (referred_by_name). The referrer's
     name comes from the customer record, never the client, and stays on the sale if that customer is deleted later.
-    A part left empty is left out, so a sale with neither never touches the columns."""
+    A part left empty is left out, so a new sale with neither never touches the columns; with replace=True (editing a
+    sale) an empty part comes back as None so it clears what was stored."""
     out = {}
     source = (data.get("lead_source") or "").strip().lower()
     if source:
         if source not in CRM_SOURCES: raise HTTPException(422, "Unknown source")
         note = (data.get("lead_note") or "").strip()[:255] or None
         out.update({"lead_source": source, "lead_note": note if source == "other" else None})
+    elif replace:
+        out.update({"lead_source": None, "lead_note": None})
     ref_id = (data.get("referred_by_id") or "").strip()
     if ref_id:
         ref = await db.customers.find_one({"id": ref_id}, {"_id": 0, "name": 1})
@@ -498,6 +504,7 @@ async def lead_for_sale(data: dict) -> dict:
     else:
         name = (data.get("referred_by_name") or "").strip()[:255]
         if name: out.update({"referred_by_id": None, "referred_by_name": name})
+        elif replace: out.update({"referred_by_id": None, "referred_by_name": None})
     return out
 
 
