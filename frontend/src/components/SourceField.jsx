@@ -95,6 +95,7 @@ export default function SourceField({ value, onChange, customers, excludeId, req
       </div>
       {value.source === "referral" && (
         <div className="mt-2 space-y-1.5">
+          <p className="text-xs font-medium text-slate-600">Referred by</p>
           <ReferrerPicker customers={list} value={value.referred_by_id} onChange={id => set({ referred_by_id: id })} excludeId={excludeId} />
           {!value.referred_by_id && (
             <input value={value.source_note} onChange={e => set({ source_note: e.target.value })} placeholder="Or type who referred them (if not a customer)" className={inp} data-testid="referrer-note" />

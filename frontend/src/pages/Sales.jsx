@@ -181,7 +181,7 @@ export default function Sales() {
   // which is required whenever this panel is in use.
   const [showAddCust, setShowAddCust] = useState(false);
   const [buyer, setBuyer] = useState(EMPTY_BUYER);
-  const [buyerSource, setBuyerSource] = useState(EMPTY_SOURCE); // how a NEW buyer found the shop
+  const [leadSource, setLeadSource] = useState(EMPTY_SOURCE); // how the buyer found the shop; kept on the sale, and tags a NEW buyer
   const [addingCust, setAddingCust] = useState(false);
 
   // Extra expenses state
@@ -246,7 +246,7 @@ export default function Sales() {
     setPresetToAdd("");
     setNewExpName(""); setNewExpAmt("");
     setBuyer(EMPTY_BUYER);
-    setBuyerSource(EMPTY_SOURCE);
+    setLeadSource(EMPTY_SOURCE);
     setShowAddCust(false);
     setShowModal(true);
     try {
@@ -276,11 +276,11 @@ export default function Sales() {
   const buyerComplete = buyer.name.trim() && buyer.address.trim() && buyer.contact_number.trim();
   const witnessComplete = form.witness_name.trim() && form.witness_address.trim() && form.witness_phone.trim();
 
-  const sourceMissing = () => (buyerSource.source === "referral" ? "Say who referred the buyer" : "Tell us how the buyer found the shop");
+  const sourceMissing = () => (leadSource.source === "referral" ? "Say who referred the buyer (Lead)" : "Tell us how the buyer found the shop (Lead)");
 
   const saveNewCustomer = async () => {
     if (!buyerComplete) { toast.error("Fill in the buyer's name, address, and phone number"); return; }
-    if (!isSourceComplete(buyerSource)) { toast.error(sourceMissing()); return; }
+    if (!isSourceComplete(leadSource)) { toast.error(sourceMissing()); return; }
     setAddingCust(true);
     try {
       const r = await api.post("/customers", {
@@ -288,7 +288,7 @@ export default function Sales() {
         contact_number: buyer.contact_number.trim(),
         address: buyer.address.trim() || null,
         id_number: buyer.id_number.trim() || null,
-        ...sourcePayload(buyerSource),
+        ...sourcePayload(leadSource),
       });
       setCustomers(prev => [r.data, ...prev]);
       setForm(f => ({ ...f, customer_id: r.data.id }));
@@ -334,12 +334,11 @@ export default function Sales() {
     // are mandatory (sale deed); a typed-but-not-yet-saved buyer gets created on the way
     // through. An existing customer picked from the dropdown covers the buyer half itself.
     const enteringNewBuyer = showAddCust && !form.customer_id;
+    // The lead is optional, unless a new buyer is being added (they must be tagged); once started, a referral needs its referrer.
+    if (leadSource.source ? !isSourceComplete(leadSource) : enteringNewBuyer) { toast.error(sourceMissing()); return; }
     if (showAddCust) {
       if (enteringNewBuyer && !buyerComplete) {
         toast.error("Fill in the buyer's name, address, and phone number"); return;
-      }
-      if (enteringNewBuyer && !isSourceComplete(buyerSource)) {
-        toast.error(sourceMissing()); return;
       }
       if (!witnessComplete) {
         toast.error("Fill in the witness's name, address, and phone number"); return;
@@ -354,11 +353,12 @@ export default function Sales() {
           contact_number: buyer.contact_number.trim(),
           address: buyer.address.trim() || null,
           id_number: buyer.id_number.trim() || null,
-          ...sourcePayload(buyerSource),
+          ...sourcePayload(leadSource),
         });
         setCustomers(prev => [r.data, ...prev]);
         customerId = r.data.id;
       }
+      const lead = sourcePayload(leadSource);
       const payMethodParts = [];
       if (Number(form.paid_cash) > 0) payMethodParts.push("Cash");
       if (Number(form.paid_bank) > 0) payMethodParts.push("Bank Transfer");
@@ -378,6 +378,7 @@ export default function Sales() {
         sale_date: form.sale_date || undefined,
         ownership_transfer_date: form.ownership_transfer_date || undefined,
         sold_by_id: form.sold_by_id || null,
+        ...(lead.source ? { lead_source: lead.source, lead_note: lead.source_note, referred_by_id: lead.referred_by_id } : {}),
         notes: form.notes,
         exchange_valuation: exchangeValuation,
         exchange_brand: form.exchange_brand.trim() || undefined,
@@ -819,6 +820,10 @@ export default function Sales() {
                 <SoldBySelect value={form.sold_by_id} onChange={v => setForm({ ...form, sold_by_id: v })} className={sel} testid="sale-sold-by-select" />
               </Field>
 
+              <div data-testid="sale-lead">
+                <SourceField value={leadSource} onChange={setLeadSource} customers={customers} label="Lead" required={showAddCust && !selectedCustomer} />
+              </div>
+
               {/* Customer */}
               <Field label="Customer">
                 <div className="flex gap-2">
@@ -857,12 +862,6 @@ export default function Sales() {
                           </MiniField>
                         </div>
                       ))}
-
-                      {!selectedCustomer && (
-                        <div className="pt-1" data-testid="buyer-source">
-                          <SourceField value={buyerSource} onChange={setBuyerSource} customers={customers} label="How did the buyer find us?" required />
-                        </div>
-                      )}
 
                       {selectedCustomer && (
                         <button type="button" onClick={() => setForm({ ...form, customer_id: "" })} className="text-xs text-blue-600 hover:underline">

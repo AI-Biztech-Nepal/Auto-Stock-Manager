@@ -70,6 +70,7 @@ TABLES = {
                            "witness_name", "witness_address", "witness_phone", "witness_id_number", "witness_relation",
                            "helmet_given", "imported", "needs_review", "review_note", "reviewed_by", "reviewed_at",
                            "sold_by_id", "sold_by_name",
+                           "lead_source", "lead_note", "referred_by_id", "referred_by_name",
                            "exchange_valuation", "exchange_brand", "exchange_model", "exchange_reg_no", "exchange_year",
                            "exchange_vehicle_id"},
               "bool_cols": {"returned", "helmet_given", "imported", "needs_review"}, "json_cols": {"extra_expenses"}},

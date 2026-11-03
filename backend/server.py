@@ -1672,6 +1672,11 @@ class SaleCreate(BaseModel):
     witness_phone: Optional[str] = None
     witness_id_number: Optional[str] = None
     sold_by_id: Optional[str] = None  # the Team member who sold it (checked and named by crm.resolve_sold_by)
+    # How the buyer found the shop (one of CRM_SOURCES); referred_by_id (a customer) only goes with "referral",
+    # lead_note is free text ("TikTok", or a referrer who isn't a customer). Checked by crm.lead_for_sale.
+    lead_source: Optional[str] = None
+    lead_note: Optional[str] = Field(None, max_length=255)
+    referred_by_id: Optional[str] = None
     # Exchange: the customer's old vehicle taken in part payment. Its valuation counts as paid.
     exchange_valuation: float = 0
     exchange_brand: Optional[str] = None
@@ -3852,6 +3857,7 @@ async def create_sale(sale: SaleCreate, cu: dict = Depends(require("sales", "cre
         **_witness,
         # The seller picked on the form, else the salesperson assigned to the customer; a sale with neither never touches the sold_by columns.
         **await crm.seller_for_sale(sale.sold_by_id, sale.customer_id),
+        **await crm.lead_for_sale(sale.model_dump()),
         "created_by": cu.get("username"),
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -5971,6 +5977,11 @@ async def _run_startup_tasks():
             # Who sold the vehicle (a Team member); the name is kept on the sale so it survives the member being removed.
             ("sales", "sold_by_id", "VARCHAR(36)"),
             ("sales", "sold_by_name", "VARCHAR(255)"),
+            # How the buyer found the shop, and who referred them (the name is kept if that customer is deleted).
+            ("sales", "lead_source", "VARCHAR(20)"),
+            ("sales", "lead_note", "VARCHAR(255)"),
+            ("sales", "referred_by_id", "VARCHAR(36)"),
+            ("sales", "referred_by_name", "VARCHAR(255)"),
             # Exchange: the old vehicle taken in part payment (valuation counts as paid).
             ("sales", "exchange_valuation", "DOUBLE"),
             ("sales", "exchange_brand", "VARCHAR(100)"),

@@ -479,6 +479,17 @@ async def resolve_sold_by(member_id: Optional[str]) -> dict:
     return {"sold_by_id": m["id"], "sold_by_name": m["name"]} if m else {"sold_by_id": None, "sold_by_name": None}
 
 
+async def lead_for_sale(data: dict) -> dict:
+    """The lead fields to store on a sale: how the buyer found the shop and, for a referral, who referred them.
+    The referrer's name stays on the sale if that customer is deleted later. A sale with no lead never touches the columns."""
+    clean = await clean_customer_source({"source": data.get("lead_source"), "source_note": data.get("lead_note"),
+                                         "referred_by_id": data.get("referred_by_id")}, None)
+    if not clean["source"]: return {}
+    ref = await db.customers.find_one({"id": clean["referred_by_id"]}, {"_id": 0, "name": 1}) if clean["referred_by_id"] else None
+    return {"lead_source": clean["source"], "lead_note": clean["source_note"],
+            "referred_by_id": clean["referred_by_id"], "referred_by_name": ref["name"] if ref else None}
+
+
 async def seller_for_sale(explicit_id: Optional[str], customer_id: Optional[str]) -> dict:
     """Who a new sale is credited to: the seller picked on the form, else the salesperson assigned to the customer.
     Never blocks a sale: a stale assignment (or the columns not being there yet) simply means no seller."""

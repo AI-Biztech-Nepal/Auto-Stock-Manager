@@ -263,6 +263,12 @@ CREATE TABLE IF NOT EXISTS sales (
   -- Who sold the vehicle: a team_members.id, plus their name as it was when picked.
   sold_by_id VARCHAR(36),
   sold_by_name VARCHAR(255),
+  -- How the buyer found the shop (walk_in | website | facebook | referral | other), a free-text note, and the
+  -- customer who referred them (customers.id) with their name as it was when picked.
+  lead_source VARCHAR(20),
+  lead_note VARCHAR(255),
+  referred_by_id VARCHAR(36),
+  referred_by_name VARCHAR(255),
   exchange_valuation DOUBLE,
   exchange_brand VARCHAR(100),
   exchange_model VARCHAR(100),
