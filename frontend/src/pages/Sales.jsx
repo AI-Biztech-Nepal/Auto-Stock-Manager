@@ -12,7 +12,7 @@ import HoverADDate from "../components/HoverADDate";
 import WarrantyBadge from "../components/WarrantyBadge";
 import Bookings from "./Bookings";
 import DateRangeFilter, { resolveDateFilter } from "../components/DateRangeFilter";
-import SourceField from "../components/SourceField";
+import SourceField, { ReferredByField } from "../components/SourceField";
 import SoldBySelect from "../components/SoldBySelect";
 import { EMPTY_SOURCE, isSourceComplete, sourcePayload } from "../utils/crm";
 
@@ -276,7 +276,7 @@ export default function Sales() {
   const buyerComplete = buyer.name.trim() && buyer.address.trim() && buyer.contact_number.trim();
   const witnessComplete = form.witness_name.trim() && form.witness_address.trim() && form.witness_phone.trim();
 
-  const sourceMissing = () => (leadSource.source === "referral" ? "Say who referred the buyer (Lead)" : "Tell us how the buyer found the shop (Lead)");
+  const sourceMissing = () => (leadSource.source === "referral" ? "Say who referred the buyer (Referred by)" : "Tell us how the buyer found the shop (Lead)");
 
   const saveNewCustomer = async () => {
     if (!buyerComplete) { toast.error("Fill in the buyer's name, address, and phone number"); return; }
@@ -821,8 +821,10 @@ export default function Sales() {
               </Field>
 
               <div data-testid="sale-lead">
-                <SourceField value={leadSource} onChange={setLeadSource} customers={customers} label="Lead" required={showAddCust && !selectedCustomer} />
+                <SourceField value={leadSource} onChange={setLeadSource} customers={customers} label="Lead" required={showAddCust && !selectedCustomer} hideReferrer />
               </div>
+
+              <ReferredByField value={leadSource} onChange={setLeadSource} customers={customers} />
 
               {/* Customer */}
               <Field label="Customer">

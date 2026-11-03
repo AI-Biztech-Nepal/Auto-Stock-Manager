@@ -58,7 +58,37 @@ function ReferrerPicker({ customers, value, onChange, excludeId }) {
   );
 }
 
-export default function SourceField({ value, onChange, customers, excludeId, required = false, label = "How did they find us?" }) {
+// The referrer: a customer from the list, or a typed name for someone who isn't one. onChange gets just the fields that changed.
+function ReferrerInputs({ customers, value, onChange, excludeId }) {
+  return (
+    <div className="space-y-1.5">
+      <ReferrerPicker customers={customers} value={value.referred_by_id} onChange={id => onChange({ referred_by_id: id })} excludeId={excludeId} />
+      {!value.referred_by_id && (
+        <input value={value.source_note} onChange={e => onChange({ source_note: e.target.value })} placeholder="Or type who referred them (if not a customer)" className={inp} data-testid="referrer-note" />
+      )}
+    </div>
+  );
+}
+
+// "Referred by" as a section of its own, on the same { source, source_note, referred_by_id } value as SourceField
+// (pass that field `hideReferrer`). Naming a referrer makes the lead a Referral; clearing it again takes that back.
+export function ReferredByField({ value, onChange, customers = [], excludeId }) {
+  const shown = value.source === "referral" ? value : { ...value, referred_by_id: "", source_note: "" };
+  const set = (patch) => {
+    const next = { ...shown, ...patch };
+    if (patch.referred_by_id) next.source_note = "";
+    const named = !!next.referred_by_id || !!(next.source_note || "").trim();
+    onChange({ ...value, referred_by_id: next.referred_by_id, source_note: next.source_note, source: named ? "referral" : value.source === "referral" ? "" : value.source });
+  };
+  return (
+    <div data-testid="referred-by-field">
+      <label className="block text-xs font-medium text-slate-600 mb-1">Referred by</label>
+      <ReferrerInputs customers={customers} value={shown} onChange={set} excludeId={excludeId} />
+    </div>
+  );
+}
+
+export default function SourceField({ value, onChange, customers, excludeId, required = false, label = "How did they find us?", hideReferrer = false }) {
   const [loaded, setLoaded] = useState(null);
   const list = customers || loaded || [];
   const needList = value.source === "referral" && !customers && !loaded;
@@ -93,13 +123,10 @@ export default function SourceField({ value, onChange, customers, excludeId, req
           );
         })}
       </div>
-      {value.source === "referral" && (
+      {value.source === "referral" && !hideReferrer && (
         <div className="mt-2 space-y-1.5">
           <p className="text-xs font-medium text-slate-600">Referred by</p>
-          <ReferrerPicker customers={list} value={value.referred_by_id} onChange={id => set({ referred_by_id: id })} excludeId={excludeId} />
-          {!value.referred_by_id && (
-            <input value={value.source_note} onChange={e => set({ source_note: e.target.value })} placeholder="Or type who referred them (if not a customer)" className={inp} data-testid="referrer-note" />
-          )}
+          <ReferrerInputs customers={list} value={value} onChange={set} excludeId={excludeId} />
         </div>
       )}
       {value.source === "other" && (
