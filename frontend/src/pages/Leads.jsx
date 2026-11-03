@@ -8,9 +8,10 @@ import { formatNPR } from "../utils/helpers";
 // Sell / Exchange / Book Service forms from the public website land here (POST /public/leads), and so do WhatsApp / Call
 // taps (the website asks who they are first). Every lead is decided once: Add to CRM (the lead is accepted and the person
 // goes into the CRM) or Reject (a remark saying why is required).
-// Tabs: "All" is the inbox of pending leads. Adding one to the CRM moves it out of All into the tab for its type; rejecting
-// one moves it to the Rejected tab. A registered account also shows in Accounts while it is still pending. A lead is never
-// deleted: Reject is the only way to put one aside.
+// Tabs: "All" is the inbox of leads nobody has seen yet. A lead stays there for the visit that first shows it; from the next
+// visit it lives in the tab for its type, still waiting for a decision there. Rejecting one moves it to the Rejected tab. A
+// registered account also shows in Accounts while it is still pending. A lead is never deleted: Reject is the only way to
+// put one aside.
 const TYPES = {
   sell: { label: "Sell bike", Icon: Bike, cls: "bg-emerald-50 text-emerald-700" },
   exchange: { label: "Exchange", Icon: Repeat, cls: "bg-indigo-50 text-indigo-700" },
@@ -38,8 +39,8 @@ const when = (iso) => (iso ? new Date(iso).toLocaleString() : "");
 // A lead is pending until it is accepted or rejected (older ones with another status count as pending too).
 const state = l => (l.status === "accepted" || l.status === "rejected" ? l.status : "new");
 
-// The one tab a lead lives in, so none can go missing. An accepted lead of a type with no tab of its own stays in All.
-const tabOf = l => (state(l) === "new" ? "all" : state(l) === "rejected" ? "rejected" : TYPES[l.type] ? l.type : "all");
+// The one tab a lead lives in, so none can go missing. A lead of a type with no tab of its own stays in All.
+const tabOf = l => (state(l) === "rejected" ? "rejected" : !TYPES[l.type] || (state(l) === "new" && !l.seen_at) ? "all" : l.type);
 const tabLabel = key => TABS.find(t => t.key === key)?.label;
 // Where a lead is listed: its home tab, plus Accounts for a registered account that is still pending (it shows there at once).
 const inTab = (l, key) => tabOf(l) === key || (key === "signup" && l.type === "signup" && state(l) === "new");
@@ -57,7 +58,8 @@ export default function Leads() {
     try {
       const { data } = await api.get("/leads");
       setLeads(data);
-      // Pending leads are all on screen in the All tab, so they count as seen: this clears the nav badge and the bell.
+      // Unseen leads are all on screen in the All tab, so they count as seen: this clears the nav badge and the bell, and
+      // takes them out of All on the next visit (the list above keeps them there for this one).
       // Done before the ping below so the badge's refetch already sees them as seen.
       const unseen = data.filter(l => state(l) === "new" && !l.seen_at).map(l => l.id);
       if (unseen.length) await api.post("/leads/seen", { ids: unseen }, { suppressErrorToast: true }).catch(() => {});
@@ -81,7 +83,7 @@ export default function Leads() {
       replaceLead(data.lead);
       toast.success(!data.customer_id ? "Accepted, but it has no phone number, so it was not added to the CRM"
         : data.customer_created ? `${lead.name} was added to the CRM` : `${lead.name} is already a customer, linked in the CRM`,
-      { description: `Moved to the ${tabLabel(tabOf(data.lead))} tab` });
+      tabOf(data.lead) === tab ? undefined : { description: `Moved to the ${tabLabel(tabOf(data.lead))} tab` });
     } catch (ex) { toast.error(errText(ex, "Couldn't add that lead to the CRM")); load(); }
     finally { setBusyId(null); }
   };
@@ -107,10 +109,10 @@ export default function Leads() {
   const countOf = key => leads.filter(l => inTab(l, key)).length; // the number of cards that tab shows
   const [emptyTitle, emptyText] = leads.length === 0
     ? ["No leads yet", "Sell, exchange and service requests, and people who tap WhatsApp or Call on your website, will appear here as they come in."]
-    : tab === "all" ? ["Nothing waiting for a decision", "New leads from your website appear here. Add one to the CRM to move it to its own tab, or reject it to move it to Rejected."]
+    : tab === "all" ? ["No new leads", "New leads from your website appear here once. After that, find them in the tab for their type."]
     : tab === "rejected" ? ["No rejected leads", "Leads you reject are kept here, with your reason."]
     : tab === "signup" ? ["No registered accounts yet", "People who sign in with Google on your website and add their phone number appear here."]
-    : [`Nothing added to the CRM from ${tabLabel(tab)} yet`, "Add a lead to the CRM in the All tab and it moves here."];
+    : [`Nothing in ${tabLabel(tab)} yet`, "Leads of this type move here from the All tab once they have been seen."];
 
   return (
     <div className="space-y-4" data-testid="leads-page">
@@ -125,7 +127,7 @@ export default function Leads() {
             className={`shrink-0 h-10 px-3.5 inline-flex items-center gap-1.5 whitespace-nowrap rounded-full text-sm font-semibold border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${tab === key ? "bg-blue-600 text-white border-blue-600" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"}`}
           >
             {Icon && <Icon size={15} />}{label}
-            {/* Every tab shows how many leads it holds; All is blue while anything waits for a decision. */}
+            {/* Every tab shows how many leads it holds; All is blue while it holds any. */}
             <span data-testid={`leads-count-${key}`} className={`ml-0.5 min-w-[20px] text-center text-xs px-1.5 py-0.5 rounded-full ${tab === key ? "bg-white/25 text-white" : key === "all" && countOf(key) > 0 ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-600"}`}>{countOf(key)}</span>
           </button>
         ))}
