@@ -398,7 +398,41 @@ def parse_import(rows: list, team: list, existing_phone_keys: set, customers_by_
             "errors": sum(1 for r in out if r["status"] == "error")}
 
 
+# ── reading the lead out of a sale's free-text notes ─────────────────
+
+_NOTE_SOURCES = (
+    ("tiktok", re.compile(r"\btik[\s-]?tok\b", re.I)),
+    ("facebook", re.compile(r"\b(?:face[\s-]?book|fb)\b", re.I)),
+    ("website", re.compile(r"\bweb[\s-]?site\b", re.I)),
+    ("walk_in", re.compile(r"\bwalk[\s-]?in\b", re.I)),
+)
+_NOTE_REFERRER = re.compile(r"\b(?:referred|referral|reference|refer|ref)\b\.?\s*(?:by|from)?\s*[:\-–—]?\s*(?P<name>[^\n\r,;.|()/]{2,80})", re.I)
+_NOTE_NAME_END = re.compile(r"\b(?:and|but|who|at|on|for|bought|paid|payment|via|through|lead|tik[\s-]?tok|face[\s-]?book|fb|web[\s-]?site|walk)\b", re.I)
+_NOT_NAMES = {"no", "number", "id", "bill", "invoice", "receipt", "amount", "code", "ref", "by", "from", "of"}
+_NOTE_TITLE = re.compile(r"\b(mr|mrs|ms|dr|er|shri|sri)\b\.?\s*", re.I)  # "Mr. Ram" is Ram; the dot would otherwise end the name
+
+
+def lead_from_notes(text) -> dict:
+    """What a sale's free-text notes say about the lead: {"lead_source": a CRM source or None, "referrer": a name or None}.
+    Careful rather than clever: a source only when exactly one is mentioned, a referrer only after "referred by" /
+    "ref:" with something name-like after it. Anything unclear is left for a person."""
+    text = str(text or "")
+    found = [key for key, rx in _NOTE_SOURCES if rx.search(text)]
+    referrer = None
+    m = _NOTE_REFERRER.search(_NOTE_TITLE.sub("", text))
+    if m:
+        name = _NOTE_NAME_END.split(m.group("name"), 1)[0].strip(" :-–—'\"")
+        name = " ".join(name.split()[:4])
+        if len(name) >= 2 and not re.search(r"\d", name) and name.split()[0].lower() not in _NOT_NAMES:
+            referrer = name
+    return {"lead_source": found[0] if len(found) == 1 else None, "referrer": referrer}
+
+
 # ── request bodies ───────────────────────────────────────────────────
+
+class SaleNotesLeadsApply(BaseModel):
+    ids: list[str] = Field(..., max_length=5000)
+
 
 class CustomerSourceUpdate(BaseModel):
     source: Optional[str] = None  # None clears the tag
@@ -620,6 +654,55 @@ def register(api_router, database, admin_only, sale_revenue):
     def _range(a, b):
         da, dbb = _as_date(a), _as_date(b)
         return (da, dbb) if da and dbb and da <= dbb else None
+
+    async def _notes_leads(only_ids=None) -> list:
+        """Sales whose notes say something about the lead type or the referrer where that part of the sale is still
+        empty. A referrer who is exactly one customer by name is linked to them; otherwise the name is kept as typed."""
+        sales = await db.sales.find({}, {"_id": 0, "id": 1, "notes": 1, "sale_date": 1, "vehicle_id": 1, "customer_id": 1,
+                                         "lead_source": 1, "referred_by_id": 1, "referred_by_name": 1}).to_list(50000)
+        by_name = {}
+        for c in await db.customers.find({}, {"_id": 0, "id": 1, "name": 1}).to_list(50000):
+            by_name.setdefault((c.get("name") or "").strip().lower(), []).append(c)
+        rows = []
+        for s in sales:
+            if only_ids is not None and s["id"] not in only_ids: continue
+            if not (s.get("notes") or "").strip(): continue
+            found = lead_from_notes(s["notes"])
+            source = found["lead_source"] if not s.get("lead_source") else None
+            referrer = found["referrer"] if not (s.get("referred_by_id") or s.get("referred_by_name")) else None
+            if not source and not referrer: continue
+            match = by_name.get(referrer.lower(), []) if referrer else []
+            customer = match[0] if len(match) == 1 else None
+            rows.append({"id": s["id"], "sale_date": s.get("sale_date"), "vehicle_id": s.get("vehicle_id"), "customer_id": s.get("customer_id"),
+                         "notes": s["notes"], "lead_source": source,
+                         "referred_by_name": customer["name"] if customer else referrer, "referred_by_id": customer["id"] if customer else None})
+        return rows
+
+    @api_router.get("/crm/sale-notes-leads")
+    async def sale_notes_leads(cu: dict = Depends(admin_only)):
+        """For review before anything is saved: the sales whose notes mention a lead type or a referrer that the sale
+        doesn't have yet, and what would be filled in."""
+        rows = await _notes_leads()
+        vehicles = await _vehicles_for(rows)
+        cust_ids = list({r["customer_id"] for r in rows if r.get("customer_id")})
+        customers = {c["id"]: c.get("name") for c in await db.customers.find({"id": {"$in": cust_ids}}, {"_id": 0, "id": 1, "name": 1}).to_list(len(cust_ids) + 10)} if cust_ids else {}
+        for r in rows:
+            r["vehicle"] = vehicle_label(vehicles.get(r["vehicle_id"])) or None
+            r["customer_name"] = customers.get(r["customer_id"])
+        rows.sort(key=lambda r: r.get("sale_date") or "", reverse=True)
+        return {"rows": rows}
+
+    @api_router.post("/crm/sale-notes-leads")
+    async def apply_sale_notes_leads(body: SaleNotesLeadsApply, cu: dict = Depends(admin_only)):
+        """Save the lead type / referrer read from the notes of the chosen sales. The notes are read again here rather
+        than trusting what the browser sends, and only what is still empty on the sale is filled."""
+        rows = await _notes_leads(set(body.ids))
+        for r in rows:
+            upd = {}
+            if r["lead_source"]: upd.update({"lead_source": r["lead_source"], "lead_note": None})
+            if r["referred_by_name"]: upd.update({"referred_by_id": r["referred_by_id"], "referred_by_name": r["referred_by_name"]})
+            await db.sales.update_one({"id": r["id"]}, {"$set": upd})
+        return {"updated": len(rows)}
 
     @api_router.get("/crm/overview")
     async def crm_overview(month_start: Optional[str] = None, month_end: Optional[str] = None, prev_start: Optional[str] = None, prev_end: Optional[str] = None,
