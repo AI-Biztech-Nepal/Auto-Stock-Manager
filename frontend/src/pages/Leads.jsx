@@ -131,15 +131,16 @@ export default function Leads() {
 
   return (
     <div className="space-y-4" data-testid="leads-page">
-      {/* One swipeable row on phones (bleeds to the screen edge so the cut-off chip hints at more); wraps from sm up. */}
-      <div role="group" aria-label="Filter leads by tab" style={{ scrollbarWidth: "none" }} className="-mx-4 px-4 sm:mx-0 sm:px-0 flex gap-2 overflow-x-scroll sm:overflow-visible sm:flex-wrap [&::-webkit-scrollbar]:hidden">
+      {/* The chips wrap onto as many rows as they need, so every tab is on screen and one tap away (no hidden sideways scrolling on phones). */}
+      <div role="group" aria-label="Filter leads by tab" className="flex flex-wrap gap-2">
         {TABS.map(({ key, label, Icon }) => (
           <button
             key={key}
+            type="button"
             onClick={() => setTab(key)}
             aria-pressed={tab === key}
             data-testid={`leads-tab-${key}`}
-            className={`shrink-0 h-10 px-3.5 inline-flex items-center gap-1.5 whitespace-nowrap rounded-full text-sm font-semibold border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${tab === key ? "bg-blue-600 text-white border-blue-600" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"}`}
+            className={`touch-manipulation h-10 px-3 inline-flex items-center gap-1.5 whitespace-nowrap rounded-full text-sm font-semibold border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${tab === key ? "bg-blue-600 text-white border-blue-600" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"}`}
           >
             {Icon && <Icon size={15} />}{label}
             {/* Every tab shows how many leads it holds; All is blue while any lead there is still undecided. */}
@@ -166,21 +167,21 @@ export default function Leads() {
                     <span className={`inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full ${t.cls}`}><t.Icon size={12} /> {t.label}</span>
                     <h3 className="mt-1.5 text-base font-bold text-slate-900" style={FONT}>{l.name}</h3>
                     <p className="text-xs text-slate-400">{when(l.created_at)}</p>
+                    <div className="mt-2 flex flex-wrap items-center gap-2" data-testid="lead-contact">
+                      {l.phone ? (
+                        <>
+                          <a href={`tel:${l.phone}`} data-testid="lead-phone" className="h-9 px-3 rounded-lg border border-slate-200 text-sm font-semibold text-slate-700 hover:bg-slate-50 inline-flex items-center gap-1.5"><Phone size={14} /> {l.phone}</a>
+                          <a href={`https://wa.me/${waNumber(l.phone)}?text=${encodeURIComponent(replyText(l))}`} target="_blank" rel="noopener noreferrer" title="Reply on WhatsApp" aria-label={`Reply to ${l.name} on WhatsApp`} data-testid="lead-whatsapp" className="h-9 px-3 rounded-lg bg-green-600 text-white text-sm font-semibold hover:bg-green-700 inline-flex items-center gap-1.5"><WhatsAppIcon size={16} /> WhatsApp</a>
+                        </>
+                      ) : (
+                        <span data-testid="lead-no-phone" className="h-9 px-3 rounded-lg border border-dashed border-slate-300 text-xs text-slate-400 inline-flex items-center gap-1.5"><Phone size={13} /> No phone number</span>
+                      )}
+                    </div>
                     {(l.email || l.address) && (
                       <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-slate-600">
                         {l.email && <a href={`mailto:${l.email}`} className="inline-flex items-center gap-1 hover:text-blue-700"><Mail size={12} className="text-slate-400" />{l.email}</a>}
                         {l.address && <span className="inline-flex items-center gap-1"><MapPin size={12} className="text-slate-400" />{l.address}</span>}
                       </p>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {l.phone ? (
-                      <>
-                        <a href={`tel:${l.phone}`} data-testid="lead-phone" className="h-9 px-3 rounded-lg border border-slate-200 text-sm font-semibold text-slate-700 hover:bg-slate-50 inline-flex items-center gap-1.5"><Phone size={14} /> {l.phone}</a>
-                        <a href={`https://wa.me/${waNumber(l.phone)}?text=${encodeURIComponent(replyText(l))}`} target="_blank" rel="noopener noreferrer" title="Reply on WhatsApp" aria-label={`Reply to ${l.name} on WhatsApp`} data-testid="lead-whatsapp" className="h-9 px-3 rounded-lg bg-green-600 text-white text-sm font-semibold hover:bg-green-700 inline-flex items-center gap-1.5"><WhatsAppIcon size={16} /> WhatsApp</a>
-                      </>
-                    ) : (
-                      <span data-testid="lead-no-phone" className="h-9 px-3 rounded-lg border border-dashed border-slate-300 text-xs text-slate-400 inline-flex items-center gap-1.5"><Phone size={13} /> No phone number</span>
                     )}
                   </div>
                 </div>
