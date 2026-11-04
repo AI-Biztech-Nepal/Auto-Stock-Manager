@@ -6,7 +6,7 @@ import { marketingTabsFor } from "../utils/permissions";
 
 // Everything that brings customers in, in one place: website leads, each accepted or rejected (Leads), posting vehicles (Share), the festival gift
 // spin (Offers) and who is visiting the website (Visits). Each tab is the page that used to be its
-// own nav entry -- lazy so opening Marketing only loads the tab shown. The "Marketing" title sits in the app's top bar (Layout).
+// own nav entry -- lazy so opening Marketing only loads the tab shown. The tab's name is the title in the app's top bar (Layout).
 const Share = lazy(() => import("./Share"));
 const Offers = lazy(() => import("./Offers"));
 const Visits = lazy(() => import("./Visits"));
