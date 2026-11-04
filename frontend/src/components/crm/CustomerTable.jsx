@@ -137,15 +137,23 @@ function OtherNote({ initial, onSave, onCancel }) {
 }
 
 // Lead Source: the kind of lead, and under it the referrer's name (or the detail for "Other").
-function LeadSourceCell({ c, pending, customers, disabled, onLeadChange, onPickReferrer, onNameReferrer, onSaveNote, onCancel, onEdit }) {
+function LeadSourceCell({ c, pending, customers, disabled, onLeadChange, onPickReferrer, onNameReferrer, onSaveNote, onCancel, onEdit, onOpenCustomer }) {
   const mine = pending?.id === c.id ? pending : null;
   const kind = mine ? mine.source : c.source;
   let detail = null;
   if (kind === "referral") {
     detail = mine
       ? <ReferrerCombo customers={customers} excludeId={c.id} onPick={id => onPickReferrer(c, id)} onName={name => onNameReferrer(c, name)} onCancel={onCancel} />
-      : <button onClick={() => onEdit(c, "referral")} title="Change who referred them" data-testid="crm-referred-by"
-          className={`block max-w-full truncate text-[11px] text-left hover:underline ${referredByLabel(c) ? "font-semibold text-slate-700 hover:text-blue-700" : "text-slate-400 italic"}`}>{referredByLabel(c) || "Add name"}</button>;
+      : c.referred_by_id
+        // The referrer is a customer: their name opens THEIR profile (not this lead's); the pencil changes who referred.
+        ? <span className="flex items-center gap-1 max-w-full">
+            <button onClick={() => onOpenCustomer(c.referred_by_id)} title={`View ${referredByLabel(c)}'s profile`} data-testid="crm-referrer-open"
+              className="min-w-0 truncate text-[11px] text-left font-semibold text-blue-700 hover:underline">{referredByLabel(c)}</button>
+            <button onClick={() => onEdit(c, "referral")} aria-label="Change who referred them" title="Change who referred them" data-testid="crm-referred-by"
+              className="shrink-0 text-slate-400 hover:text-blue-700"><Pencil size={11} /></button>
+          </span>
+        : <button onClick={() => onEdit(c, "referral")} title="Change who referred them" data-testid="crm-referred-by"
+            className={`block max-w-full truncate text-[11px] text-left hover:underline ${referredByLabel(c) ? "font-semibold text-slate-700 hover:text-blue-700" : "text-slate-400 italic"}`}>{referredByLabel(c) || "Add name"}</button>;
   } else if (kind === "other") {
     detail = mine
       ? <OtherNote initial={mine.note} onSave={note => onSaveNote(c, note)} onCancel={onCancel} />
@@ -244,7 +252,7 @@ export default function CustomerTable({
     if (key !== c.source) onSaveLead(c, { source: key });
   };
   const cell = {
-    customers, pending, onLeadChange: leadChange, onCancel: cancel,
+    customers, pending, onLeadChange: leadChange, onCancel: cancel, onOpenCustomer: id => onView({ id }),
     onEdit: (c, kind) => setPending({ id: c.id, source: kind, note: c.source === kind ? c.source_note || "" : "" }),
     onPickReferrer: (c, id) => done(c, { source: "referral", referred_by_id: id }),
     onNameReferrer: (c, name) => done(c, { source: "referral", source_note: name }),
