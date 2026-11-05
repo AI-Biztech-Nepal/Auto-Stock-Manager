@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { Phone, MessageCircle, Inbox, Wrench, Repeat, Bike, X, Mail, MapPin, Check, Ban, Users, ExternalLink, UserPlus } from "lucide-react";
+import { Phone, MessageCircle, Inbox, Wrench, Repeat, Bike, X, Mail, MapPin, Check, CheckCheck, Ban, Users, ExternalLink, UserPlus, Clock, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
 import { formatNPR } from "../utils/helpers";
@@ -51,6 +51,21 @@ const replyText = l => {
 
 const when = (iso) => (iso ? new Date(iso).toLocaleString() : "");
 
+// "Today", "Yesterday", "2 days ago" ... counted in calendar days, so a lead from last night is "Yesterday", not "Today".
+const dayLabel = (iso) => {
+  if (!iso) return "";
+  const d = new Date(iso);
+  const startOf = x => new Date(x.getFullYear(), x.getMonth(), x.getDate());
+  const days = Math.round((startOf(new Date()) - startOf(d)) / 86400000);
+  if (days <= 0) return "Today";
+  if (days === 1) return "Yesterday";
+  if (days <= 30) return `${days} days ago`;
+  return d.toLocaleDateString([], { day: "numeric", month: "short", year: "numeric" });
+};
+const DAY_CLS = { Today: "bg-blue-600 text-white", Yesterday: "bg-amber-100 text-amber-800" };
+const clock = (iso) => (iso ? new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "");
+const dateOnly = (iso) => (iso ? new Date(iso).toLocaleDateString([], { day: "numeric", month: "short", year: "numeric" }) : "");
+
 // A lead is pending until it is accepted or rejected (older ones with another status count as pending too).
 const state = l => (l.status === "accepted" || l.status === "rejected" ? l.status : "new");
 
@@ -68,11 +83,15 @@ export default function Leads() {
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("all");
   const [zoom, setZoom] = useState(null);
+  // Leads nobody had opened before this visit: they stay "New" (blue) while the page is open. Opening the page marks them
+  // seen on the server, so on the next visit they show as "Read" (green).
+  const [newIds, setNewIds] = useState(() => new Set());
 
   const load = useCallback(async () => {
     try {
       const { data } = await api.get("/leads");
       setLeads(data);
+      setNewIds(prev => (prev.size ? prev : new Set(data.filter(l => !l.seen_at).map(l => l.id))));
       // Unseen leads are all on screen in the All tab, so they count as seen: this clears the nav badge and the bell, and
       // takes them out of All on the next visit (the list above keeps them there for this one).
       // Done before the ping below so the badge's refetch already sees them as seen.
@@ -160,13 +179,19 @@ export default function Leads() {
           {shown.map(l => {
             const t = TYPES[l.type] || { label: l.type, Icon: Inbox, cls: "bg-slate-100 text-slate-600" };
             const images = (l.images || []).filter(Boolean);
+            const isNew = newIds.has(l.id);
+            const day = dayLabel(l.created_at);
             return (
-              <div key={l.id} data-testid="lead-card" data-state={state(l)} className={`bg-white border rounded-2xl p-4 shadow-[0_1px_3px_rgba(15,23,42,0.06)] ${state(l) === "new" ? "border-blue-300" : "border-slate-200/80"}`}>
+              <div key={l.id} data-testid="lead-card" data-state={state(l)} className={`border rounded-2xl p-4 shadow-[0_1px_3px_rgba(15,23,42,0.06)] ${state(l) === "rejected" ? "bg-white border-slate-200/80" : isNew ? "bg-white border-blue-300 ring-1 ring-blue-100" : "bg-emerald-50/60 border-emerald-300"}`}>
                 <div className="flex flex-wrap items-start justify-between gap-2">
                   <div className="min-w-0">
                     <span className={`inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full ${t.cls}`}><t.Icon size={12} /> {t.label}</span>
                     <h3 className="mt-1.5 text-base font-bold text-slate-900" style={FONT}>{l.name}</h3>
-                    <p className="text-xs text-slate-400">{when(l.created_at)}</p>
+                    <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500" data-testid="lead-when">
+                      <span className={`inline-flex items-center rounded-full px-2 py-0.5 font-bold ${DAY_CLS[day] || "bg-slate-100 text-slate-700"}`}>{day}</span>
+                      <span className="inline-flex items-center gap-1"><Clock size={12} className="text-slate-400" />{clock(l.created_at)}</span>
+                      <span className="text-slate-400">{dateOnly(l.created_at)}</span>
+                    </p>
                     <div className="mt-2 flex flex-wrap items-center gap-2" data-testid="lead-contact">
                       {l.phone ? (
                         <>
@@ -184,6 +209,9 @@ export default function Leads() {
                       </p>
                     )}
                   </div>
+                  {state(l) !== "rejected" && (isNew
+                    ? <span data-testid="lead-new" className="inline-flex items-center gap-1 rounded-full bg-blue-600 px-2.5 py-1 text-xs font-bold text-white"><Sparkles size={12} /> New</span>
+                    : <span data-testid="lead-read" className="inline-flex items-center gap-1 rounded-full bg-emerald-600 px-2.5 py-1 text-xs font-bold text-white"><CheckCheck size={13} /> Read</span>)}
                 </div>
 
                 {(l.requested_service || l.vehicle_type || l.preferred_date) && (
