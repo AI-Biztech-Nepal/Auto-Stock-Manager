@@ -677,11 +677,12 @@ export default function Sales() {
             </div>
 
             {/* Table — sm and up */}
-            <div className="hidden sm:block overflow-x-auto">
+            {/* Bounded height so the sideways scrollbar sits at the bottom of the screen, not the end of a long list */}
+            <div className="hidden sm:block overflow-auto max-h-[calc(100vh-16rem)]">
               <table className="w-full">
-                <thead>
+                <thead className="sticky top-0 z-10 bg-white">
                   <tr className="border-b border-slate-100">
-                    {["Vehicle", "Customer", "Sale Price", "Extra Expenses", "Sanakhat Cost", "Transfer", "Total", "Margin", "Payment", "Date", ""].map(h => (
+                    {["Vehicle", "Customer", "Sale Price", "Extra Expenses", "Sanakhat Cost", "Transfer", "Total", "Due", "Payment", "Date", ""].map(h => (
                       <th key={h} className="text-left text-xs font-semibold uppercase tracking-wider text-slate-500 px-4 py-3 whitespace-nowrap">{h}</th>
                     ))}
                   </tr>
@@ -731,9 +732,9 @@ export default function Sales() {
                         </td>
                         <td className="px-4 py-3 text-sm font-bold text-green-700 whitespace-nowrap">{formatNPR(s.total_amount)}</td>
                         <td className="px-4 py-3 text-sm font-semibold whitespace-nowrap">
-                          {margin == null
-                            ? <span className="text-slate-400">—</span>
-                            : <span className={margin < 0 || v?.low_margin ? "text-red-600" : "text-green-600"} title={s.returned ? "Kept after refund" : "Realized margin"}>{formatNPR(margin)}</span>}
+                          {!s.returned && s.due_amount > 0
+                            ? <span className="text-red-600">{formatNPR(s.due_amount)}</span>
+                            : <span className="text-slate-400">—</span>}
                         </td>
                         <td className="px-4 py-3">
                           {s.returned ? (
