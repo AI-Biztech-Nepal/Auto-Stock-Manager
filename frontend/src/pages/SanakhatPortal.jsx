@@ -16,6 +16,8 @@ const STATES = {
   pending: { label: "Not done yet", short: "Not done", Icon: Clock, chip: "bg-amber-100 text-amber-800", on: "bg-amber-500 text-white shadow-sm", ring: "border-amber-300 bg-amber-50/40" },
   no: { label: "Refused / No", short: "No", Icon: XCircle, chip: "bg-red-100 text-red-800", on: "bg-red-600 text-white shadow-sm", ring: "border-red-300 bg-red-50/40" },
 };
+// The desk only deals in Done / Not done. A vehicle an older screen marked "No" counts as Not done here.
+const stateOf = v => (v.ownership_termination_status === "yes" ? "yes" : "pending");
 const STOCK = {
   available: ["In stock", "bg-blue-50 text-blue-700"],
   reserved: ["Booked", "bg-violet-50 text-violet-700"],
@@ -34,14 +36,15 @@ const daysSince = d => {
 const ACCENT = { yes: "bg-emerald-500", pending: "bg-amber-400", no: "bg-red-500" };
 
 function VehicleCard({ v, busy, onStatus, onDate }) {
-  const st = STATES[v.ownership_termination_status] || STATES.pending;
+  const state = stateOf(v);
+  const st = STATES[state];
   const [stockLabel, stockCls] = stockOf(v.status);
-  const waiting = v.ownership_termination_status === "pending" ? daysSince(v.sanakhat_date) : null;
+  const waiting = state === "pending" ? daysSince(v.sanakhat_date) : null;
   const overdue = waiting !== null && waiting > OVERDUE_DAYS && v.status !== "sold" && v.status !== "scrap";
   return (
-    <div data-testid="sanakhat-card" data-state={v.ownership_termination_status}
+    <div data-testid="sanakhat-card" data-state={state}
       className={`relative overflow-hidden rounded-2xl border border-slate-200/80 bg-white pl-5 pr-4 py-4 shadow-sm transition hover:shadow-md ${busy ? "opacity-70" : ""}`}>
-      <span aria-hidden className={`absolute inset-y-0 left-0 w-1.5 ${ACCENT[v.ownership_termination_status] || ACCENT.pending}`} />
+      <span aria-hidden className={`absolute inset-y-0 left-0 w-1.5 ${ACCENT[state]}`} />
       <div className="flex items-center gap-3">
         <span className={`size-10 shrink-0 rounded-xl flex items-center justify-center ${st.chip}`}><Bike size={19} /></span>
         <h3 className="min-w-0 flex-1 text-base font-bold text-slate-900 leading-snug line-clamp-2 break-words" style={FONT}>{[v.brand, v.model, v.year].filter(Boolean).join(" ")}</h3>
@@ -55,9 +58,9 @@ function VehicleCard({ v, busy, onStatus, onDate }) {
         {v.color && <span className="text-xs text-slate-400">{v.color}</span>}
       </div>
 
-      <div role="group" aria-label="Sanakhat status" className="mt-4 grid grid-cols-3 gap-1.5 rounded-xl bg-slate-100 p-1.5">
-        {["yes", "pending", "no"].map(k => {
-          const s = STATES[k]; const on = v.ownership_termination_status === k;
+      <div role="group" aria-label="Sanakhat status" className="mt-4 grid grid-cols-2 gap-1.5 rounded-xl bg-slate-100 p-1.5">
+        {["yes", "pending"].map(k => {
+          const s = STATES[k]; const on = state === k;
           return (
             <button key={k} type="button" disabled={busy || on} onClick={() => onStatus(v, k)} aria-pressed={on} data-testid={`sanakhat-set-${k}`}
               className={`touch-manipulation h-11 rounded-lg text-sm font-semibold inline-flex items-center justify-center gap-1.5 transition ${on ? s.on : "text-slate-500 hover:bg-white hover:text-slate-800"}`}>
@@ -86,8 +89,7 @@ export default function SanakhatPortal() {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
-  const [filter, setFilter] = useState("all");   // all | pending | yes | no
-  const [stock, setStock] = useState("all");     // all | instock | sold
+  const [filter, setFilter] = useState("all");   // all | pending | yes
   const [shown, setShown] = useState(PAGE);
   const [busyId, setBusyId] = useState(null);
 
@@ -97,11 +99,11 @@ export default function SanakhatPortal() {
     finally { setLoading(false); }
   }, []);
   useEffect(() => { load(); }, [load]);
-  useEffect(() => { setShown(PAGE); }, [q, filter, stock]);
+  useEffect(() => { setShown(PAGE); }, [q, filter]);
 
   const counts = useMemo(() => {
-    const c = { all: rows.length, yes: 0, pending: 0, no: 0 };
-    rows.forEach(v => { c[v.ownership_termination_status] = (c[v.ownership_termination_status] || 0) + 1; });
+    const c = { all: rows.length, yes: 0, pending: 0 };
+    rows.forEach(v => { c[stateOf(v)] += 1; });
     return c;
   }, [rows]);
 
@@ -109,14 +111,12 @@ export default function SanakhatPortal() {
     const t = q.trim().toLowerCase().replace(/\s+/g, " ");
     const squash = s => String(s || "").toLowerCase().replace(/[\s-]/g, "");
     return rows.filter(v => {
-      if (filter !== "all" && v.ownership_termination_status !== filter) return false;
-      if (stock === "sold" && v.status !== "sold") return false;
-      if (stock === "instock" && (v.status === "sold" || v.status === "scrap")) return false;
+      if (filter !== "all" && stateOf(v) !== filter) return false;
       if (!t) return true;
       const hay = `${v.brand || ""} ${v.model || ""} ${v.year || ""} ${v.color || ""} ${v.registration_number || ""}`.toLowerCase();
       return hay.includes(t) || squash(v.registration_number).includes(squash(t));
     });
-  }, [rows, q, filter, stock]);
+  }, [rows, q, filter]);
 
   const patch = async (v, body, okMsg) => {
     const before = { ownership_termination_status: v.ownership_termination_status, sanakhat_date: v.sanakhat_date };
@@ -133,7 +133,7 @@ export default function SanakhatPortal() {
 
   if (loading) return <div className="flex items-center justify-center h-64"><div className="animate-spin w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full" /></div>;
 
-  const FILTERS = [["all", "All", counts.all], ["pending", "Not done", counts.pending], ["yes", "Done", counts.yes], ["no", "No", counts.no]];
+  const FILTERS = [["all", "All", counts.all], ["pending", "Not done", counts.pending], ["yes", "Done", counts.yes]];
   return (
     <div className="space-y-4 animate-fade-in pb-8" data-testid="sanakhat-portal">
       <div className="flex items-center gap-2.5">
@@ -145,7 +145,7 @@ export default function SanakhatPortal() {
       </div>
 
       {/* Search */}
-      <div className="rounded-xl bg-white border border-slate-200/80 shadow-sm p-3 space-y-3 sm:sticky sm:top-0 sm:z-10">
+      <div className="rounded-xl bg-white border border-slate-200/80 shadow-sm p-3 space-y-3 sticky top-0 z-10">
         <div className="relative">
           <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
           <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search plate, brand or model"
@@ -162,12 +162,6 @@ export default function SanakhatPortal() {
             ))}
           </div>
         </div>
-        <div role="group" aria-label="Stock" className="grid grid-cols-3 gap-1 rounded-lg bg-slate-100 p-1">
-          {[["all", "All stock"], ["instock", "In stock"], ["sold", "Sold"]].map(([k, label]) => (
-            <button key={k} type="button" onClick={() => setStock(k)} aria-pressed={stock === k}
-              className={`touch-manipulation h-9 rounded-md text-sm font-semibold transition ${stock === k ? "bg-white text-blue-700 shadow-sm" : "text-slate-500 hover:text-slate-800"}`}>{label}</button>
-          ))}
-        </div>
       </div>
 
       {/* Results */}
@@ -177,7 +171,7 @@ export default function SanakhatPortal() {
           <span className="mx-auto mb-4 size-12 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center"><SearchX size={22} /></span>
           <h3 className="text-base font-bold text-slate-900" style={FONT}>{rows.length ? "No vehicle matches" : "No vehicles yet"}</h3>
           <p className="mt-1 text-sm text-slate-600">{rows.length ? "Try a different number plate or clear the filters." : "Vehicles added to the stock appear here."}</p>
-          {(q || filter !== "all" || stock !== "all") && <button type="button" onClick={() => { setQ(""); setFilter("all"); setStock("all"); }} className="mt-4 h-9 px-4 rounded-lg bg-blue-600 text-white text-sm font-semibold">Clear search and filters</button>}
+          {(q || filter !== "all") && <button type="button" onClick={() => { setQ(""); setFilter("all"); }} className="mt-4 h-9 px-4 rounded-lg bg-blue-600 text-white text-sm font-semibold">Clear search and filters</button>}
         </div>
       ) : (
         <>
