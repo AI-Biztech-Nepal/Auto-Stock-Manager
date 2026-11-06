@@ -1910,10 +1910,9 @@ async def signup(request: Request, req: SignUpRequest):
     companies, which is exactly the UX that confused people before. Using email rather than
     a free-text username sidesteps the "everyone wants to type admin" collision on top of
     that, and is what a real password-reset-by-email flow needs -- see /auth/forgot-password
-    below. New signups must also verify their email before they can log in (see
-    /auth/verify-email) -- staff accounts an admin creates via /auth/register are exempt
-    (that admin is already vouching for the email); only anonymous self-signup is gated,
-    since that's the actual abuse case (throwaway/fake emails claiming a company)."""
+    below. Email verification is no longer required: a new account is signed in straight away
+    (the response carries the same token /auth/login returns). /auth/verify-email and
+    /auth/resend-verification still exist for links already sent."""
     email = req.email.lower()
     existing = await db.users.find_one({"username": email})
     if existing:
@@ -1923,20 +1922,15 @@ async def signup(request: Request, req: SignUpRequest):
     await db.companies.insert_one({"id": company_id, "name": req.company_name, "created_at": now})
     user = {"id": str(uuid.uuid4()), "username": email,
             "password_hash": await hash_pw_async(req.password), "name": req.name, "role": "admin",
-            "company_id": company_id, "email_verified_at": None, "created_at": now}
+            "company_id": company_id, "email_verified_at": now, "created_at": now}
     await db.users.insert_one(user)
     # A settings row is looked up purely by company_id (see get_settings/update_settings) --
     # "id" here is just an arbitrary row id, not a lookup key.
     await db.settings.insert_one({"id": str(uuid.uuid4()), "company_id": company_id,
                                    "business_name": req.company_name})
-    verify_token = await _create_auth_token(user["id"], "verify_email", ttl_minutes=24 * 60)
-    link = f"{FRONTEND_URL}/verify-email?token={verify_token}"
-    await _send_email(email, "Verify your email — Auto Stock Manager",
-                       f"<p>Hi {req.name},</p>"
-                       f"<p>Click below to verify your email and activate <b>{req.company_name}</b>'s workspace:</p>"
-                       f"<p><a href='{link}'>{link}</a></p>"
-                       f"<p>This link expires in 24 hours.</p>")
-    return {"message": "Account created — check your email to verify it before signing in.", "email": email}
+    token = create_token(user["id"], email, "admin", company_id)
+    return {"message": "Account created.", "email": email, "token": token, "username": email,
+            "name": req.name, "role": "admin", "company_name": req.company_name}
 
 @api_router.post("/auth/login")
 @limiter.limit("5/minute")
@@ -1944,8 +1938,6 @@ async def login(request: Request, req: LoginRequest):
     user = await db.users.find_one({"username": req.username})
     if not user or not await verify_pw_async(req.password, user["password_hash"]):
         raise HTTPException(401, "Invalid credentials")
-    if not user.get("email_verified_at"):
-        raise HTTPException(403, "Please verify your email before signing in — check your inbox, or request a new link.")
     token = create_token(user.get("id", ""), user["username"], user.get("role", "admin"), user.get("company_id"))
     company = await db.companies.find_one({"id": user.get("company_id")}, {"_id": 0, "name": 1}) if user.get("company_id") else None
     return {"token": token, "username": user["username"], "name": user.get("name", user["username"]),
