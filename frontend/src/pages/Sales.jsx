@@ -1,9 +1,9 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
-import { Plus, Search, Trash2, Eye, TrendingUp, DollarSign, Calendar, ShoppingBag, X, ChevronDown, ChevronUp, UserPlus, AlertTriangle, UploadCloud, FileSpreadsheet, CheckCircle2, Undo2, BookmarkCheck, ArrowRight } from "lucide-react";
+import { Plus, Search, Trash2, Eye, TrendingUp, DollarSign, Calendar, ShoppingBag, X, ChevronDown, ChevronUp, UserPlus, AlertTriangle, UploadCloud, FileSpreadsheet, CheckCircle2, Undo2, BookmarkCheck, ArrowRight, Tags } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
-import { formatNPR, splitSanakhatExpenses, withSanakhatExpenses, TRANSFER_STATUS_OPTIONS, getTransferStatusStyle } from "../utils/helpers";
+import { formatNPR, splitSanakhatExpenses, withSanakhatExpenses, deleteSaleConfirm, TRANSFER_STATUS_OPTIONS, getTransferStatusStyle } from "../utils/helpers";
 import { getCurrentBSMonthRange } from "../utils/nepali-date";
 import { useAuth } from "../context/AuthContext";
 import VehicleComboBox from "../components/VehicleComboBox";
@@ -12,9 +12,9 @@ import HoverADDate from "../components/HoverADDate";
 import WarrantyBadge from "../components/WarrantyBadge";
 import Bookings from "./Bookings";
 import DateRangeFilter, { resolveDateFilter } from "../components/DateRangeFilter";
-import SourceField from "../components/SourceField";
+import SourceField, { ReferredByField } from "../components/SourceField";
 import SoldBySelect from "../components/SoldBySelect";
-import { EMPTY_SOURCE, isSourceComplete, sourcePayload } from "../utils/crm";
+import { EMPTY_REFERRER, EMPTY_SOURCE, SOURCE_LABEL, isSourceComplete, sourcePayload } from "../utils/crm";
 
 const PRESET_EXPENSES = [
   { name: "Registration Transfer Fee", amount: 2000 },
@@ -171,6 +171,12 @@ export default function Sales() {
   const [importResult, setImportResult] = useState(null);
   const [importBusy, setImportBusy] = useState(false);
 
+  // Admin tool: read the lead type / referrer out of existing sales' notes, review, then save the ticked ones.
+  const [showNoteLeads, setShowNoteLeads] = useState(false);
+  const [noteLeads, setNoteLeads] = useState(null);       // null while loading, else the sales the notes say something about
+  const [noteLeadPicks, setNoteLeadPicks] = useState({}); // sale id -> ticked
+  const [noteLeadsBusy, setNoteLeadsBusy] = useState(false);
+
   // Modal state
   const [form, setForm] = useState(EMPTY_FORM);
   const [vehicles, setVehicles] = useState([]);
@@ -181,7 +187,8 @@ export default function Sales() {
   // which is required whenever this panel is in use.
   const [showAddCust, setShowAddCust] = useState(false);
   const [buyer, setBuyer] = useState(EMPTY_BUYER);
-  const [buyerSource, setBuyerSource] = useState(EMPTY_SOURCE); // how a NEW buyer found the shop
+  const [leadSource, setLeadSource] = useState(EMPTY_SOURCE); // how the buyer found the shop; kept on the sale, and tags a NEW buyer
+  const [referrer, setReferrer] = useState(EMPTY_REFERRER); // who referred the buyer; kept on the sale, and tags a NEW buyer
   const [addingCust, setAddingCust] = useState(false);
 
   // Extra expenses state
@@ -246,7 +253,8 @@ export default function Sales() {
     setPresetToAdd("");
     setNewExpName(""); setNewExpAmt("");
     setBuyer(EMPTY_BUYER);
-    setBuyerSource(EMPTY_SOURCE);
+    setLeadSource(EMPTY_SOURCE);
+    setReferrer(EMPTY_REFERRER);
     setShowAddCust(false);
     setShowModal(true);
     try {
@@ -276,7 +284,10 @@ export default function Sales() {
   const buyerComplete = buyer.name.trim() && buyer.address.trim() && buyer.contact_number.trim();
   const witnessComplete = form.witness_name.trim() && form.witness_address.trim() && form.witness_phone.trim();
 
-  const sourceMissing = () => (buyerSource.source === "referral" ? "Say who referred the buyer" : "Tell us how the buyer found the shop");
+  // The CRM keeps one source per customer, so a new buyer is tagged as referred when a referrer is named, else with the lead.
+  const referrerNamed = !!referrer.referred_by_id || !!referrer.source_note.trim();
+  const buyerSource = referrerNamed ? { source: "referral", ...referrer } : leadSource;
+  const sourceMissing = () => "Pick a Lead, or say who referred the buyer";
 
   const saveNewCustomer = async () => {
     if (!buyerComplete) { toast.error("Fill in the buyer's name, address, and phone number"); return; }
@@ -338,6 +349,7 @@ export default function Sales() {
       if (enteringNewBuyer && !buyerComplete) {
         toast.error("Fill in the buyer's name, address, and phone number"); return;
       }
+      // Lead and Referred by are optional, except that a new buyer must be tagged with one or the other.
       if (enteringNewBuyer && !isSourceComplete(buyerSource)) {
         toast.error(sourceMissing()); return;
       }
@@ -378,6 +390,8 @@ export default function Sales() {
         sale_date: form.sale_date || undefined,
         ownership_transfer_date: form.ownership_transfer_date || undefined,
         sold_by_id: form.sold_by_id || null,
+        ...(leadSource.source ? { lead_source: leadSource.source, lead_note: leadSource.source_note.trim() || null } : {}),
+        ...(referrerNamed ? { referred_by_id: referrer.referred_by_id || null, referred_by_name: referrer.source_note.trim() || null } : {}),
         notes: form.notes,
         exchange_valuation: exchangeValuation,
         exchange_brand: form.exchange_brand.trim() || undefined,
@@ -416,11 +430,33 @@ export default function Sales() {
 
   const closeImport = () => { setShowImport(false); setImportFile(null); setImportResult(null); };
 
-  const handleDelete = async (id) => {
-    if (!window.confirm("Delete this sale? The vehicle will be restored to available.")) return;
+  const openNoteLeads = async () => {
+    setShowNoteLeads(true); setNoteLeads(null);
     try {
-      await api.delete(`/sales/${id}`);
-      toast.success("Sale deleted, vehicle restored");
+      const rows = (await api.get("/crm/sale-notes-leads")).data.rows;
+      setNoteLeads(rows);
+      setNoteLeadPicks(Object.fromEntries(rows.map(r => [r.id, true])));
+    } catch (err) { toast.error(getErrMsg(err, "Couldn't read the sale notes")); setShowNoteLeads(false); }
+  };
+
+  const applyNoteLeads = async () => {
+    const ids = noteLeads.filter(r => noteLeadPicks[r.id]).map(r => r.id);
+    if (!ids.length) return;
+    setNoteLeadsBusy(true);
+    try {
+      const r = await api.post("/crm/sale-notes-leads", { ids });
+      toast.success(`Lead details saved on ${r.data.updated} sale${r.data.updated === 1 ? "" : "s"}`);
+      setShowNoteLeads(false);
+      fetchAll();
+    } catch (err) { toast.error(getErrMsg(err, "Couldn't save the lead details")); }
+    finally { setNoteLeadsBusy(false); }
+  };
+
+  const handleDelete = async (id) => {
+    if (!window.confirm(deleteSaleConfirm(sales.find(s => s.id === id)))) return;
+    try {
+      const r = await api.delete(`/sales/${id}`);
+      toast.success(r.data?.message || "Sale deleted, vehicle restored");
       fetchAll();
     } catch (err) { toast.error(getErrMsg(err, "Failed to delete")); }
   };
@@ -482,6 +518,11 @@ export default function Sales() {
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <DateRangeFilter value={dateRange.key} custom={dateRange.custom} onChange={(key, custom) => setDateRange({ key, custom })} testid="sales-date-filter" />
+          {isAdmin && (
+            <button onClick={openNoteLeads} data-testid="note-leads-btn" title="Read the lead type and referrer from what was typed in each sale's notes" className="flex items-center gap-2 border border-slate-200 text-slate-700 text-sm font-medium px-4 py-3 rounded-lg hover:bg-slate-50 transition-all active:scale-95">
+              <Tags size={16} /> Leads from Notes
+            </button>
+          )}
           {isAdmin && (
             <button onClick={() => setShowImport(true)} data-testid="import-sales-btn" className="flex items-center gap-2 border border-slate-200 text-slate-700 text-sm font-medium px-4 py-3 rounded-lg hover:bg-slate-50 transition-all active:scale-95">
               <UploadCloud size={16} /> Import Sheet
@@ -820,6 +861,12 @@ export default function Sales() {
                 <SoldBySelect value={form.sold_by_id} onChange={v => setForm({ ...form, sold_by_id: v })} className={sel} testid="sale-sold-by-select" />
               </Field>
 
+              <div data-testid="sale-lead">
+                <SourceField value={leadSource} onChange={setLeadSource} customers={customers} label="Lead" hideReferral />
+              </div>
+
+              <ReferredByField value={referrer} onChange={setReferrer} customers={customers} />
+
               {/* Customer */}
               <Field label="Customer">
                 <div className="flex gap-2">
@@ -859,12 +906,6 @@ export default function Sales() {
                         </div>
                       ))}
 
-                      {!selectedCustomer && (
-                        <div className="pt-1" data-testid="buyer-source">
-                          <SourceField value={buyerSource} onChange={setBuyerSource} customers={customers} label="How did the buyer find us?" required />
-                        </div>
-                      )}
-
                       {selectedCustomer && (
                         <button type="button" onClick={() => setForm({ ...form, customer_id: "" })} className="text-xs text-blue-600 hover:underline">
                           Enter a different buyer
@@ -903,7 +944,10 @@ export default function Sales() {
 
               {/* Exchange: the customer's old vehicle; its valuation is deducted from what they owe */}
               <div className="border border-slate-200 rounded-xl p-4 space-y-3" data-testid="exchange-section">
-                <p className="text-sm font-semibold text-slate-700">Exchange</p>
+                <div>
+                  <p className="text-sm font-semibold text-slate-700">Exchange</p>
+                  <p className="text-xs text-slate-400 mt-0.5">The old vehicle is added to Inventory when you save, at its valuation, unlisted until you set a selling price.</p>
+                </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <Field label="Valuation (NPR)">
                     <input type="text" inputMode="numeric" value={form.exchange_valuation} onChange={e => setForm({...form, exchange_valuation: e.target.value})} placeholder="0" className={inp} data-testid="exchange-valuation-input" />
@@ -1031,6 +1075,62 @@ export default function Sales() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Leads from Notes modal: what the notes say, for review before anything is saved */}
+      {showNoteLeads && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setShowNoteLeads(false)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()} data-testid="note-leads-modal">
+            <div className="flex items-center justify-between p-4 sm:p-5 border-b border-slate-100 shrink-0">
+              <div>
+                <h2 className="text-lg font-bold text-slate-900">Leads from Notes</h2>
+                <p className="text-xs text-slate-500 mt-0.5">Sales whose notes mention a lead type or who referred the buyer, where the sale doesn't have it yet. Untick anything that's wrong.</p>
+              </div>
+              <button onClick={() => setShowNoteLeads(false)} aria-label="Close" className="w-11 h-11 -mr-2.5 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500 shrink-0">✕</button>
+            </div>
+
+            <div className="p-4 sm:p-5 space-y-2 overflow-y-auto">
+              {noteLeads === null && <div className="flex justify-center py-10"><div className="animate-spin w-7 h-7 border-4 border-blue-600 border-t-transparent rounded-full" /></div>}
+              {noteLeads && noteLeads.length === 0 && (
+                <p className="text-sm text-slate-500 text-center py-10" data-testid="note-leads-empty">No sale notes mention a lead type or a referrer that isn't already filled in.</p>
+              )}
+              {noteLeads && noteLeads.length > 0 && (
+                <>
+                  <div className="flex items-center justify-between text-xs text-slate-500 pb-1">
+                    <span>{noteLeads.filter(r => noteLeadPicks[r.id]).length} of {noteLeads.length} selected</span>
+                    <button type="button" onClick={() => setNoteLeadPicks(Object.fromEntries(noteLeads.map(r => [r.id, !noteLeads.every(x => noteLeadPicks[x.id])])))} className="font-semibold text-blue-600 hover:underline">
+                      {noteLeads.every(r => noteLeadPicks[r.id]) ? "Untick all" : "Tick all"}
+                    </button>
+                  </div>
+                  {noteLeads.map(r => (
+                    <label key={r.id} className={`flex items-start gap-3 border rounded-xl p-3 cursor-pointer transition-colors ${noteLeadPicks[r.id] ? "border-blue-200 bg-blue-50/40" : "border-slate-200 hover:bg-slate-50"}`} data-testid="note-leads-row">
+                      <input type="checkbox" checked={!!noteLeadPicks[r.id]} onChange={e => setNoteLeadPicks(p => ({ ...p, [r.id]: e.target.checked }))} className="mt-1 w-4 h-4 accent-blue-600 shrink-0" />
+                      <div className="min-w-0 flex-1 space-y-1.5">
+                        <div className="text-sm font-semibold text-slate-900 truncate">
+                          {r.vehicle || "Vehicle"}{r.customer_name ? ` · ${r.customer_name}` : ""} <span className="font-normal text-slate-500">· <HoverADDate date={r.sale_date} /></span>
+                        </div>
+                        <p className="text-xs text-slate-600 bg-white border border-slate-100 rounded-lg px-2.5 py-1.5 whitespace-pre-line break-words line-clamp-3">&ldquo;{r.notes}&rdquo;</p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {r.lead_source && <span className="inline-flex items-center h-6 px-2.5 rounded-full text-[11px] font-semibold bg-blue-100 text-blue-700">Lead: {SOURCE_LABEL[r.lead_source] || r.lead_source}</span>}
+                          {r.referred_by_name && <span className="inline-flex items-center h-6 px-2.5 rounded-full text-[11px] font-semibold bg-amber-100 text-amber-800">Referred by: {r.referred_by_name}{r.referred_by_id ? " (customer)" : ""}</span>}
+                        </div>
+                      </div>
+                    </label>
+                  ))}
+                </>
+              )}
+            </div>
+
+            <div className="flex gap-3 p-4 sm:p-5 border-t border-slate-100 shrink-0">
+              <button onClick={() => setShowNoteLeads(false)} className="flex-1 h-11 border border-slate-200 text-slate-700 rounded-lg text-sm font-semibold hover:bg-slate-50">Close</button>
+              {noteLeads && noteLeads.length > 0 && (
+                <button onClick={applyNoteLeads} disabled={noteLeadsBusy || !noteLeads.some(r => noteLeadPicks[r.id])} data-testid="note-leads-save" className="flex-1 h-11 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-semibold disabled:opacity-60">
+                  {noteLeadsBusy ? "Saving..." : `Save (${noteLeads.filter(r => noteLeadPicks[r.id]).length})`}
+                </button>
+              )}
+            </div>
           </div>
         </div>
       )}

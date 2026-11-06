@@ -213,11 +213,7 @@ export default function CRM() {
 
   return (
     <div className="space-y-4" data-testid="crm-page">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-2xl lg:text-[28px] leading-tight font-extrabold text-slate-900" style={FONT}>Customer Relationship Management</h1>
-          <p className="text-sm text-slate-500 mt-1">Manage customers, leads and follow-ups in one place</p>
-        </div>
+      <div className="flex flex-wrap items-center justify-end gap-3">
         <div className="flex gap-2">
           <button onClick={() => setAdding(true)} className={btnPrimary} data-testid="crm-add"><Plus size={17} /> Add Customer</button>
           <button onClick={() => setImportOpen(true)} className={btnGhost} data-testid="crm-import"><Upload size={16} /> Import</button>

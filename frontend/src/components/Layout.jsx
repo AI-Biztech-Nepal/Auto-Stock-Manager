@@ -7,7 +7,7 @@ import { canAccessPath, marketingTabsFor } from "../utils/permissions";
 import { isSanakhatOverdue, sanakhatPendingDays } from "../utils/helpers";
 import {
   LayoutDashboard, Bike, Wrench, BarChart3, Sparkles, Settings, LogOut, Menu, X, Bell,
-  BookOpen, Wallet, Boxes, ShoppingBag, Building2, ImageOff, FileWarning, ShieldCheck, Megaphone, Inbox, ChevronDown, Share2, Gift, Eye, HeartHandshake
+  BookOpen, Boxes, ShoppingBag, Building2, ImageOff, FileWarning, ShieldCheck, Megaphone, Inbox, ChevronDown, Share2, Gift, Eye, HeartHandshake
 } from "lucide-react";
 
 // A vehicle needs at least this many photos before it's considered adequately
@@ -33,7 +33,6 @@ const navItems = [
   { path: "/ledger",       label: "Ledger",       icon: BookOpen },
   { path: "/jobs",         label: "Job Cards",    icon: Wrench },
   { path: "/warranty",     label: "Warranty",     icon: ShieldCheck },
-  { path: "/finance",      label: "Finance",      icon: Wallet },
   { path: "/reports",      label: "Reports",      icon: BarChart3 },
   { path: "/ai",           label: "AI Assistant", icon: Sparkles },
   { path: "/settings",     label: "Settings",     icon: Settings },
@@ -66,6 +65,7 @@ export default function Layout() {
   }, [user, canSeeInventory]);
 
   // New website leads (form submissions and WhatsApp/Call taps): admin-only on the backend.
+  // Only pending leads nobody has opened yet count: opening the Leads screen marks what it shows as seen.
   // Polled every minute; the Leads screen pings "leads-changed" so the badge clears at once.
   const [newLeads, setNewLeads] = useState(0);
   const lastNewLeads = useRef(null);
@@ -74,7 +74,7 @@ export default function Layout() {
     if (!user || !isAdmin) return;
     const load = () => {
       api.get("/leads").then(r => {
-        const n = r.data.filter(l => l.status === "new").length;
+        const n = r.data.filter(l => l.status === "new" && !l.seen_at).length;
         if (lastNewLeads.current !== null && n > lastNewLeads.current) {
           toast.info(`${n - lastNewLeads.current} new website lead${n - lastNewLeads.current > 1 ? "s" : ""}`, { action: { label: "View", onClick: () => navigate("/marketing?tab=leads") } });
         }
@@ -268,7 +268,18 @@ export default function Layout() {
           >
             <Menu size={20} />
           </button>
-          <div className="flex-1" />
+          {/* On every Marketing tab the page title sits here, level with the bell. */}
+          {pathname.startsWith("/marketing") ? (() => {
+            // Named after the tab that is open (Leads, CRM, Share...), like any other page's title.
+            const tabs = marketingTabsFor(user?.role);
+            const requested = new URLSearchParams(search).get("tab");
+            const { label: title, icon: TitleIcon } = MARKETING_NAV[tabs.includes(requested) ? requested : tabs[0]] || { label: "Marketing", icon: Megaphone };
+            return (
+              <h1 className="flex-1 min-w-0 flex items-center gap-2 text-lg font-bold text-slate-900 truncate" data-testid="header-title">
+                <TitleIcon size={19} className="shrink-0 text-slate-400" /> {title}
+              </h1>
+            );
+          })() : <div className="flex-1" />}
           {canSeeInventory && (
             <div className="relative" ref={notifRef}>
               <button

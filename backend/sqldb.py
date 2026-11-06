@@ -70,7 +70,9 @@ TABLES = {
                            "witness_name", "witness_address", "witness_phone", "witness_id_number", "witness_relation",
                            "helmet_given", "imported", "needs_review", "review_note", "reviewed_by", "reviewed_at",
                            "sold_by_id", "sold_by_name",
-                           "exchange_valuation", "exchange_brand", "exchange_model", "exchange_reg_no", "exchange_year"},
+                           "lead_source", "lead_note", "referred_by_id", "referred_by_name",
+                           "exchange_valuation", "exchange_brand", "exchange_model", "exchange_reg_no", "exchange_year",
+                           "exchange_vehicle_id"},
               "bool_cols": {"returned", "helmet_given", "imported", "needs_review"}, "json_cols": {"extra_expenses"}},
     "bookings": {"columns": {"id", "company_id", "vehicle_id", "customer_id", "booking_amount", "payment_method", "booking_date",
                               "receipt_no", "expected_sale_date", "agreed_price", "status", "notes", "sale_id", "cancelled_at",
@@ -106,7 +108,9 @@ TABLES = {
     "leads": {"columns": {"id", "company_id", "type", "name", "phone", "message", "images", "requested_service", "vehicle_type",
                            "preferred_date", "status", "created_at",
                            # who the visitor is, and what was decided about the lead (accepted / rejected + remark)
-                           "email", "address", "remark", "decided_by", "decided_at", "customer_id", "vehicle_id"}, "json_cols": {"images"}},
+                           "email", "address", "remark", "decided_by", "decided_at", "customer_id", "vehicle_id",
+                           # when staff first opened the lead in the Leads screen (drives the new-lead badge)
+                           "seen_at"}, "json_cols": {"images"}},
     "settings": {"columns": {"id", "company_id", "logo_url", "business_name", "contact_phone", "contact_email", "address",
                               "hero_image_url", "service_image_url", "warranty_days_default"}},
     "sync_logs": {"columns": {"id", "company_id", "pushed_at", "count", "status", "message"}},
@@ -123,7 +127,8 @@ TABLES = {
                                    "outcome", "created_by", "created_at", "updated_at"}},
     "crm_interactions": {"columns": {"id", "company_id", "customer_id", "kind", "summary", "occurred_at", "created_by",
                                       "created_at"}},
-    # Finance books (finance_books.py)
+    # Leftover Finance tables. The Finance section was removed from the app, but the tables remain in the database
+    # (with foreign keys to companies), so they stay registered: server.py's delete-company cascade clears their rows.
     "fin_parties": {"columns": {"id", "company_id", "name", "phone", "address", "created_at", "updated_at"}},
     "fin_bank_accounts": {"columns": {"id", "company_id", "name", "bank_name", "account_number", "account_holder_name",
                                        "address", "created_at", "updated_at"}},
@@ -140,6 +145,10 @@ TABLES = {
     "fin_vendor_ledger": {"columns": {"id", "company_id", "vendor_id", "entry_type", "amount", "note", "source", "source_type", "source_id",
                                      "bank_account_id", "entry_date", "receipt_no", "created_at"}},
     "fin_statement_imports": {"columns": {"id", "company_id", "reference_code", "created_at"}},
+    "fin_rentals": {"columns": {"id", "company_id", "car", "model", "customer_id", "customer_name", "start_date", "end_date",
+                                 "returned_on", "rate_per_day", "note", "created_at", "updated_at"}},
+    "fin_cash_account": {"columns": {"id", "company_id", "name", "bank_name", "account_number", "account_holder_name", "address",
+                                      "updated_at"}},
 }
 
 

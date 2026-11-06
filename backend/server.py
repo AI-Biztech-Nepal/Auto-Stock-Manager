@@ -80,9 +80,11 @@ TENANT_COLLECTIONS = {
     "sync_logs", "team_members", "vehicle_photos", "vehicles", "vendor_payments", "vendors",
     "audit_logs", "ai_chat_sessions", "settings", "facebook_pages", "bookings",
     "offer_prizes", "offer_codes", "page_views", "crm_followups", "crm_interactions",
-    # Finance books (see finance_books.py); tables are created by migration_add_finance_books.sql.
+    # The Finance section was removed from the app, but its fin_* tables are still in the database and have foreign
+    # keys to companies, so they stay listed here: deleting a company must still clear whatever rows they hold.
     "fin_parties", "fin_bank_accounts", "fin_account_transfers", "fin_expense_categories", "fin_items",
     "fin_transactions", "fin_customer_ledger", "fin_vendor_ledger", "fin_statement_imports",
+    "fin_rentals", "fin_cash_account",
 }
 
 def company_scope(cu: dict) -> dict:
@@ -1673,6 +1675,12 @@ class SaleCreate(BaseModel):
     witness_phone: Optional[str] = None
     witness_id_number: Optional[str] = None
     sold_by_id: Optional[str] = None  # the Team member who sold it (checked and named by crm.resolve_sold_by)
+    # How the buyer found the shop (one of CRM_SOURCES; lead_note is the detail for "other"), and separately who
+    # referred them: a customer (referred_by_id) or a name typed in (referred_by_name). Checked by crm.lead_for_sale.
+    lead_source: Optional[str] = None
+    lead_note: Optional[str] = Field(None, max_length=255)
+    referred_by_id: Optional[str] = None
+    referred_by_name: Optional[str] = Field(None, max_length=255)
     # Exchange: the customer's old vehicle taken in part payment. Its valuation counts as paid.
     exchange_valuation: float = 0
     exchange_brand: Optional[str] = None
@@ -1695,6 +1703,11 @@ class SaleUpdate(BaseModel):
     ownership_transfer_date: Optional[str] = None
     notes: Optional[str] = None
     sold_by_id: Optional[str] = None  # only changed when the form sends it
+    # Lead and referrer, as on SaleCreate. Replaced whole when the form sends any of them (an empty one clears it).
+    lead_source: Optional[str] = None
+    lead_note: Optional[str] = Field(None, max_length=255)
+    referred_by_id: Optional[str] = None
+    referred_by_name: Optional[str] = Field(None, max_length=255)
 
 class CustomerCreate(BaseModel):
     name: str; contact_number: str
@@ -1864,6 +1877,9 @@ class OfferSpin(BaseModel):
 
 class LeadReject(BaseModel):
     remark: str  # why the lead is turned down: required
+
+class LeadsSeen(BaseModel):
+    ids: List[str] = Field(default_factory=list, max_length=1000)  # the leads that were on screen
 
 class SettingsUpdate(BaseModel):
     logo_url: Optional[str] = None
@@ -2136,8 +2152,7 @@ async def platform_delete_company(company_id: str, cu: dict = Depends(platform_o
         try:
             await getattr(db, name).delete_many({"company_id": company_id})
         except Exception as e:
-            # The finance tables only exist once migration_add_finance_books.sql has been run by hand;
-            # until then there is nothing of theirs to delete.
+            # The leftover finance tables may not exist on every database; then there is nothing of theirs to delete.
             if name.startswith("fin_") and ("1146" in str(e) or "doesn't exist" in str(e)):
                 continue
             raise
@@ -2228,6 +2243,15 @@ def _sold_over_30_days(v: dict) -> bool:
     cutoff = (datetime.now(timezone.utc).date() - timedelta(days=30)).isoformat()
     return v.get("status") == "sold" and bool(v.get("sold_date")) and str(v["sold_date"])[:10] < cutoff
 
+async def _vehicle_holding_plate(registration_number: str) -> Optional[dict]:
+    """The vehicle already in the books under this plate (case-insensitive), or None. One sold
+    more than 30 days ago no longer holds it."""
+    matches = await db.vehicles.find(
+        {"registration_number": {"$regex": f"^{re.escape(registration_number.strip())}$", "$options": "i"}},
+        {"_id": 0, "id": 1, "status": 1, "brand": 1, "model": 1, "year": 1, "sold_date": 1},
+    ).to_list(100)
+    return next((m for m in matches if not _sold_over_30_days(m)), None)
+
 @api_router.post("/vehicles")
 async def create_vehicle(vehicle: VehicleCreate, cu: dict = Depends(require_any("vehicles", {"create", "create_basic"}))):
     role = cu.get("role", "admin")
@@ -2243,11 +2267,7 @@ async def create_vehicle(vehicle: VehicleCreate, cu: dict = Depends(require_any(
         raise HTTPException(422, "Purchase price, purchase date and purchase source are required")
     if vehicle.status == "available" and not vehicle.selling_price:
         vehicle.status = "unlisted"  # no price yet — adding one later relists it (see update_vehicle)
-    matches = await db.vehicles.find(
-        {"registration_number": {"$regex": f"^{re.escape(vehicle.registration_number.strip())}$", "$options": "i"}},
-        {"_id": 0, "id": 1, "status": 1, "brand": 1, "model": 1, "year": 1, "sold_date": 1},
-    ).to_list(100)
-    existing = next((m for m in matches if not _sold_over_30_days(m)), None)
+    existing = await _vehicle_holding_plate(vehicle.registration_number)
     if existing:
         if existing.get("status") not in ("sold", "scrap"):
             # Still actively in stock under this plate — always a mistake, never bypassable.
@@ -3748,6 +3768,46 @@ async def get_sales(start_date: Optional[str] = None, end_date: Optional[str] = 
             s["profit_margin"] = round((revenue - investment) / revenue * 100, 2) if revenue else None
     return sales
 
+async def _exchange_vehicle_for_sale(sale: SaleCreate, sold: dict, sale_date: str, exchange_valuation: float, cu: dict) -> Optional[dict]:
+    """The inventory record for the old vehicle a customer hands over in part payment, ready to insert, so it can
+    be resold without anyone re-keying it into Inventory. It costs the shop its valuation and stays unlisted until
+    it is priced. None when the sale has no exchange. Writes nothing: a plate already in stock raises here,
+    before the sale is saved."""
+    brand, model = (sale.exchange_brand or "").strip(), (sale.exchange_model or "").strip()
+    reg_no, year = (sale.exchange_reg_no or "").strip(), (sale.exchange_year or "").strip()
+    if not (exchange_valuation > 0 or brand or model or reg_no or year):
+        return None
+    if reg_no:
+        holder = await _vehicle_holding_plate(reg_no)
+        # A plate closed out as sold/scrap is free to reuse: a customer trading in a bike this shop sold is a buyback.
+        if holder and holder.get("status") not in ("sold", "scrap"):
+            raise HTTPException(400, f"Exchange vehicle '{reg_no}' is already in stock")
+    customer = await db.customers.find_one({"id": sale.customer_id}, {"_id": 0, "name": 1}) if sale.customer_id else None
+    sold_label = f"{sold.get('brand', '')} {sold.get('model', '')} {sold.get('year') or ''}".strip()
+    now = datetime.now(timezone.utc).isoformat()
+    # Built through VehicleCreate so it gets the same defaults as a vehicle added from Inventory. Year and engine
+    # size are unknown (the sale form never asks for the cc): the year is set below and the cc stays 0, as in a
+    # bulk import.
+    v = VehicleCreate(
+        brand=brand or "Unknown", model=model or "Unknown", year=0, engine_cc=0, registration_number=reg_no,
+        purchase_price=exchange_valuation, purchase_date=sale_date, purchase_source="Exchange",
+        purchase_from=customer["name"] if customer else None,
+        linked_contact_type="customer" if customer else None,
+        linked_contact_id=sale.customer_id if customer else None,
+        linked_contact_name=customer["name"] if customer else None,
+        notes=f"Taken in exchange on the sale of {sold_label} on {sale_date}.",
+        status="unlisted",
+    ).model_dump(exclude={"confirm_reused_registration"})
+    v.update({
+        "id": str(uuid.uuid4()),
+        "year": int(year) if year.isdigit() else None,
+        "created_at": now, "updated_at": now,
+        "sold_date": None, "customer_id": None,
+        "salesperson_id": None, "salesperson_name": None, "discount": 0,
+        "created_by": cu.get("username"),
+    })
+    return v
+
 @api_router.post("/sales")
 async def create_sale(sale: SaleCreate, cu: dict = Depends(require("sales", "create"))):
     v = await db.vehicles.find_one({"id": sale.vehicle_id}, {"_id": 0})
@@ -3778,6 +3838,7 @@ async def create_sale(sale: SaleCreate, cu: dict = Depends(require("sales", "cre
     due_amount = round(sale.due_amount, 2) if sale.due_amount is not None else max(round(total_amount - paid_total, 2), 0)
     payment_status = "Paid" if due_amount <= 0 else ("Partial" if paid_total > 0 else "Unpaid")
     sale_date = sale.sale_date or datetime.now(timezone.utc).date().isoformat()
+    exchange_vehicle = await _exchange_vehicle_for_sale(sale, v, sale_date, exchange_valuation, cu)
     doc = {
         "id": str(uuid.uuid4()),
         "vehicle_id": sale.vehicle_id,
@@ -3801,13 +3862,27 @@ async def create_sale(sale: SaleCreate, cu: dict = Depends(require("sales", "cre
         "exchange_model": (sale.exchange_model or "").strip() or None,
         "exchange_reg_no": (sale.exchange_reg_no or "").strip() or None,
         "exchange_year": (sale.exchange_year or "").strip() or None,
+        "exchange_vehicle_id": exchange_vehicle["id"] if exchange_vehicle else None,
         **_witness,
         # The seller picked on the form, else the salesperson assigned to the customer; a sale with neither never touches the sold_by columns.
         **await crm.seller_for_sale(sale.sold_by_id, sale.customer_id),
+        **await crm.lead_for_sale(sale.model_dump()),
         "created_by": cu.get("username"),
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
-    await db.sales.insert_one(doc)
+    if exchange_vehicle:
+        await db.vehicles.insert_one(exchange_vehicle)
+    try:
+        await db.sales.insert_one(doc)
+    except Exception:
+        # Otherwise a retry would trip over the half-made entry's own plate ("already in stock").
+        if exchange_vehicle:
+            await db.vehicles.delete_one({"id": exchange_vehicle["id"]})
+        raise
+    if exchange_vehicle:
+        await db.audit_logs.insert_one({"action": "vehicle_created", "vehicle_id": exchange_vehicle["id"],
+            "user": cu["username"], "timestamp": datetime.now(timezone.utc).isoformat(),
+            "details": f"Added {exchange_vehicle['brand']} {exchange_vehicle['model']} {exchange_vehicle['year'] or ''}".strip() + " (taken in exchange)"})
     if booking:
         await db.bookings.update_one({"id": booking["id"]}, {"$set": {
             "status": "converted", "sale_id": doc["id"], "updated_at": datetime.now(timezone.utc).isoformat(),
@@ -3995,6 +4070,12 @@ async def update_sale(sid: str, sale: SaleUpdate, cu: dict = Depends(get_current
     # before or after, so an ordinary edit leaves the sold_by columns alone.
     if "sold_by_id" in sale.model_fields_set and (sale.sold_by_id or existing.get("sold_by_id")):
         update_doc.update(await crm.resolve_sold_by(sale.sold_by_id))
+    # Same for the lead and referrer: a form that does not show them leaves them alone, and nothing is written when
+    # there is none before or after.
+    if sale.model_fields_set & crm.SALE_LEAD_FIELDS:
+        lead = await crm.lead_for_sale(sale.model_dump(), replace=True)
+        if any(lead.values()) or any(existing.get(k) for k in lead):
+            update_doc.update(lead)
     await db.sales.update_one({"id": sid}, {"$set": update_doc})
     # Keep vehicle record in sync (price/date/customer may have changed). Re-saving an active
     # sale also re-asserts status "sold", so a vehicle that drifted out of Sold Stock (e.g.
@@ -4042,7 +4123,19 @@ async def delete_sale(sid: str, cu: dict = Depends(get_current_user)):
         "status": "available", "sold_date": None, "customer_id": None,
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }})
-    return {"message": "Sale deleted, vehicle restored to available"}
+    message = "Sale deleted, vehicle restored to available"
+    exchange_id = s.get("exchange_vehicle_id")
+    exchange = await db.vehicles.find_one({"id": exchange_id}, {"_id": 0, "status": 1}) if exchange_id else None
+    if exchange:
+        # The old vehicle was only taken in because of this sale. Still unlisted with no spend on it, it goes too; once
+        # it has been priced, sold or worked on it is real stock and stays.
+        worked_on = await db.expenses.find_one({"vehicle_id": exchange_id}, {"_id": 0, "id": 1}) or await db.job_cards.find_one({"vehicle_id": exchange_id}, {"_id": 0, "id": 1})
+        if exchange.get("status") == "unlisted" and not worked_on:
+            await db.vehicles.delete_one({"id": exchange_id})
+            message += ", and the exchange vehicle removed from inventory"
+        else:
+            message += ". The exchange vehicle stays in inventory"
+    return {"message": message}
 
 @api_router.patch("/sales/{sid}/review")
 async def set_sale_review(sid: str, body: dict, cu: dict = Depends(admin_only)):
@@ -5364,6 +5457,15 @@ def _lead_email(v) -> Optional[str]:
     e = str(v or "").strip()[:255]
     return e if re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", e) else None
 
+@api_router.post("/leads/seen")
+async def mark_leads_seen(body: LeadsSeen, cu: dict = Depends(admin_only)):
+    """The Leads screen was opened with these leads on it: they stop counting as new in the nav badge and the bell.
+    Only the ids the screen actually showed are marked, so a lead that arrived a moment later still notifies."""
+    if body.ids:
+        await db.leads.update_many({"id": {"$in": body.ids}, "seen_at": {"$exists": False}},
+                                   {"$set": {"seen_at": datetime.now(timezone.utc).isoformat()}})
+    return {"ok": True}
+
 @api_router.post("/leads/{lid}/accept")
 async def accept_lead(lid: str, cu: dict = Depends(admin_only)):
     async with _lead_decision_lock:
@@ -5387,11 +5489,7 @@ async def reject_lead(lid: str, body: LeadReject, cu: dict = Depends(admin_only)
                                                          "decided_at": datetime.now(timezone.utc).isoformat()}})
     return await db.leads.find_one({"id": lid}, {"_id": 0})
 
-@api_router.delete("/leads/{lid}")
-async def delete_lead(lid: str, cu: dict = Depends(admin_only)):
-    r = await db.leads.delete_one({"id": lid})
-    if r.deleted_count == 0: raise HTTPException(404, "Lead not found")
-    return {"message": "Deleted"}
+# There is no delete: a lead is kept for good, and Reject (with a remark) is the only way to put one aside.
 
 # ── OFFERS (storefront "Offers" tab: Dashain Spin & Win) ───────────────
 # A customer who buys a vehicle enters their name, mobile number and the bike's number plate
@@ -5891,15 +5989,22 @@ async def _run_startup_tasks():
             ("leads", "decided_at", "VARCHAR(40)"),
             ("leads", "customer_id", "VARCHAR(36)"),
             ("leads", "vehicle_id", "VARCHAR(36)"),  # the vehicle the visitor was looking at when they tapped WhatsApp / Call
+            ("leads", "seen_at", "VARCHAR(40)"),  # when staff first opened the lead; unseen pending leads drive the nav badge
             # Who sold the vehicle (a Team member); the name is kept on the sale so it survives the member being removed.
             ("sales", "sold_by_id", "VARCHAR(36)"),
             ("sales", "sold_by_name", "VARCHAR(255)"),
+            # How the buyer found the shop, and who referred them (the name is kept if that customer is deleted).
+            ("sales", "lead_source", "VARCHAR(20)"),
+            ("sales", "lead_note", "VARCHAR(255)"),
+            ("sales", "referred_by_id", "VARCHAR(36)"),
+            ("sales", "referred_by_name", "VARCHAR(255)"),
             # Exchange: the old vehicle taken in part payment (valuation counts as paid).
             ("sales", "exchange_valuation", "DOUBLE"),
             ("sales", "exchange_brand", "VARCHAR(100)"),
             ("sales", "exchange_model", "VARCHAR(100)"),
             ("sales", "exchange_reg_no", "VARCHAR(50)"),
             ("sales", "exchange_year", "VARCHAR(10)"),
+            ("sales", "exchange_vehicle_id", "VARCHAR(36)"),  # the inventory entry made for that old vehicle
         ]
         for _tbl, _col, _type in _post_schema_cols:
             try:
@@ -7053,6 +7158,23 @@ async def public_create_lead(lead: LeadCreate):
     l["name"], l["phone"] = (l["name"] or "").strip()[:255], (l["phone"] or "").strip()[:50]
     l["email"] = _lead_email(l.get("email"))
     l["address"] = (l.get("address") or "").strip()[:500] or None
+    if l["type"] == "signup" and l["email"]:
+        # A registered account. The website sends it the moment someone signs in with Google (no phone yet), then again
+        # when they add their number: both land on one entry. A number is only ever filled in, never overwritten, since
+        # this endpoint is public; a changed number later becomes its own entry, as before.
+        async with _signup_lead_lock:
+            mine = await db.leads.find_one({"type": "signup", "email": l["email"]}, {"_id": 0})
+            if mine and not l["phone"]: return mine  # signed in again
+            if mine and not mine.get("phone"):
+                patch = {"phone": l["phone"], "name": l["name"] or mine.get("name"), "message": l.get("message") or mine.get("message")}
+                await db.leads.update_one({"id": mine["id"]}, {"$set": patch})
+                return {**mine, **patch}
+            return await _insert_lead(l)
+    return await _insert_lead(l)
+
+_signup_lead_lock = asyncio.Lock()
+
+async def _insert_lead(l: dict) -> dict:
     l["id"] = str(uuid.uuid4())
     l["status"] = "new"
     l["created_at"] = datetime.now(timezone.utc).isoformat()
@@ -7162,8 +7284,6 @@ async def shutdown():
     client.close()
     _compress_pool.shutdown(wait=False, cancel_futures=True)
 
-import finance_books
-finance_books.register(api_router, db, admin_only)
 crm.register(api_router, db, admin_only, _sale_revenue)
 
 app.include_router(api_router)

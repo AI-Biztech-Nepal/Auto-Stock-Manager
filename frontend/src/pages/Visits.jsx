@@ -13,6 +13,9 @@ const RANGES = [
 const PAGE_SIZE = 16;
 const FONT = { fontFamily: "Manrope" };
 
+// The website's front page is the path "/"; show it as Home.
+const pageName = p => (p === "/" ? "Home" : p);
+
 const fmtDuration = s => (s < 60 ? (s ? `${s} sec` : "under 1 min") : `${Math.floor(s / 60)} min ${s % 60} sec`);
 
 // Search Console reports countries as ISO alpha-3 codes; Intl.DisplayNames wants alpha-2.
@@ -168,7 +171,7 @@ const SearchTable = ({ title, icon, rows: allRows, empty, linkBase }) => {
     {allRows.length === 0 ? <p className="px-5 pb-6 text-sm text-slate-500 text-center">{empty}</p> : (
       <div className="pb-2">
         <table className="w-full text-sm">
-          <thead><tr className="text-xs text-slate-400 text-left"><th className="px-5 py-2 font-medium">&nbsp;</th><th className="py-2 font-medium text-right">Clicks</th><th className="py-2 font-medium text-right">Shown</th><th className="px-5 py-2 font-medium text-right">Rank</th></tr></thead>
+          <thead><tr className="text-xs text-slate-400 text-left"><th className="px-5 py-2 font-medium">&nbsp;</th><th className="py-2 font-medium text-right" title="People who clicked through from Google to your website">Visitors</th><th className="py-2 font-medium text-right" title="How many times your website was shown in Google results">Shown Page</th><th className="px-5 py-2 font-medium text-right" title="Your average position in Google results: 1 is the very top, 10 is the bottom of the first page">Rank</th></tr></thead>
           <tbody>{rows.map(r => (
             <tr key={r.name} className="border-t border-slate-100 hover:bg-slate-50">
               <td className="px-5 py-2.5 text-slate-700 max-w-[150px] sm:max-w-[240px] truncate" title={r.name}>
@@ -197,7 +200,7 @@ const VisitTile = ({ v, onOpen }) => {
       <span className="flex items-center gap-2 text-sm font-semibold text-slate-800 whitespace-nowrap md:w-44 shrink-0"><Dev size={15} className="text-slate-500" />{v.started}</span>
       <span className={`flex items-center gap-1.5 text-sm font-bold whitespace-nowrap md:w-36 shrink-0 ${quick ? "text-slate-400" : "text-slate-900"}`} style={FONT}><Clock size={13} className="text-slate-400" />{fmtDuration(v.seconds)}</span>
       <span className="text-xs text-slate-500 whitespace-nowrap md:w-16 shrink-0">{v.pages} {v.pages === 1 ? "page" : "pages"}</span>
-      <span className="text-xs text-slate-600 truncate flex-1 min-w-[140px] basis-full md:basis-0" title={v.paths.join(", ")}>{v.paths.join("  ›  ")}</span>
+      <span className="text-xs text-slate-600 truncate flex-1 min-w-[140px] basis-full md:basis-0" title={v.paths.map(pageName).join(", ")}>{v.paths.map(pageName).join("  ›  ")}</span>
       <span className="text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 whitespace-nowrap shrink-0 max-w-[140px] truncate">{v.source}</span>
       <span className="text-xs text-slate-500 capitalize whitespace-nowrap shrink-0 md:w-16">{v.device}</span>
       <span className="font-mono text-xs text-slate-400 shrink-0">{v.visitor}</span>
@@ -228,7 +231,7 @@ const VisitModal = ({ v, onClose }) => {
             <li key={i} className="flex gap-3">
               <div className="flex flex-col items-center"><span className="w-2.5 h-2.5 rounded-full bg-blue-500 mt-1.5" />{i < v.steps.length - 1 && <span className="flex-1 w-px bg-slate-200" />}</div>
               <div className="pb-3 min-w-0">
-                <div className="text-sm text-slate-800 break-words">{st.label || st.path}</div>
+                <div className="text-sm text-slate-800 break-words">{pageName(st.label || st.path)}</div>
                 <div className="text-xs text-slate-400">{st.time}{i > 0 && ` · ${fmtDuration(st.after)} after the previous page`}</div>
               </div>
             </li>
@@ -275,6 +278,8 @@ export default function Visits({ embedded = false }) {
   if (loading) return <div className="flex items-center justify-center h-48"><div className="animate-spin w-7 h-7 border-4 border-blue-600 border-t-transparent rounded-full" /></div>;
   if (!data) return null;
 
+  // Google reports search data 2 to 3 days late, so a short range ending today or yesterday is always empty there.
+  const searchEmpty = days <= 2 && skip <= 2 ? "Google shows search data 2 to 3 days late, so there is none for this day yet. Pick 7 days or Month." : "No search data for this period.";
   const devTotal = data.devices.mobile + data.devices.desktop;
   const pct = n => (devTotal ? Math.round((n / devTotal) * 100) : 0);
   const eng = data.engagement;
@@ -316,7 +321,7 @@ export default function Visits({ embedded = false }) {
       </Card>}
 
       <div className="grid lg:grid-cols-3 gap-4">
-        <RankList title="Top pages" icon={FileText} rows={data.top_pages} empty="No pages yet" linkBase={base} />
+        <RankList title="Top pages" icon={FileText} rows={data.top_pages.map(r => ({ ...r, name: pageName(r.name) }))} empty="No pages yet" linkBase={base} />
         <RankList title="Where visitors come from" icon={Globe} rows={data.sources} empty="No traffic yet" />
         <Card>
           <SectionTitle icon={Users} title="Devices" />
@@ -334,8 +339,8 @@ export default function Visits({ embedded = false }) {
       {searchErr && <p className="text-sm text-red-600">{searchErr}</p>}
       {search?.configured && (
         <div className="grid lg:grid-cols-2 gap-4">
-          <SearchTable title="What people searched on Google" icon={Search} rows={search.queries} empty="No search data yet" />
-          <SearchTable title="Countries (Google Search)" icon={Globe} rows={search.countries.map(c => ({ ...c, name: countryName(c.name) }))} empty="No search data yet" />
+          <SearchTable title="What people searched on Google" icon={Search} rows={search.queries} empty={searchEmpty} />
+          <SearchTable title="Countries (Google Search)" icon={Globe} rows={search.countries.map(c => ({ ...c, name: countryName(c.name) }))} empty={searchEmpty} />
         </div>
       )}
 

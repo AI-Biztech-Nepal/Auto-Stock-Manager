@@ -121,7 +121,7 @@ CREATE TABLE IF NOT EXISTS customers (
   notes TEXT,
   created_at VARCHAR(40),
   last_purchase_date VARCHAR(20),
-  -- CRM: how the customer found the shop (walk_in | website | facebook | referral | other), a free-text
+  -- CRM: how the customer found the shop (walk_in | website | facebook | tiktok | referral | other), a free-text
   -- note for "other" / an unlisted referrer, and the customer who referred them (another customers.id).
   source VARCHAR(20),
   source_note VARCHAR(255),
@@ -263,11 +263,19 @@ CREATE TABLE IF NOT EXISTS sales (
   -- Who sold the vehicle: a team_members.id, plus their name as it was when picked.
   sold_by_id VARCHAR(36),
   sold_by_name VARCHAR(255),
+  -- How the buyer found the shop (walk_in | website | facebook | tiktok | other) with a note for "other", and
+  -- separately who referred them: a customers.id, plus their name (typed in when they aren't a customer).
+  lead_source VARCHAR(20),
+  lead_note VARCHAR(255),
+  referred_by_id VARCHAR(36),
+  referred_by_name VARCHAR(255),
   exchange_valuation DOUBLE,
   exchange_brand VARCHAR(100),
   exchange_model VARCHAR(100),
   exchange_reg_no VARCHAR(50),
   exchange_year VARCHAR(10),
+  -- The inventory entry created for the exchanged vehicle when the sale was recorded.
+  exchange_vehicle_id VARCHAR(36),
   helmet_given TINYINT(1),
   imported TINYINT(1),
   needs_review TINYINT(1),
@@ -624,6 +632,7 @@ CREATE TABLE IF NOT EXISTS leads (
   decided_at VARCHAR(40),
   customer_id VARCHAR(36),
   vehicle_id VARCHAR(36),
+  seen_at VARCHAR(40),
   INDEX idx_leads_created_at (created_at),
   CONSTRAINT fk_leads_company FOREIGN KEY (company_id) REFERENCES companies(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
