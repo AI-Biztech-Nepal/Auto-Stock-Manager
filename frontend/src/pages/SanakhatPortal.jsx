@@ -82,7 +82,7 @@ function VehicleCard({ v, busy, onStatus, onDate }) {
   );
 }
 
-export default function SanakhatPortal({ embedded = false }) {
+export default function SanakhatPortal() {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
@@ -148,7 +148,7 @@ export default function SanakhatPortal({ embedded = false }) {
       <div className="rounded-xl bg-white border border-slate-200/80 shadow-sm p-3 space-y-3 sm:sticky sm:top-0 sm:z-10">
         <div className="relative">
           <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-          <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search plate, brand or model" autoFocus={!embedded}
+          <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search plate, brand or model"
             className="w-full h-11 pl-10 pr-10 rounded-lg border border-slate-200 bg-slate-50 text-base sm:text-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500" data-testid="sanakhat-search" />
           {q && <button type="button" onClick={() => setQ("")} aria-label="Clear search" className="absolute right-2 top-1/2 -translate-y-1/2 size-8 rounded-lg text-slate-400 hover:bg-slate-100 flex items-center justify-center"><X size={16} /></button>}
         </div>
