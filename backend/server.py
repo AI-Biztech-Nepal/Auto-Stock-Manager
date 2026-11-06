@@ -5602,12 +5602,18 @@ def _ga4_token() -> str:
     creds.refresh(GoogleRequest())
     return creds.token
 
+_BIKE_PATH = re.compile(r"/inventory/([0-9a-fA-F-]{36})/?")
+
 async def _name_vehicle_pages(summary: dict) -> dict:
     """Swap /inventory/<id> paths in top_pages for the vehicle (brand model year) so the admin
     sees which bike or car was viewed rather than a long id."""
     pat = re.compile(r"/inventory/([0-9a-fA-F-]{36})/?")
+    if "top_bikes" not in summary:  # Google Analytics only reports page views, not who the viewers were
+        summary["top_bikes"] = [{"id": m.group(1), "path": r["name"], "name": m.group(1), "views": r["views"], "customers": None}
+                                for r in summary.get("top_pages", []) if (m := pat.fullmatch(r["name"]))]
     for r in summary.get("top_pages", []): r["path"] = r["name"]
     ids = {m.group(1) for r in summary.get("top_pages", []) if (m := pat.fullmatch(r["name"]))}
+    ids |= {b["id"] for b in summary["top_bikes"]}
     for v in summary.get("visit_list", []):
         ids |= {m.group(1) for p in v["paths"] if (m := pat.fullmatch(p))}
         ids |= {m.group(1) for st in v.get("steps", []) if (m := pat.fullmatch(st["path"]))}
@@ -5618,6 +5624,7 @@ async def _name_vehicle_pages(summary: dict) -> dict:
             if label: labels[v["id"]] = label
         name = lambda p: labels.get(m.group(1), p) if (m := pat.fullmatch(p)) else p
         for r in summary.get("top_pages", []): r["name"] = name(r["name"])
+        for b in summary["top_bikes"]: b["name"] = labels.get(b["id"], b["name"])
         for v in summary.get("visit_list", []):
             v["paths"] = [name(p) for p in v["paths"]]
             for st in v.get("steps", []): st["label"] = name(st["path"])
@@ -5752,6 +5759,14 @@ async def visits_summary(days: int = 30, skip: int = 0, cu: dict = Depends(admin
     # A visit = one visitor's page views with no gap over 30 minutes. We only see when a page opens,
     # not when the person leaves, so time on site = first to last page of the visit; a one-page
     # visit has no measurable time and counts as a quick visit.
+    # Bikes ranked by how often their page was opened, and by how many different people (browsers) opened it.
+    bike_views = {}
+    for r in rows:
+        if m := _BIKE_PATH.fullmatch(r["path"]):
+            e = bike_views.setdefault(m.group(1), {"views": 0, "people": set()})
+            e["views"] += 1; e["people"].add(r["visitor_id"])
+    top_bikes = [{"id": k, "path": f"/inventory/{k}", "name": k, "views": e["views"], "customers": len(e["people"])}
+                 for k, e in sorted(bike_views.items(), key=lambda kv: (-kv[1]["views"], -len(kv[1]["people"])))[:20]]
     visits, spans, visit_list = 0, [], []
     def close_visit(vid, pv):
         nonlocal visits
@@ -5779,7 +5794,7 @@ async def visits_summary(days: int = 30, skip: int = 0, cu: dict = Depends(admin
                   "quick_visit_pct": round(100 * (visits - len(spans)) / visits) if visits else 0}
     return await _name_vehicle_pages({"days": days, "total_views": len(rows), "unique_visitors": len(visitors),
             "today_views": today_views, "today_visitors": len(today_visitors), "daily": daily,
-            "top_pages": top(pages), "sources": top(refs), "devices": devices,
+            "top_pages": top(pages), "top_bikes": top_bikes, "sources": top(refs), "devices": devices,
             "storefront_url": STOREFRONT_URL, "source": "beacon", "engagement": engagement, "visit_list": visit_list[:200]})
 
 # ── SETTINGS (storefront branding/contact info) ────────────────────────

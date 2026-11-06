@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
-import { Eye, Users, Smartphone, Monitor, Globe, FileText, ExternalLink, Search, Clock, TrendingUp, Layers } from "lucide-react";
+import { Eye, Users, Smartphone, Monitor, Globe, FileText, ExternalLink, Search, Clock, TrendingUp, Layers, Bike } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
 
@@ -190,6 +190,43 @@ const SearchTable = ({ title, icon, rows: allRows, empty, linkBase }) => {
   );
 };
 
+// The bikes people opened most, with how many different customers (browsers) looked at each one.
+const TopBikes = ({ rows, linkBase }) => {
+  const [all, setAll] = useState(false);
+  const list = all ? rows : rows.slice(0, 8);
+  const max = Math.max(1, ...rows.map(r => r.views));
+  const hasCustomers = rows.some(r => r.customers != null);
+  return (
+    <Card>
+      <SectionTitle icon={Bike} title="Most viewed bikes" hint="Which bikes customers open most. Customers = different people who looked at that bike." />
+      {rows.length === 0 ? <p className="px-5 pb-6 text-sm text-slate-500 text-center">No bike pages were opened in this period.</p> : (
+        <div className="pb-2">
+          <table className="w-full text-sm">
+            <thead><tr className="text-xs text-slate-400 text-left">
+              <th className="pl-5 py-2 font-medium w-8">#</th>
+              <th className="py-2 font-medium">Bike</th>
+              <th className="py-2 font-medium text-right">Views</th>
+              {hasCustomers && <th className="px-5 py-2 font-medium text-right" title="Different people (browsers) who opened this bike's page">Customers</th>}
+            </tr></thead>
+            <tbody>{list.map((r, i) => (
+              <tr key={r.id} className="border-t border-slate-100 hover:bg-slate-50" data-testid="top-bike-row">
+                <td className="pl-5 py-2.5 text-slate-400 font-semibold">{i + 1}</td>
+                <td className="py-2.5 pr-3 max-w-[180px] sm:max-w-[320px]">
+                  <a href={linkBase + r.path} target="_blank" rel="noopener noreferrer" title="Open this bike on the website" className="block truncate text-slate-700 hover:text-blue-700 hover:underline">{r.name}</a>
+                  <div className="h-1 bg-slate-100 rounded-full mt-1.5"><div className="h-1 bg-gradient-to-r from-blue-500 to-indigo-500 rounded-full" style={{ width: `${(r.views / max) * 100}%` }} /></div>
+                </td>
+                <td className="py-2.5 text-right font-semibold text-slate-900">{r.views}</td>
+                {hasCustomers && <td className="px-5 py-2.5 text-right text-slate-600"><span className="inline-flex items-center gap-1"><Users size={12} className="text-slate-400" />{r.customers}</span></td>}
+              </tr>
+            ))}</tbody>
+          </table>
+        </div>
+      )}
+      {rows.length > 8 && <button onClick={() => setAll(!all)} className="w-full pb-4 text-xs font-medium text-blue-600 hover:underline">{all ? "Show less" : `Show all ${rows.length}`}</button>}
+    </Card>
+  );
+};
+
 // One visit as a single full-width clickable line with every detail; click it to open the page-by-page timeline.
 const VisitTile = ({ v, onOpen }) => {
   const Dev = v.device === "mobile" ? Smartphone : Monitor;
@@ -335,6 +372,8 @@ export default function Visits({ embedded = false }) {
           </div>
         </Card>
       </div>
+
+      <TopBikes rows={data.top_bikes || []} linkBase={base} />
 
       {searchErr && <p className="text-sm text-red-600">{searchErr}</p>}
       {search?.configured && (
