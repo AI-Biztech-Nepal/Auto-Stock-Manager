@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
-import { Eye, Users, Smartphone, Monitor, Globe, FileText, ExternalLink, Search, Clock, TrendingUp, Layers, Bike } from "lucide-react";
+import { Eye, Users, Smartphone, Monitor, Globe, FileText, ExternalLink, Search, Clock, TrendingUp, Layers, Bike, Mail } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
 
@@ -240,6 +240,9 @@ const VisitTile = ({ v, onOpen }) => {
       <span className="text-xs text-slate-600 truncate flex-1 min-w-[140px] basis-full md:basis-0" title={v.paths.map(pageName).join(", ")}>{v.paths.map(pageName).join("  ›  ")}</span>
       <span className="text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 whitespace-nowrap shrink-0 max-w-[140px] truncate">{v.source}</span>
       <span className="text-xs text-slate-500 capitalize whitespace-nowrap shrink-0 md:w-16">{v.device}</span>
+      {v.email
+        ? <span className="inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 whitespace-nowrap shrink-0 max-w-[220px]" title={`Registered: ${v.email}`} data-testid="visit-email"><Mail size={11} className="shrink-0" /><span className="truncate">{v.email}</span></span>
+        : <span className="text-xs text-slate-300 whitespace-nowrap shrink-0" title="Not signed in">Guest</span>}
       <span className="font-mono text-xs text-slate-400 shrink-0">{v.visitor}</span>
     </button>
   );
@@ -258,6 +261,7 @@ const VisitModal = ({ v, onClose }) => {
         <div className="flex items-start justify-between gap-3">
           <div>
             <div className="text-xs text-slate-500 flex items-center gap-1.5"><Dev size={13} />{v.started} · from {v.source} · visitor <span className="font-mono">{v.visitor}</span></div>
+            {v.email && <div className="mt-1 inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700"><Mail size={11} />{v.email}</div>}
             <div className="text-2xl font-bold text-slate-900 mt-1" style={FONT}>{fmtDuration(v.seconds)}</div>
             <div className="text-xs text-slate-400">time on site · {v.pages} {v.pages === 1 ? "page" : "pages"}</div>
           </div>
@@ -388,7 +392,7 @@ export default function Visits({ embedded = false }) {
           <div className="flex flex-wrap items-end justify-between gap-2">
             <div>
               <h3 className="text-base font-bold text-slate-900 flex items-center gap-2" style={FONT}><Clock size={18} className="text-blue-600" />Every visit</h3>
-              <p className="text-xs text-slate-400 mt-1">Newest first, Nepal time. Tap a row for its page-by-page timeline. Time is first to last page opened, so a one-page visit shows as under a minute.</p>
+              <p className="text-xs text-slate-400 mt-1">Newest first, Nepal time. Registered visitors show their email, the rest show Guest. Tap a row for its page-by-page timeline. Time is first to last page opened, so a one-page visit shows as under a minute.</p>
             </div>
             {eng && <span className="text-xs text-slate-500">{eng.visits} visits · {eng.pages_per_visit} pages each · longest {eng.longest_minutes} min · {eng.quick_visit_pct}% left after one page</span>}
           </div>

@@ -741,6 +741,7 @@ CREATE TABLE IF NOT EXISTS page_views (
   path VARCHAR(300),
   referrer VARCHAR(100),
   device VARCHAR(10),
+  email VARCHAR(255),
   created_at VARCHAR(40),
   INDEX idx_page_views_created_at (created_at),
   CONSTRAINT fk_page_views_company FOREIGN KEY (company_id) REFERENCES companies(id)

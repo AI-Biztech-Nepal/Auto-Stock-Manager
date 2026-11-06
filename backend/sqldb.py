@@ -121,7 +121,7 @@ TABLES = {
     "offer_prizes": {"columns": {"id", "company_id", "name", "weight", "stock", "sort_order", "created_at"}},
     "offer_codes": {"columns": {"id", "company_id", "code", "status", "customer_name", "phone", "prize", "created_by",
                                  "created_at", "used_at"}},
-    "page_views": {"columns": {"id", "company_id", "visitor_id", "path", "referrer", "device", "created_at"}},
+    "page_views": {"columns": {"id", "company_id", "visitor_id", "path", "referrer", "device", "email", "created_at"}},
     # CRM follow-ups and contact history (crm.py)
     "crm_followups": {"columns": {"id", "company_id", "customer_id", "due_at", "purpose", "notes", "status", "completed_at",
                                    "outcome", "created_by", "created_at", "updated_at"}},

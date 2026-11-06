@@ -5736,6 +5736,7 @@ async def visits_summary(days: int = 30, skip: int = 0, cu: dict = Depends(admin
     by_day, pages, refs, devices = {}, {}, {}, {"mobile": 0, "desktop": 0}
     visitors, today_views, today_visitors = set(), 0, set()
     stamps = {}  # visitor -> page-view times, to estimate how long each visit lasted
+    emails = {r["visitor_id"]: r["email"] for r in sorted(rows, key=lambda x: x["created_at"]) if r.get("email")}  # who each registered visitor is
     for r in rows:
         ts = datetime.fromisoformat(r["created_at"])
         stamps.setdefault(r["visitor_id"], []).append((ts, r))
@@ -5775,7 +5776,7 @@ async def visits_summary(days: int = 30, skip: int = 0, cu: dict = Depends(admin
         if len(pv) > 1: spans.append(secs)
         first = pv[0][1]
         visit_list.append({"started": pv[0][0].astimezone(npt).strftime("%Y-%m-%d %H:%M"), "seconds": int(secs),
-                           "pages": len(pv), "visitor": vid[:6], "device": first.get("device") or "desktop",
+                           "pages": len(pv), "visitor": vid[:6], "email": emails.get(vid), "device": first.get("device") or "desktop",
                            "source": first.get("referrer") or "Direct", "paths": [p[1]["path"] for p in pv][:8],
                            "steps": [{"path": p[1]["path"], "time": p[0].astimezone(npt).strftime("%H:%M:%S"),
                                       "after": int((p[0] - pv[i - 1][0]).total_seconds()) if i else 0}
@@ -5997,6 +5998,7 @@ async def _run_startup_tasks():
             ("customers", "assigned_to_id", "VARCHAR(36)"),
             ("customers", "assigned_to_name", "VARCHAR(255)"),
             # Website leads: who the visitor is, and what was decided about the lead (Accept / Reject, see LEADS below).
+            ("page_views", "email", "VARCHAR(255)"),  # a registered visitor's email, so the Visits page can say who they are
             ("leads", "email", "VARCHAR(255)"),
             ("leads", "address", "VARCHAR(500)"),
             ("leads", "remark", "TEXT"),
@@ -7159,8 +7161,11 @@ async def public_record_visit(request: Request):
     if not visitor: return {"ok": False}
     ref_host = (urlparse(str(body.get("referrer") or "")).hostname or "").lower().removeprefix("www.")[:100]
     if ref_host.endswith("hamroauto.com.np"): ref_host = ""  # internal navigation isn't a source
+    # A signed-in visitor's email rides along, but only one that really is a registered account is kept (the beacon is public).
+    email = _lead_email(body.get("email"))
+    if email and not await db.leads.find_one({"type": "signup", "email": email}, {"_id": 0, "id": 1}): email = None
     await db.page_views.insert_one({
-        "id": str(uuid.uuid4()), "visitor_id": visitor, "path": path, "referrer": ref_host,
+        "id": str(uuid.uuid4()), "visitor_id": visitor, "path": path, "referrer": ref_host, "email": email,
         "device": _visit_device(request.headers.get("user-agent", "")),
         "created_at": datetime.now(timezone.utc).isoformat()})
     return {"ok": True}
