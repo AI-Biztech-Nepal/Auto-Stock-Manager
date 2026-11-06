@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { Phone, MessageCircle, Inbox, Wrench, Repeat, Bike, X, Mail, MapPin, Check, Ban, Users, ExternalLink, UserPlus } from "lucide-react";
+import { Phone, MessageCircle, Inbox, Wrench, Repeat, Bike, X, Mail, MapPin, Check, CheckCheck, Ban, Users, ExternalLink, UserPlus, Clock, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
 import { formatNPR } from "../utils/helpers";
@@ -8,10 +8,9 @@ import { formatNPR } from "../utils/helpers";
 // Sell / Exchange / Book Service forms from the public website land here (POST /public/leads), and so do WhatsApp / Call
 // taps (the website asks who they are first). Every lead is decided once: Add to CRM (the lead is accepted and the person
 // goes into the CRM) or Reject (a remark saying why is required).
-// Tabs: "All" is the inbox of leads nobody has seen yet. A lead stays there for the visit that first shows it; from the next
-// visit it lives in the tab for its type, still waiting for a decision there. Rejecting one moves it to the Rejected tab. A
-// registered account also shows in Accounts while it is still pending. A lead is never deleted: Reject is the only way to
-// put one aside.
+// Tabs: "All" lists every lead, newest first, whatever its type or outcome. Each lead also lives in the tab for its type
+// (still waiting for a decision there); rejecting one also puts it in the Rejected tab. A registered account also shows in
+// Accounts while it is still pending. A lead is never deleted: Reject is the only way to put one aside.
 const TYPES = {
   sell: { label: "Sell bike", Icon: Bike, cls: "bg-emerald-50 text-emerald-700" },
   exchange: { label: "Exchange", Icon: Repeat, cls: "bg-indigo-50 text-indigo-700" },
@@ -34,16 +33,47 @@ const waNumber = phone => {
   return d.length === 10 ? `977${d}` : d;
 };
 
+// The WhatsApp logo (lucide has no brand icons).
+const WhatsAppIcon = ({ size = 16 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+    <path d="M20.52 3.48A11.86 11.86 0 0 0 12.05 0C5.5 0 .17 5.33.17 11.88c0 2.09.55 4.13 1.59 5.93L0 24l6.35-1.66a11.86 11.86 0 0 0 5.7 1.45h.01c6.55 0 11.88-5.33 11.88-11.88 0-3.17-1.23-6.15-3.42-8.43zM12.06 21.8h-.01a9.9 9.9 0 0 1-5.04-1.38l-.36-.21-3.77.99 1.01-3.67-.24-.38a9.88 9.88 0 0 1-1.51-5.27c0-5.46 4.45-9.9 9.92-9.9 2.65 0 5.13 1.03 7 2.9a9.84 9.84 0 0 1 2.9 7c0 5.46-4.45 9.91-9.9 9.91zm5.43-7.42c-.3-.15-1.76-.87-2.03-.97-.27-.1-.47-.15-.67.15-.2.3-.77.97-.94 1.17-.17.2-.35.22-.65.07-.3-.15-1.26-.46-2.4-1.48-.89-.79-1.49-1.77-1.66-2.07-.17-.3-.02-.46.13-.61.14-.13.3-.35.45-.52.15-.17.2-.3.3-.5.1-.2.05-.37-.02-.52-.08-.15-.67-1.62-.92-2.22-.24-.58-.49-.5-.67-.51h-.57c-.2 0-.52.07-.8.37-.27.3-1.04 1.02-1.04 2.48s1.07 2.88 1.21 3.08c.15.2 2.1 3.2 5.08 4.49.71.31 1.26.49 1.69.63.71.23 1.36.2 1.87.12.57-.08 1.76-.72 2.01-1.41.25-.7.25-1.29.17-1.41-.07-.12-.27-.2-.57-.35z" />
+  </svg>
+);
+
+// The reply that opens in WhatsApp, ready to send: greets them by name and refers to what they asked for.
+const replyText = l => {
+  const first = String(l.name || "").trim().split(/\s+/)[0];
+  const hi = first && first !== "Website" ? `Hello ${first}, ` : "Hello, ";
+  const about = l.vehicle?.label ? ` about the ${l.vehicle.label}`
+    : { sell: " about selling your bike", exchange: " about your exchange request", service: l.requested_service ? ` about your ${l.requested_service} booking` : " about your service booking" }[l.type] || "";
+  return `${hi}this is Hamro G&G Auto, Nayabasti, Boudha. Thank you for contacting us${about}. How can we help you?`;
+};
+
 const when = (iso) => (iso ? new Date(iso).toLocaleString() : "");
+
+// "Today", "Yesterday", "2 days ago" ... counted in calendar days, so a lead from last night is "Yesterday", not "Today".
+const dayLabel = (iso) => {
+  if (!iso) return "";
+  const d = new Date(iso);
+  const startOf = x => new Date(x.getFullYear(), x.getMonth(), x.getDate());
+  const days = Math.round((startOf(new Date()) - startOf(d)) / 86400000);
+  if (days <= 0) return "Today";
+  if (days === 1) return "Yesterday";
+  if (days <= 30) return `${days} days ago`;
+  return d.toLocaleDateString([], { day: "numeric", month: "short", year: "numeric" });
+};
+const DAY_CLS = { Today: "bg-blue-600 text-white", Yesterday: "bg-amber-100 text-amber-800" };
+const clock = (iso) => (iso ? new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "");
+const dateOnly = (iso) => (iso ? new Date(iso).toLocaleDateString([], { day: "numeric", month: "short", year: "numeric" }) : "");
 
 // A lead is pending until it is accepted or rejected (older ones with another status count as pending too).
 const state = l => (l.status === "accepted" || l.status === "rejected" ? l.status : "new");
 
-// The one tab a lead lives in, so none can go missing. A lead of a type with no tab of its own stays in All.
-const tabOf = l => (state(l) === "rejected" ? "rejected" : !TYPES[l.type] || (state(l) === "new" && !l.seen_at) ? "all" : l.type);
+// The one tab a lead lives in, apart from All (which lists every lead). A lead of a type with no tab of its own is only in All.
+const tabOf = l => (state(l) === "rejected" ? "rejected" : !TYPES[l.type] ? "all" : l.type);
 const tabLabel = key => TABS.find(t => t.key === key)?.label;
 // Where a lead is listed: its home tab, plus Accounts for a registered account that is still pending (it shows there at once).
-const inTab = (l, key) => tabOf(l) === key || (key === "signup" && l.type === "signup" && state(l) === "new");
+const inTab = (l, key) => key === "all" || tabOf(l) === key || (key === "signup" && l.type === "signup" && state(l) === "new");
 
 export default function Leads() {
   const navigate = useNavigate();
@@ -53,11 +83,15 @@ export default function Leads() {
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("all");
   const [zoom, setZoom] = useState(null);
+  // Leads nobody had opened before this visit: they stay "New" (blue) while the page is open. Opening the page marks them
+  // seen on the server, so on the next visit they show as "Read" (green).
+  const [newIds, setNewIds] = useState(() => new Set());
 
   const load = useCallback(async () => {
     try {
       const { data } = await api.get("/leads");
       setLeads(data);
+      setNewIds(prev => (prev.size ? prev : new Set(data.filter(l => !l.seen_at).map(l => l.id))));
       // Unseen leads are all on screen in the All tab, so they count as seen: this clears the nav badge and the bell, and
       // takes them out of All on the next visit (the list above keeps them there for this one).
       // Done before the ping below so the badge's refetch already sees them as seen.
@@ -109,26 +143,27 @@ export default function Leads() {
   const countOf = key => leads.filter(l => inTab(l, key)).length; // the number of cards that tab shows
   const [emptyTitle, emptyText] = leads.length === 0
     ? ["No leads yet", "Sell, exchange and service requests, and people who tap WhatsApp or Call on your website, will appear here as they come in."]
-    : tab === "all" ? ["No new leads", "New leads from your website appear here once. After that, find them in the tab for their type."]
+    : tab === "all" ? ["No leads yet", "Every lead from your website appears here, and also in the tab for its type."]
     : tab === "rejected" ? ["No rejected leads", "Leads you reject are kept here, with your reason."]
     : tab === "signup" ? ["No registered accounts yet", "People who sign in with Google on your website and add their phone number appear here."]
-    : [`Nothing in ${tabLabel(tab)} yet`, "Leads of this type move here from the All tab once they have been seen."];
+    : [`Nothing in ${tabLabel(tab)} yet`, "Leads of this type appear here as they come in."];
 
   return (
     <div className="space-y-4" data-testid="leads-page">
-      {/* One swipeable row on phones (bleeds to the screen edge so the cut-off chip hints at more); wraps from sm up. */}
-      <div role="group" aria-label="Filter leads by tab" style={{ scrollbarWidth: "none" }} className="-mx-4 px-4 sm:mx-0 sm:px-0 flex gap-2 overflow-x-scroll sm:overflow-visible sm:flex-wrap [&::-webkit-scrollbar]:hidden">
+      {/* The chips wrap onto as many rows as they need, so every tab is on screen and one tap away (no hidden sideways scrolling on phones). */}
+      <div role="group" aria-label="Filter leads by tab" className="flex flex-wrap gap-2">
         {TABS.map(({ key, label, Icon }) => (
           <button
             key={key}
+            type="button"
             onClick={() => setTab(key)}
             aria-pressed={tab === key}
             data-testid={`leads-tab-${key}`}
-            className={`shrink-0 h-10 px-3.5 inline-flex items-center gap-1.5 whitespace-nowrap rounded-full text-sm font-semibold border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${tab === key ? "bg-blue-600 text-white border-blue-600" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"}`}
+            className={`touch-manipulation h-10 px-3 inline-flex items-center gap-1.5 whitespace-nowrap rounded-full text-sm font-semibold border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${tab === key ? "bg-blue-600 text-white border-blue-600" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"}`}
           >
             {Icon && <Icon size={15} />}{label}
-            {/* Every tab shows how many leads it holds; All is blue while it holds any. */}
-            <span data-testid={`leads-count-${key}`} className={`ml-0.5 min-w-[20px] text-center text-xs px-1.5 py-0.5 rounded-full ${tab === key ? "bg-white/25 text-white" : key === "all" && countOf(key) > 0 ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-600"}`}>{countOf(key)}</span>
+            {/* Every tab shows how many leads it holds; All is blue while any lead there is still undecided. */}
+            <span data-testid={`leads-count-${key}`} className={`ml-0.5 min-w-[20px] text-center text-xs px-1.5 py-0.5 rounded-full ${tab === key ? "bg-white/25 text-white" : key === "all" && leads.some(x => state(x) === "new") ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-600"}`}>{countOf(key)}</span>
           </button>
         ))}
       </div>
@@ -144,13 +179,29 @@ export default function Leads() {
           {shown.map(l => {
             const t = TYPES[l.type] || { label: l.type, Icon: Inbox, cls: "bg-slate-100 text-slate-600" };
             const images = (l.images || []).filter(Boolean);
+            const isNew = newIds.has(l.id);
+            const day = dayLabel(l.created_at);
             return (
-              <div key={l.id} data-testid="lead-card" data-state={state(l)} className={`bg-white border rounded-2xl p-4 shadow-[0_1px_3px_rgba(15,23,42,0.06)] ${state(l) === "new" ? "border-blue-300" : "border-slate-200/80"}`}>
+              <div key={l.id} data-testid="lead-card" data-state={state(l)} className={`border rounded-2xl p-4 shadow-[0_1px_3px_rgba(15,23,42,0.06)] ${state(l) === "rejected" ? "bg-white border-slate-200/80" : isNew ? "bg-white border-blue-300 ring-1 ring-blue-100" : "bg-emerald-50/60 border-emerald-300"}`}>
                 <div className="flex flex-wrap items-start justify-between gap-2">
                   <div className="min-w-0">
                     <span className={`inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full ${t.cls}`}><t.Icon size={12} /> {t.label}</span>
                     <h3 className="mt-1.5 text-base font-bold text-slate-900" style={FONT}>{l.name}</h3>
-                    <p className="text-xs text-slate-400">{when(l.created_at)}</p>
+                    <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500" data-testid="lead-when">
+                      <span className={`inline-flex items-center rounded-full px-2 py-0.5 font-bold ${DAY_CLS[day] || "bg-slate-100 text-slate-700"}`}>{day}</span>
+                      <span className="inline-flex items-center gap-1"><Clock size={12} className="text-slate-400" />{clock(l.created_at)}</span>
+                      <span className="text-slate-400">{dateOnly(l.created_at)}</span>
+                    </p>
+                    <div className="mt-2 flex flex-wrap items-center gap-2" data-testid="lead-contact">
+                      {l.phone ? (
+                        <>
+                          <a href={`tel:${l.phone}`} data-testid="lead-phone" className="h-9 px-3 rounded-lg border border-slate-200 text-sm font-semibold text-slate-700 hover:bg-slate-50 inline-flex items-center gap-1.5"><Phone size={14} /> {l.phone}</a>
+                          <a href={`https://wa.me/${waNumber(l.phone)}?text=${encodeURIComponent(replyText(l))}`} target="_blank" rel="noopener noreferrer" title="Reply on WhatsApp" aria-label={`Reply to ${l.name} on WhatsApp`} data-testid="lead-whatsapp" className="h-9 px-3 rounded-lg bg-green-600 text-white text-sm font-semibold hover:bg-green-700 inline-flex items-center gap-1.5"><WhatsAppIcon size={16} /> WhatsApp</a>
+                        </>
+                      ) : (
+                        <span data-testid="lead-no-phone" className="h-9 px-3 rounded-lg border border-dashed border-slate-300 text-xs text-slate-400 inline-flex items-center gap-1.5"><Phone size={13} /> No phone number</span>
+                      )}
+                    </div>
                     {(l.email || l.address) && (
                       <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-slate-600">
                         {l.email && <a href={`mailto:${l.email}`} className="inline-flex items-center gap-1 hover:text-blue-700"><Mail size={12} className="text-slate-400" />{l.email}</a>}
@@ -158,10 +209,9 @@ export default function Leads() {
                       </p>
                     )}
                   </div>
-                  <div className="flex items-center gap-2">
-                    {l.phone && <a href={`tel:${l.phone}`} className="h-9 px-3 rounded-lg border border-slate-200 text-sm font-semibold text-slate-700 hover:bg-slate-50 inline-flex items-center gap-1.5"><Phone size={14} /> {l.phone}</a>}
-                    {l.phone && <a href={`https://wa.me/${waNumber(l.phone)}`} target="_blank" rel="noopener noreferrer" aria-label="WhatsApp" className="h-9 w-9 rounded-lg bg-green-600 text-white hover:bg-green-700 inline-flex items-center justify-center"><MessageCircle size={16} /></a>}
-                  </div>
+                  {state(l) !== "rejected" && (isNew
+                    ? <span data-testid="lead-new" className="inline-flex items-center gap-1 rounded-full bg-blue-600 px-2.5 py-1 text-xs font-bold text-white"><Sparkles size={12} /> New</span>
+                    : <span data-testid="lead-read" className="inline-flex items-center gap-1 rounded-full bg-emerald-600 px-2.5 py-1 text-xs font-bold text-white"><CheckCheck size={13} /> Read</span>)}
                 </div>
 
                 {(l.requested_service || l.vehicle_type || l.preferred_date) && (

@@ -268,7 +268,18 @@ export default function Layout() {
           >
             <Menu size={20} />
           </button>
-          <div className="flex-1" />
+          {/* On every Marketing tab the page title sits here, level with the bell. */}
+          {pathname.startsWith("/marketing") ? (() => {
+            // Named after the tab that is open (Leads, CRM, Share...), like any other page's title.
+            const tabs = marketingTabsFor(user?.role);
+            const requested = new URLSearchParams(search).get("tab");
+            const { label: title, icon: TitleIcon } = MARKETING_NAV[tabs.includes(requested) ? requested : tabs[0]] || { label: "Marketing", icon: Megaphone };
+            return (
+              <h1 className="flex-1 min-w-0 flex items-center gap-2 text-lg font-bold text-slate-900 truncate" data-testid="header-title">
+                <TitleIcon size={19} className="shrink-0 text-slate-400" /> {title}
+              </h1>
+            );
+          })() : <div className="flex-1" />}
           {canSeeInventory && (
             <div className="relative" ref={notifRef}>
               <button

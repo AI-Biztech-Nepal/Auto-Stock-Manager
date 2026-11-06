@@ -107,6 +107,16 @@ export function AddVehicleModal({ form, setForm, onClose, onSubmit, saving, phot
                   className={inp}
                 />
               </Field>
+              <Field label="Due Amount (NPR)">
+                <input
+                  data-testid="purchase-due-input"
+                  type="text" inputMode="numeric" pattern="[0-9]*"
+                  value={form.purchase_due ?? ""}
+                  onChange={e => setForm({ ...form, purchase_due: e.target.value })}
+                  placeholder="Unpaid part of purchase price"
+                  className={inp}
+                />
+              </Field>
               <Field label="Selling Price (NPR)">
                 <input
                   type="text" inputMode="numeric" pattern="[0-9]*"

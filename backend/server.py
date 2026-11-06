@@ -1526,6 +1526,8 @@ class VehicleCreate(BaseModel):
     sanakhat_status: str = "pending"
     # Sanaakhat (ownership termination) — the date it reaches the shop, set by hand, and what it cost.
     sanakhat_date: Optional[str] = None; sanakhat_cost: Optional[float] = None
+    # Part of purchase_price still owed to the seller (purchase not paid in full at once).
+    purchase_due: Optional[float] = None
     # True once the user has confirmed, via the duplicate-registration prompt, that reusing a
     # sold/scrapped vehicle's plate on this new record is intentional (a buyback/trade-in) and
     # not a fat-fingered re-entry of the same vehicle. Never persisted — see create_vehicle.
@@ -1557,6 +1559,7 @@ class VehicleUpdate(BaseModel):
     ownership_transfer_status: Optional[str] = None
     sanakhat_status: Optional[Literal["pending", "done"]] = None
     sanakhat_date: Optional[str] = None; sanakhat_cost: Optional[float] = None
+    purchase_due: Optional[float] = None
     confirm_reused_registration: bool = False
 
 class VehicleStatusUpdate(BaseModel):
@@ -5956,6 +5959,7 @@ async def _run_startup_tasks():
             ("vehicles", "sanakhat_status", "VARCHAR(20) DEFAULT 'pending'"),
             ("vehicles", "sanakhat_date", "VARCHAR(20)"),
             ("vehicles", "sanakhat_cost", "DOUBLE"),
+            ("vehicles", "purchase_due", "DOUBLE"),
             ("settings", "warranty_days_default", "INT"),
             ("vehicle_photos", "sort_order", "INT"),
             ("vehicle_photos", "storage_path", "VARCHAR(500)"),
