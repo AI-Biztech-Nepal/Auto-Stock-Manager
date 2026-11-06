@@ -89,6 +89,8 @@ export default function SanakhatPortal() {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
+  // While the keyboard is up on a phone, only the search box stays on screen so the list below it is still visible.
+  const [typing, setTyping] = useState(false);
   const [filter, setFilter] = useState("all");   // all | pending | yes
   const [shown, setShown] = useState(PAGE);
   const [busyId, setBusyId] = useState(null);
@@ -136,7 +138,7 @@ export default function SanakhatPortal() {
   const FILTERS = [["all", "All", counts.all], ["pending", "Not done", counts.pending], ["yes", "Done", counts.yes]];
   return (
     <div className="space-y-4 animate-fade-in pb-8" data-testid="sanakhat-portal">
-      <div className="flex items-center gap-2.5">
+      <div className={`${typing ? "hidden sm:flex" : "flex"} items-center gap-2.5`}>
         <span className="size-9 rounded-xl bg-gradient-to-br from-blue-600 to-indigo-600 text-white flex items-center justify-center shadow-sm"><FileCheck2 size={18} /></span>
         <div>
           <h1 className="text-lg font-bold text-slate-900 leading-tight" style={FONT}>Sanakhat</h1>
@@ -146,13 +148,18 @@ export default function SanakhatPortal() {
 
       {/* Search */}
       <div className="rounded-xl bg-white border border-slate-200/80 shadow-sm p-3 space-y-3 sticky top-0 z-10">
-        <div className="relative">
-          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-          <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search plate, brand or model"
-            className="w-full h-11 pl-10 pr-10 rounded-lg border border-slate-200 bg-slate-50 text-base sm:text-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500" data-testid="sanakhat-search" />
-          {q && <button type="button" onClick={() => setQ("")} aria-label="Clear search" className="absolute right-2 top-1/2 -translate-y-1/2 size-8 rounded-lg text-slate-400 hover:bg-slate-100 flex items-center justify-center"><X size={16} /></button>}
-        </div>
-        <div className="-mx-3 px-3 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:mx-0 sm:px-0 sm:overflow-visible">
+        <form onSubmit={e => { e.preventDefault(); document.activeElement?.blur?.(); }} className="flex items-center gap-2" role="search">
+          <div className="relative min-w-0 flex-1">
+            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input type="search" enterKeyHint="search" inputMode="search" autoComplete="off" autoCorrect="off" spellCheck={false}
+              value={q} onChange={e => setQ(e.target.value)} onFocus={() => setTyping(true)} onBlur={() => setTyping(false)} placeholder="Search plate, brand or model"
+              className="w-full h-11 pl-10 pr-10 rounded-lg border border-slate-200 bg-slate-50 text-base sm:text-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 [&::-webkit-search-cancel-button]:hidden" data-testid="sanakhat-search" />
+            {q && <button type="button" onPointerDown={e => e.preventDefault()} onClick={() => setQ("")} aria-label="Clear search" className="absolute right-1.5 top-1/2 -translate-y-1/2 size-9 rounded-lg text-slate-400 hover:bg-slate-100 flex items-center justify-center"><X size={17} /></button>}
+          </div>
+          {/* Closes the keyboard so the whole list can be seen (the keyboard's own Enter / Search key does the same). */}
+          {typing && <button type="submit" onPointerDown={e => e.preventDefault()} className="sm:hidden h-11 px-4 rounded-lg bg-blue-600 text-white text-sm font-semibold shrink-0" data-testid="sanakhat-search-done">Done</button>}
+        </form>
+        <div className={`${typing ? "hidden sm:block" : ""} -mx-3 px-3 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:mx-0 sm:px-0 sm:overflow-visible`}>
           <div className="flex items-center gap-2 w-max sm:w-auto sm:flex-wrap">
             {FILTERS.map(([k, label, n]) => (
               <button key={k} type="button" onClick={() => setFilter(k)} aria-pressed={filter === k}
