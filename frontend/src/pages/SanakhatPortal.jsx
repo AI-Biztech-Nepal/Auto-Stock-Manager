@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
-import { Search, X, CheckCircle2, Clock, XCircle, FileCheck2, Bike, AlertTriangle, SearchX } from "lucide-react";
+import { Search, X, CheckCircle2, Clock, XCircle, Bike, AlertTriangle, SearchX, CalendarCheck2, Pencil, Undo2 } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
 import BSDatePicker from "../components/BSDatePicker";
+import { formatBSDate } from "../utils/nepali-date";
 
 // The Sanakhat desk: every vehicle in the company, whatever its stock status, with its Sanaakhat (ownership
 // termination) progress. Search for a bike, see at a glance whether its Sanakhat is done, and update it.
@@ -28,6 +29,7 @@ const STOCK = {
 };
 const stockOf = s => STOCK[s] || [String(s || "").replace(/_/g, " ") || "In stock", "bg-slate-100 text-slate-600"];
 
+const todayLocal = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
 const daysSince = d => {
   const t = new Date(`${(d || "").slice(0, 10)}T00:00:00`);
   return isNaN(t) ? null : Math.max(0, Math.floor((Date.now() - t.getTime()) / 86400000));
@@ -35,7 +37,7 @@ const daysSince = d => {
 
 const ACCENT = { yes: "bg-emerald-500", pending: "bg-amber-400", no: "bg-red-500" };
 
-function VehicleCard({ v, busy, onStatus, onDate }) {
+function VehicleCard({ v, busy, onDone, onUndo }) {
   const state = stateOf(v);
   const st = STATES[state];
   const [stockLabel, stockCls] = stockOf(v.status);
@@ -58,28 +60,63 @@ function VehicleCard({ v, busy, onStatus, onDate }) {
         {v.color && <span className="text-xs text-slate-400">{v.color}</span>}
       </div>
 
-      <div role="group" aria-label="Sanakhat status" className="mt-4 grid grid-cols-2 gap-1.5 rounded-xl bg-slate-100 p-1.5">
-        {["yes", "pending"].map(k => {
-          const s = STATES[k]; const on = state === k;
-          return (
-            <button key={k} type="button" disabled={busy || on} onClick={() => onStatus(v, k)} aria-pressed={on} data-testid={`sanakhat-set-${k}`}
-              className={`touch-manipulation h-11 rounded-lg text-sm font-semibold inline-flex items-center justify-center gap-1.5 transition ${on ? s.on : "text-slate-500 hover:bg-white hover:text-slate-800"}`}>
-              <s.Icon size={15} />{s.short}
-            </button>
-          );
-        })}
-      </div>
-
-      <div className="mt-4">
-        <div className="mb-1.5 flex items-center justify-between gap-2">
-          <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Sanakhat date (BS)</span>
-          {waiting !== null && (
-            <span className={`inline-flex items-center gap-1 text-xs font-semibold rounded-full px-2.5 py-0.5 ${overdue ? "bg-red-100 text-red-700" : "bg-slate-100 text-slate-600"}`}>
-              {overdue && <AlertTriangle size={12} />}{waiting === 0 ? "Started today" : `${waiting} day${waiting > 1 ? "s" : ""} waiting`}
-            </span>
-          )}
+      {state === "yes" ? (
+        <div className="mt-4 flex items-center gap-3 rounded-xl bg-emerald-50 border border-emerald-100 px-3 py-2.5">
+          <span className="size-9 shrink-0 rounded-lg bg-emerald-600 text-white flex items-center justify-center"><CalendarCheck2 size={18} /></span>
+          <div className="min-w-0 flex-1">
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-emerald-700/70">Sanakhat date</div>
+            <div className="text-sm font-bold text-emerald-900 truncate">{v.sanakhat_date ? `${formatBSDate(v.sanakhat_date.slice(0, 10))} BS` : "No date saved"}</div>
+          </div>
+          <button type="button" onClick={() => onDone(v)} disabled={busy} aria-label="Change the Sanakhat date" title="Change the date" className="touch-manipulation size-10 rounded-lg text-emerald-700 hover:bg-emerald-100 flex items-center justify-center"><Pencil size={16} /></button>
+          <button type="button" onClick={() => onUndo(v)} disabled={busy} aria-label="Mark as not done" title="Mark as not done" className="touch-manipulation size-10 rounded-lg text-slate-500 hover:bg-white flex items-center justify-center"><Undo2 size={16} /></button>
         </div>
-        <BSDatePicker value={(v.sanakhat_date || "").slice(0, 10)} onChange={d => onDate(v, d)} />
+      ) : (
+        <div className="mt-4 space-y-2">
+          {waiting !== null && (
+            <div className={`flex items-center gap-1.5 text-xs font-semibold ${overdue ? "text-red-600" : "text-slate-500"}`}>
+              {overdue ? <AlertTriangle size={13} /> : <Clock size={13} />}
+              Started {formatBSDate(v.sanakhat_date.slice(0, 10))} BS · {waiting === 0 ? "today" : `${waiting} day${waiting > 1 ? "s" : ""} waiting`}
+            </div>
+          )}
+          <button type="button" onClick={() => onDone(v)} disabled={busy} data-testid="sanakhat-mark-done"
+            className="touch-manipulation w-full h-12 rounded-xl bg-gradient-to-r from-emerald-600 to-emerald-500 text-white text-sm font-bold inline-flex items-center justify-center gap-2 shadow-sm hover:from-emerald-700 hover:to-emerald-600 active:scale-[0.99] transition">
+            <CheckCircle2 size={18} /> Mark Sanakhat done
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Opens when "Mark Sanakhat done" is pressed: pick the Sanakhat date (Nepali calendar), then Save or Cancel.
+function DoneModal({ v, saving, onCancel, onSave }) {
+  const [date, setDate] = useState((v.sanakhat_date || "").slice(0, 10) || todayLocal());
+  useEffect(() => {
+    const h = e => e.key === "Escape" && onCancel();
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  }, [onCancel]);
+  const editing = stateOf(v) === "yes";
+  return (
+    <div className="fixed inset-0 z-[45] flex items-end sm:items-center justify-center bg-slate-900/55 backdrop-blur-[2px] sm:p-4" onClick={onCancel} data-testid="sanakhat-done-modal">
+      <div role="dialog" aria-modal="true" aria-label="Sanakhat date" onClick={e => e.stopPropagation()}
+        className="w-full sm:max-w-sm bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl overflow-hidden animate-fade-in">
+        <div className="bg-gradient-to-br from-emerald-600 to-teal-500 text-white px-5 pt-5 pb-4">
+          <span className="size-11 rounded-2xl bg-white/20 flex items-center justify-center"><CheckCircle2 size={24} /></span>
+          <h2 className="mt-3 text-lg font-bold leading-tight" style={FONT}>{editing ? "Change Sanakhat date" : "Sanakhat done"}</h2>
+          <p className="mt-0.5 text-sm text-emerald-50 truncate">{[v.brand, v.model, v.year].filter(Boolean).join(" ")}{v.registration_number ? ` · ${v.registration_number}` : ""}</p>
+        </div>
+        <div className="px-5 py-5">
+          <div className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500"><CalendarCheck2 size={14} /> Sanakhat date (BS)</div>
+          <BSDatePicker value={date} onChange={setDate} />
+          <p className="mt-3 text-xs text-slate-400">Pick the day the Sanakhat was done, then press Save.</p>
+        </div>
+        <div className="grid grid-cols-2 gap-3 px-5 pb-5" style={{ paddingBottom: "max(1.25rem, env(safe-area-inset-bottom))" }}>
+          <button type="button" onClick={onCancel} disabled={saving} className="touch-manipulation h-12 rounded-xl border border-slate-200 bg-white text-sm font-semibold text-slate-700 hover:bg-slate-50" data-testid="sanakhat-cancel">Cancel</button>
+          <button type="button" onClick={() => onSave(v, date)} disabled={saving || !date} className="touch-manipulation h-12 rounded-xl bg-emerald-600 text-sm font-bold text-white hover:bg-emerald-700 disabled:opacity-60 inline-flex items-center justify-center gap-2" data-testid="sanakhat-save">
+            {saving ? "Saving..." : "Save"}
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -94,6 +131,7 @@ export default function SanakhatPortal() {
   const [filter, setFilter] = useState("all");   // all | pending | yes
   const [shown, setShown] = useState(PAGE);
   const [busyId, setBusyId] = useState(null);
+  const [doneFor, setDoneFor] = useState(null); // the vehicle whose Sanakhat-date popup is open
 
   const load = useCallback(async () => {
     try { const { data } = await api.get("/sanakhat/vehicles"); setRows(data); }
@@ -124,28 +162,27 @@ export default function SanakhatPortal() {
     const before = { ownership_termination_status: v.ownership_termination_status, sanakhat_date: v.sanakhat_date };
     setRows(rs => rs.map(x => (x.id === v.id ? { ...x, ...body } : x)));
     setBusyId(v.id);
-    try { await api.patch(`/sanakhat/vehicles/${v.id}`, body, { suppressErrorToast: true }); toast.success(okMsg); }
+    try { await api.patch(`/sanakhat/vehicles/${v.id}`, body, { suppressErrorToast: true }); toast.success(okMsg); return true; }
     catch (ex) {
       setRows(rs => rs.map(x => (x.id === v.id ? { ...x, ...before } : x)));
       toast.error(typeof ex.response?.data?.detail === "string" ? ex.response.data.detail : "Could not save that change");
+      return false;
     } finally { setBusyId(null); }
   };
-  const setStatus = (v, k) => patch(v, { ownership_termination_status: k }, `${[v.brand, v.model].filter(Boolean).join(" ")}: Sanakhat ${STATES[k].short.toLowerCase()}`);
-  const setDate = (v, d) => patch(v, { sanakhat_date: d }, d ? "Date saved" : "Date cleared");
+  const saveDone = async (v, date) => {
+    const ok = await patch(v, { ownership_termination_status: "yes", sanakhat_date: date }, `${[v.brand, v.model].filter(Boolean).join(" ")}: Sanakhat done`);
+    if (ok) setDoneFor(null);
+  };
+  const undo = v => {
+    if (!window.confirm(`Mark Sanakhat of ${[v.brand, v.model].filter(Boolean).join(" ")} as not done?`)) return;
+    patch(v, { ownership_termination_status: "pending" }, "Marked as not done");
+  };
 
   if (loading) return <div className="flex items-center justify-center h-64"><div className="animate-spin w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full" /></div>;
 
   const FILTERS = [["all", "All", counts.all], ["pending", "Not done", counts.pending], ["yes", "Done", counts.yes]];
   return (
     <div className="space-y-4 animate-fade-in pb-8" data-testid="sanakhat-portal">
-      <div className={`${typing ? "hidden sm:flex" : "flex"} items-center gap-2.5`}>
-        <span className="size-9 rounded-xl bg-gradient-to-br from-blue-600 to-indigo-600 text-white flex items-center justify-center shadow-sm"><FileCheck2 size={18} /></span>
-        <div>
-          <h1 className="text-lg font-bold text-slate-900 leading-tight" style={FONT}>Sanakhat</h1>
-          <p className="text-xs text-slate-500">Search a bike and set its Sanakhat status and date</p>
-        </div>
-      </div>
-
       {/* Search */}
       <div className="rounded-xl bg-white border border-slate-200/80 shadow-sm p-3 space-y-3 sticky top-0 z-10">
         <form onSubmit={e => { e.preventDefault(); document.activeElement?.blur?.(); }} className="flex items-center gap-2" role="search">
@@ -157,7 +194,7 @@ export default function SanakhatPortal() {
             {q && <button type="button" onPointerDown={e => e.preventDefault()} onClick={() => setQ("")} aria-label="Clear search" className="absolute right-1.5 top-1/2 -translate-y-1/2 size-9 rounded-lg text-slate-400 hover:bg-slate-100 flex items-center justify-center"><X size={17} /></button>}
           </div>
           {/* Closes the keyboard so the whole list can be seen (the keyboard's own Enter / Search key does the same). */}
-          {typing && <button type="submit" onPointerDown={e => e.preventDefault()} className="sm:hidden h-11 px-4 rounded-lg bg-blue-600 text-white text-sm font-semibold shrink-0" data-testid="sanakhat-search-done">Done</button>}
+          {typing && <button type="submit" onPointerDown={e => e.preventDefault()} className="sm:hidden h-11 px-4 rounded-lg bg-blue-600 text-white text-sm font-semibold shrink-0" data-testid="sanakhat-search-done">Search</button>}
         </form>
         <div className={`${typing ? "hidden sm:block" : ""} -mx-3 px-3 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:mx-0 sm:px-0 sm:overflow-visible`}>
           <div className="flex items-center gap-2 w-max sm:w-auto sm:flex-wrap">
@@ -183,13 +220,14 @@ export default function SanakhatPortal() {
       ) : (
         <>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-3">
-            {list.slice(0, shown).map(v => <VehicleCard key={v.id} v={v} busy={busyId === v.id} onStatus={setStatus} onDate={setDate} />)}
+            {list.slice(0, shown).map(v => <VehicleCard key={v.id} v={v} busy={busyId === v.id} onDone={setDoneFor} onUndo={undo} />)}
           </div>
           {shown < list.length && (
             <div className="text-center"><button type="button" onClick={() => setShown(shown + PAGE)} className="h-10 px-6 rounded-xl border border-slate-200 bg-white text-sm font-semibold text-slate-700 hover:border-blue-300 hover:text-blue-700">Show more ({list.length - shown} left)</button></div>
           )}
         </>
       )}
+      {doneFor && <DoneModal v={doneFor} saving={busyId === doneFor.id} onCancel={() => setDoneFor(null)} onSave={saveDone} />}
     </div>
   );
 }

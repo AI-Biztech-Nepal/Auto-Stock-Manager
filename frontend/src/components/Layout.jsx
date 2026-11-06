@@ -282,7 +282,11 @@ export default function Layout() {
             <Menu size={20} />
           </button>
           {/* On every Marketing tab the page title sits here, level with the bell. */}
-          {pathname.startsWith("/marketing") ? (() => {
+          {pathname.startsWith("/sanakhat") ? (
+            <h1 className="flex-1 min-w-0 flex items-center gap-2 text-lg font-bold text-slate-900 truncate" data-testid="header-title">
+              <span className="size-8 shrink-0 rounded-lg bg-gradient-to-br from-blue-600 to-indigo-600 text-white flex items-center justify-center"><FileCheck2 size={17} /></span> Sanakhat
+            </h1>
+          ) : pathname.startsWith("/marketing") ? (() => {
             // Named after the tab that is open (Leads, CRM, Share...), like any other page's title.
             const tabs = marketingTabsFor(user?.role);
             const requested = new URLSearchParams(search).get("tab");
