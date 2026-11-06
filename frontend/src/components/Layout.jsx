@@ -105,10 +105,10 @@ export default function Layout() {
     if (!notifOpen) return;
     const onClickOutside = (e) => { if (!notifRef.current?.contains(e.target)) setNotifOpen(false); };
     const onEscape = (e) => { if (e.key === "Escape") setNotifOpen(false); };
-    document.addEventListener("mousedown", onClickOutside);
+    document.addEventListener("pointerdown", onClickOutside);
     document.addEventListener("keydown", onEscape);
     return () => {
-      document.removeEventListener("mousedown", onClickOutside);
+      document.removeEventListener("pointerdown", onClickOutside);
       document.removeEventListener("keydown", onEscape);
     };
   }, [notifOpen]);
@@ -133,7 +133,9 @@ export default function Layout() {
     return () => { clearInterval(id); document.removeEventListener("visibilitychange", onVisible); };
   }, [user]);
 
-  const Sidebar = ({ mobile = false }) => (
+  // A plain render function, not a component: declared inside Layout, a component would be a new type on every render
+  // and the whole sidebar would remount (losing taps on its buttons) whenever the polled data refreshed.
+  const renderSidebar = (mobile = false) => (
     <aside className={`${mobile ? "fixed inset-0 z-50 flex" : "hidden lg:flex"} flex-col bg-slate-900 text-white ${mobile ? "w-64" : "w-64"} h-app`}>
       {/* Logo */}
       <div className="flex items-center gap-3 px-6 py-5 border-b border-slate-700">
@@ -226,7 +228,7 @@ export default function Layout() {
       </nav>
 
       {/* User */}
-      <div className="px-4 py-4 border-t border-slate-700">
+      <div className="px-4 py-3 border-t border-slate-700" style={{ paddingBottom: "max(0.75rem, env(safe-area-inset-bottom))" }}>
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center text-white text-xs font-bold">
             {user?.name?.[0]?.toUpperCase() || "A"}
@@ -235,8 +237,8 @@ export default function Layout() {
             <div className="text-sm font-medium text-white truncate">{user?.name}</div>
             <div className="text-xs text-slate-400 capitalize">{user?.role}</div>
           </div>
-          <button onClick={handleLogout} className="text-slate-400 hover:text-white transition-colors" data-testid="logout-button">
-            <LogOut size={16} />
+          <button type="button" onClick={handleLogout} aria-label="Sign out" title="Sign out" className="touch-manipulation -mr-2 w-11 h-11 shrink-0 rounded-lg flex items-center justify-center text-slate-400 hover:text-white hover:bg-slate-800 active:bg-slate-700 transition-colors" data-testid="logout-button">
+            <LogOut size={18} />
           </button>
         </div>
       </div>
@@ -246,13 +248,13 @@ export default function Layout() {
   return (
     <div className="flex h-app overflow-hidden bg-slate-50 pl-safe pr-safe">
       {/* Desktop Sidebar */}
-      <Sidebar />
+      {renderSidebar()}
 
       {/* Mobile Overlay */}
       {sidebarOpen && (
         <div className="lg:hidden fixed inset-0 z-40 bg-black/50" onClick={() => setSidebarOpen(false)}>
           <div onClick={(e) => e.stopPropagation()}>
-            <Sidebar mobile />
+            {renderSidebar(true)}
           </div>
         </div>
       )}
@@ -283,8 +285,11 @@ export default function Layout() {
           {canSeeInventory && (
             <div className="relative" ref={notifRef}>
               <button
+                type="button"
                 onClick={() => setNotifOpen(o => !o)}
-                className="relative w-11 h-11 rounded-lg border border-slate-200 flex items-center justify-center text-slate-500 hover:bg-slate-50 transition-colors"
+                aria-label="Notifications"
+                aria-expanded={notifOpen}
+                className="touch-manipulation relative w-11 h-11 rounded-lg border border-slate-200 flex items-center justify-center text-slate-500 hover:bg-slate-50 transition-colors"
                 data-testid="notif-bell-btn"
                 title="Vehicles needing attention"
               >
@@ -298,7 +303,7 @@ export default function Layout() {
 
               {notifOpen && (
                 <div
-                  className="absolute right-0 top-full mt-2 w-80 max-w-[calc(100vw-2rem)] bg-white rounded-xl border border-slate-200 shadow-2xl overflow-hidden z-50"
+                  className="fixed inset-x-3 top-[calc(3.5rem+env(safe-area-inset-top)+0.5rem)] sm:absolute sm:inset-x-auto sm:right-0 sm:top-full sm:mt-2 sm:w-80 bg-white rounded-xl border border-slate-200 shadow-2xl overflow-hidden z-50"
                   data-testid="notif-panel"
                 >
                   <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
