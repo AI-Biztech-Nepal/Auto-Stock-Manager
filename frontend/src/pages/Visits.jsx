@@ -237,23 +237,43 @@ const VisitHeader = () => (
   </div>
 );
 
-// One visit as a row of the table; click it to open the page-by-page timeline.
+// One visit as a row of the table (a compact card on a phone); click it to open the page-by-page timeline.
 const VisitTile = ({ v, onOpen }) => {
   const Dev = v.device === "mobile" ? Smartphone : Monitor;
   const quick = v.seconds === 0;
+  const route = v.paths.map(pageName).join("  ›  ");
+  const email = v.email
+    ? <span className="inline-flex items-center gap-1 min-w-0 text-xs font-semibold text-emerald-700" title={`Registered: ${v.email}`} data-testid="visit-email"><Mail size={12} className="shrink-0" /><span className="truncate">{v.email}</span></span>
+    : <span className="text-xs text-slate-300" title="Not signed in">Guest</span>;
   return (
     <button type="button" onClick={onOpen} role="row"
-      className={`w-full text-left bg-white border border-slate-200/80 rounded-xl px-4 py-3 flex flex-wrap items-center gap-x-3 gap-y-1.5 min-w-0 transition shadow-[0_1px_3px_rgba(15,23,42,0.06)] hover:shadow-md hover:border-blue-300 ${VISIT_COLS}`}>
-      <span className="flex items-center gap-2 text-sm font-semibold text-slate-800 whitespace-nowrap"><Dev size={15} className="text-slate-500 shrink-0" />{v.started}</span>
-      <span className={`flex items-center gap-1.5 text-sm font-bold whitespace-nowrap ${quick ? "text-slate-400" : "text-slate-900"}`} style={FONT}><Clock size={13} className="text-slate-400 shrink-0" />{fmtDuration(v.seconds)}</span>
-      <span className="text-xs text-slate-500 whitespace-nowrap">{v.pages} {v.pages === 1 ? "page" : "pages"}</span>
-      <span className="text-xs text-slate-600 truncate min-w-[140px] basis-full md:basis-auto" title={v.paths.map(pageName).join(", ")}>{v.paths.map(pageName).join("  ›  ")}</span>
-      <span className="min-w-0"><span className="inline-block max-w-full truncate align-middle text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">{v.source}</span></span>
-      <span className="text-xs text-slate-500 capitalize whitespace-nowrap">{v.device}</span>
-      {v.email
-        ? <span className="inline-flex items-center gap-1 min-w-0 text-xs font-semibold text-emerald-700" title={`Registered: ${v.email}`} data-testid="visit-email"><Mail size={12} className="shrink-0" /><span className="truncate">{v.email}</span></span>
-        : <span className="text-xs text-slate-300" title="Not signed in">Guest</span>}
-      <span className="font-mono text-xs text-slate-400">{v.visitor}</span>
+      className="block w-full text-left bg-white border border-slate-200/80 rounded-xl px-4 py-3 min-w-0 transition shadow-[0_1px_3px_rgba(15,23,42,0.06)] hover:shadow-md hover:border-blue-300">
+      {/* Phone: time and duration on top, the pages opened, then source, pages and device, then who it was. */}
+      <div className="md:hidden space-y-2">
+        <div className="flex items-center justify-between gap-3">
+          <span className="flex items-center gap-2 text-sm font-semibold text-slate-800"><Dev size={15} className="text-slate-500 shrink-0" />{v.started}</span>
+          <span className={`flex items-center gap-1 text-sm font-bold whitespace-nowrap ${quick ? "text-slate-400" : "text-slate-900"}`} style={FONT}><Clock size={13} className="text-slate-400" />{fmtDuration(v.seconds)}</span>
+        </div>
+        <p className="text-xs text-slate-600 line-clamp-2 break-words" title={route}>{route}</p>
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500">
+          <span className="max-w-[60%] truncate px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">{v.source}</span>
+          <span>{v.pages} {v.pages === 1 ? "page" : "pages"}</span>
+          <span className="capitalize">{v.device}</span>
+          <span className="ml-auto font-mono text-slate-400">{v.visitor}</span>
+        </div>
+        <div className="flex items-center gap-1.5 border-t border-slate-100 pt-2">{email}</div>
+      </div>
+      {/* Laptop: one table row. */}
+      <div className={`hidden items-center ${VISIT_COLS}`}>
+        <span className="flex items-center gap-2 text-sm font-semibold text-slate-800 whitespace-nowrap"><Dev size={15} className="text-slate-500 shrink-0" />{v.started}</span>
+        <span className={`flex items-center gap-1.5 text-sm font-bold whitespace-nowrap ${quick ? "text-slate-400" : "text-slate-900"}`} style={FONT}><Clock size={13} className="text-slate-400 shrink-0" />{fmtDuration(v.seconds)}</span>
+        <span className="text-xs text-slate-500 whitespace-nowrap">{v.pages} {v.pages === 1 ? "page" : "pages"}</span>
+        <span className="text-xs text-slate-600 truncate" title={route}>{route}</span>
+        <span className="min-w-0"><span className="inline-block max-w-full truncate align-middle text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">{v.source}</span></span>
+        <span className="text-xs text-slate-500 capitalize whitespace-nowrap">{v.device}</span>
+        {email}
+        <span className="font-mono text-xs text-slate-400">{v.visitor}</span>
+      </div>
     </button>
   );
 };

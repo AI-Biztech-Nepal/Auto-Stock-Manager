@@ -5693,7 +5693,11 @@ async def visits_search(days: int = 30, skip: int = 0, cu: dict = Depends(admin_
     days = max(1, min(days, 365)); skip = max(0, min(skip, 30))
     if not GSC_CREDENTIALS_JSON:
         return {"configured": False}
-    token = await asyncio.to_thread(_gsc_token)
+    try:
+        token = await asyncio.to_thread(_gsc_token)
+    except Exception as ex:  # bad or missing key, wrong key format, Google refusing the sign-in
+        logger.exception("Search Console sign-in failed")
+        raise HTTPException(502, f"Could not sign in to Google Search Console ({type(ex).__name__}). Check GSC_CREDENTIALS_JSON on the backend.")
     end = datetime.now(timezone.utc).date() - timedelta(days=skip)
     start = end - timedelta(days=days - 1)
     url = f"https://searchconsole.googleapis.com/webmasters/v3/sites/{quote(GSC_SITE_URL, safe='')}/searchAnalytics/query"
@@ -5703,11 +5707,19 @@ async def visits_search(days: int = 30, skip: int = 0, cu: dict = Depends(admin_
                 "startDate": start.isoformat(), "endDate": end.isoformat(),
                 "dimensions": [dim], "rowLimit": limit})
         if resp.status_code != 200:
-            raise HTTPException(502, f"Google Search Console error: {resp.json().get('error', {}).get('message', resp.status_code)}")
+            try: why = resp.json().get("error", {}).get("message") or resp.status_code
+            except Exception: why = resp.status_code
+            raise HTTPException(502, f"Google Search Console error: {why}")
         return [{"name": r["keys"][0], "clicks": int(r["clicks"]), "impressions": int(r["impressions"]),
                  "position": round(r["position"], 1)} for r in resp.json().get("rows", [])]
-    queries, countries, pages, daily = await asyncio.gather(
-        query("query", 500), query("country", 100), query("page", 100), query("date", 400))
+    try:
+        queries, countries, pages, daily = await asyncio.gather(
+            query("query", 500), query("country", 100), query("page", 100), query("date", 400))
+    except HTTPException:
+        raise
+    except Exception as ex:  # timeout / network error reaching Google
+        logger.exception("Search Console request failed")
+        raise HTTPException(502, f"Could not reach Google Search Console ({type(ex).__name__}). Try again in a minute.")
     for p in pages:  # show the path, not the full address
         p["name"] = urlparse(p["name"]).path or "/"
     pages = (await _name_vehicle_pages({"top_pages": pages}))["top_pages"]
