@@ -227,23 +227,33 @@ const TopBikes = ({ rows, linkBase }) => {
   );
 };
 
-// One visit as a single full-width clickable line with every detail; click it to open the page-by-page timeline.
+// The "Every visit" table: one column per detail, so the emails of registered visitors line up in their own column.
+const VISIT_COLS = "md:grid md:grid-cols-[10.5rem_8rem_4.5rem_minmax(0,1fr)_9rem_5rem_15rem_4.5rem] md:gap-x-3";
+const VISIT_HEAD = ["Time", "Time on site", "Pages", "Pages visited", "Source", "Device", "Email", "Visitor"];
+
+const VisitHeader = () => (
+  <div className={`hidden ${VISIT_COLS} sticky top-0 z-10 items-center rounded-xl bg-slate-100 border border-slate-200 px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-slate-500`} role="row">
+    {VISIT_HEAD.map(h => <span key={h} role="columnheader">{h}</span>)}
+  </div>
+);
+
+// One visit as a row of the table; click it to open the page-by-page timeline.
 const VisitTile = ({ v, onOpen }) => {
   const Dev = v.device === "mobile" ? Smartphone : Monitor;
   const quick = v.seconds === 0;
   return (
-    <button type="button" onClick={onOpen}
-      className="w-full text-left bg-white border border-slate-200/80 rounded-xl px-4 py-3 flex flex-wrap md:flex-nowrap items-center gap-x-3 gap-y-1.5 min-w-0 transition shadow-[0_1px_3px_rgba(15,23,42,0.06)] hover:shadow-md hover:border-blue-300">
-      <span className="flex items-center gap-2 text-sm font-semibold text-slate-800 whitespace-nowrap md:w-44 shrink-0"><Dev size={15} className="text-slate-500" />{v.started}</span>
-      <span className={`flex items-center gap-1.5 text-sm font-bold whitespace-nowrap md:w-36 shrink-0 ${quick ? "text-slate-400" : "text-slate-900"}`} style={FONT}><Clock size={13} className="text-slate-400" />{fmtDuration(v.seconds)}</span>
-      <span className="text-xs text-slate-500 whitespace-nowrap md:w-16 shrink-0">{v.pages} {v.pages === 1 ? "page" : "pages"}</span>
-      <span className="text-xs text-slate-600 truncate flex-1 min-w-[140px] basis-full md:basis-0" title={v.paths.map(pageName).join(", ")}>{v.paths.map(pageName).join("  ›  ")}</span>
-      <span className="text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 whitespace-nowrap shrink-0 max-w-[140px] truncate">{v.source}</span>
-      <span className="text-xs text-slate-500 capitalize whitespace-nowrap shrink-0 md:w-16">{v.device}</span>
+    <button type="button" onClick={onOpen} role="row"
+      className={`w-full text-left bg-white border border-slate-200/80 rounded-xl px-4 py-3 flex flex-wrap items-center gap-x-3 gap-y-1.5 min-w-0 transition shadow-[0_1px_3px_rgba(15,23,42,0.06)] hover:shadow-md hover:border-blue-300 ${VISIT_COLS}`}>
+      <span className="flex items-center gap-2 text-sm font-semibold text-slate-800 whitespace-nowrap"><Dev size={15} className="text-slate-500 shrink-0" />{v.started}</span>
+      <span className={`flex items-center gap-1.5 text-sm font-bold whitespace-nowrap ${quick ? "text-slate-400" : "text-slate-900"}`} style={FONT}><Clock size={13} className="text-slate-400 shrink-0" />{fmtDuration(v.seconds)}</span>
+      <span className="text-xs text-slate-500 whitespace-nowrap">{v.pages} {v.pages === 1 ? "page" : "pages"}</span>
+      <span className="text-xs text-slate-600 truncate min-w-[140px] basis-full md:basis-auto" title={v.paths.map(pageName).join(", ")}>{v.paths.map(pageName).join("  ›  ")}</span>
+      <span className="min-w-0"><span className="inline-block max-w-full truncate align-middle text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">{v.source}</span></span>
+      <span className="text-xs text-slate-500 capitalize whitespace-nowrap">{v.device}</span>
       {v.email
-        ? <span className="inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 whitespace-nowrap shrink-0 max-w-[220px]" title={`Registered: ${v.email}`} data-testid="visit-email"><Mail size={11} className="shrink-0" /><span className="truncate">{v.email}</span></span>
-        : <span className="text-xs text-slate-300 whitespace-nowrap shrink-0" title="Not signed in">Guest</span>}
-      <span className="font-mono text-xs text-slate-400 shrink-0">{v.visitor}</span>
+        ? <span className="inline-flex items-center gap-1 min-w-0 text-xs font-semibold text-emerald-700" title={`Registered: ${v.email}`} data-testid="visit-email"><Mail size={12} className="shrink-0" /><span className="truncate">{v.email}</span></span>
+        : <span className="text-xs text-slate-300" title="Not signed in">Guest</span>}
+      <span className="font-mono text-xs text-slate-400">{v.visitor}</span>
     </button>
   );
 };
@@ -396,7 +406,8 @@ export default function Visits({ embedded = false }) {
             </div>
             {eng && <span className="text-xs text-slate-500">{eng.visits} visits · {eng.pages_per_visit} pages each · longest {eng.longest_minutes} min · {eng.quick_visit_pct}% left after one page</span>}
           </div>
-          <div className="space-y-2">
+          <div className="space-y-2" role="table" aria-label="Every visit">
+            <VisitHeader />
             {visitList.slice(0, shown).map((v, i) => <VisitTile key={`${v.visitor}-${v.started}-${i}`} v={v} onOpen={() => setOpen(i)} />)}
           </div>
           {shown < visitList.length && (
