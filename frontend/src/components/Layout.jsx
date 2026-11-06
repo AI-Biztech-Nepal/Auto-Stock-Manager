@@ -53,6 +53,16 @@ export default function Layout() {
   // registration number so gaps get caught without staff having to go hunting for
   // them in Inventory. Only fetched for roles that can actually open Inventory.
   const canSeeInventory = canAccessPath(user?.role, "/inventory");
+  const [profileOpen, setProfileOpen] = useState(false);
+  const profileRef = useRef(null);
+  useEffect(() => {
+    if (!profileOpen) return;
+    const onDown = (e) => { if (!profileRef.current?.contains(e.target)) setProfileOpen(false); };
+    const onEsc = (e) => { if (e.key === "Escape") setProfileOpen(false); };
+    document.addEventListener("pointerdown", onDown);
+    document.addEventListener("keydown", onEsc);
+    return () => { document.removeEventListener("pointerdown", onDown); document.removeEventListener("keydown", onEsc); };
+  }, [profileOpen]);
   const [notifOpen, setNotifOpen] = useState(false);
   const [notifVehicles, setNotifVehicles] = useState([]);
   const notifRef = useRef(null);
@@ -355,11 +365,25 @@ export default function Layout() {
               )}
             </div>
           )}
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center text-white text-xs font-bold">
-              {user?.name?.[0]?.toUpperCase() || "A"}
-            </div>
-            <span className="hidden sm:block text-sm font-medium text-slate-700">{user?.name}</span>
+          <div className="relative" ref={profileRef}>
+            <button type="button" onClick={() => setProfileOpen(o => !o)} aria-label="Account menu" aria-expanded={profileOpen} data-testid="profile-btn"
+              className="touch-manipulation flex items-center gap-2 h-11 pl-1 pr-1 sm:pr-2 rounded-full hover:bg-slate-50 transition-colors">
+              <span className="w-9 h-9 rounded-full bg-blue-600 flex items-center justify-center text-white text-sm font-bold">{user?.name?.[0]?.toUpperCase() || "A"}</span>
+              <span className="hidden sm:block text-sm font-medium text-slate-700">{user?.name}</span>
+              <ChevronDown size={14} className={`hidden sm:block text-slate-400 transition-transform ${profileOpen ? "rotate-180" : ""}`} />
+            </button>
+            {profileOpen && (
+              <div className="absolute right-0 top-full mt-2 w-64 bg-white rounded-xl border border-slate-200 shadow-2xl overflow-hidden z-50" data-testid="profile-menu">
+                <div className="px-4 py-3 border-b border-slate-100">
+                  <div className="text-sm font-semibold text-slate-900 truncate">{user?.name}</div>
+                  <div className="text-xs text-slate-500 truncate">{user?.username}</div>
+                  <div className="mt-1 inline-block text-[11px] font-semibold text-blue-700 bg-blue-50 rounded-full px-2 py-0.5 capitalize">{String(user?.role || "admin").replace(/_/g, " ")}</div>
+                </div>
+                <button type="button" onClick={handleLogout} className="w-full flex items-center gap-2.5 px-4 h-12 text-sm font-semibold text-red-600 hover:bg-red-50" data-testid="profile-logout">
+                  <LogOut size={16} /> Sign out
+                </button>
+              </div>
+            )}
           </div>
         </header>
 

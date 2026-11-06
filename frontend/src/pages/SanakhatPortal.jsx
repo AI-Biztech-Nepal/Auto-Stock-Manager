@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
-import { Search, X, CheckCircle2, Clock, XCircle, FileCheck2, Bike, CalendarDays, AlertTriangle, SearchX } from "lucide-react";
+import { Search, X, CheckCircle2, Clock, XCircle, FileCheck2, Bike, AlertTriangle, SearchX } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
+import BSDatePicker from "../components/BSDatePicker";
 
 // The Sanakhat desk: every vehicle in the company, whatever its stock status, with its Sanaakhat (ownership
 // termination) progress. Search for a bike, see at a glance whether its Sanakhat is done, and update it.
@@ -29,28 +30,8 @@ const daysSince = d => {
   const t = new Date(`${(d || "").slice(0, 10)}T00:00:00`);
   return isNaN(t) ? null : Math.max(0, Math.floor((Date.now() - t.getTime()) / 86400000));
 };
-const fmtDate = d => (d ? new Date(`${d.slice(0, 10)}T00:00:00`).toLocaleDateString("en", { day: "numeric", month: "short", year: "numeric" }) : "");
 
-function Ring({ pct }) {
-  const r = 34, c = 2 * Math.PI * r;
-  return (
-    <svg viewBox="0 0 80 80" className="size-16 shrink-0 -rotate-90" aria-hidden="true">
-      <circle cx="40" cy="40" r={r} fill="none" stroke="rgba(255,255,255,0.22)" strokeWidth="9" />
-      <circle cx="40" cy="40" r={r} fill="none" stroke="#fff" strokeWidth="9" strokeLinecap="round" strokeDasharray={c} strokeDashoffset={c * (1 - pct / 100)} style={{ transition: "stroke-dashoffset .6s ease" }} />
-    </svg>
-  );
-}
-
-const Tile = ({ icon: Icon, value, label, tone, active, onClick }) => (
-  <button type="button" onClick={onClick} aria-pressed={active}
-    className={`text-left rounded-xl border px-3 py-2 flex items-center gap-2.5 transition hover:shadow-md ${active ? "border-blue-500 ring-2 ring-blue-100 bg-white" : "border-slate-200/80 bg-white"}`}>
-    <span className={`size-8 shrink-0 rounded-lg flex items-center justify-center ${tone}`}><Icon size={16} /></span>
-    <span className="min-w-0">
-      <span className="block text-lg font-bold text-slate-900 leading-none" style={FONT}>{value.toLocaleString()}</span>
-      <span className="block mt-0.5 text-[11px] text-slate-500 truncate">{label}</span>
-    </span>
-  </button>
-);
+const ACCENT = { yes: "bg-emerald-500", pending: "bg-amber-400", no: "bg-red-500" };
 
 function VehicleCard({ v, busy, onStatus, onDate }) {
   const st = STATES[v.ownership_termination_status] || STATES.pending;
@@ -59,45 +40,45 @@ function VehicleCard({ v, busy, onStatus, onDate }) {
   const overdue = waiting !== null && waiting > OVERDUE_DAYS && v.status !== "sold" && v.status !== "scrap";
   return (
     <div data-testid="sanakhat-card" data-state={v.ownership_termination_status}
-      className={`rounded-xl border p-3 transition shadow-sm ${st.ring} ${busy ? "opacity-70" : ""}`}>
-      <div className="flex items-start gap-2.5">
-        <span className="size-9 shrink-0 rounded-lg bg-white border border-slate-200 text-slate-500 flex items-center justify-center"><Bike size={17} /></span>
+      className={`relative overflow-hidden rounded-2xl border border-slate-200/80 bg-white pl-4 pr-3.5 py-3.5 shadow-sm transition hover:shadow-md ${busy ? "opacity-70" : ""}`}>
+      <span aria-hidden className={`absolute inset-y-0 left-0 w-1.5 ${ACCENT[v.ownership_termination_status] || ACCENT.pending}`} />
+      <div className="flex items-start gap-3">
+        <span className={`size-10 shrink-0 rounded-xl flex items-center justify-center ${st.chip}`}><Bike size={19} /></span>
         <div className="min-w-0 flex-1">
-          <h3 className="text-sm font-bold text-slate-900 leading-tight truncate" style={FONT}>{[v.brand, v.model, v.year].filter(Boolean).join(" ")}</h3>
-          <div className="mt-1 flex flex-wrap items-center gap-1.5">
+          <h3 className="font-bold text-slate-900 leading-tight truncate" style={FONT}>{[v.brand, v.model, v.year].filter(Boolean).join(" ")}</h3>
+          <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
             {v.registration_number
-              ? <span className="font-mono text-[11px] font-semibold text-slate-700 bg-white border border-slate-200 rounded px-1.5 py-0.5">{v.registration_number}</span>
-              : <span className="text-[11px] text-slate-400 italic">No number yet</span>}
+              ? <span className="font-mono text-xs font-bold tracking-wide text-slate-800 bg-slate-100 border border-slate-200 rounded-md px-2 py-0.5">{v.registration_number}</span>
+              : <span className="text-xs text-slate-400 italic">No number yet</span>}
             <span className={`text-[11px] font-semibold rounded-full px-2 py-0.5 ${stockCls}`}>{stockLabel}</span>
+            {v.color && <span className="text-[11px] text-slate-400">{v.color}</span>}
           </div>
         </div>
-        <span className={`shrink-0 inline-flex items-center gap-1 text-[11px] font-bold rounded-full px-2 py-0.5 ${st.chip}`}><st.Icon size={13} />{st.short}</span>
+        <span className={`shrink-0 inline-flex items-center gap-1 text-xs font-bold rounded-full px-2.5 py-1 ${st.chip}`}><st.Icon size={13} />{st.short}</span>
       </div>
 
-      <div role="group" aria-label="Sanakhat status" className="mt-2.5 grid grid-cols-3 gap-0.5 rounded-lg bg-white border border-slate-200 p-0.5">
+      <div role="group" aria-label="Sanakhat status" className="mt-3.5 grid grid-cols-3 gap-1 rounded-xl bg-slate-100 p-1">
         {["yes", "pending", "no"].map(k => {
           const s = STATES[k]; const on = v.ownership_termination_status === k;
           return (
             <button key={k} type="button" disabled={busy || on} onClick={() => onStatus(v, k)} aria-pressed={on} data-testid={`sanakhat-set-${k}`}
-              className={`touch-manipulation h-8 rounded-md text-xs font-semibold inline-flex items-center justify-center gap-1 transition ${on ? s.on : "text-slate-500 hover:bg-slate-50"}`}>
-              <s.Icon size={13} />{s.short}
+              className={`touch-manipulation h-9 rounded-lg text-sm font-semibold inline-flex items-center justify-center gap-1.5 transition ${on ? s.on : "text-slate-500 hover:bg-white hover:text-slate-800"}`}>
+              <s.Icon size={15} />{s.short}
             </button>
           );
         })}
       </div>
 
-      <div className="mt-2 flex flex-wrap items-center gap-x-2.5 gap-y-1.5">
-        <label className="inline-flex items-center gap-1.5 text-[11px] text-slate-500">
-          <CalendarDays size={13} className="text-slate-400" /> Reached the shop
-          <input type="date" value={(v.sanakhat_date || "").slice(0, 10)} onChange={e => onDate(v, e.target.value)} disabled={busy}
-            className="h-7 rounded-md border border-slate-200 bg-white px-1.5 text-[11px] text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-400" data-testid="sanakhat-date" />
-        </label>
+      <div className="mt-3 flex items-center gap-2">
+        <div className="min-w-0 flex-1">
+          <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Sanakhat date (BS)</div>
+          <BSDatePicker value={(v.sanakhat_date || "").slice(0, 10)} onChange={d => onDate(v, d)} />
+        </div>
         {waiting !== null && (
-          <span className={`inline-flex items-center gap-1 text-[11px] font-semibold rounded-full px-2 py-0.5 ${overdue ? "bg-red-100 text-red-700" : "bg-slate-100 text-slate-600"}`}>
-            {overdue && <AlertTriangle size={12} />}{waiting === 0 ? "Started today" : `${waiting} day${waiting > 1 ? "s" : ""} waiting`}
+          <span className={`shrink-0 self-end mb-6 inline-flex items-center gap-1 text-xs font-semibold rounded-full px-2.5 py-1 ${overdue ? "bg-red-100 text-red-700" : "bg-slate-100 text-slate-600"}`}>
+            {overdue && <AlertTriangle size={12} />}{waiting === 0 ? "Today" : `${waiting} day${waiting > 1 ? "s" : ""}`}
           </span>
         )}
-        {v.ownership_termination_status === "yes" && v.sanakhat_date && <span className="text-xs text-slate-400">Started {fmtDate(v.sanakhat_date)}</span>}
       </div>
     </div>
   );
@@ -125,7 +106,6 @@ export default function SanakhatPortal({ embedded = false }) {
     rows.forEach(v => { c[v.ownership_termination_status] = (c[v.ownership_termination_status] || 0) + 1; });
     return c;
   }, [rows]);
-  const pct = counts.all ? Math.round((counts.yes / counts.all) * 100) : 0;
 
   const list = useMemo(() => {
     const t = q.trim().toLowerCase().replace(/\s+/g, " ");
@@ -158,27 +138,12 @@ export default function SanakhatPortal({ embedded = false }) {
   const FILTERS = [["all", "All", counts.all], ["pending", "Not done", counts.pending], ["yes", "Done", counts.yes], ["no", "No", counts.no]];
   return (
     <div className="space-y-3 animate-fade-in" data-testid="sanakhat-portal">
-      {/* Banner: overall progress */}
-      <section className="rounded-2xl bg-gradient-to-br from-blue-700 via-blue-600 to-indigo-600 text-white px-4 py-3 sm:px-5 shadow-md">
-        <div className="flex items-center gap-3 sm:gap-4">
-          <div className="relative">
-            <Ring pct={pct} />
-            <span className="absolute inset-0 flex items-center justify-center text-sm font-bold" style={FONT}>{pct}%</span>
-          </div>
-          <div className="min-w-0">
-            <div className="flex items-center gap-1.5 text-blue-100 text-[11px] font-semibold uppercase tracking-wider"><FileCheck2 size={13} /> Sanakhat desk</div>
-            <h1 className="mt-0.5 text-base sm:text-lg font-bold leading-tight" style={FONT}>{counts.yes.toLocaleString()} of {counts.all.toLocaleString()} bikes done</h1>
-            <p className="text-xs sm:text-sm text-blue-100">{counts.pending.toLocaleString()} still waiting{counts.no ? `, ${counts.no} refused` : ""}. Search a bike below and update its Sanakhat.</p>
-          </div>
+      <div className="flex items-center gap-2.5">
+        <span className="size-9 rounded-xl bg-gradient-to-br from-blue-600 to-indigo-600 text-white flex items-center justify-center shadow-sm"><FileCheck2 size={18} /></span>
+        <div>
+          <h1 className="text-lg font-bold text-slate-900 leading-tight" style={FONT}>Sanakhat</h1>
+          <p className="text-xs text-slate-500">Search a bike and set its Sanakhat status and date</p>
         </div>
-      </section>
-
-      {/* Filter tiles */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
-        <Tile icon={Bike} value={counts.all} label="All vehicles" tone="bg-slate-100 text-slate-600" active={filter === "all"} onClick={() => setFilter("all")} />
-        <Tile icon={Clock} value={counts.pending} label="Not done yet" tone="bg-amber-100 text-amber-700" active={filter === "pending"} onClick={() => setFilter(filter === "pending" ? "all" : "pending")} />
-        <Tile icon={CheckCircle2} value={counts.yes} label="Done" tone="bg-emerald-100 text-emerald-700" active={filter === "yes"} onClick={() => setFilter(filter === "yes" ? "all" : "yes")} />
-        <Tile icon={XCircle} value={counts.no} label="Refused / No" tone="bg-red-100 text-red-700" active={filter === "no"} onClick={() => setFilter(filter === "no" ? "all" : "no")} />
       </div>
 
       {/* Search */}
