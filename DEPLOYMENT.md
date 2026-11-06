@@ -129,12 +129,12 @@ Search Console data runs 2 to 3 days behind and only exists from when the site w
 
 Vehicle photos and legal documents used to live in MySQL as base64 and pass through the backend on every
 view (with up to 300MB of them cached in its memory). With Supabase Storage switched on, they are kept in the
-FINANCE Supabase project instead (`backend/media_storage.py`): photos in the public `asm-photos` bucket, served
+Auto Stock Manager's own Supabase project instead (`backend/media_storage.py`): photos in the public `asm-photos` bucket, served
 by its CDN; documents in the private `asm-documents` bucket, opened through hour-long signed links. The app's
 `/file` links keep working and redirect there, and the storefront gets the CDN links directly.
 
-1. Supabase (FINANCE project) → SQL Editor: run `FINANCE/supabase/migrations/0013_asm_media_buckets.sql`.
-2. On the VPS, in the backend's `.env`: `SUPABASE_URL=https://boiiqzkkbyzqkqsxuzyp.supabase.co` and
+1. Supabase (this app's project) → SQL Editor: run `backend/supabase/0001_media_buckets.sql`.
+2. On the VPS, in the backend's `.env`: `SUPABASE_URL=https://<your-project-ref>.supabase.co` and
    `SUPABASE_SERVICE_ROLE_KEY=` (Project Settings → API → service_role; server-side only, never the
    frontend). Restart the backend. From here on new uploads go to Storage.
 3. Move what is already there, from `~/auto-stock-manager/backend/`:
@@ -149,7 +149,7 @@ Without the two settings nothing changes: uploads keep going into MySQL, as befo
 
 ## Copying the database to Supabase (MySQL stays as it is)
 
-`backend/copy_mysql_to_supabase.py` copies every MySQL table into the FINANCE Supabase project as
+`backend/copy_mysql_to_supabase.py` copies every MySQL table into Auto Stock Manager's own Supabase project as
 `asm_<table>` (Row Level Security on, no policies: only the service role key can reach them). It only reads
 MySQL; the app keeps running on it. Re-run any time to bring Supabase up to date. Uses the same two Supabase
 settings as above. From `~/auto-stock-manager/backend/`:

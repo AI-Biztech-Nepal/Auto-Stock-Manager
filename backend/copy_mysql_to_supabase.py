@@ -1,4 +1,4 @@
-"""Copies Auto Stock Manager's MySQL database into Supabase Postgres (the FINANCE project), table by table.
+"""Copies Auto Stock Manager's MySQL database into Supabase Postgres, table by table.
 
 Read-only on the MySQL side: nothing on the VPS is changed or deleted, and the app keeps running on MySQL
 as before. Run it as often as you like - each run brings Supabase up to date (rows are matched on their
@@ -10,8 +10,7 @@ Run on the VPS from backend/, with the backend's .env (MySQL + SUPABASE_URL + SU
     venv/bin/python copy_mysql_to_supabase.py copy     # copies every row
     venv/bin/python copy_mysql_to_supabase.py check    # row counts, MySQL next to Supabase
 
-Every table lands in Supabase's public schema as asm_<table> (asm_vehicles, asm_sales, ...), so nothing can
-clash with the Finance app's own tables. Row Level Security is switched on with no policies: only the
+Every table lands in Supabase's public schema as asm_<table> (asm_vehicles, asm_sales, ...). Row Level Security is switched on with no policies: only the
 service role key (this script, and later the backend) can read or write them - never the public API key.
 
 Left out: the base64 `data` of vehicle_photos / legal_documents (the files go to Supabase Storage - see
@@ -106,7 +105,7 @@ async def schema():
     lines += ["commit;", "", "-- Lets Supabase's API see the new tables straight away.", "notify pgrst, 'reload schema';", ""]
     SCHEMA_FILE.write_text("\n".join(lines))
     missing_pk = [n for n, t in meta.items() if not t["pk"]]
-    print(f"Wrote {SCHEMA_FILE} - {len(meta)} tables. Paste it into Supabase (FINANCE) -> SQL Editor -> Run.")
+    print(f"Wrote {SCHEMA_FILE} - {len(meta)} tables. Paste it into Supabase -> SQL Editor -> Run.")
     if missing_pk:
         print(f"No primary key (copied fresh each run, see copy): {', '.join(sorted(missing_pk))}")
 

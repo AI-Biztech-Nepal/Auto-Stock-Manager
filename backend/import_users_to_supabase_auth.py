@@ -1,5 +1,5 @@
 """Gives every Auto Stock Manager login a Supabase Auth login with the same password, and records its company and
-role in asm_members (FINANCE/supabase/migrations/0014_asm_security.sql). Step 1 of moving the app to Supabase.
+role in asm_members (backend/supabase/0002_security.sql). Step 1 of moving the app to Supabase.
 
 Read-only on MySQL; the app keeps logging people in exactly as before until its screens are switched over.
 
@@ -11,8 +11,7 @@ nobody's password changes and nobody's password is ever seen.
 Usernames: Supabase logs people in by email. An account whose username is an email keeps it; any other
 username (e.g. "admin") becomes <username>@<ASM_STAFF_EMAIL_DOMAIN> (default staff.hamroauto.local), and the
 login screen will turn a plain username into that address.
-An email that already has a Supabase login (an owner who also uses Finance) is linked, not created: that login
-and its password stay as they are.
+An email that already has a Supabase login is linked, not created: that login and its password stay as they are.
 """
 import asyncio
 import os
