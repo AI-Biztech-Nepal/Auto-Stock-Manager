@@ -34,7 +34,7 @@ const fmtDate = d => (d ? new Date(`${d.slice(0, 10)}T00:00:00`).toLocaleDateStr
 function Ring({ pct }) {
   const r = 34, c = 2 * Math.PI * r;
   return (
-    <svg viewBox="0 0 80 80" className="size-24 shrink-0 -rotate-90" aria-hidden="true">
+    <svg viewBox="0 0 80 80" className="size-16 shrink-0 -rotate-90" aria-hidden="true">
       <circle cx="40" cy="40" r={r} fill="none" stroke="rgba(255,255,255,0.22)" strokeWidth="9" />
       <circle cx="40" cy="40" r={r} fill="none" stroke="#fff" strokeWidth="9" strokeLinecap="round" strokeDasharray={c} strokeDashoffset={c * (1 - pct / 100)} style={{ transition: "stroke-dashoffset .6s ease" }} />
     </svg>
@@ -43,10 +43,12 @@ function Ring({ pct }) {
 
 const Tile = ({ icon: Icon, value, label, tone, active, onClick }) => (
   <button type="button" onClick={onClick} aria-pressed={active}
-    className={`text-left rounded-2xl border p-4 transition shadow-[0_1px_3px_rgba(15,23,42,0.06)] hover:shadow-md ${active ? "border-blue-500 ring-2 ring-blue-100 bg-white" : "border-slate-200/80 bg-white"}`}>
-    <span className={`size-9 rounded-xl flex items-center justify-center ${tone}`}><Icon size={18} /></span>
-    <div className="mt-2 text-2xl font-bold text-slate-900 leading-none" style={FONT}>{value.toLocaleString()}</div>
-    <div className="mt-1 text-xs text-slate-500">{label}</div>
+    className={`text-left rounded-xl border px-3 py-2 flex items-center gap-2.5 transition hover:shadow-md ${active ? "border-blue-500 ring-2 ring-blue-100 bg-white" : "border-slate-200/80 bg-white"}`}>
+    <span className={`size-8 shrink-0 rounded-lg flex items-center justify-center ${tone}`}><Icon size={16} /></span>
+    <span className="min-w-0">
+      <span className="block text-lg font-bold text-slate-900 leading-none" style={FONT}>{value.toLocaleString()}</span>
+      <span className="block mt-0.5 text-[11px] text-slate-500 truncate">{label}</span>
+    </span>
   </button>
 );
 
@@ -57,41 +59,41 @@ function VehicleCard({ v, busy, onStatus, onDate }) {
   const overdue = waiting !== null && waiting > OVERDUE_DAYS && v.status !== "sold" && v.status !== "scrap";
   return (
     <div data-testid="sanakhat-card" data-state={v.ownership_termination_status}
-      className={`rounded-2xl border p-4 transition shadow-[0_1px_3px_rgba(15,23,42,0.06)] ${st.ring} ${busy ? "opacity-70" : ""}`}>
-      <div className="flex items-start gap-3">
-        <span className="size-11 shrink-0 rounded-xl bg-white border border-slate-200 text-slate-500 flex items-center justify-center"><Bike size={20} /></span>
+      className={`rounded-xl border p-3 transition shadow-sm ${st.ring} ${busy ? "opacity-70" : ""}`}>
+      <div className="flex items-start gap-2.5">
+        <span className="size-9 shrink-0 rounded-lg bg-white border border-slate-200 text-slate-500 flex items-center justify-center"><Bike size={17} /></span>
         <div className="min-w-0 flex-1">
-          <h3 className="font-bold text-slate-900 leading-tight truncate" style={FONT}>{[v.brand, v.model, v.year].filter(Boolean).join(" ")}</h3>
+          <h3 className="text-sm font-bold text-slate-900 leading-tight truncate" style={FONT}>{[v.brand, v.model, v.year].filter(Boolean).join(" ")}</h3>
           <div className="mt-1 flex flex-wrap items-center gap-1.5">
             {v.registration_number
-              ? <span className="font-mono text-xs font-semibold text-slate-700 bg-white border border-slate-200 rounded px-1.5 py-0.5">{v.registration_number}</span>
-              : <span className="text-xs text-slate-400 italic">No number yet</span>}
+              ? <span className="font-mono text-[11px] font-semibold text-slate-700 bg-white border border-slate-200 rounded px-1.5 py-0.5">{v.registration_number}</span>
+              : <span className="text-[11px] text-slate-400 italic">No number yet</span>}
             <span className={`text-[11px] font-semibold rounded-full px-2 py-0.5 ${stockCls}`}>{stockLabel}</span>
           </div>
         </div>
-        <span className={`shrink-0 inline-flex items-center gap-1 text-xs font-bold rounded-full px-2.5 py-1 ${st.chip}`}><st.Icon size={13} />{st.short}</span>
+        <span className={`shrink-0 inline-flex items-center gap-1 text-[11px] font-bold rounded-full px-2 py-0.5 ${st.chip}`}><st.Icon size={13} />{st.short}</span>
       </div>
 
-      <div role="group" aria-label="Sanakhat status" className="mt-4 grid grid-cols-3 gap-1 rounded-xl bg-white border border-slate-200 p-1">
+      <div role="group" aria-label="Sanakhat status" className="mt-2.5 grid grid-cols-3 gap-0.5 rounded-lg bg-white border border-slate-200 p-0.5">
         {["yes", "pending", "no"].map(k => {
           const s = STATES[k]; const on = v.ownership_termination_status === k;
           return (
             <button key={k} type="button" disabled={busy || on} onClick={() => onStatus(v, k)} aria-pressed={on} data-testid={`sanakhat-set-${k}`}
-              className={`touch-manipulation h-10 rounded-lg text-xs sm:text-sm font-semibold inline-flex items-center justify-center gap-1.5 transition ${on ? s.on : "text-slate-500 hover:bg-slate-50"}`}>
-              <s.Icon size={14} />{s.short}
+              className={`touch-manipulation h-8 rounded-md text-xs font-semibold inline-flex items-center justify-center gap-1 transition ${on ? s.on : "text-slate-500 hover:bg-slate-50"}`}>
+              <s.Icon size={13} />{s.short}
             </button>
           );
         })}
       </div>
 
-      <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2">
-        <label className="inline-flex items-center gap-1.5 text-xs text-slate-500">
-          <CalendarDays size={14} className="text-slate-400" /> Reached the shop
+      <div className="mt-2 flex flex-wrap items-center gap-x-2.5 gap-y-1.5">
+        <label className="inline-flex items-center gap-1.5 text-[11px] text-slate-500">
+          <CalendarDays size={13} className="text-slate-400" /> Reached the shop
           <input type="date" value={(v.sanakhat_date || "").slice(0, 10)} onChange={e => onDate(v, e.target.value)} disabled={busy}
-            className="h-8 rounded-lg border border-slate-200 bg-white px-2 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-400" data-testid="sanakhat-date" />
+            className="h-7 rounded-md border border-slate-200 bg-white px-1.5 text-[11px] text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-400" data-testid="sanakhat-date" />
         </label>
         {waiting !== null && (
-          <span className={`inline-flex items-center gap-1 text-xs font-semibold rounded-full px-2 py-0.5 ${overdue ? "bg-red-100 text-red-700" : "bg-slate-100 text-slate-600"}`}>
+          <span className={`inline-flex items-center gap-1 text-[11px] font-semibold rounded-full px-2 py-0.5 ${overdue ? "bg-red-100 text-red-700" : "bg-slate-100 text-slate-600"}`}>
             {overdue && <AlertTriangle size={12} />}{waiting === 0 ? "Started today" : `${waiting} day${waiting > 1 ? "s" : ""} waiting`}
           </span>
         )}
@@ -155,24 +157,24 @@ export default function SanakhatPortal({ embedded = false }) {
 
   const FILTERS = [["all", "All", counts.all], ["pending", "Not done", counts.pending], ["yes", "Done", counts.yes], ["no", "No", counts.no]];
   return (
-    <div className="space-y-5 animate-fade-in" data-testid="sanakhat-portal">
+    <div className="space-y-3 animate-fade-in" data-testid="sanakhat-portal">
       {/* Banner: overall progress */}
-      <section className="rounded-3xl bg-gradient-to-br from-blue-700 via-blue-600 to-indigo-600 text-white p-5 sm:p-6 shadow-lg">
-        <div className="flex items-center gap-4 sm:gap-6">
+      <section className="rounded-2xl bg-gradient-to-br from-blue-700 via-blue-600 to-indigo-600 text-white px-4 py-3 sm:px-5 shadow-md">
+        <div className="flex items-center gap-3 sm:gap-4">
           <div className="relative">
             <Ring pct={pct} />
-            <span className="absolute inset-0 flex items-center justify-center text-xl font-bold" style={FONT}>{pct}%</span>
+            <span className="absolute inset-0 flex items-center justify-center text-sm font-bold" style={FONT}>{pct}%</span>
           </div>
           <div className="min-w-0">
-            <div className="flex items-center gap-2 text-blue-100 text-xs font-semibold uppercase tracking-wider"><FileCheck2 size={15} /> Sanakhat desk</div>
-            <h1 className="mt-1 text-xl sm:text-2xl font-bold leading-tight" style={FONT}>{counts.yes.toLocaleString()} of {counts.all.toLocaleString()} bikes done</h1>
-            <p className="mt-1 text-sm text-blue-100">{counts.pending.toLocaleString()} still waiting{counts.no ? `, ${counts.no} refused` : ""}. Search a bike below and update its Sanakhat.</p>
+            <div className="flex items-center gap-1.5 text-blue-100 text-[11px] font-semibold uppercase tracking-wider"><FileCheck2 size={13} /> Sanakhat desk</div>
+            <h1 className="mt-0.5 text-base sm:text-lg font-bold leading-tight" style={FONT}>{counts.yes.toLocaleString()} of {counts.all.toLocaleString()} bikes done</h1>
+            <p className="text-xs sm:text-sm text-blue-100">{counts.pending.toLocaleString()} still waiting{counts.no ? `, ${counts.no} refused` : ""}. Search a bike below and update its Sanakhat.</p>
           </div>
         </div>
       </section>
 
       {/* Filter tiles */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
         <Tile icon={Bike} value={counts.all} label="All vehicles" tone="bg-slate-100 text-slate-600" active={filter === "all"} onClick={() => setFilter("all")} />
         <Tile icon={Clock} value={counts.pending} label="Not done yet" tone="bg-amber-100 text-amber-700" active={filter === "pending"} onClick={() => setFilter(filter === "pending" ? "all" : "pending")} />
         <Tile icon={CheckCircle2} value={counts.yes} label="Done" tone="bg-emerald-100 text-emerald-700" active={filter === "yes"} onClick={() => setFilter(filter === "yes" ? "all" : "yes")} />
@@ -180,22 +182,22 @@ export default function SanakhatPortal({ embedded = false }) {
       </div>
 
       {/* Search */}
-      <div className="rounded-2xl bg-white border border-slate-200/80 shadow-[0_1px_3px_rgba(15,23,42,0.06)] p-3 sm:p-4 space-y-3 sticky top-0 z-10">
+      <div className="rounded-xl bg-white border border-slate-200/80 shadow-sm p-2.5 space-y-2 sticky top-0 z-10">
         <div className="relative">
-          <Search size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
           <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search by number plate, brand, model, year or colour" autoFocus={!embedded}
-            className="w-full h-12 pl-11 pr-11 rounded-xl border border-slate-200 bg-slate-50 text-base focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500" data-testid="sanakhat-search" />
+            className="w-full h-10 pl-10 pr-10 rounded-lg border border-slate-200 bg-slate-50 text-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500" data-testid="sanakhat-search" />
           {q && <button type="button" onClick={() => setQ("")} aria-label="Clear search" className="absolute right-2 top-1/2 -translate-y-1/2 size-8 rounded-lg text-slate-400 hover:bg-slate-100 flex items-center justify-center"><X size={16} /></button>}
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {FILTERS.map(([k, label, n]) => (
             <button key={k} type="button" onClick={() => setFilter(k)} aria-pressed={filter === k}
-              className={`h-9 px-3 rounded-full text-sm font-semibold border transition ${filter === k ? "bg-blue-600 text-white border-blue-600" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"}`}>
+              className={`h-8 px-3 rounded-full text-xs font-semibold border transition ${filter === k ? "bg-blue-600 text-white border-blue-600" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"}`}>
               {label} <span className={`ml-1 text-xs ${filter === k ? "text-blue-100" : "text-slate-400"}`}>{n}</span>
             </button>
           ))}
           <select value={stock} onChange={e => setStock(e.target.value)} aria-label="Stock"
-            className="ml-auto h-9 rounded-full border border-slate-200 bg-white px-3 text-sm font-medium text-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-400">
+            className="ml-auto h-8 rounded-full border border-slate-200 bg-white px-3 text-xs font-medium text-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-400">
             <option value="all">All stock</option>
             <option value="instock">In stock only</option>
             <option value="sold">Sold only</option>
@@ -214,7 +216,7 @@ export default function SanakhatPortal({ embedded = false }) {
         </div>
       ) : (
         <>
-          <div className="grid sm:grid-cols-2 xl:grid-cols-3 gap-3">
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-2.5">
             {list.slice(0, shown).map(v => <VehicleCard key={v.id} v={v} busy={busyId === v.id} onStatus={setStatus} onDate={setDate} />)}
           </div>
           {shown < list.length && (
