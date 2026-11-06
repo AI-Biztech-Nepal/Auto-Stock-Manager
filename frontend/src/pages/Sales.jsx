@@ -140,7 +140,7 @@ function marginOf(sale, vehicle) {
   return vehicle?.expected_profit ?? null;
 }
 
-function SalesMain() {
+export default function Sales() {
   const navigate = useNavigate();
   const location = useLocation();
   const { user } = useAuth();
@@ -1241,10 +1241,4 @@ function SalesMain() {
       )}
     </div>
   );
-}
-
-// The Sanakhat desk account sees only the Sanakhat portal here -- the sales list carries prices and margins.
-export default function Sales() {
-  const { user } = useAuth();
-  return user?.role === "sanakhat_officer" ? <SanakhatPortal /> : <SalesMain />;
 }
