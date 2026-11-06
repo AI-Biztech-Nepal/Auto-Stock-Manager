@@ -180,7 +180,7 @@ export default function Settings() {
     }
   };
 
-  const ROLE_LABELS = { admin: "Admin", stock_supervisor: "Front Desk", parts_supervisor: "Parts Department", social_media: "Social Media" };
+  const ROLE_LABELS = { admin: "Admin", stock_supervisor: "Front Desk", parts_supervisor: "Parts Department", social_media: "Social Media", sanakhat_officer: "Sanakhat Desk" };
 
   const inp = "w-full h-10 px-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500";
 
@@ -456,6 +456,7 @@ export default function Settings() {
                   <option value="stock_supervisor">Front Desk</option>
                   <option value="parts_supervisor">Parts Department</option>
                   <option value="social_media">Social Media</option>
+                  <option value="sanakhat_officer">Sanakhat Desk</option>
                   <option value="admin">Admin</option>
                 </select>
               </div>
@@ -494,6 +495,7 @@ export default function Settings() {
                   <option value="stock_supervisor">Front Desk</option>
                   <option value="parts_supervisor">Parts Department</option>
                   <option value="social_media">Social Media</option>
+                  <option value="sanakhat_officer">Sanakhat Desk</option>
                   <option value="admin">Admin</option>
                 </select>
               </div>

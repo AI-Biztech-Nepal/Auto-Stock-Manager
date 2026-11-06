@@ -355,6 +355,9 @@ ROLE_PERMISSIONS = {
         # not general vehicle edits.
         "sale_statuses": {"edit"},
     },
+    "sanakhat_officer": {  # Sanakhat desk -- sees every vehicle's Sanaakhat status and updates it, nothing else (no prices, no sales)
+        "sanakhat": {"view", "edit"},
+    },
     "parts_supervisor": {  # Parts department
         "spare_parts": {"view", "create", "edit", "delete"},
         "jobs": {"view", "create", "edit", "delete"},
@@ -2954,6 +2957,41 @@ async def update_sale_statuses(vid: str, body: SaleStatusesUpdate, cu: dict = De
     """Name-transfer and sanakhat progress on a sold vehicle. Separate from update_vehicle so
     front desk can keep these current without getting general vehicle edit access."""
     upd = {k: val for k, val in body.model_dump().items() if val is not None}
+    if not upd:
+        raise HTTPException(400, "Nothing to update")
+    res = await db.vehicles.update_one({"id": vid}, {"$set": {**upd, "updated_at": datetime.now(timezone.utc).isoformat()}})
+    if not res.matched_count:
+        raise HTTPException(404, "Vehicle not found")
+    return upd
+
+# ── SANAKHAT DESK ─────────────────────────────────────────────────────
+# One screen for whoever handles Sanaakhat (ownership termination) cases: every vehicle in the company, whatever its
+# stock status, with only the fields needed to find it and its Sanaakhat progress. No prices, purchase details or sales.
+SANAKHAT_DESK_FIELDS = {"_id": 0, "id": 1, "brand": 1, "model": 1, "year": 1, "type": 1, "registration_number": 1, "color": 1,
+                        "status": 1, "ownership_termination_status": 1, "sanakhat_date": 1, "created_at": 1}
+
+@api_router.get("/sanakhat/vehicles")
+async def sanakhat_vehicles(cu: dict = Depends(require("sanakhat", "view"))):
+    rows = await db.vehicles.find({}, SANAKHAT_DESK_FIELDS).to_list(5000)
+    for v in rows:
+        v["ownership_termination_status"] = v.get("ownership_termination_status") if v.get("ownership_termination_status") in ("yes", "no") else "pending"
+    rows.sort(key=lambda v: v.get("created_at") or "", reverse=True)
+    return rows
+
+class SanakhatUpdate(BaseModel):
+    ownership_termination_status: Optional[Literal["yes", "no", "pending"]] = None
+    sanakhat_date: Optional[str] = None  # YYYY-MM-DD; "" clears it
+
+@api_router.patch("/sanakhat/vehicles/{vid}")
+async def sanakhat_update(vid: str, body: SanakhatUpdate, cu: dict = Depends(require("sanakhat", "edit"))):
+    upd = {}
+    if body.ownership_termination_status is not None:
+        upd["ownership_termination_status"] = body.ownership_termination_status
+    if body.sanakhat_date is not None:
+        d = body.sanakhat_date.strip()
+        if d and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", d):
+            raise HTTPException(400, "Date must look like 2026-11-06")
+        upd["sanakhat_date"] = d or None
     if not upd:
         raise HTTPException(400, "Nothing to update")
     res = await db.vehicles.update_one({"id": vid}, {"$set": {**upd, "updated_at": datetime.now(timezone.utc).isoformat()}})

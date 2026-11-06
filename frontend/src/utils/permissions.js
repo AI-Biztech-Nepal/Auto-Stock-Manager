@@ -9,6 +9,8 @@ export const ROLE_NAV_PATHS = {
   // /sales/vehicle: the sold-vehicle page, so they can keep Transfer / Sanakhat status current
   // (the Sales list itself stays admin-only -- it carries prices and margins).
   stock_supervisor: ["/inventory", "/warranty", "/ledger", "/sales/vehicle", "/settings"],
+  // Sanakhat desk: the Sales page shows only its Sanakhat tab for this role (see Sales.jsx); the sales data stays admin-only.
+  sanakhat_officer: ["/sales"],
   // Parts department gets read-only inventory browsing plus the ability to flip a vehicle's
   // pipeline status (Available <-> In Repair, or Scrap) — see PARTS_ALLOWED_STATUSES in server.py.
   // Ledger: Vendors + Staff tabs (see LEDGER_TABS below).
@@ -21,6 +23,7 @@ export const ROLE_NAV_PATHS = {
 };
 
 export const ROLE_DEFAULT_PATH = {
+  sanakhat_officer: "/sales",
   stock_supervisor: "/inventory",
   parts_supervisor: "/spare-parts",
   social_media: "/inventory",
