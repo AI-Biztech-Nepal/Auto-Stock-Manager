@@ -37,11 +37,12 @@ export const FINANCE_NAV = [
 ];
 
 // Pages that are reached from a button, not from the panel, and the panel item each one belongs under.
+// The Balance Sheet is Finance itself (what clicking Finance opens, as in Jageer Nepal), so no item lights up for it.
 export const FINANCE_HIDDEN_TABS = {
-  expenses: "daybook", import: "statement", totals: "report", "total-received": "ledger", "total-paid": "ledger",
+  "balance-sheet": "", expenses: "daybook", import: "statement", totals: "report", "total-received": "ledger", "total-paid": "ledger",
 };
 
-export const FINANCE_DEFAULT_TAB = "daybook";
+export const FINANCE_DEFAULT_TAB = "balance-sheet";
 export const FINANCE_TABS = [
   ...FINANCE_NAV.flatMap((i) => [i.key, ...(i.children || []).map((c) => c.key)]),
   ...Object.keys(FINANCE_HIDDEN_TABS),

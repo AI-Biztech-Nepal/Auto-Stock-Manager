@@ -13,6 +13,7 @@ import ImportStatement from "./finance/ImportStatement";
 import { Report, Totals, MoneyMoved } from "./finance/Reports";
 import { SalesReport, PurchaseReport, ExpenseReport, ReceivableReport, PayableReport, AgeingReport } from "./finance/ReportPages";
 import Quotation from "./finance/Quotation";
+import BalanceSheet from "./finance/BalanceSheet";
 import { financeTab, FINANCE_NAV } from "./finance/nav";
 import { Card, Notice } from "./finance/ui";
 import { todayStr } from "./finance/money";
@@ -38,7 +39,7 @@ const BOOK_CSS = `
 `;
 
 // The page's own name, as Jageer's top bar shows it.
-const HIDDEN_TITLES = { expenses: "Expenses", import: "Import Statement", totals: "Money In and Out", "total-received": "Total Received", "total-paid": "Total Paid" };
+const HIDDEN_TITLES = { "balance-sheet": "Balance Sheet", expenses: "Expenses", import: "Import Statement", totals: "Money In and Out", "total-received": "Total Received", "total-paid": "Total Paid" };
 const titleOf = (tab) => {
   for (const item of FINANCE_NAV) {
     if (item.key === tab) return item.label;
@@ -84,6 +85,7 @@ function FinanceInner() {
   if (loadError) return <Notice tone="red">{loadError}</Notice>;
 
   const screens = {
+    "balance-sheet": <BalanceSheet goTab={goTab} openParty={openParty} />,
     daybook: <DayBook date={bookDate} setDate={setBookDate} goTab={goTab} />,
     statement: <Statement goTab={goTab} />,
     voucher: <Journal onDone={() => goTab("daybook")} />,
