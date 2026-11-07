@@ -4,7 +4,6 @@ import { toast } from "sonner";
 import api from "../utils/api";
 import { useAuth } from "../context/AuthContext";
 import { canAccessPath, marketingTabsFor } from "../utils/permissions";
-import FinanceNavGroup from "./FinanceNavGroup";
 import { isSanakhatOverdue, sanakhatPendingDays } from "../utils/helpers";
 import {
   LayoutDashboard, Bike, Wrench, BarChart3, Sparkles, Settings, LogOut, Menu, X, Bell,
@@ -47,8 +46,6 @@ export default function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const { pathname, search } = useLocation();
   const [marketingOpen, setMarketingOpen] = useState(null); // null = follow the current page
-  const [financeOpen, setFinanceOpen] = useState(null);     // same for the Finance dropdown...
-  const [reportOpen, setReportOpen] = useState(null);       // ...and the family of reports under its Report item
 
   const handleLogout = () => { logout(); navigate("/login"); };
   const visibleNavItems = navItems.filter(({ path }) => canAccessPath(user?.role, path) && (path !== "/sanakhat" || user?.role === "sanakhat_officer" || canAccessPath(user?.role, "/sales")));
@@ -177,23 +174,6 @@ export default function Layout() {
       {/* Nav */}
       <nav className="flex-1 py-4 px-3 space-y-0.5 sidebar-nav overflow-y-auto">
         {visibleNavItems.map(({ path, label, icon: Icon }) => {
-          if (path === "/finance") {
-            return (
-              <FinanceNavGroup
-                key={path}
-                label={label}
-                Icon={Icon}
-                pathname={pathname}
-                search={search}
-                navigate={navigate}
-                open={financeOpen}
-                setOpen={setFinanceOpen}
-                reportOpen={reportOpen}
-                setReportOpen={setReportOpen}
-                onPick={() => mobile && setSidebarOpen(false)}
-              />
-            );
-          }
           const subTabs = path === "/marketing" ? marketingTabsFor(user?.role) : [];
           const leadsBadge = (
             <span className="ml-auto min-w-[20px] h-5 px-1.5 rounded-full bg-red-500 text-white text-[11px] font-bold flex items-center justify-center" data-testid="nav-leads-badge">{newLeads > 99 ? "99+" : newLeads}</span>
