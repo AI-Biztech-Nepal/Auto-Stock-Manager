@@ -3,8 +3,8 @@ import { Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { useBooks } from "./BooksContext";
 import Feed from "./Feed";
-import { Card, Field, DateField, AccountSelect, PartyPicker, inputCls, btnPrimary, btnGhost } from "./ui";
-import { todayStr, nextReceiptNo, isJournal, COLORS } from "./money";
+import { Card, Field, DateField, AccountSelect, PartyPicker, useConfirmSave, useAskNewParty, inputCls, btnPrimary, btnGhost } from "./ui";
+import { todayStr, nextReceiptNo, isJournal, balances, accountName, num, COLORS } from "./money";
 import { noteWithItem, vehicleNames } from "./rentLogic";
 
 let rowSeq = 0;
@@ -34,6 +34,10 @@ export default function Payment({ direction }) {
   const suggested = useMemo(() => nextReceiptNo(used), [used]);
   useEffect(() => { if (!touched) setNumber(suggested); }, [suggested, touched]);
 
+  const { confirm, dialog: confirmDialog } = useConfirmSave();
+  const { askNewParty, dialog: newPartyDialog } = useAskNewParty(books.types_ready ? books.party_types : []);
+  const available = useMemo(() => balances(books).buckets, [books]);
+
   const setRow = (key, patch) => setRows((rs) => rs.map((r) => (r.key === key ? { ...r, ...patch } : r)));
   const total = rows.reduce((s, r) => s + (Number(r.amount) || 0), 0);
   const vehicles = useMemo(() => vehicleNames(books), [books]);
@@ -43,8 +47,12 @@ export default function Payment({ direction }) {
     const name = p.name.trim();
     const existing = books.parties.find((x) => x.name.toLowerCase() === name.toLowerCase());
     if (existing) return existing.id;
-    // Typing a name that isn't saved creates the party on save: a payment must link to a real id.
-    const created = await post("/fin/parties", { name });
+    // A name nobody has yet: ask for their details and ledger type, then save them, since a payment must
+    // link to a real party (as Finance Nepal does).
+    const asked = await askNewParty({ name, kind: side });
+    if (!asked) return null;
+    if (asked.phone && asked.phone.length !== 10) { toast.error("Phone must be 10 digits"); return null; }
+    const created = await post("/fin/parties", { name: asked.name, phone: asked.phone, ...(books.types_ready ? { party_type_id: asked.party_type_id } : {}) });
     return created?.id || null;
   };
 
@@ -52,6 +60,17 @@ export default function Payment({ direction }) {
     const todo = rows.filter((r) => r.party.name.trim() || r.amount);
     if (!todo.length) return toast.error("Add a person and an amount");
     if (todo.some((r) => !r.party.name.trim() || !(Number(r.amount) > 0))) return toast.error("Every row needs a name and an amount above 0");
+    const sum = todo.reduce((s, r) => s + Number(r.amount), 0);
+    const ok = await confirm({
+      title: `Save this ${received ? "Received" : "Paid"} entry?`,
+      rows: [
+        ...todo.map((r) => ({ label: r.party.name.trim() + (r.item ? ` · ${r.item}` : ""), value: `NPR ${num(r.amount)}` })),
+        ...(number.trim() ? [{ label: received ? "Receipt no." : "Payment no.", value: number.trim() }] : []),
+        { label: received ? "Received in" : "Paid via", value: accountName(books, method) },
+      ],
+      total: { label: "Amount", value: `NPR ${num(sum)}`, color: received ? COLORS.in : COLORS.out },
+    });
+    if (!ok) return;
     setBusy(true);
     let saved = 0;
     for (const r of todo) {
@@ -82,7 +101,7 @@ export default function Payment({ direction }) {
         <div className="grid sm:grid-cols-3 gap-3">
           <DateField value={date} onChange={setDate} />
           <Field label={received ? "Receipt No." : "Payment No."}><input value={number} onChange={(e) => { setNumber(e.target.value); setTouched(true); }} className={inputCls} /></Field>
-          <AccountSelect value={method} onChange={setMethod} accounts={books.accounts} />
+          <AccountSelect value={method} onChange={setMethod} accounts={books.accounts} available={available} />
         </div>
 
         <div className="space-y-3">
@@ -111,6 +130,8 @@ export default function Payment({ direction }) {
         </div>
       </Card>
       <Feed defaultFilter={received ? "received" : "paid"} title={received ? "Money received" : "Payments out"} />
+      {confirmDialog}
+      {newPartyDialog}
     </div>
   );
 }

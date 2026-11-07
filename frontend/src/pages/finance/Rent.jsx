@@ -75,7 +75,7 @@ function RentalForm({ rental, onClose }) {
           <Field label="Model"><input value={model} onChange={(e) => setModel(e.target.value)} className={inputCls} /></Field>
           <div className="sm:col-span-2">
             <PartyPicker label="Rented to" parties={books.parties} id={renter.id} name={renter.name}
-              onChange={(p) => setRenter({ id: p.id, name: p.name })} onCreate={(name) => post("/fin/parties", { name })} />
+              onChange={(p) => setRenter({ id: p.id, name: p.name })} onCreate={(name) => post("/fin/parties", { name, ...(books.types_ready ? { party_type_id: books.party_types.find((t) => t.name === "Customer")?.id || null } : {}) })} />
           </div>
           <DateField label="Rented on *" value={start} onChange={setStart} />
           <div>

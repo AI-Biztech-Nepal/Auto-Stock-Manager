@@ -54,14 +54,79 @@ export const DateField = ({ label = "Date", value, onChange, max }) => (
   </Field>
 );
 
-export const AccountSelect = ({ label = "Payment method", value, onChange, accounts, emptyLabel = "Cash" }) => (
+// `available` (optional, from balances(books).buckets): each option shows what the account holds right now,
+// as Finance Nepal's picker does, so nobody pays out of an account that cannot cover it.
+const withAmount = (name, bucket) => (bucket ? `${name}  —  ${npr(bucket.total)}` : name);
+export const AccountSelect = ({ label = "Payment method", value, onChange, accounts, emptyLabel = "Cash", available }) => (
   <Field label={label}>
     <select value={value || ""} onChange={(e) => onChange(e.target.value || null)} className={inputCls}>
-      <option value="">{emptyLabel}</option>
-      {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+      <option value="">{withAmount(emptyLabel, available && (available.cash || { total: 0 }))}</option>
+      {accounts.map((a) => <option key={a.id} value={a.id}>{withAmount(a.name, available && (available[a.id] || { total: 0 }))}</option>)}
     </select>
   </Field>
 );
+
+// ── "Save this entry?" -- the summary Finance Nepal shows before anything is saved ──
+// const { confirm, dialog } = useConfirmSave();  ...  if (!(await confirm({ title, rows, total }))) return;
+export function useConfirmSave() {
+  const [ask, setAsk] = useState(null);
+  const confirm = (opts) => new Promise((resolve) => setAsk({ ...opts, resolve }));
+  const done = (ok) => { ask?.resolve(ok); setAsk(null); };
+  const dialog = ask && (
+    <Modal title={ask.title} onClose={() => done(false)}>
+      <div className="space-y-2">
+        {ask.rows.map((r, i) => (
+          <div key={i} className="flex justify-between gap-4 text-sm"><span className="text-slate-500">{r.label}</span><span className="font-semibold text-slate-900 text-right">{r.value}</span></div>
+        ))}
+        {ask.total && (
+          <div className="flex justify-between gap-4 border-t border-slate-200 pt-3 mt-3 text-base font-bold">
+            <span>{ask.total.label}</span><span style={{ color: ask.total.color }}>{ask.total.value}</span>
+          </div>
+        )}
+        <div className="flex justify-end gap-2 pt-3">
+          <button onClick={() => done(false)} className={btnGhost}>Cancel</button>
+          <button onClick={() => done(true)} className={btnPrimary} autoFocus>Save</button>
+        </div>
+      </div>
+    </Modal>
+  );
+  return { confirm, dialog };
+}
+
+// ── "Add new customer / vendor" -- asked when a form is saved with a name nobody has yet ──
+// Name (editable), phone (optional) and ledger type, defaulting to the side of the entry (Received ->
+// Customer, Paid -> Vendor). Resolves to { name, phone, party_type_id } or null when cancelled.
+export function useAskNewParty(partyTypes) {
+  const [ask, setAsk] = useState(null);
+  const askNewParty = ({ name, kind }) => new Promise((resolve) => {
+    const want = kind === "vendor" ? "vendor" : "customer";
+    const typeId = (partyTypes || []).find((t) => t.name.toLowerCase() === want)?.id || "";
+    setAsk({ kind: want, name, phone: "", typeId, resolve });
+  });
+  const done = (value) => { ask?.resolve(value); setAsk(null); };
+  const dialog = ask && (
+    <Modal title={`Add new ${ask.kind}`} onClose={() => done(null)}>
+      <div className="space-y-4">
+        <p className="text-sm text-slate-500">Nobody is saved by this name yet. Save them now so this entry lands on their ledger.</p>
+        <Field label="Name"><input value={ask.name} onChange={(e) => setAsk({ ...ask, name: e.target.value })} className={inputCls} autoFocus /></Field>
+        <Field label="Phone (optional)" hint="10-digit phone"><input value={ask.phone} onChange={(e) => setAsk({ ...ask, phone: e.target.value })} inputMode="numeric" className={inputCls} /></Field>
+        {partyTypes?.length > 0 && (
+          <Field label="Ledger type">
+            <select value={ask.typeId} onChange={(e) => setAsk({ ...ask, typeId: e.target.value })} className={inputCls}>
+              <option value="">No ledger type</option>
+              {partyTypes.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </select>
+          </Field>
+        )}
+        <div className="flex justify-end gap-2">
+          <button onClick={() => done(null)} className={btnGhost}>Cancel</button>
+          <button disabled={!ask.name.trim()} onClick={() => done({ name: ask.name.trim(), phone: ask.phone.replace(/\D/g, ""), party_type_id: ask.typeId || null })} className={btnPrimary}>Add and continue</button>
+        </div>
+      </div>
+    </Modal>
+  );
+  return { askNewParty, dialog };
+}
 
 // Type to search saved parties. Typing a name that isn't saved offers "Add as new" -- on forms that
 // need a real party id it creates it on the spot via onCreate; otherwise the typed name is returned

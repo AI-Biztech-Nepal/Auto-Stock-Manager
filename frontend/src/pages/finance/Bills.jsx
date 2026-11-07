@@ -3,8 +3,8 @@ import { Plus, Trash2, Percent, Tags, Wrench } from "lucide-react";
 import { toast } from "sonner";
 import { useBooks } from "./BooksContext";
 import Feed from "./Feed";
-import { Card, Field, Modal, DateField, AccountSelect, PartyPicker, TwoTapDelete, inputCls, btnPrimary, btnGhost } from "./ui";
-import { todayStr, billTotals, serviceLines, nextBillNo, npr, COLORS } from "./money";
+import { Card, Field, Modal, DateField, AccountSelect, PartyPicker, TwoTapDelete, useConfirmSave, useAskNewParty, inputCls, btnPrimary, btnGhost } from "./ui";
+import { todayStr, billTotals, serviceLines, nextBillNo, balances, accountName, npr, COLORS } from "./money";
 
 let seq = 0;
 const newLine = () => ({ key: ++seq, description: "", qty: "1", rate: "" });
@@ -30,6 +30,16 @@ function ItemisedBill({ type }) {
   const [vatPercent, setVatPercent] = useState("0");
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
+  const { confirm, dialog: confirmDialog } = useConfirmSave();
+  const { askNewParty, dialog: newPartyDialog } = useAskNewParty(books.types_ready ? books.party_types : []);
+
+  // A new customer / vendor is asked for their details and ledger type first, as Finance Nepal does.
+  const createParty = async (name) => {
+    const asked = await askNewParty({ name, kind: sale ? "customer" : "vendor" });
+    if (!asked) return null;
+    if (asked.phone && asked.phone.length !== 10) { toast.error("Phone must be 10 digits"); return null; }
+    return post("/fin/parties", { name: asked.name, phone: asked.phone, ...(books.types_ready ? { party_type_id: asked.party_type_id } : {}) });
+  };
 
   const suggested = useMemo(() => nextBillNo(books.transactions, type), [books.transactions, type]);
   useEffect(() => { if (!touched) setBillNo(suggested); }, [suggested, touched]);
@@ -62,6 +72,19 @@ function ItemisedBill({ type }) {
     const good = lines.filter((l) => l.description.trim() && Number(l.qty) > 0 && Number(l.rate) >= 0 && l.rate !== "");
     if (!good.length) return toast.error("Add at least one item with a name, quantity and rate");
     if (!(t.total > 0)) return toast.error("The bill total must be above 0");
+    const confirmed = await confirm({
+      title: `Save this ${sale ? "sale" : "purchase"}?`,
+      rows: [
+        { label: sale ? "Customer" : "Vendor", value: party.name },
+        ...(billNo.trim() ? [{ label: "Bill no.", value: billNo.trim() }] : []),
+        { label: "Items", value: good.map((l) => l.description.trim()).join(", ") },
+        ...(t.services > 0 ? [{ label: "Services (VAT and discount apply)", value: npr(t.services) }] : []),
+        ...(t.discount > 0 ? [{ label: "Discount", value: `− ${npr(t.discount)}` }] : []),
+        ...(t.vat > 0 ? [{ label: "VAT", value: `+ ${npr(t.vat)}` }] : []),
+      ],
+      total: { label: "Grand total", value: npr(t.total), color },
+    });
+    if (!confirmed) return;
     setBusy(true);
     // Remember typed names for next time; a failure here must not lose the bill.
     let notRemembered = false;
@@ -92,7 +115,7 @@ function ItemisedBill({ type }) {
       <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
         <div className="lg:col-span-2">
           <PartyPicker label={sale ? "Customer" : "Vendor"} parties={books.parties} id={party.id} name={party.name}
-            onChange={pickParty} onCreate={(name) => post("/fin/parties", { name })} />
+            onChange={pickParty} onCreate={createParty} />
         </div>
         <DateField value={date} onChange={setDate} />
         <Field label="Bill No."><input value={billNo} onChange={(e) => { setBillNo(e.target.value); setTouched(true); }} className={inputCls} /></Field>
@@ -154,6 +177,8 @@ function ItemisedBill({ type }) {
           <button onClick={save} disabled={busy} className={`${btnPrimary} w-full mt-3`}>{busy ? "Saving…" : `Save ${type}`}</button>
         </div>
       </div>
+      {confirmDialog}
+      {newPartyDialog}
     </Card>
   );
 }
@@ -205,6 +230,8 @@ function ExpenseForm() {
   const [rows, setRows] = useState([newExpenseRow()]);
   const [manage, setManage] = useState(false);
   const [busy, setBusy] = useState(false);
+  const { confirm, dialog: confirmDialog } = useConfirmSave();
+  const available = useMemo(() => balances(books).buckets, [books]);
   const setRow = (key, patch) => setRows((rs) => rs.map((r) => (r.key === key ? { ...r, ...patch } : r)));
   const total = rows.reduce((s, r) => s + (Number(r.amount) || 0), 0);
 
@@ -212,6 +239,17 @@ function ExpenseForm() {
     const todo = rows.filter((r) => r.payee.trim() || r.amount);
     if (!todo.length) return toast.error("Add a payee and an amount");
     if (todo.some((r) => !r.payee.trim() || !(Number(r.amount) > 0))) return toast.error("Every row needs a payee and an amount above 0");
+    const sum = todo.reduce((s, r) => s + Number(r.amount), 0);
+    const catName = (id) => books.categories.find((c) => c.id === id)?.name;
+    const ok = await confirm({
+      title: todo.length === 1 ? "Save this expense?" : `Save these ${todo.length} expenses?`,
+      rows: [
+        ...todo.map((r) => ({ label: [r.payee.trim(), catName(r.category_id)].filter(Boolean).join(" · "), value: npr(Number(r.amount)) })),
+        { label: "Paid via", value: accountName(books, method) },
+      ],
+      total: { label: "Total", value: npr(sum), color: COLORS.out },
+    });
+    if (!ok) return;
     setBusy(true);
     let saved = 0;
     for (const r of todo) {
@@ -235,7 +273,7 @@ function ExpenseForm() {
       </div>
       <div className="grid sm:grid-cols-2 gap-3">
         <DateField value={date} onChange={setDate} />
-        <AccountSelect value={method} onChange={setMethod} accounts={books.accounts} />
+        <AccountSelect value={method} onChange={setMethod} accounts={books.accounts} available={available} />
       </div>
       <div className="space-y-3">
         {rows.map((r, i) => (
@@ -265,6 +303,7 @@ function ExpenseForm() {
         </div>
       </div>
       {manage && <CategoryManager onClose={() => setManage(false)} />}
+      {confirmDialog}
     </Card>
   );
 }
