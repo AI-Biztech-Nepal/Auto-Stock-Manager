@@ -7,8 +7,10 @@ import { canAccessPath, marketingTabsFor } from "../utils/permissions";
 import { isSanakhatOverdue, sanakhatPendingDays } from "../utils/helpers";
 import {
   LayoutDashboard, Bike, Wrench, BarChart3, Sparkles, Settings, LogOut, Menu, X, Bell,
-  BookOpen, Boxes, ShoppingBag, Building2, ImageOff, FileWarning, ShieldCheck, Megaphone, Inbox, ChevronDown, Share2, Gift, Eye, HeartHandshake, FileCheck2
+  BookOpen, Wallet, ExternalLink, Boxes, ShoppingBag, Building2, ImageOff, FileWarning, ShieldCheck, Megaphone, Inbox, ChevronDown, Share2, Gift, Eye, HeartHandshake, FileCheck2
 } from "lucide-react";
+
+const FINANCE_NEPAL_URL = process.env.REACT_APP_FINANCE_URL || "https://finance-drab-three.vercel.app";
 
 // A vehicle needs at least this many photos before it's considered adequately
 // photographed — mirrors MIN_PHOTOS in Inventory.jsx, kept separate since a shared
@@ -34,6 +36,9 @@ const navItems = [
   { path: "/ledger",       label: "Ledger",       icon: BookOpen },
   { path: "/jobs",         label: "Job Cards",    icon: Wrench },
   { path: "/warranty",     label: "Warranty",     icon: ShieldCheck },
+  // The books are kept in Finance Nepal (its own app and Supabase project), so this opens it in a new tab.
+  // Admin only: /finance is in no other role's list in permissions.js.
+  { path: "/finance",      label: "Finance",      icon: Wallet, href: FINANCE_NEPAL_URL },
   { path: "/reports",      label: "Reports",      icon: BarChart3 },
   { path: "/ai",           label: "AI Assistant", icon: Sparkles },
   { path: "/settings",     label: "Settings",     icon: Settings },
@@ -172,7 +177,24 @@ export default function Layout() {
 
       {/* Nav */}
       <nav className="flex-1 py-4 px-3 space-y-0.5 sidebar-nav overflow-y-auto">
-        {visibleNavItems.map(({ path, label, icon: Icon }) => {
+        {visibleNavItems.map(({ path, label, icon: Icon, href }) => {
+          if (href) {
+            return (
+              <a
+                key={path}
+                href={href}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={() => mobile && setSidebarOpen(false)}
+                className="flex items-center gap-3 px-3 py-3 rounded-lg text-sm font-medium transition-all duration-150 text-slate-400 hover:text-white hover:bg-slate-800"
+                data-testid={`nav-${label.toLowerCase().replace(" ", "-")}`}
+              >
+                <Icon size={17} />
+                {label}
+                <ExternalLink size={13} className="ml-auto opacity-60" />
+              </a>
+            );
+          }
           const subTabs = path === "/marketing" ? marketingTabsFor(user?.role) : [];
           const leadsBadge = (
             <span className="ml-auto min-w-[20px] h-5 px-1.5 rounded-full bg-red-500 text-white text-[11px] font-bold flex items-center justify-center" data-testid="nav-leads-badge">{newLeads > 99 ? "99+" : newLeads}</span>
