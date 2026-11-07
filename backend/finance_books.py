@@ -94,6 +94,20 @@ PARTY_TYPE_DDL = [
     "ALTER TABLE fin_parties ADD COLUMN IF NOT EXISTS party_type_id VARCHAR(36) NULL",
 ]
 STARTER_PARTY_TYPES = ("Customer", "Vendor", "Employee")
+
+# Quotations, as Jageer Nepal's Quotation page saves them: the numbered copy of each quote generated (client,
+# items, terms, total, and the letterhead details it was printed with), so the next quote numbers on from it.
+# Not a bill: nothing here touches a ledger or a balance.
+QUOTATION_DDL = (
+    "CREATE TABLE IF NOT EXISTS fin_quotations ("
+    "id VARCHAR(36) NOT NULL PRIMARY KEY, company_id VARCHAR(36) NOT NULL, quote_seq INT NOT NULL DEFAULT 0, "
+    "quote_no VARCHAR(80) NULL, quote_date VARCHAR(20) NULL, subject VARCHAR(300) NULL, client_name VARCHAR(200) NOT NULL, "
+    "client_address VARCHAR(300) NULL, salesperson_name VARCHAR(150) NULL, salesperson_phone VARCHAR(40) NULL, "
+    "items LONGTEXT NULL, terms TEXT NULL, total DOUBLE NOT NULL DEFAULT 0, business LONGTEXT NULL, created_at VARCHAR(40), "
+    "INDEX idx_fin_quotations_company (company_id, quote_seq), "
+    "CONSTRAINT fk_fin_quotations_company FOREIGN KEY (company_id) REFERENCES companies(id)"
+    ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+)
 # Whether fin_parties.party_type_id exists (same reasoning as _services_ready).
 _types_ready = True
 
@@ -153,6 +167,10 @@ async def ensure_schema(db, registry=None):
             await db.execute_raw(ddl)
         except Exception:  # noqa: BLE001
             logger.warning("Could not ensure the ledger types", exc_info=True)
+    try:
+        await db.execute_raw(QUOTATION_DDL)
+    except Exception:  # noqa: BLE001
+        logger.warning("Could not ensure the quotations table", exc_info=True)
     try:
         rows = await db.fetch_raw("SELECT COLUMN_NAME FROM information_schema.COLUMNS "
                                   "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'fin_parties'")
@@ -305,6 +323,29 @@ class PartyBody(BaseModel):
 
 class PartyTypeBody(BaseModel):
     name: str
+
+
+class QuotationItem(BaseModel):
+    subject: str
+    description: Optional[str] = None
+    mrp: Optional[float] = None
+    discount: Optional[float] = None
+    rate: Optional[float] = None
+    qty: float = 1
+    amount: float = 0
+
+
+class QuotationBody(BaseModel):
+    quote_no: Optional[str] = None
+    quote_date: Optional[str] = None
+    subject: Optional[str] = None
+    client_name: str
+    client_address: Optional[str] = None
+    salesperson_name: Optional[str] = None
+    salesperson_phone: Optional[str] = None
+    items: List[QuotationItem] = Field(default_factory=list)
+    terms: Optional[str] = None
+    business: Optional[dict] = None  # the letterhead it was printed with (name, reg / VAT no., address, phone)
 
 
 class PartyTypeAssign(BaseModel):
@@ -661,6 +702,49 @@ def register(api_router, db, admin_only):
         if ids:
             await db.fin_parties.update_many({"id": {"$in": ids}}, {"$set": {"party_type_id": tid, "updated_at": _now()}})
         return {"ok": True, "count": len(ids)}
+
+    # ── quotations ─────────────────────────────────────────────────────────
+    def _quote_line(i: QuotationItem) -> dict:
+        # The letterhead reads MRP -> Discount -> Rate: Rate is the discounted unit price already, so when it is
+        # filled in the discount is inside it; without a Rate the unit price is MRP less the per-unit discount.
+        unit = i.rate if (i.rate or 0) > 0 else max(0.0, (i.mrp or 0) - (i.discount or 0))
+        qty = max(0.0, float(i.qty or 0))
+        return {"subject": i.subject.strip(), "description": (i.description or "").strip(), "mrp": i.mrp,
+                "discount": i.discount, "rate": i.rate, "qty": qty, "amount": round(unit * qty, 2)}
+
+    @api_router.get("/fin/quotations")
+    @_safe
+    async def fin_list_quotations(cu: dict = Depends(admin_only)):
+        rows = await db.fin_quotations.find({}, {"_id": 0}).sort("quote_seq", -1).to_list(5000)
+        return rows
+
+    @api_router.post("/fin/quotations")
+    @_safe
+    async def fin_create_quotation(body: QuotationBody, cu: dict = Depends(admin_only)):
+        client = _clean(body.client_name)
+        if not client:
+            raise HTTPException(400, "Enter the client's name for this quotation")
+        items = [_quote_line(i) for i in body.items if i.subject.strip()]
+        if not items:
+            raise HTTPException(400, "Add at least one line item to quote")
+        last = await db.fin_quotations.find({}, {"_id": 0, "quote_seq": 1}).sort("quote_seq", -1).to_list(1)
+        seq = (int(last[0]["quote_seq"] or 0) if last else 0) + 1
+        doc = {
+            "id": _id(), "quote_seq": seq, "quote_no": _clean(body.quote_no) or str(seq), "quote_date": _clean(body.quote_date),
+            "subject": _clean(body.subject), "client_name": client, "client_address": _clean(body.client_address),
+            "salesperson_name": _clean(body.salesperson_name), "salesperson_phone": _clean(body.salesperson_phone),
+            "items": items, "terms": body.terms or "", "total": round(sum(i["amount"] for i in items), 2),
+            "business": body.business or {}, "created_at": _now(),
+        }
+        await db.fin_quotations.insert_one(doc)
+        doc.pop("_id", None)
+        return doc
+
+    @api_router.delete("/fin/quotations/{qid}")
+    @_safe
+    async def fin_delete_quotation(qid: str, cu: dict = Depends(admin_only)):
+        await db.fin_quotations.delete_one({"id": qid})
+        return {"ok": True}
 
     @api_router.delete("/fin/parties/{pid}")
     @_safe

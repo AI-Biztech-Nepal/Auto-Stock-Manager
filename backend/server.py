@@ -85,8 +85,8 @@ TENANT_COLLECTIONS = {
     "fin_transactions", "fin_customer_ledger", "fin_vendor_ledger", "fin_statement_imports",
     # Rent and the Cash account's details; created by migration_add_finance_rent.sql.
     "fin_rentals", "fin_cash_account",
-    # Ledger types; created at start-up by finance_books.ensure_schema.
-    "fin_party_types",
+    # Ledger types and quotations; created at start-up by finance_books.ensure_schema.
+    "fin_party_types", "fin_quotations",
 }
 
 def company_scope(cu: dict) -> dict:

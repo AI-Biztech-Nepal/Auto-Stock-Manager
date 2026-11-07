@@ -155,6 +155,10 @@ TABLES = {
     # Ledger types (Customer, Vendor, Employee, ...): created at start-up by finance_books.ensure_schema, which also adds
     # fin_parties.party_type_id to the fin_parties entry once it has confirmed the column exists.
     "fin_party_types": {"columns": {"id", "company_id", "name", "created_at"}},
+    # Quotations (Jageer Nepal's Quotation page); created at start-up by finance_books.ensure_schema.
+    "fin_quotations": {"columns": {"id", "company_id", "quote_seq", "quote_no", "quote_date", "subject", "client_name",
+                                    "client_address", "salesperson_name", "salesperson_phone", "items", "terms", "total",
+                                    "business", "created_at"}, "json_cols": {"items", "business"}},
 }
 
 
