@@ -151,6 +151,51 @@ export function ledgerRows(books, from, to) {
   });
 }
 
+// ── one party's statement, as Finance Nepal's party ledger shows it ───────
+// Both ledgers as one account, oldest first to run the balance, returned newest first. Debit = they owe you
+// more (a sale, a refund paid out to them, a payment made to a vendor), credit = they owe you less (money
+// received, a purchase on credit). `balance` > 0 is Dr (they owe you), < 0 is Cr (you owe them).
+// `kind` is the Ledger table's word for the money: billed, paid, received, or none for a journal voucher.
+const BILL_KIND = { sale: "Sales no.", purchase: "Purchase no.", expense: "Expenses no." };
+
+export function partyStatement(books, partyId) {
+  const bills = new Map(books.transactions.map((t) => [t.id, t]));
+  const items = [];
+  const push = (e, side) => {
+    const debitEntry = e.entry_type === "debit";
+    const manual = e.source === "manual";
+    const journal = isJournal(e);
+    const kind = journal ? "none" : side === "c" ? (debitEntry ? (manual ? "paid" : "billed") : "received") : (debitEntry ? "billed" : "paid");
+    const label = journal ? "Journal voucher"
+      : side === "c" ? (debitEntry ? (manual ? "Paid out" : e.source_type === "rental_rent" ? "Daily rent" : "Billed") : "Received")
+      : (debitEntry ? "Bought on credit" : "Paid");
+    const bill = e.source_type === "business_transaction" ? bills.get(e.source_id) : null;
+    const no = bill?.bill_no || e.receipt_no;
+    const refKind = bill ? BILL_KIND[bill.type] : side === "v" ? (debitEntry ? "Purchase no." : "Payment no.") : (debitEntry ? (manual ? "Payment no." : "Sales no.") : "Receipt no.");
+    const j = journalOf(e.note);
+    const note = j ? [j.code, j.narration].filter(Boolean).join(" · ") : e.note;
+    // customer debit and vendor credit raise what they owe you; the other two lower it
+    const up = side === "c" ? debitEntry : !debitEntry;
+    items.push({
+      e, side, table: side === "c" ? "cl" : "vl", date: entryDate(e), kind, label,
+      sub: [no ? `${refKind} ${no}` : null, note].filter(Boolean).join(" · "),
+      debit: up ? e.amount : 0, credit: up ? 0 : e.amount,
+    });
+  };
+  for (const e of books.customer_ledger) if (e.customer_id === partyId) push(e, "c");
+  for (const e of books.vendor_ledger) if (e.vendor_id === partyId) push(e, "v");
+  items.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : (a.e.created_at || "") < (b.e.created_at || "") ? -1 : 1));
+  let run = 0;
+  for (const l of items) { run += l.debit - l.credit; l.balance = Math.round(run * 100) / 100; }
+  const sum = (k) => items.reduce((s, l) => s + (l.kind === k ? l.e.amount : 0), 0);
+  return {
+    lines: items.reverse(),
+    billed: sum("billed"), paid: sum("paid"), received: sum("received"),
+    debit: items.reduce((s, l) => s + l.debit, 0), credit: items.reduce((s, l) => s + l.credit, 0),
+    closing: Math.round(run * 100) / 100,
+  };
+}
+
 // Business totals only count parties on the wrong side of zero, so one customer in credit never
 // cancels another's debt.
 export function owedTotals(books) {
@@ -342,35 +387,39 @@ export function tradingAccount(books, from, to) {
 // ── Day Book (section 3.1) ────────────────────────────────────────────────
 // Rows for one day, in time order, with a running balance that only cash rows advance. The opening
 // balance calls the SAME available-balance formula with a cutoff, so the two can never disagree.
-export function dayBook(books, date) {
-  const opening = balances(books, { before: date }).total;
+// The cash book for a run of days (the Statement), with the Day Book's rows and columns. Each row carries its
+// day; rows run oldest first, then by time. No `from` means from the very first entry.
+export function cashBook(books, from, to) {
+  const inRange = (d) => (!from || d >= from) && (!to || d <= to);
+  const opening = from ? balances(books, { before: from }).total : 0;
   const rows = [];
   for (const t of books.transactions) {
-    if (billDate(t) !== date || isJournal(t)) continue;
+    if (!inRange(billDate(t)) || isJournal(t)) continue;
     const who = t.party_name || partyName(books, t.customer_id) || "";
     if (t.type === "expense") rows.push({ key: `t${t.id}`, at: t.created_at, kind: "expense", label: `Expense${who ? `: ${who}` : ""}`, note: t.note, invoice: t.bill_no, out: t.amount, table: "tx", data: t });
     else if (isSettledOnTheSpot(t)) rows.push({ key: `t${t.id}`, at: t.created_at, kind: t.type, label: `${t.type === "sale" ? "Sale" : "Purchase"}${who ? `: ${who}` : ""} (no party)`, note: t.note, invoice: t.bill_no, bill: t.amount, discount: t.discount_amount, invoiceAmt: t.amount + (t.discount_amount || 0) - (t.vat_amount || 0), [t.type === "sale" ? "in" : "out"]: t.amount, table: "tx", data: t });
     else rows.push({ key: `t${t.id}`, at: t.created_at, kind: t.type, label: `${t.type === "sale" ? "Sale" : "Purchase"}: ${who || "—"}`, note: t.note, invoice: t.bill_no, bill: t.amount, discount: t.discount_amount, invoiceAmt: t.amount + (t.discount_amount || 0) - (t.vat_amount || 0), table: "tx", data: t });
   }
   for (const e of books.customer_ledger) {
-    if (entryDate(e) !== date || isJournal(e)) continue;
+    if (!inRange(entryDate(e)) || isJournal(e)) continue;
     const isIn = e.entry_type === "credit";
     if (!isIn && e.source !== "manual") continue; // a booking debit IS the sale bill row
     rows.push({ key: `c${e.id}`, at: e.created_at, kind: isIn ? "received" : "paid", label: isIn ? `Received from ${partyName(books, e.customer_id, "Customer")}` : `Paid to ${partyName(books, e.customer_id, "Customer")}`, note: e.note, invoice: e.receipt_no, [isIn ? "in" : "out"]: e.amount, table: "cl", data: e });
   }
   for (const e of books.vendor_ledger) {
-    if (entryDate(e) !== date || e.entry_type !== "credit" || isJournal(e)) continue; // debits are the Purchase itself
+    if (!inRange(entryDate(e)) || e.entry_type !== "credit" || isJournal(e)) continue; // debits are the Purchase itself
     rows.push({ key: `v${e.id}`, at: e.created_at, kind: "paid", label: `Paid to ${partyName(books, e.vendor_id, "Vendor")}`, note: e.note, invoice: e.receipt_no, out: e.amount, table: "vl", data: e });
   }
   for (const t of books.transfers) {
-    if (transferDate(t) !== date) continue;
+    if (!inRange(transferDate(t))) continue;
     rows.push({ key: `x${t.id}`, at: t.created_at, kind: "transfer", label: `${accountName(books, t.from_account_id)} → ${accountName(books, t.to_account_id)}`, note: t.note, transferAmount: t.amount, table: "tr", data: t });
   }
   for (const v of journalVouchers(books)) {
-    if (v.date !== date) continue;
+    if (!inRange(v.date)) continue;
     rows.push({ key: `j${v.code}`, at: v.at, kind: "journal", label: `Journal voucher ${v.code}`, note: voucherSummary(v), transferAmount: v.total, table: "jv", data: v });
   }
-  rows.sort((a, b) => ((a.at || "") < (b.at || "") ? -1 : (a.at || "") > (b.at || "") ? 1 : 0));
+  for (const r of rows) r.date = r.table === "tx" ? billDate(r.data) : r.table === "tr" ? transferDate(r.data) : r.table === "jv" ? r.data.date : entryDate(r.data);
+  rows.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : (a.at || "") < (b.at || "") ? -1 : (a.at || "") > (b.at || "") ? 1 : 0));
   let running = opening, cashIn = 0, cashOut = 0, salesBilled = 0, purchasesBilled = 0;
   for (const r of rows) {
     if (r.in) { running += r.in; cashIn += r.in; }
@@ -381,6 +430,9 @@ export function dayBook(books, date) {
   }
   return { opening, rows, cashIn, cashOut, closing: opening + cashIn - cashOut, salesBilled, purchasesBilled };
 }
+
+// A paper cash book for one day.
+export const dayBook = (books, date) => cashBook(books, date, date);
 
 // ── the interleaved feed under the entry forms ────────────────────────────
 export function feedRows(books) {

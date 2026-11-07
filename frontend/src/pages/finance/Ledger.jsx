@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import { useBooks } from "./BooksContext";
 import EntryEditor from "./EntryEditor";
 import { Card, Field, Modal, Empty, TwoTapDelete, Notice, ExportBar, exportXlsx, inputCls, btnPrimary, btnGhost } from "./ui";
-import { partyBalances, ledgerRows, entryDate, journalOf, npr, num, COLORS } from "./money";
+import { ledgerRows, partyStatement, npr, num } from "./money";
 import { getCurrentBSMonthRange, getCurrentBSYearRange, formatBSDate } from "../../utils/nepali-date";
 
 const PhoneHint = "10-digit phone";
@@ -98,47 +98,22 @@ function PartyDetail({ party, onBack, openReport }) {
   const { books, del } = useBooks();
   const [editing, setEditing] = useState(false);
   const [openRow, setOpenRow] = useState(null);
-  const b = partyBalances(books)[party.id] || { receivable: 0, payable: 0 };
+  const st = useMemo(() => partyStatement(books, party.id), [books, party.id]);
+  const typeName = books.party_types.find((t) => t.id === party.party_type_id)?.name;
 
-  const custRows = useMemo(() => books.customer_ledger.filter((e) => e.customer_id === party.id).sort((a, c) => (entryDate(a) < entryDate(c) ? 1 : entryDate(a) > entryDate(c) ? -1 : (a.created_at < c.created_at ? 1 : -1))), [books, party.id]);
-  const vendRows = useMemo(() => books.vendor_ledger.filter((e) => e.vendor_id === party.id).sort((a, c) => (entryDate(a) < entryDate(c) ? 1 : entryDate(a) > entryDate(c) ? -1 : (a.created_at < c.created_at ? 1 : -1))), [books, party.id]);
+  const sideWord = (b) => (b > 0 ? " Dr" : b < 0 ? " Cr" : "");
+  const balanceText = (b) => `${num(Math.abs(b))}${sideWord(b)}`;
+  const balanceColor = (b) => (b > 0 ? TONE.receivable.text : b < 0 ? TONE.payable.text : "#64748B");
 
   const cols = [
-    { header: "Ledger", value: (r) => r.ledger },
-    { header: "Date", value: (r) => entryDate(r.e) },
-    { header: "Type", value: (r) => (r.e.entry_type === "debit" ? "Debt" : "Payment") },
-    { header: "Receipt/Payment no", value: (r) => r.e.receipt_no || "" },
-    { header: "Note", value: (r) => r.e.note || "" },
-    { header: "Amount", value: (r) => r.e.amount },
+    { header: "SN", value: (l) => st.lines.indexOf(l) + 1 },
+    { header: "Date", value: (l) => l.date },
+    { header: "Details", value: (l) => [l.label, l.sub].filter(Boolean).join(" · ") },
+    { header: "Transaction", value: (l) => (l.kind === "billed" ? l.e.amount : "") },
+    { header: "Total paid", value: (l) => (l.kind === "paid" ? l.e.amount : "") },
+    { header: "Total received", value: (l) => (l.kind === "received" ? l.e.amount : "") },
+    { header: "Balance", value: (l) => balanceText(l.balance) },
   ];
-  const allRows = [...custRows.map((e) => ({ ledger: "Customer", e })), ...vendRows.map((e) => ({ ledger: "Vendor", e }))];
-
-  const list = (rows, table, owedLabel) => (
-    <Card>
-      <div className="px-4 py-3 border-b border-slate-100 text-sm font-semibold text-slate-800">{owedLabel}</div>
-      {rows.length === 0 ? <Empty>No entries.</Empty> : rows.map((e) => {
-        const debt = e.entry_type === "debit";
-        const color = table === "cl" ? (debt ? COLORS.sale : COLORS.in) : (debt ? COLORS.purchase : COLORS.out);
-        return (
-          <button key={e.id} onClick={() => setOpenRow({ table, data: e })} className="w-full text-left px-4 py-3 border-t border-slate-100 first:border-t-0 hover:bg-slate-50 flex items-center gap-3">
-            <div className="flex-1 min-w-0">
-              <div className="text-sm text-slate-800">{journalOf(e.note) ? "Journal voucher" : debt ? (table === "cl" ? (e.source_type === "rental_rent" ? "Daily rent" : "Sale (debt)") : "Purchase (debt)") : (table === "cl" ? "Payment received" : "Payment out")}{e.receipt_no ? <span className="text-slate-400"> · #{e.receipt_no}</span> : null}</div>
-              <div className="text-xs text-slate-400 truncate">{entryDate(e)}{e.note ? ` · ${e.note}` : ""}{e.source !== "manual" ? " · from a bill" : ""}</div>
-            </div>
-            <div className="text-sm font-semibold shrink-0" style={{ color }}>{npr(e.amount)}</div>
-          </button>
-        );
-      })}
-    </Card>
-  );
-
-  const headline = (amount, owedBy, owedTo, color) => (
-    <Card className="p-4">
-      <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">{owedBy}</div>
-      <div className="text-2xl font-bold mt-1" style={{ fontFamily: "Manrope", color }}>{npr(Math.abs(amount))}</div>
-      {amount < 0 && <div className="text-xs text-slate-500 mt-0.5">{owedTo}</div>}
-    </Card>
-  );
 
   return (
     <div className="space-y-4">
@@ -147,13 +122,14 @@ function PartyDetail({ party, onBack, openReport }) {
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h2 className="text-xl font-bold text-slate-900">{party.name}</h2>
+            {typeName && <span className="inline-block mt-1 rounded-full bg-blue-50 px-2.5 py-0.5 text-xs font-semibold text-blue-700">{typeName}</span>}
             <div className="text-sm text-slate-500 mt-1 space-y-0.5">
               {party.phone && <div className="flex items-center gap-1.5"><Phone size={13} />{party.phone}</div>}
               {party.address && <div className="flex items-center gap-1.5"><MapPin size={13} />{party.address}</div>}
             </div>
           </div>
           <div className="fin-no-print flex flex-wrap gap-2">
-            <ExportBar onXlsx={() => exportXlsx(`ledger-${party.name}`, cols, allRows)} />
+            <ExportBar onXlsx={() => exportXlsx(`ledger-${party.name}`, cols, st.lines)} />
             {openReport && [["sales", "Sales"], ["purchase", "Purchases"], ["expense", "Expenses"]].map(([k, l]) => (
               <button key={k} onClick={() => openReport(k, party.id)} className={btnGhost} data-testid={`party-report-${k}`}>{l} report</button>
             ))}
@@ -164,13 +140,59 @@ function PartyDetail({ party, onBack, openReport }) {
         <p className="text-xs text-slate-400 mt-3">Deleting a party also deletes their whole ledger. Bills keep the name that was typed on them.</p>
       </Card>
 
-      <div className="grid sm:grid-cols-2 gap-3">
-        {headline(b.receivable, b.receivable >= 0 ? "Customer owes you" : "You owe this customer", "They paid in advance or for a bill that was removed", b.receivable > 0 ? COLORS.in : b.receivable < 0 ? COLORS.out : "#0f172a")}
-        {(vendRows.length > 0 || b.payable !== 0) && headline(b.payable, b.payable >= 0 ? "You owe this vendor" : "Vendor owes you", "You paid more than was billed", b.payable > 0 ? COLORS.out : b.payable < 0 ? COLORS.in : "#0f172a")}
+      {/* The Ledger table's own figures for this one party */}
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+        <SummaryCard label="Transaction (original price)" value={npr(st.billed)} tone={{ text: "#0F172A", base: "#E2E8F0" }} />
+        <SummaryCard label="Total paid" value={npr(st.paid)} tone={TONE.payable} />
+        <SummaryCard label="Total received" value={npr(st.received)} tone={TONE.receivable} />
+        <SummaryCard label={st.closing > 0 ? "Balance (to receive)" : st.closing < 0 ? "Balance (to pay)" : "Balance"} value={`NPR ${balanceText(st.closing)}`} tone={st.closing < 0 ? TONE.payable : st.closing > 0 ? TONE.receivable : TONE.settled} />
+        <SummaryCard label="Entries" value={String(st.lines.length)} tone={TONE.settled} />
       </div>
 
-      {list(custRows, "cl", "As a customer (what they owe you)")}
-      {vendRows.length > 0 && list(vendRows, "vl", "As a vendor (what you owe them)")}
+      <Card className="overflow-x-auto">
+        {st.lines.length === 0 ? <Empty>No entries yet.</Empty> : (
+          <table className="w-full text-[13px]">
+            <thead>
+              <tr className="bg-slate-50 text-left text-xs font-semibold text-slate-500">
+                <th className="px-3 py-2.5 w-12">SN</th>
+                <th className="px-3 py-2.5 hidden sm:table-cell">Date</th>
+                <th className="px-3 py-2.5">Details</th>
+                <th className="px-3 py-2.5 text-right">Transaction</th>
+                <th className="px-3 py-2.5 text-right">Total paid</th>
+                <th className="px-3 py-2.5 text-right">Total received</th>
+                <th className="px-3 py-2.5 text-right">Balance</th>
+              </tr>
+            </thead>
+            <tbody>
+              {st.lines.map((l, i) => (
+                <tr key={`${l.table}${l.e.id}`} onClick={() => setOpenRow({ table: l.table, data: l.e })} className="border-t border-slate-100 hover:bg-slate-50 cursor-pointer">
+                  <td className="px-3 py-2.5 text-slate-500">{i + 1}</td>
+                  <td className="px-3 py-2.5 hidden sm:table-cell text-slate-600 whitespace-nowrap">{formatBSDate(l.date)}</td>
+                  <td className="px-3 py-2.5 min-w-0">
+                    <div className="font-medium text-slate-900 truncate">{l.label}{l.sub && <span className="font-normal text-slate-500"> · {l.sub}</span>}</div>
+                    <div className="sm:hidden text-[11px] text-slate-400">{formatBSDate(l.date)}</div>
+                  </td>
+                  <td className="px-3 py-2.5 text-right">{fig(l.kind === "billed" ? l.e.amount : 0, "#0F172A")}</td>
+                  <td className="px-3 py-2.5 text-right">{fig(l.kind === "paid" ? l.e.amount : 0, TONE.payable.text)}</td>
+                  <td className="px-3 py-2.5 text-right">{fig(l.kind === "received" ? l.e.amount : 0, TONE.receivable.text)}</td>
+                  <td className="px-3 py-2.5 text-right font-bold whitespace-nowrap" style={{ color: balanceColor(l.balance) }}>{l.balance ? balanceText(l.balance) : "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr className="border-t-2 border-slate-200 bg-slate-50 font-bold">
+                <td className="px-3 py-2.5 hidden sm:table-cell" colSpan={3}>Total</td>
+                <td className="px-3 py-2.5 sm:hidden" colSpan={2}>Total</td>
+                <td className="px-3 py-2.5 text-right">{num(st.billed)}</td>
+                <td className="px-3 py-2.5 text-right" style={{ color: TONE.payable.text }}>{num(st.paid)}</td>
+                <td className="px-3 py-2.5 text-right" style={{ color: TONE.receivable.text }}>{num(st.received)}</td>
+                <td className="px-3 py-2.5 text-right" style={{ color: balanceColor(st.closing) }}>{balanceText(st.closing)}</td>
+              </tr>
+            </tfoot>
+          </table>
+        )}
+      </Card>
+      <p className="text-xs text-slate-400">Dr = they owe you, Cr = you owe them. A journal voucher moves the balance but no money.</p>
 
       {editing && <PartyForm party={party} onClose={() => setEditing(false)} onOpenExisting={() => {}} />}
       {openRow && <EntryEditor row={openRow} onClose={() => setOpenRow(null)} />}
