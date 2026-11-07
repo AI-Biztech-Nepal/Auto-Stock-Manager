@@ -504,3 +504,99 @@ export function receivableAgeing(books, today = todayStr()) {
   owing.sort((a, b) => b.days - a.days || b.balance - a.balance);
   return { owing, ageing, receivable: ageing[0] + ageing[1] + ageing[2] };
 }
+
+// ── the Statement, as Jageer Nepal's TransactionsBook reads the books ─────
+// Every entry newest first: bills (Sale bill / Purchase bill / Expenses), money received and paid, what is owed
+// that is not a bill (Credit sale / Credit purchase: daily rent, a debt entered by hand), transfers between your
+// own accounts and journal vouchers. A bill also posts a line on its party's ledger; that line IS the bill, so it
+// is not listed twice. Bill amount is what was billed; Cash in / Cash out is money that moved. A journal voucher
+// shows its amount for the record but counts in no total.
+export const STATEMENT_PILL = {
+  received: { label: "Received", color: "#047857", bg: "#ECFDF5" },
+  paid: { label: "Paid", color: "#B91C1C", bg: "#FEF2F2" },
+  expense: { label: "Expenses", color: "#B91C1C", bg: "#FEF2F2" },
+  sale: { label: "Sale bill", color: "#047857", bg: "#ECFDF5" },
+  purchase: { label: "Purchase bill", color: "#B91C1C", bg: "#FEF2F2" },
+  creditSale: { label: "Credit sale", color: "#047857", bg: "#ECFDF5" },
+  creditPurchase: { label: "Credit purchase", color: "#B91C1C", bg: "#FEF2F2" },
+  transfer: { label: "Transfer", color: "#4338CA", bg: "#EEF2FF" },
+  journal: { label: "Journal", color: "#B45309", bg: "#FFFBEB" },
+};
+
+export function statementRows(books) {
+  const P = STATEMENT_PILL;
+  const cat = new Map(books.categories.map((c) => [c.id, c.name]));
+  const rows = [];
+  for (const t of books.transactions) {
+    if (isJournal(t)) continue;
+    const expense = t.type === "expense";
+    const onSpot = isSettledOnTheSpot(t);
+    const category = t.expense_category_id ? cat.get(t.expense_category_id) : null;
+    const items = (t.items || []).map((i) => i.description).filter(Boolean).join(", ");
+    rows.push({
+      id: `b-${t.id}`, key: `b-${t.id}`, kind: t.type, table: "tx", data: t, date: billDate(t), at: t.created_at,
+      details: expense ? (t.party_name || category || "Expenses") : (t.party_name || partyName(books, t.customer_id) || (t.type === "sale" ? "Sale" : "Purchase")),
+      sub: [t.bill_no ? `Bill #${t.bill_no}` : null, expense && t.party_name ? category : null, !expense ? items || t.note : t.note,
+        expense ? accountName(books, t.bank_account_id) : onSpot ? `Paid on the spot · ${accountName(books, t.bank_account_id)}` : "On credit"].filter(Boolean).join(" · "),
+      pill: expense ? P.expense : t.type === "sale" ? P.sale : P.purchase,
+      invoice: expense ? null : t.bill_no || null,
+      discount: expense ? null : t.discount_amount || 0,
+      amount: expense ? null : t.amount,
+      cashIn: onSpot && t.type === "sale" ? t.amount : null,
+      cashOut: expense ? t.amount : onSpot && t.type === "purchase" ? t.amount : null,
+      deletable: true,
+    });
+  }
+  for (const e of books.customer_ledger) {
+    if (e.source_type === "business_transaction") continue; // the bill's own row
+    const isIn = e.entry_type === "credit", manual = e.source === "manual";
+    const name = partyName(books, e.customer_id, "Customer");
+    const v = journalOf(e.note);
+    rows.push({
+      id: `l-${e.id}`, key: `l-${e.id}`, kind: v ? "journal" : isIn ? "received" : manual ? "paid" : "creditSale", table: "cl", data: e, party: e.customer_id,
+      date: entryDate(e), at: e.created_at,
+      details: v ? `Journal voucher · ${isIn ? "out of" : "onto"} ${name}` : isIn ? `Received from ${name}` : manual ? `Paid to ${name}` : e.source_type === "rental_rent" ? `Daily rent · ${name}` : `Receivable from ${name}`,
+      sub: v ? [v.code, v.narration].filter(Boolean).join(" · ") : [e.receipt_no ? `${isIn ? "Receipt" : "Payment"} No. ${e.receipt_no}` : null, e.note, isIn || manual ? accountName(books, e.bank_account_id) : null].filter(Boolean).join(" · "),
+      pill: v ? P.journal : isIn ? P.received : manual ? P.paid : P.creditSale,
+      invoice: null, discount: null,
+      amount: v || (!isIn && !manual) ? e.amount : null,
+      cashIn: !v && isIn ? e.amount : null,
+      cashOut: !v && !isIn && manual ? e.amount : null,
+      journal: !!v,
+    });
+  }
+  for (const e of books.vendor_ledger) {
+    if (e.source_type === "business_transaction") continue;
+    const isPay = e.entry_type === "credit";
+    const name = partyName(books, e.vendor_id, "Vendor");
+    const v = journalOf(e.note);
+    rows.push({
+      id: `v-${e.id}`, key: `v-${e.id}`, kind: v ? "journal" : isPay ? "paid" : "creditPurchase", table: "vl", data: e, party: e.vendor_id,
+      date: entryDate(e), at: e.created_at,
+      details: v ? `Journal voucher · ${isPay ? "onto" : "out of"} ${name}` : isPay ? `Paid to ${name}` : `Bought on credit · ${name}`,
+      sub: v ? [v.code, v.narration].filter(Boolean).join(" · ") : [e.receipt_no ? `Payment No. ${e.receipt_no}` : null, e.note, isPay ? accountName(books, e.bank_account_id) : null].filter(Boolean).join(" · "),
+      pill: v ? P.journal : isPay ? P.paid : P.creditPurchase,
+      invoice: null, discount: null,
+      amount: v || !isPay ? e.amount : null,
+      cashIn: null,
+      cashOut: !v && isPay ? e.amount : null,
+      journal: !!v,
+    });
+  }
+  for (const tr of books.transfers) {
+    rows.push({
+      id: `t-${tr.id}`, key: `t-${tr.id}`, kind: "transfer", table: "tr", data: tr, date: transferDate(tr), at: tr.created_at,
+      details: `${accountName(books, tr.from_account_id)} → ${accountName(books, tr.to_account_id)}`,
+      sub: tr.note || "Between your own accounts", pill: P.transfer,
+      invoice: null, discount: null, amount: tr.amount, cashIn: null, cashOut: null, deletable: true,
+    });
+  }
+  return rows.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : (a.at || "") < (b.at || "") ? 1 : -1));
+}
+
+// "Today · 2083 Kartik 21", "Yesterday · ...", "5 days ago · ..." - the Statement's day groups.
+export function dayGroupLabel(date, bsLabel, today = todayStr()) {
+  const diff = Math.round((new Date(today) - new Date(date)) / 86400000);
+  const rel = diff === 0 ? "Today" : diff === 1 ? "Yesterday" : diff > 1 ? `${diff} days ago` : "";
+  return rel ? `${rel} · ${bsLabel}` : bsLabel;
+}

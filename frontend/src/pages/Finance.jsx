@@ -87,7 +87,7 @@ function FinanceInner() {
   const screens = {
     "balance-sheet": <BalanceSheet goTab={goTab} openParty={openParty} />,
     daybook: <DayBook date={bookDate} setDate={setBookDate} goTab={goTab} />,
-    statement: <Statement goTab={goTab} />,
+    statement: <Statement goTab={goTab} openParty={openParty} />,
     voucher: <Journal onDone={() => goTab("daybook")} />,
     contra: <Contra />,
     received: <Payment direction="received" />,
