@@ -80,10 +80,10 @@ TENANT_COLLECTIONS = {
     "sync_logs", "team_members", "vehicle_photos", "vehicles", "vendor_payments", "vendors",
     "audit_logs", "ai_chat_sessions", "settings", "facebook_pages", "bookings",
     "offer_prizes", "offer_codes", "page_views", "crm_followups", "crm_interactions",
-    # Finance books (see finance_books.py); tables are created by migration_add_finance_books.sql.
+    # The Finance section was removed from the app, but its fin_* tables are still in the database and have foreign
+    # keys to companies, so they stay listed here: deleting a company must still clear whatever rows they hold.
     "fin_parties", "fin_bank_accounts", "fin_account_transfers", "fin_expense_categories", "fin_items",
     "fin_transactions", "fin_customer_ledger", "fin_vendor_ledger", "fin_statement_imports",
-    # Rent and the Cash account's details; created by migration_add_finance_rent.sql.
     "fin_rentals", "fin_cash_account",
 }
 
@@ -2147,8 +2147,7 @@ async def platform_delete_company(company_id: str, cu: dict = Depends(platform_o
         try:
             await getattr(db, name).delete_many({"company_id": company_id})
         except Exception as e:
-            # The finance tables only exist once migration_add_finance_books.sql has been run by hand;
-            # until then there is nothing of theirs to delete.
+            # The leftover finance tables may not exist on every database; then there is nothing of theirs to delete.
             if name.startswith("fin_") and ("1146" in str(e) or "doesn't exist" in str(e)):
                 continue
             raise
@@ -6081,10 +6080,6 @@ async def _run_startup_tasks():
                 await db.execute_raw(_ddl)
             except Exception:
                 logger.warning("Could not ensure offers tables", exc_info=True)
-        try:
-            await finance_books.ensure_schema(db)  # Finance's Rent tables and bill-service columns (never raises)
-        except Exception:
-            logger.warning("Could not ensure the Finance rent tables", exc_info=True)
     try:
         await _backfill_booking_receipt_numbers()
     except Exception:
@@ -7351,8 +7346,6 @@ async def shutdown():
     client.close()
     _compress_pool.shutdown(wait=False, cancel_futures=True)
 
-import finance_books
-finance_books.register(api_router, db, admin_only)
 crm.register(api_router, db, admin_only, _sale_revenue)
 
 app.include_router(api_router)

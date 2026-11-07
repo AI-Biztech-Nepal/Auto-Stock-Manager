@@ -27,7 +27,6 @@ const Reports = lazy(() => import("./pages/Reports"));
 const AIAssistant = lazy(() => import("./pages/AIAssistant"));
 const Settings = lazy(() => import("./pages/Settings"));
 const Ledger = lazy(() => import("./pages/Ledger"));
-const Finance = lazy(() => import("./pages/Finance"));
 const SpareParts = lazy(() => import("./pages/SpareParts"));
 const Sales = lazy(() => import("./pages/Sales"));
 const SaleDetail = lazy(() => import("./pages/SaleDetail"));
@@ -106,7 +105,6 @@ function AppRoutes() {
           <Route path="vendors" element={<Navigate to="/ledger?tab=vendors" replace />} />
           <Route path="team" element={<Navigate to="/ledger?tab=staff" replace />} />
           <Route path="reports" element={<RoleRoute path="/reports"><Reports /></RoleRoute>} />
-          <Route path="finance" element={<RoleRoute path="/finance"><Finance /></RoleRoute>} />
           <Route path="spare-parts" element={<RoleRoute path="/spare-parts"><SpareParts /></RoleRoute>} />
           <Route path="sales" element={<RoleRoute path="/sales"><Sales /></RoleRoute>} />
           <Route path="sanakhat" element={<RoleRoute path="/sanakhat"><SanakhatPortal /></RoleRoute>} />
