@@ -15,7 +15,7 @@ import ImportStatement from "./finance/ImportStatement";
 import Inventory from "./finance/Inventory";
 import BusinessSummary from "./finance/BusinessSummary";
 import Rent from "./finance/Rent";
-import { Report, Totals } from "./finance/Reports";
+import { Report, Totals, MoneyMoved } from "./finance/Reports";
 import { SalesReport, PurchaseReport, ExpenseReport, ReceivableReport, PayableReport } from "./finance/ReportPages";
 import { financeTab } from "./finance/nav";
 import { Card, Notice } from "./finance/ui";
@@ -82,6 +82,8 @@ function FinanceInner() {
     import: <ImportStatement />,
     report: <Report goTab={goTab} />,
     totals: <Totals />,
+    "total-received": <MoneyMoved dir="in" openParty={openParty} />,
+    "total-paid": <MoneyMoved dir="out" openParty={openParty} />,
     "sales-report": <SalesReport partyId={partyId} onShowAll={showEveryone} />,
     "purchase-report": <PurchaseReport partyId={partyId} onShowAll={showEveryone} />,
     "expense-report": <ExpenseReport partyId={partyId} onShowAll={showEveryone} />,

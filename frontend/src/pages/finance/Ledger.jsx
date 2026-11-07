@@ -278,8 +278,8 @@ export default function Ledger({ partyId, setPartyId, openReport, goTab }) {
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
-        <SummaryCard label="Total paid" value={npr(cards.paid)} tone={TONE.payable} onClick={() => goTab?.("totals")} />
-        <SummaryCard label="Total received" value={npr(cards.received)} tone={TONE.receivable} onClick={() => goTab?.("totals")} />
+        <SummaryCard label="Total paid" value={npr(cards.paid)} tone={TONE.payable} onClick={() => goTab?.("total-paid")} />
+        <SummaryCard label="Total received" value={npr(cards.received)} tone={TONE.receivable} onClick={() => goTab?.("total-received")} />
         <SummaryCard label="Payable" value={npr(cards.payable)} tone={TONE.payable} active={filter === "payable"} onClick={() => setFilter(filter === "payable" ? "all" : "payable")} />
         <SummaryCard label="Receivable" value={npr(cards.receivable)} tone={TONE.receivable} active={filter === "receivable"} onClick={() => setFilter(filter === "receivable" ? "all" : "receivable")} />
         <SummaryCard label="Total ledgers" value={String(analysed.length)} tone={TONE.settled} active={filter === "all"} onClick={() => setFilter("all")} />

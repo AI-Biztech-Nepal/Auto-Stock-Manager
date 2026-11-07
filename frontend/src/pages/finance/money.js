@@ -266,18 +266,18 @@ export function cashMovements(books) {
     if (isJournal(t)) continue;
     const d = billDate(t);
     const who = t.party_name || partyName(books, t.customer_id) || "Walk-in";
-    if (isSettledOnTheSpot(t)) lines.push({ id: t.id, date: d, dir: t.type === "sale" ? "in" : "out", amount: t.amount, label: `${t.type === "sale" ? "Sale" : "Purchase"}: ${who}`, table: "tx", src: t.type === "sale" ? "walkIn" : "walkInBought" });
-    else if (t.type === "expense") lines.push({ id: t.id, date: d, dir: "out", amount: t.amount, label: `Expense: ${who}`, table: "tx", src: "expense" });
+    if (isSettledOnTheSpot(t)) lines.push({ id: t.id, date: d, dir: t.type === "sale" ? "in" : "out", amount: t.amount, label: `${t.type === "sale" ? "Sale" : "Purchase"}: ${who}`, table: "tx", party: t.customer_id || null, ref: t.bill_no, src: t.type === "sale" ? "walkIn" : "walkInBought" });
+    else if (t.type === "expense") lines.push({ id: t.id, date: d, dir: "out", amount: t.amount, label: `Expense: ${who}`, table: "tx", party: t.customer_id || null, ref: t.bill_no, src: "expense" });
   }
   for (const e of books.customer_ledger) {
     if (isJournal(e)) continue;
     const who = partyName(books, e.customer_id, "Customer");
-    if (e.entry_type === "credit") lines.push({ id: e.id, date: entryDate(e), dir: "in", amount: e.amount, label: `Received from ${who}`, table: "cl", src: "customers" });
-    else if (e.source === "manual") lines.push({ id: e.id, date: entryDate(e), dir: "out", amount: e.amount, label: `Refunded to ${who}`, table: "cl", src: "toCustomers" });
+    if (e.entry_type === "credit") lines.push({ id: e.id, date: entryDate(e), dir: "in", amount: e.amount, label: `Received from ${who}`, table: "cl", party: e.customer_id, ref: e.receipt_no, src: "customers" });
+    else if (e.source === "manual") lines.push({ id: e.id, date: entryDate(e), dir: "out", amount: e.amount, label: `Refunded to ${who}`, table: "cl", party: e.customer_id, ref: e.receipt_no, src: "toCustomers" });
   }
   for (const e of books.vendor_ledger) {
     if (isJournal(e)) continue;
-    if (e.entry_type === "credit") lines.push({ id: e.id, date: entryDate(e), dir: "out", amount: e.amount, label: `Paid to ${partyName(books, e.vendor_id, "Vendor")}`, table: "vl", src: "toVendors" });
+    if (e.entry_type === "credit") lines.push({ id: e.id, date: entryDate(e), dir: "out", amount: e.amount, label: `Paid to ${partyName(books, e.vendor_id, "Vendor")}`, table: "vl", party: e.vendor_id, ref: e.receipt_no, src: "toVendors" });
   }
   return lines.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
 }

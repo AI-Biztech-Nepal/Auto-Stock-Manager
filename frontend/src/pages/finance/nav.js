@@ -33,7 +33,7 @@ export const FINANCE_NAV = [
 // Pages that are reached from a button, not from the panel, and the panel item each one belongs under.
 export const FINANCE_HIDDEN_TABS = {
   received: "daybook", paid: "daybook", sales: "daybook", purchases: "daybook", expenses: "daybook", voucher: "daybook", contra: "daybook",
-  import: "statement", totals: "report",
+  import: "statement", totals: "report", "total-received": "ledger", "total-paid": "ledger",
 };
 
 export const FINANCE_DEFAULT_TAB = "summary";

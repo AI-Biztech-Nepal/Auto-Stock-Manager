@@ -3,7 +3,7 @@ import { Plus, Landmark, Banknote, ArrowRightLeft } from "lucide-react";
 import { toast } from "sonner";
 import { useBooks } from "./BooksContext";
 import EntryEditor from "./EntryEditor";
-import { Card, Field, Modal, DateField, Empty, TwoTapDelete, inputCls, btnPrimary, btnGhost } from "./ui";
+import { Card, Field, Modal, DateField, Empty, Stat, TwoTapDelete, inputCls, btnPrimary, btnGhost } from "./ui";
 import { balances, transferDate, todayStr, npr, CASH, COLORS } from "./money";
 
 // The lines behind one account's balance, so a wrong total can be traced.
@@ -101,6 +101,12 @@ export default function BankAccounts() {
 
   return (
     <div className="space-y-5">
+      {/* Bank Balances, as Finance Nepal heads it: everything available, the banks together, and cash */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <Stat label="Available balance (Cash + Banks)" value={bal.total} color={bal.total < 0 ? COLORS.out : COLORS.balance} />
+        <Stat label="Bank total" value={bal.total - bal.cash} color={bal.total - bal.cash < 0 ? COLORS.out : COLORS.balance} />
+        <Stat label="Cash" value={bal.cash} color={bal.cash < 0 ? COLORS.out : COLORS.balance} />
+      </div>
       <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
         <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
           <button onClick={() => setLines({ title: cashName, bucket: bal.buckets[CASH] })} className="text-left w-full">
