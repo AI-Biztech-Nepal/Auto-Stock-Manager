@@ -152,6 +152,9 @@ TABLES = {
                                  "returned_on", "rate_per_day", "note", "created_at", "updated_at"}},
     "fin_cash_account": {"columns": {"id", "company_id", "name", "bank_name", "account_number", "account_holder_name", "address",
                                       "updated_at"}},
+    # Ledger types (Customer, Vendor, Employee, ...): created at start-up by finance_books.ensure_schema, which also adds
+    # fin_parties.party_type_id to the fin_parties entry once it has confirmed the column exists.
+    "fin_party_types": {"columns": {"id", "company_id", "name", "created_at"}},
 }
 
 

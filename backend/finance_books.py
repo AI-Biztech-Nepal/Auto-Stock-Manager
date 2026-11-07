@@ -82,18 +82,34 @@ _services_ready = True
 # Same for fin_expense_categories.expense_group.
 _groups_ready = True
 
+# Ledger types, as in Finance Nepal: a label on each party (Customer, Vendor, Employee, or any type the company adds).
+# It only files the party; it moves nothing between the customer and vendor ledgers. Deleting a type leaves its parties
+# untyped, and an untyped party shows as Customer or Vendor from what its ledger holds most of.
+PARTY_TYPE_DDL = [
+    "CREATE TABLE IF NOT EXISTS fin_party_types ("
+    "id VARCHAR(36) NOT NULL PRIMARY KEY, company_id VARCHAR(36) NOT NULL, name VARCHAR(100) NOT NULL, created_at VARCHAR(40), "
+    "UNIQUE KEY uq_fin_party_types_name (company_id, name), "
+    "CONSTRAINT fk_fin_party_types_company FOREIGN KEY (company_id) REFERENCES companies(id)"
+    ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
+    "ALTER TABLE fin_parties ADD COLUMN IF NOT EXISTS party_type_id VARCHAR(36) NULL",
+]
+STARTER_PARTY_TYPES = ("Customer", "Vendor", "Employee")
+# Whether fin_parties.party_type_id exists (same reasoning as _services_ready).
+_types_ready = True
+
 
 async def ensure_schema(db, registry=None):
     """Called once from server.py's start-up on MySQL. `db` is the real database object (execute_raw /
     fetch_raw). Creates what the Rent screen needs, adds the two service columns, and only then tells the SQL
     layer's table registry about them. Never raises: a database user that cannot alter tables simply leaves
     Rent and services off, and the rest of Finance exactly as it was."""
-    global _services_ready, _groups_ready
+    global _services_ready, _groups_ready, _types_ready
     if registry is None:
         import sqldb
         registry = sqldb.TABLES
     _services_ready = False
     _groups_ready = False
+    _types_ready = False
     for ddl in RENT_DDL:
         try:
             await db.execute_raw(ddl)
@@ -132,6 +148,21 @@ async def ensure_schema(db, registry=None):
             logger.warning("Finance expense heads are all direct: fin_expense_categories has no expense_group column")
     except Exception:  # noqa: BLE001
         logger.warning("Could not check fin_expense_categories' columns", exc_info=True)
+    for ddl in PARTY_TYPE_DDL:
+        try:
+            await db.execute_raw(ddl)
+        except Exception:  # noqa: BLE001
+            logger.warning("Could not ensure the ledger types", exc_info=True)
+    try:
+        rows = await db.fetch_raw("SELECT COLUMN_NAME FROM information_schema.COLUMNS "
+                                  "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'fin_parties'")
+        if "party_type_id" in {r["COLUMN_NAME"] for r in rows}:
+            registry["fin_parties"]["columns"].add("party_type_id")
+            _types_ready = True
+        else:
+            logger.warning("Ledger types are off: fin_parties has no party_type_id column")
+    except Exception:  # noqa: BLE001
+        logger.warning("Could not check fin_parties' columns", exc_info=True)
 
 LEDGER_SIDES = {"customer": ("fin_customer_ledger", "customer_id"),
                 "vendor": ("fin_vendor_ledger", "vendor_id")}
@@ -269,6 +300,16 @@ class PartyBody(BaseModel):
     name: str
     phone: Optional[str] = None
     address: Optional[str] = None
+    party_type_id: Optional[str] = None  # left out, the party keeps its type
+
+
+class PartyTypeBody(BaseModel):
+    name: str
+
+
+class PartyTypeAssign(BaseModel):
+    party_ids: List[str]
+    party_type_id: Optional[str] = None  # None clears the type
 
 
 class AccountBody(BaseModel):
@@ -491,7 +532,19 @@ def register(api_router, db, admin_only):
         cash_rows = await _optional(db.fin_cash_account, "updated_at")
         if rentals:
             await _sync_rental_rent()  # catches up the days since the books were last read
+        party_types = await _optional(db.fin_party_types, "name")
+        if party_types == []:
+            # The three starter types, the first time the books are opened (as Finance Nepal does).
+            now = _now()
+            for name in STARTER_PARTY_TYPES:
+                try:
+                    await db.fin_party_types.insert_one({"id": _id(), "name": name, "created_at": now})
+                except Exception:  # noqa: BLE001 -- another request made it first (unique name)
+                    pass
+            party_types = await _all(db.fin_party_types, "name")
         return {
+            "party_types": party_types or [],
+            "types_ready": _types_ready and party_types is not None,
             "parties": await _all(db.fin_parties, "name"),
             "accounts": await _all(db.fin_bank_accounts, "name"),
             "transfers": await _all(db.fin_account_transfers),
@@ -523,6 +576,8 @@ def register(api_router, db, admin_only):
         now = _now()
         doc = {"id": _id(), "name": name, "phone": phone, "address": _clean(body.address),
                "created_at": now, "updated_at": now}
+        if _types_ready:
+            doc["party_type_id"] = await _party_type_or_none(body.party_type_id)
         await db.fin_parties.insert_one(doc)
         doc.pop("_id", None)
         return doc
@@ -539,9 +594,73 @@ def register(api_router, db, admin_only):
             dup = await db.fin_parties.find_one({"phone": phone, "id": {"$ne": pid}}, {"_id": 0})
             if dup:
                 raise HTTPException(409, f"{dup['name']} already has this phone number")
-        await db.fin_parties.update_one({"id": pid}, {"$set": {
-            "name": name, "phone": phone, "address": _clean(body.address), "updated_at": _now()}})
+        fields = {"name": name, "phone": phone, "address": _clean(body.address), "updated_at": _now()}
+        if _types_ready and "party_type_id" in body.model_fields_set:
+            fields["party_type_id"] = await _party_type_or_none(body.party_type_id)
+        await db.fin_parties.update_one({"id": pid}, {"$set": fields})
         return await db.fin_parties.find_one({"id": pid}, {"_id": 0})
+
+    # ── ledger types ───────────────────────────────────────────────────────
+    async def _party_type_or_none(tid: Optional[str]):
+        if not tid:
+            return None
+        if not await db.fin_party_types.find_one({"id": tid}, {"_id": 0, "id": 1}):
+            raise HTTPException(404, "Ledger type not found")
+        return tid
+
+    async def _party_type_name_free(name: str, exclude: Optional[str] = None):
+        for t in await db.fin_party_types.find({}, {"_id": 0, "id": 1, "name": 1}).to_list(1000):
+            if t["id"] != exclude and (t["name"] or "").strip().lower() == name.lower():
+                raise HTTPException(409, "This ledger type already exists")
+
+    def _types_on():
+        if not _types_ready:
+            raise HTTPException(503, "Ledger types need a database update, which the server applies when it starts. Restart the backend once.")
+
+    @api_router.post("/fin/party-types")
+    @_safe
+    async def fin_create_party_type(body: PartyTypeBody, cu: dict = Depends(admin_only)):
+        _types_on()
+        name = _clean(body.name)
+        if not name:
+            raise HTTPException(400, "Ledger type name is required")
+        await _party_type_name_free(name)
+        doc = {"id": _id(), "name": name, "created_at": _now()}
+        await db.fin_party_types.insert_one(doc)
+        doc.pop("_id", None)
+        return doc
+
+    @api_router.put("/fin/party-types/{tid}")
+    @_safe
+    async def fin_rename_party_type(tid: str, body: PartyTypeBody, cu: dict = Depends(admin_only)):
+        _types_on()
+        await _party_type_or_none(tid)
+        name = _clean(body.name)
+        if not name:
+            raise HTTPException(400, "Ledger type name is required")
+        await _party_type_name_free(name, exclude=tid)
+        await db.fin_party_types.update_one({"id": tid}, {"$set": {"name": name}})
+        return await db.fin_party_types.find_one({"id": tid}, {"_id": 0})
+
+    @api_router.delete("/fin/party-types/{tid}")
+    @_safe
+    async def fin_delete_party_type(tid: str, cu: dict = Depends(admin_only)):
+        """Its parties are left untyped; nothing on any ledger changes."""
+        _types_on()
+        await db.fin_parties.update_many({"party_type_id": tid}, {"$set": {"party_type_id": None}})
+        await db.fin_party_types.delete_one({"id": tid})
+        return {"ok": True}
+
+    @api_router.post("/fin/party-types/assign")
+    @_safe
+    async def fin_assign_party_type(body: PartyTypeAssign, cu: dict = Depends(admin_only)):
+        """Files several parties under one ledger type at once (the Ledger's bulk Set type)."""
+        _types_on()
+        tid = await _party_type_or_none(body.party_type_id)
+        ids = [i for i in body.party_ids if i][:1000]
+        if ids:
+            await db.fin_parties.update_many({"id": {"$in": ids}}, {"$set": {"party_type_id": tid, "updated_at": _now()}})
+        return {"ok": True, "count": len(ids)}
 
     @api_router.delete("/fin/parties/{pid}")
     @_safe

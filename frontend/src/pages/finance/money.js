@@ -96,6 +96,7 @@ export const emptyBooks = () => ({
   parties: [], accounts: [], transfers: [], categories: [], items: [],
   transactions: [], customer_ledger: [], vendor_ledger: [],
   rentals: [], cash_account: null, rent_ready: false, services_ready: false, groups_ready: false,
+  party_types: [], types_ready: false,
 });
 
 export const partyName = (books, id, fallback = "") => books.parties.find((p) => p.id === id)?.name || fallback;
@@ -108,6 +109,46 @@ export function partyBalances(books) {
   for (const e of books.customer_ledger) get(e.customer_id).receivable += e.entry_type === "debit" ? e.amount : -e.amount;
   for (const e of books.vendor_ledger) get(e.vendor_id).payable += e.entry_type === "debit" ? e.amount : -e.amount;
   return by;
+}
+
+// ── the Ledger's table, as Finance Nepal shows it ─────────────────────────
+// One row per party, with its two ledgers read as the one account they add up to. `balance` > 0 is to
+// receive, < 0 to pay, at the end of the period. Within the period: `billed` (Transaction: sales and
+// purchases with them, before any payment), `paid` (money paid to them: a vendor payment or a refund to a
+// customer) and `received` (money received from them). Journal vouchers move the balance, never cash.
+// A party with no ledger type shows as Customer or Vendor from the side its ledger holds most of.
+export function ledgerRows(books, from, to) {
+  const typeName = new Map((books.party_types || []).map((t) => [t.id, t.name]));
+  const rows = new Map(books.parties.map((p) => [p.id, {
+    party: p, billed: 0, paid: 0, received: 0, balance: 0, last: null, custCount: 0, vendCount: 0,
+  }]));
+  const visit = (id, e, side) => {
+    const r = rows.get(id);
+    if (!r) return;
+    const d = entryDate(e);
+    if (to && d > to) return;
+    const debit = e.entry_type === "debit";
+    if (side === "c") { r.custCount++; r.balance += debit ? e.amount : -e.amount; } else { r.vendCount++; r.balance -= debit ? e.amount : -e.amount; }
+    if (!r.last || d > r.last) r.last = d;
+    if (from && d < from) return;
+    if (isJournal(e)) return;
+    if (debit && (side === "v" || e.source !== "manual")) r.billed += e.amount;
+    else if (side === "c" && debit) r.paid += e.amount;       // refund to a customer
+    else if (side === "c") r.received += e.amount;
+    else r.paid += e.amount;                                  // payment to a vendor
+  };
+  for (const e of books.customer_ledger) visit(e.customer_id, e, "c");
+  for (const e of books.vendor_ledger) visit(e.vendor_id, e, "v");
+  return [...rows.values()].map((r) => {
+    const round = (n) => Math.round(n * 100) / 100;
+    const balance = round(r.balance);
+    return {
+      ...r, balance,
+      status: balance > 0 ? "receivable" : balance < 0 ? "payable" : "settled",
+      typeName: typeName.get(r.party.party_type_id) || null,
+      shownType: typeName.get(r.party.party_type_id) || (r.vendCount > r.custCount ? "Vendor" : "Customer"),
+    };
+  });
 }
 
 // Business totals only count parties on the wrong side of zero, so one customer in credit never

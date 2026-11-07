@@ -77,7 +77,7 @@ function FinanceInner() {
     purchases: <Bills type="purchase" />,
     expenses: <Bills type="expense" />,
     rent: <Rent openParty={openParty} />,
-    ledger: <Ledger partyId={partyId} setPartyId={setPartyId} openReport={openReport} />,
+    ledger: <Ledger partyId={partyId} setPartyId={setPartyId} openReport={openReport} goTab={goTab} />,
     banks: <BankAccounts />,
     import: <ImportStatement />,
     report: <Report goTab={goTab} />,
