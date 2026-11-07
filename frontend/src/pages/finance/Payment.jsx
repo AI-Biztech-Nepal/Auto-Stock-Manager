@@ -3,7 +3,7 @@ import { Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { useBooks } from "./BooksContext";
 import Feed from "./Feed";
-import { Card, Field, DateField, AccountSelect, PartyPicker, useConfirmSave, useAskNewParty, inputCls, btnPrimary, btnGhost } from "./ui";
+import { Card, Field, DateField, AccountSelect, PartyPicker, useConfirmSave, useAskNewParty, inputCls, btnPrimary, btnGhost, btnSave } from "./ui";
 import { todayStr, nextReceiptNo, isJournal, balances, accountName, num, COLORS } from "./money";
 import { noteWithItem, vehicleNames } from "./rentLogic";
 
@@ -125,7 +125,7 @@ export default function Payment({ direction }) {
           <button type="button" onClick={() => setRows((rs) => [...rs, newRow()])} className={btnGhost}><Plus size={16} /> Add another person</button>
           <div className="flex items-center gap-4">
             <span className="text-sm text-slate-600">Total <b style={{ color: received ? COLORS.in : COLORS.out }}>NPR {Math.round(total).toLocaleString("en-IN")}</b></span>
-            <button onClick={save} disabled={busy} className={btnPrimary}>{busy ? "Saving…" : "Save"}</button>
+            <button onClick={save} disabled={busy} className={btnSave}>{busy ? "Saving…" : "Save"}</button>
           </div>
         </div>
       </Card>

@@ -142,7 +142,7 @@ function PartyDetail({ party, onBack, openReport }) {
 
       {/* The Ledger table's own figures for this one party */}
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
-        <SummaryCard label="Transaction (original price)" value={npr(st.billed)} tone={{ text: "#0F172A", base: "#E2E8F0" }} />
+        <SummaryCard label="Transaction (original price)" value={npr(st.billed)} tone={{ text: "#111827", base: "#374151" }} />
         <SummaryCard label="Total paid" value={npr(st.paid)} tone={TONE.payable} />
         <SummaryCard label="Total received" value={npr(st.received)} tone={TONE.receivable} />
         <SummaryCard label={st.closing > 0 ? "Balance (to receive)" : st.closing < 0 ? "Balance (to pay)" : "Balance"} value={`NPR ${balanceText(st.closing)}`} tone={st.closing < 0 ? TONE.payable : st.closing > 0 ? TONE.receivable : TONE.settled} />
@@ -201,16 +201,20 @@ function PartyDetail({ party, onBack, openReport }) {
 }
 
 // The table's colours, as in Finance Nepal: money going out red, coming in green.
-const TONE = { payable: { text: "#B91C1C", base: "#FEE2E2" }, receivable: { text: "#047857", base: "#D1FAE5" }, settled: { text: "#1E3A8A", base: "#DBEAFE" } };
+// Jageer Nepal's LEDGER_TONE: `text` for the figure, `base` for the card's coloured edge.
+const TONE = { payable: { text: "#B91C1C", base: "#DC2626" }, receivable: { text: "#047857", base: "#059669" }, settled: { text: "#4B5563", base: "#9CA3AF" } };
 const PERIODS = [["all", "All time"], ["month", "This month"], ["year", "This year"]];
 const NO_TYPE = "__none";
 
 function SummaryCard({ label, value, tone, active, onClick }) {
   return (
-    <button onClick={onClick} className="text-left rounded-xl border bg-white p-4 transition-shadow hover:shadow-sm"
-      style={{ borderColor: active ? tone.text : "#E2E8F0", borderLeft: `4px solid ${tone.text}`, boxShadow: active ? `0 0 0 3px ${tone.base}` : undefined }}>
-      <div className="text-xs font-semibold text-slate-500">{label}</div>
-      <div className="text-lg font-bold mt-1" style={{ color: tone.text, fontFamily: "Manrope" }}>{value}</div>
+    <button onClick={onClick} disabled={!onClick} className="flex text-left rounded-xl overflow-hidden border transition-colors disabled:cursor-default"
+      style={{ borderColor: active ? tone.base : "#E5E7EB", backgroundColor: active ? "#F9FAFB" : "#FFFFFF" }}>
+      <span className="w-1 shrink-0" style={{ backgroundColor: tone.base }} />
+      <span className="flex-1 min-w-0 px-3 py-2.5">
+        <span className="block text-[11px] font-semibold tracking-wide text-gray-400 truncate">{label}</span>
+        <span className="block text-[17px] font-extrabold mt-0.5 truncate" style={{ color: tone.text }}>{value}</span>
+      </span>
     </button>
   );
 }
@@ -286,8 +290,8 @@ export default function Ledger({ partyId, setPartyId, openReport, goTab }) {
       </div>
 
       <div className="fin-no-print flex flex-wrap items-center gap-2">
-        <div className="flex gap-1 bg-slate-100 rounded-lg p-1">
-          {PERIODS.map(([k, l]) => <button key={k} onClick={() => setPeriod(k)} className={`h-8 px-3 rounded-md text-sm font-semibold ${period === k ? "bg-white shadow-sm text-blue-700" : "text-slate-500"}`}>{l}</button>)}
+        <div className="inline-flex gap-0.5 bg-gray-100 rounded-lg p-1">
+          {PERIODS.map(([k, l]) => <button key={k} onClick={() => setPeriod(k)} className={`px-3 py-1.5 rounded-md text-xs font-bold ${period === k ? "bg-white shadow-sm text-blue-700" : "text-slate-500"}`}>{l}</button>)}
         </div>
         <div className="relative flex-1 min-w-[200px]"><Search size={15} className="absolute left-3 top-3 text-slate-400" /><input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search by ledger name or phone" className={`${inputCls} pl-9`} /></div>
         {books.types_ready && (

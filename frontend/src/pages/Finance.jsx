@@ -13,7 +13,7 @@ import ImportStatement from "./finance/ImportStatement";
 import { Report, Totals, MoneyMoved } from "./finance/Reports";
 import { SalesReport, PurchaseReport, ExpenseReport, ReceivableReport, PayableReport, AgeingReport } from "./finance/ReportPages";
 import Quotation from "./finance/Quotation";
-import { financeTab } from "./finance/nav";
+import { financeTab, FINANCE_NAV } from "./finance/nav";
 import { Card, Notice } from "./finance/ui";
 import { todayStr } from "./finance/money";
 
@@ -23,6 +23,30 @@ import { todayStr } from "./finance/money";
 
 // Printing a screen should print the screen, not the app around it.
 const PRINT_CSS = "@media print { aside, header, .fin-no-print { display: none !important; } main { padding: 0 !important; overflow: visible !important; } }";
+
+// Every Finance table drawn as Jageer Nepal's BookTable: one bordered table, a grey header row of small bold
+// titles, a rule between every cell, and compact rows. Scoped to the Finance page so nothing else changes.
+const BOOK_CSS = `
+.fin-book table { border-collapse: collapse; width: 100%; font-size: 13px; color: #111827; }
+.fin-book thead th { background: #F9FAFB; color: #4B5563; font-size: 11.5px; font-weight: 700; text-transform: none; letter-spacing: 0;
+  padding: 8px 10px; border-bottom: 1px solid #D1D5DB; white-space: nowrap; }
+.fin-book tbody td, .fin-book tfoot td { padding: 8px 10px; border-bottom: 1px solid #E5E7EB; vertical-align: middle; }
+.fin-book thead th + th, .fin-book tbody td + td, .fin-book tfoot td + td { border-left: 1px solid #E5E7EB; }
+.fin-book tbody tr:last-child td { border-bottom: none; }
+.fin-book tfoot td { background: #F9FAFB; font-weight: 700; border-top: 1px solid #D1D5DB; border-bottom: none; }
+.fin-book tbody tr:hover td { background-color: #F8FAFC; }
+`;
+
+// The page's own name, as Jageer's top bar shows it.
+const HIDDEN_TITLES = { expenses: "Expenses", import: "Import Statement", totals: "Money In and Out", "total-received": "Total Received", "total-paid": "Total Paid" };
+const titleOf = (tab) => {
+  for (const item of FINANCE_NAV) {
+    if (item.key === tab) return item.label;
+    const child = (item.children || []).find((c) => c.key === tab);
+    if (child) return child.label;
+  }
+  return HIDDEN_TITLES[tab] || "Finance";
+};
 
 function SetupNotice({ message }) {
   // The message names the file to run (the first migration, or the later rent one).
@@ -85,18 +109,19 @@ function FinanceInner() {
     quotation: <Quotation />,
   };
 
-  return <div className="min-w-0 w-full">{screens[tab]}</div>;
+  return (
+    <div className="min-w-0 w-full space-y-3.5">
+      <h1 className="text-xl font-bold text-gray-900">{titleOf(tab)}</h1>
+      {screens[tab]}
+    </div>
+  );
 }
 
 export default function Finance() {
   return (
     <BooksProvider>
-      <style>{PRINT_CSS}</style>
-      <div className="space-y-5 animate-fade-in" data-testid="finance-page">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-900">Finance</h1>
-          <p className="text-sm text-slate-500">Your books: who owes whom, where the money sits, and what came in and went out each day.</p>
-        </div>
+      <style>{PRINT_CSS + BOOK_CSS}</style>
+      <div className="fin-book animate-fade-in -m-4 lg:-m-6 p-3 lg:p-6 min-h-full bg-gray-50" data-testid="finance-page">
         <FinanceInner />
       </div>
     </BooksProvider>

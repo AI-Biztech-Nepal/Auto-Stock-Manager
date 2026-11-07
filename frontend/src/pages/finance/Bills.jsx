@@ -3,7 +3,7 @@ import { Plus, Trash2, Percent, Tags, Wrench } from "lucide-react";
 import { toast } from "sonner";
 import { useBooks } from "./BooksContext";
 import Feed from "./Feed";
-import { Card, Field, Modal, DateField, AccountSelect, PartyPicker, TwoTapDelete, useConfirmSave, useAskNewParty, inputCls, btnPrimary, btnGhost } from "./ui";
+import { Card, Field, Modal, DateField, AccountSelect, PartyPicker, TwoTapDelete, useConfirmSave, useAskNewParty, inputCls, btnPrimary, btnGhost, btnSave } from "./ui";
 import { todayStr, billTotals, serviceLines, nextBillNo, balances, accountName, npr, COLORS } from "./money";
 
 let seq = 0;
@@ -174,7 +174,7 @@ function ItemisedBill({ type }) {
           {t.discount > 0 && <div className="flex justify-between"><span className="text-slate-500">Discount</span><span>− {npr(t.discount)}</span></div>}
           {showVat && <div className="flex justify-between"><span className="text-slate-500">VAT ({vatPercent || 0}%)</span><span>+ {npr(t.vat)}</span></div>}
           <div className="flex justify-between border-t border-slate-200 pt-2 text-base font-bold" style={{ color }}><span>Total</span><span>{npr(t.total)}</span></div>
-          <button onClick={save} disabled={busy} className={`${btnPrimary} w-full mt-3`}>{busy ? "Saving…" : `Save ${type}`}</button>
+          <button onClick={save} disabled={busy} className={`${btnSave} w-full mt-3`}>{busy ? "Saving…" : `Save ${type}`}</button>
         </div>
       </div>
       {confirmDialog}
@@ -299,7 +299,7 @@ function ExpenseForm() {
         </div>
         <div className="flex items-center gap-4">
           <span className="text-sm text-slate-600">Total <b style={{ color: COLORS.out }}>{npr(total)}</b></span>
-          <button onClick={save} disabled={busy} className={btnPrimary}>{busy ? "Saving…" : "Save"}</button>
+          <button onClick={save} disabled={busy} className={btnSave}>{busy ? "Saving…" : "Save"}</button>
         </div>
       </div>
       {manage && <CategoryManager onClose={() => setManage(false)} />}

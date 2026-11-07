@@ -14,8 +14,8 @@ function PeriodBar({ period, setPeriod, range, onXlsx }) {
   return (
     <>
       <div className="fin-no-print flex flex-wrap items-center justify-between gap-2">
-        <div className="flex gap-1 bg-slate-100 rounded-lg p-1">
-          {PERIODS.map(([k, l]) => <button key={k} onClick={() => setPeriod(k)} className={`h-8 px-3 rounded-md text-sm font-semibold ${period === k ? "bg-white shadow-sm text-blue-700" : "text-slate-500"}`}>{l}</button>)}
+        <div className="inline-flex gap-0.5 bg-gray-100 rounded-lg p-1">
+          {PERIODS.map(([k, l]) => <button key={k} onClick={() => setPeriod(k)} className={`px-3 py-1.5 rounded-md text-xs font-bold ${period === k ? "bg-white shadow-sm text-blue-700" : "text-slate-500"}`}>{l}</button>)}
         </div>
         <ExportBar onXlsx={onXlsx} />
       </div>
@@ -253,8 +253,8 @@ export function AgeingReport({ openParty }) {
         {AGEING_BUCKETS.map((b, i) => <Stat key={b.label} label={b.label} value={age.ageing[i]} color={b.color} onClick={() => setFilter(filter === String(i) ? "all" : String(i))} />)}
       </div>
       <div className="fin-no-print flex flex-wrap items-center justify-between gap-2">
-        <div className="flex gap-1 bg-slate-100 rounded-lg p-1">
-          {AGE_FILTERS.map(([k, l]) => <button key={k} onClick={() => setFilter(k)} className={`h-8 px-3 rounded-md text-sm font-semibold ${filter === k ? "bg-white shadow-sm text-blue-700" : "text-slate-500"}`}>{l}</button>)}
+        <div className="inline-flex gap-0.5 bg-gray-100 rounded-lg p-1">
+          {AGE_FILTERS.map(([k, l]) => <button key={k} onClick={() => setFilter(k)} className={`px-3 py-1.5 rounded-md text-xs font-bold ${filter === k ? "bg-white shadow-sm text-blue-700" : "text-slate-500"}`}>{l}</button>)}
         </div>
         <div className="flex gap-2">
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search by name or phone" className={`${inputCls} max-w-xs`} />

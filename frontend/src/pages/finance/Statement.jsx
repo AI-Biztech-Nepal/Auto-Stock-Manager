@@ -43,8 +43,8 @@ export default function Statement({ goTab }) {
   return (
     <div className="space-y-4">
       <div className="fin-no-print flex flex-wrap items-center justify-between gap-3">
-        <div className="flex gap-1 bg-slate-100 rounded-lg p-1">
-          {PERIODS.map(([k, l]) => <button key={k} onClick={() => setPeriod(k)} className={`h-8 px-3 rounded-md text-sm font-semibold ${period === k ? "bg-white shadow-sm text-blue-700" : "text-slate-500"}`}>{l}</button>)}
+        <div className="inline-flex gap-0.5 bg-gray-100 rounded-lg p-1">
+          {PERIODS.map(([k, l]) => <button key={k} onClick={() => setPeriod(k)} className={`px-3 py-1.5 rounded-md text-xs font-bold ${period === k ? "bg-white shadow-sm text-blue-700" : "text-slate-500"}`}>{l}</button>)}
         </div>
         <div className="flex flex-wrap gap-2">
           <button onClick={() => goTab("import")} className={btnGhost} data-testid="statement-import"><FileSpreadsheet size={16} /> Import</button>

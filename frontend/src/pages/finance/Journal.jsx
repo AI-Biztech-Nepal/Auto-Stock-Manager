@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { useBooks } from "./BooksContext";
-import { Card, Field, DateField, inputCls, btnPrimary, btnGhost } from "./ui";
+import { Card, Field, DateField, inputCls, btnPrimary, btnGhost, btnSave } from "./ui";
 import { todayStr, npr, COLORS } from "./money";
 
 let seq = 0;
@@ -141,7 +141,7 @@ export default function Journal({ onDone }) {
       <Field label="Remarks"><input value={narration} onChange={(e) => setNarration(e.target.value)} placeholder="Optional" className={inputCls} /></Field>
       <div className="flex justify-end gap-2">
         <button onClick={() => onDone?.()} className={btnGhost}>Cancel</button>
-        <button onClick={save} disabled={busy} className={btnPrimary} data-testid="post-voucher">{busy ? "Posting…" : "Post voucher"}</button>
+        <button onClick={save} disabled={busy} className={btnSave} data-testid="post-voucher">{busy ? "Posting…" : "Post voucher"}</button>
       </div>
     </Card>
   );

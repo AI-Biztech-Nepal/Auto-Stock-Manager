@@ -89,8 +89,8 @@ export function Report({ goTab }) {
   return (
     <div className="space-y-4">
       <div className="fin-no-print flex flex-wrap items-center justify-between gap-2">
-        <div className="flex gap-1 bg-slate-100 rounded-lg p-1">
-          {PERIODS.map(([k, l]) => <button key={k} onClick={() => setPeriod(k)} className={`h-8 px-3 rounded-md text-sm font-semibold ${period === k ? "bg-white shadow-sm text-blue-700" : "text-slate-500"}`}>{l}</button>)}
+        <div className="inline-flex gap-0.5 bg-gray-100 rounded-lg p-1">
+          {PERIODS.map(([k, l]) => <button key={k} onClick={() => setPeriod(k)} className={`px-3 py-1.5 rounded-md text-xs font-bold ${period === k ? "bg-white shadow-sm text-blue-700" : "text-slate-500"}`}>{l}</button>)}
         </div>
         <ExportBar onXlsx={() => exportXlsx(`profit-and-loss-${period}`, cols, rows)} />
       </div>
@@ -222,7 +222,7 @@ export function Totals() {
       <Card className="p-4">
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-base font-bold text-slate-900">Money in and out</h3>
-          <div className="flex gap-1 bg-slate-100 rounded-lg p-1">{[["week", "By week"], ["month", "By month"]].map(([k, l]) => <button key={k} onClick={() => setBy(k)} className={`h-7 px-3 rounded-md text-xs font-semibold ${by === k ? "bg-white shadow-sm text-blue-700" : "text-slate-500"}`}>{l}</button>)}</div>
+          <div className="inline-flex gap-0.5 bg-gray-100 rounded-lg p-1">{[["week", "By week"], ["month", "By month"]].map(([k, l]) => <button key={k} onClick={() => setBy(k)} className={`h-7 px-3 rounded-md text-xs font-semibold ${by === k ? "bg-white shadow-sm text-blue-700" : "text-slate-500"}`}>{l}</button>)}</div>
         </div>
         {chart.length === 0 ? <Empty>No money has moved yet.</Empty> : (
           <div className="h-64"><ResponsiveContainer width="100%" height="100%">
@@ -312,8 +312,8 @@ export function MoneyMoved({ dir, openParty }) {
         <Stat label="Largest" value={stats.largest} />
       </div>
       <div className="fin-no-print flex flex-wrap items-center gap-2">
-        <div className="flex gap-1 bg-slate-100 rounded-lg p-1">
-          {MOVED_PERIODS.map(([k, l]) => <button key={k} onClick={() => setPeriod(k)} className={`h-8 px-3 rounded-md text-sm font-semibold ${period === k ? "bg-white shadow-sm text-blue-700" : "text-slate-500"}`}>{l}</button>)}
+        <div className="inline-flex gap-0.5 bg-gray-100 rounded-lg p-1">
+          {MOVED_PERIODS.map(([k, l]) => <button key={k} onClick={() => setPeriod(k)} className={`px-3 py-1.5 rounded-md text-xs font-bold ${period === k ? "bg-white shadow-sm text-blue-700" : "text-slate-500"}`}>{l}</button>)}
         </div>
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search by name or number" className="flex-1 min-w-[200px] h-10 px-3 rounded-lg border border-slate-300 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
         <ExportBar onXlsx={() => exportXlsx(incoming ? "total-received" : "total-paid", cols, shown)} />

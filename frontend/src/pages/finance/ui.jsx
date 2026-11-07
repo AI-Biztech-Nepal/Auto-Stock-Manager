@@ -1,16 +1,41 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { X, Plus, Check } from "lucide-react";
+import { X, Plus, Check, Printer, FileSpreadsheet } from "lucide-react";
 import * as XLSX from "xlsx";
 import { formatBSDate } from "../../utils/nepali-date";
 import { npr } from "./money";
 
-export const inputCls = "w-full h-10 px-3 rounded-lg border border-slate-300 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-slate-50 disabled:text-slate-500";
-export const btnPrimary = "inline-flex items-center justify-center gap-2 h-10 px-4 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold disabled:opacity-50 transition-colors";
-export const btnGhost = "inline-flex items-center justify-center gap-2 h-10 px-4 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 text-sm font-medium disabled:opacity-50 transition-colors";
+// Styled after Jageer Nepal's Finance kit (BookKit / FormKit): its input, its blue toolbar button (#1D4ED8),
+// its white outline button, and the white rounded card with a soft shadow that its forms and tables sit in.
+export const inputCls = "w-full h-10 px-3 rounded-lg border border-gray-300 bg-white text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 disabled:bg-gray-50 disabled:text-gray-500";
+export const btnPrimary = "inline-flex items-center justify-center gap-1.5 h-9 px-3.5 rounded-lg bg-[#1D4ED8] hover:bg-[#1E40AF] text-white text-[13px] font-semibold disabled:opacity-50 transition-colors";
+export const btnGhost = "inline-flex items-center justify-center gap-1.5 h-9 px-3 rounded-lg border border-gray-200 bg-white hover:bg-gray-50 text-gray-800 text-[13px] font-semibold disabled:opacity-50 transition-colors";
+// The big Save on an entry form (Jageer's FINANCE_ENTRY_ACCENT, with its glow).
+export const btnSave = "inline-flex items-center justify-center gap-2 h-10 px-8 rounded-xl bg-[#2563EB] hover:bg-[#1D4ED8] text-white text-sm font-semibold disabled:opacity-50 shadow-[0_2px_6px_rgba(37,99,235,0.35)] transition-colors";
 
 export const Card = ({ children, className = "" }) => (
-  <div className={`bg-white border border-slate-200 rounded-xl shadow-sm ${className}`}>{children}</div>
+  <div className={`bg-white border border-gray-200 rounded-2xl shadow-[0_1px_2px_rgba(16,24,40,0.04),0_4px_12px_rgba(16,24,40,0.03)] ${className}`}>{children}</div>
 );
+
+// A small grey section title with its icon, as Jageer's FormSection / FormCard heads a group of fields.
+export const SectionTitle = ({ icon: Icon, children }) => (
+  <div className="flex items-center gap-1.5 mb-3">{Icon && <Icon size={13} className="text-gray-400" />}<span className="text-[11px] font-bold uppercase tracking-wide text-gray-400">{children}</span></div>
+);
+
+// A soft coloured tag (a row's type, an age group ...).
+export const Pill = ({ text, color, bg }) => (
+  <span className="inline-block rounded-full px-2 py-0.5 text-[10.5px] font-bold whitespace-nowrap" style={{ color, backgroundColor: bg }}>{text}</span>
+);
+
+// Jageer's segmented filter: grey track, the chosen one white with blue text.
+export function FilterTabs({ options, value, onChange }) {
+  return (
+    <div className="inline-flex rounded-lg bg-gray-100 p-1 gap-0.5">
+      {options.map(([k, l]) => (
+        <button key={k} type="button" onClick={() => onChange(k)} className={`rounded-md px-3 py-1.5 text-xs font-bold ${value === k ? "bg-white text-blue-700 shadow-sm" : "text-gray-500 hover:text-gray-700"}`}>{l}</button>
+      ))}
+    </div>
+  );
+}
 
 export const Notice = ({ tone = "amber", children }) => {
   const tones = { amber: "bg-amber-50 border-amber-200 text-amber-800", red: "bg-red-50 border-red-200 text-red-700", blue: "bg-blue-50 border-blue-200 text-blue-800" };
@@ -19,7 +44,7 @@ export const Notice = ({ tone = "amber", children }) => {
 
 export const Field = ({ label, hint, children, className = "" }) => (
   <label className={`block ${className}`}>
-    <span className="block text-xs font-semibold text-slate-600 mb-1">{label}</span>
+    <span className="block text-xs font-semibold text-gray-600 mb-1.5">{label}</span>
     {children}
     {hint && <span className="block text-xs text-slate-400 mt-1">{hint}</span>}
   </label>
@@ -188,7 +213,7 @@ export function TwoTapDelete({ onConfirm, label = "Delete" }) {
   }, [armed]);
   return (
     <button type="button" onClick={() => (armed ? onConfirm() : setArmed(true))}
-      className={`h-10 px-4 rounded-lg text-sm font-semibold transition-colors ${armed ? "bg-red-600 text-white hover:bg-red-700" : "border border-red-200 text-red-600 hover:bg-red-50"}`}>
+      className={`h-9 px-3.5 rounded-lg text-[13px] font-semibold transition-colors ${armed ? "bg-red-600 text-white hover:bg-red-700" : "border border-red-200 bg-red-50 text-red-600 hover:bg-red-100"}`}>
       {armed ? "Tap again to delete for good" : label}
     </button>
   );
@@ -197,14 +222,14 @@ export function TwoTapDelete({ onConfirm, label = "Delete" }) {
 export const Stat = ({ label, value, color, onClick, sub }) => (
   <div onClick={onClick} role={onClick ? "button" : undefined} tabIndex={onClick ? 0 : undefined}
     onKeyDown={onClick ? (e) => (e.key === "Enter" || e.key === " ") && onClick() : undefined}
-    className={`bg-white border border-slate-200 rounded-xl p-3 sm:p-4 shadow-sm ${onClick ? "cursor-pointer hover:border-blue-300 hover:shadow-md transition" : ""}`}>
-    <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</div>
-    <div className="text-lg sm:text-xl font-bold mt-1 leading-tight" style={{ fontFamily: "Manrope", color: color || "#0f172a" }}>{typeof value === "number" ? npr(value) : value}</div>
-    {sub && <div className="text-xs text-slate-400 mt-0.5">{sub}</div>}
+    className={`bg-white border border-gray-200 rounded-xl px-3.5 py-2.5 ${onClick ? "cursor-pointer hover:border-blue-300 transition" : ""}`}>
+    <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">{label}</div>
+    <div className="text-base font-extrabold mt-0.5 leading-tight" style={{ color: color || "#111827" }}>{typeof value === "number" ? npr(value) : value}</div>
+    {sub && <div className="text-[11px] text-gray-400 mt-0.5">{sub}</div>}
   </div>
 );
 
-export const Empty = ({ children }) => <p className="py-10 text-center text-sm text-slate-500">{children}</p>;
+export const Empty = ({ children }) => <p className="py-10 text-center text-[13px] text-gray-500">{children}</p>;
 
 export const SavedCheck = () => <Check size={16} className="text-emerald-600" />;
 
@@ -219,7 +244,7 @@ export function exportXlsx(filename, columns, rows) {
 
 export const ExportBar = ({ onXlsx }) => (
   <div className="fin-no-print flex gap-2">
-    <button onClick={() => window.print()} className={btnGhost}>Print / PDF</button>
-    {onXlsx && <button onClick={onXlsx} className={btnGhost}>Excel</button>}
+    <button onClick={() => window.print()} className={btnGhost}><Printer size={15} className="text-gray-500" /> Print</button>
+    {onXlsx && <button onClick={onXlsx} className={btnGhost}><FileSpreadsheet size={15} className="text-emerald-600" /> Excel</button>}
   </div>
 );
