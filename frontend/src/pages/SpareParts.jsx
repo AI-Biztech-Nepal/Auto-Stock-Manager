@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import api from "../utils/api";
 import { formatNPR } from "../utils/helpers";
 import BSDatePicker from "../components/BSDatePicker";
+import { BOOK_CARD, BookTableStyle } from "../components/BookTable";
 
 // ── Defined outside component to prevent focus loss ────────────────────
 const inp = "w-full h-9 px-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500";
@@ -482,7 +483,8 @@ export default function SpareParts() {
       </div>
 
       {/* Table */}
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+      <div className={BOOK_CARD}>
+        <BookTableStyle />
         {filtered.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-40 text-slate-500">
             <Package size={32} className="mb-2 opacity-30" />
@@ -575,46 +577,54 @@ export default function SpareParts() {
 
             {/* Table — sm and up */}
             <div className="hidden sm:block overflow-x-auto">
-            <table className="w-full">
+            <table>
               <thead>
-                <tr className="border-b border-slate-100">
-                  {["Part Name", "Category", "Part#", "Qty", "Unit Cost", "Sell Price", "Total Value", "Supplier", ""].map(h => (
-                    <th key={h} className="text-left text-xs font-semibold uppercase tracking-wider text-slate-500 px-4 py-3 whitespace-nowrap">{h}</th>
-                  ))}
+                <tr>
+                  <th className="w-10">SN</th>
+                  <th>Part Name</th>
+                  <th>Category</th>
+                  <th>Part#</th>
+                  <th>Qty</th>
+                  <th className="text-right">Unit Cost</th>
+                  <th className="text-right">Sell Price</th>
+                  <th className="text-right">Total Value</th>
+                  <th>Supplier</th>
+                  <th />
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-50">
-                {filtered.flatMap(p => {
+              <tbody>
+                {filtered.flatMap((p, i) => {
                   const displaySupplier = p.vendor_name || p.supplier;
                   const rows = [];
                   rows.push(
-                    <tr key={p.id} data-testid="part-row" onClick={() => openEdit(p)} title="Click to edit part" className={`cursor-pointer transition-colors ${p.low_stock ? "bg-red-50/40" : "hover:bg-slate-50"}`}>
-                      <td className="px-4 py-3">
-                        <div className="font-semibold text-slate-900 text-sm flex items-center gap-2">
+                    <tr key={p.id} data-testid="part-row" onClick={() => openEdit(p)} title="Click to edit part" className={`cursor-pointer ${p.low_stock ? "bg-red-50/40" : ""}`}>
+                      <td className="text-gray-500">{i + 1}</td>
+                      <td className="min-w-[12rem]">
+                        <div className="font-semibold text-gray-900 flex items-center gap-2">
                           {p.name}
                           {(p.is_kit || p.stock_type === "set") && <span className="text-xs bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded-full font-bold flex items-center gap-1" title={p.stock_type === "set" ? "This part is a set — see its component checklist" : "This part is a kit with its own components"}><Boxes size={11} /> {p.stock_type === "set" ? "Set" : "Kit"}</span>}
                           {p.low_stock && <span className="text-xs bg-red-100 text-red-700 px-1.5 py-0.5 rounded-full font-bold">Low</span>}
                         </div>
-                        {p.brand_compatibility && <div className="text-xs text-slate-400 mt-0.5">{p.brand_compatibility}</div>}
+                        {p.brand_compatibility && <div className="text-[11px] text-gray-400 mt-0.5">{p.brand_compatibility}</div>}
                       </td>
-                      <td className="px-4 py-3 text-sm text-slate-600 whitespace-nowrap">{p.category}</td>
-                      <td className="px-4 py-3 text-xs font-mono text-slate-500">{p.part_number || "—"}</td>
-                      <td className="px-4 py-3">
+                      <td className="text-gray-600 whitespace-nowrap">{p.category}</td>
+                      <td className="font-mono text-gray-600 whitespace-nowrap">{p.part_number || <span className="text-gray-300">—</span>}</td>
+                      <td>
                         <div className="flex items-center gap-1.5">
                           <button onClick={(e) => { e.stopPropagation(); adjustStock(p.id, -1); }} className="w-6 h-6 rounded-md bg-slate-100 hover:bg-red-100 flex items-center justify-center transition-colors"><Minus size={11} /></button>
-                          <span className={`text-sm font-bold w-7 text-center ${p.low_stock ? "text-red-600" : "text-slate-900"}`}>{p.quantity}</span>
+                          <span className={`font-bold w-7 text-center ${p.low_stock ? "text-red-600" : "text-gray-900"}`}>{p.quantity}</span>
                           <button onClick={(e) => { e.stopPropagation(); adjustStock(p.id, 1); }} className="w-6 h-6 rounded-md bg-slate-100 hover:bg-green-100 flex items-center justify-center transition-colors"><Plus size={11} /></button>
                         </div>
                       </td>
-                      <td className="px-4 py-3 text-sm text-slate-700 whitespace-nowrap">{formatNPR(p.unit_cost)}</td>
-                      <td className="px-4 py-3 text-sm whitespace-nowrap">{p.selling_price ? <span className="text-green-700 font-medium">{formatNPR(p.selling_price)}</span> : "—"}</td>
-                      <td className="px-4 py-3 text-sm font-medium text-slate-800 whitespace-nowrap">{formatNPR(p.total_value)}</td>
-                      <td className="px-4 py-3 whitespace-nowrap">
+                      <td className="text-right text-gray-700 whitespace-nowrap">{formatNPR(p.unit_cost)}</td>
+                      <td className="text-right whitespace-nowrap">{p.selling_price ? <span className="text-green-700 font-medium">{formatNPR(p.selling_price)}</span> : <span className="text-gray-300">—</span>}</td>
+                      <td className="text-right font-bold text-gray-900 whitespace-nowrap">{formatNPR(p.total_value)}</td>
+                      <td className="whitespace-nowrap">
                         {displaySupplier
-                          ? <span className="flex items-center gap-1 text-sm text-slate-600"><Store size={12} className="text-slate-400 shrink-0" />{displaySupplier}</span>
-                          : <span className="text-slate-400 text-sm">—</span>}
+                          ? <span className="flex items-center gap-1 text-gray-600"><Store size={12} className="text-slate-400 shrink-0" />{displaySupplier}</span>
+                          : <span className="text-gray-300">—</span>}
                       </td>
-                      <td className="px-4 py-3">
+                      <td>
                         <div className="flex items-center gap-1">
                           <button onClick={(e) => { e.stopPropagation(); openUsePart(p); }} title="Use / Sell Part" data-testid="use-part-btn" className="max-md:min-w-11 max-md:min-h-11 max-md:inline-flex max-md:items-center max-md:justify-center p-1.5 hover:bg-orange-50 rounded-lg transition-colors">
                             <ShoppingCart size={14} className="text-orange-500" />
@@ -636,7 +646,7 @@ export default function SpareParts() {
                   if (expandedPart === p.id) {
                     rows.push(
                       <tr key={`${p.id}-txn`} className="bg-slate-50">
-                        <td colSpan={9} className="px-6 py-3">
+                        <td colSpan={10}>
                           <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-500 mb-2">
                             <History size={12} /> Usage History
                           </div>

@@ -18,7 +18,7 @@ const ForgotPassword = lazy(() => import("./pages/ForgotPassword"));
 const ResetPassword = lazy(() => import("./pages/ResetPassword"));
 const VerifyEmail = lazy(() => import("./pages/VerifyEmail"));
 const Dashboard = lazy(() => import("./pages/Dashboard"));
-const Inventory = lazy(() => import("./pages/Inventory"));
+const InventoryHub = lazy(() => import("./pages/InventoryHub"));
 const VehicleDetail = lazy(() => import("./pages/VehicleDetail"));
 const JobCards = lazy(() => import("./pages/JobCards"));
 const Warranty = lazy(() => import("./pages/Warranty"));
@@ -28,7 +28,6 @@ const AIAssistant = lazy(() => import("./pages/AIAssistant"));
 const Settings = lazy(() => import("./pages/Settings"));
 const Ledger = lazy(() => import("./pages/Ledger"));
 const Finance = lazy(() => import("./pages/Finance"));
-const SpareParts = lazy(() => import("./pages/SpareParts"));
 const Sales = lazy(() => import("./pages/Sales"));
 const SaleDetail = lazy(() => import("./pages/SaleDetail"));
 const SoldStockDetail = lazy(() => import("./pages/SoldStockDetail"));
@@ -95,7 +94,7 @@ function AppRoutes() {
         <Route path="/verify-email" element={<PublicRoute><VerifyEmail /></PublicRoute>} />
         <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
           <Route index element={<HomeRoute />} />
-          <Route path="inventory" element={<RoleRoute path="/inventory"><Inventory /></RoleRoute>} />
+          <Route path="inventory" element={<RoleRoute path="/inventory"><InventoryHub /></RoleRoute>} />
           <Route path="inventory/:id" element={<RoleRoute path="/inventory/detail"><VehicleDetail /></RoleRoute>} />
           <Route path="import-stock" element={<RoleRoute path="/import-stock"><ImportStock /></RoleRoute>} />
           <Route path="jobs" element={<RoleRoute path="/jobs"><JobCards /></RoleRoute>} />
@@ -107,7 +106,8 @@ function AppRoutes() {
           <Route path="team" element={<Navigate to="/ledger?tab=staff" replace />} />
           <Route path="reports" element={<RoleRoute path="/reports"><Reports /></RoleRoute>} />
           <Route path="finance" element={<RoleRoute path="/finance"><Finance /></RoleRoute>} />
-          <Route path="spare-parts" element={<RoleRoute path="/spare-parts"><SpareParts /></RoleRoute>} />
+          {/* Spare Parts moved under Inventory. */}
+          <Route path="spare-parts" element={<Navigate to="/inventory?tab=spare-parts" replace />} />
           <Route path="sales" element={<RoleRoute path="/sales"><Sales /></RoleRoute>} />
           <Route path="sanakhat" element={<RoleRoute path="/sanakhat"><SanakhatPortal /></RoleRoute>} />
           <Route path="bookings" element={<Navigate to="/sales?tab=bookings" replace />} />

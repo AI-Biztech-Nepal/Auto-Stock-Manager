@@ -5,6 +5,7 @@ import api from "../utils/api";
 import { useAuth } from "../context/AuthContext";
 import { canAccessPath, marketingTabsFor } from "../utils/permissions";
 import FinanceNavGroup from "./FinanceNavGroup";
+import InventoryNavGroup from "./InventoryNavGroup";
 import { isSanakhatOverdue, sanakhatPendingDays } from "../utils/helpers";
 import {
   LayoutDashboard, Bike, Wrench, BarChart3, Sparkles, Settings, LogOut, Menu, X, Bell,
@@ -31,7 +32,6 @@ const navItems = [
   { path: "/sanakhat",     label: "Sanakhat",     icon: FileCheck2 },  // the Sanakhat Desk account's only page; admin opens the same page
   { path: "/marketing",   label: "Marketing",    icon: Megaphone },
   { path: "/sales",        label: "Sales",        icon: ShoppingBag },
-  { path: "/spare-parts",  label: "Spare Parts",  icon: Boxes },
   { path: "/ledger",       label: "Ledger",       icon: BookOpen },
   { path: "/jobs",         label: "Job Cards",    icon: Wrench },
   { path: "/warranty",     label: "Warranty",     icon: ShieldCheck },
@@ -47,7 +47,8 @@ export default function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const { pathname, search } = useLocation();
   const [marketingOpen, setMarketingOpen] = useState(null); // null = follow the current page
-  const [financeOpen, setFinanceOpen] = useState(null);     // same for the Finance dropdown...
+  const [inventoryOpen, setInventoryOpen] = useState(null); // same for the Inventory dropdown (Product / Spare Parts)...
+  const [financeOpen, setFinanceOpen] = useState(null);     // ...the Finance dropdown...
   const [reportOpen, setReportOpen] = useState(null);       // ...and the family of reports under its Report item
 
   const handleLogout = () => { logout(); navigate("/login"); };
@@ -190,6 +191,29 @@ export default function Layout() {
                 onPick={() => mobile && setSidebarOpen(false)}
               />
             );
+          }
+          if (path === "/inventory") {
+            // Spare Parts lives under Inventory: a dropdown when the role gets both pages, the plain link otherwise.
+            const tabs = [
+              { key: "product", label: "Product", icon: Bike, to: "/inventory" },
+              canAccessPath(user?.role, "/spare-parts") && { key: "spare-parts", label: "Spare Parts", icon: Boxes, to: "/inventory?tab=spare-parts" },
+            ].filter(Boolean);
+            if (tabs.length > 1) {
+              return (
+                <InventoryNavGroup
+                  key={path}
+                  label={label}
+                  Icon={Icon}
+                  pathname={pathname}
+                  search={search}
+                  tabs={tabs}
+                  open={inventoryOpen}
+                  setOpen={setInventoryOpen}
+                  navigate={navigate}
+                  onPick={() => mobile && setSidebarOpen(false)}
+                />
+              );
+            }
           }
           const subTabs = path === "/marketing" ? marketingTabsFor(user?.role) : [];
           const leadsBadge = (
