@@ -438,10 +438,7 @@ export default function SpareParts() {
     <div className="space-y-5 animate-fade-in">
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-900">Spare Parts</h1>
-          <p className="text-sm text-slate-500">{parts.length} parts in inventory</p>
-        </div>
+        <p className="text-sm text-slate-500">{parts.length} parts in inventory</p>
         <button onClick={openBulkAdd} data-testid="bulk-add-part-btn" className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-3 rounded-lg transition-all active:scale-95 shadow-sm">
           <Layers size={16} /> Bulk Add (Bill)
         </button>

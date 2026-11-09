@@ -458,10 +458,7 @@ export default function Inventory() {
     <div className="space-y-3 animate-fade-in">
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
-        <div className="flex items-baseline gap-2.5">
-          <h1 className="text-xl font-bold text-slate-900">Inventory</h1>
-          <p className="text-sm text-slate-500">{filtered.length} vehicles found</p>
-        </div>
+        <p className="text-sm text-slate-500">{filtered.length} vehicles found</p>
         <div className="flex items-center gap-2 flex-wrap">
           <DateRangeFilter value={dateRange.key} custom={dateRange.custom} onChange={(key, custom) => setDateRange({ key, custom })} testid="inventory-date-filter" />
           <ViewToggle view={view} onChange={setView} testid="inventory-view-toggle" />
