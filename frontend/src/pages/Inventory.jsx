@@ -1,7 +1,8 @@
 import { useEffect, useState, useCallback, useMemo, useRef, useLayoutEffect } from "react";
 import { createPortal } from "react-dom";
-import { useNavigate, useSearchParams } from "react-router-dom";
-import { Plus, Search, Trash2, Filter, X, UploadCloud, Download, EyeOff, Package, Wallet, DollarSign, Lock, Moon, Archive, Sparkles, Store, User, Wrench, Clock, CheckCircle2, AlertTriangle, ImageOff, ChevronDown, Share2 } from "lucide-react";
+import { useNavigate, useOutletContext, useSearchParams } from "react-router-dom";
+import useMediaQuery from "../hooks/useMediaQuery";
+import { Plus, Search, Trash2, Filter, X, UploadCloud, Download, EyeOff, Package, Wallet, DollarSign, Lock, Moon, Sparkles, Store, User, Wrench, Clock, CheckCircle2, AlertTriangle, ImageOff, ChevronDown } from "lucide-react";
 import { toast } from "sonner";
 import api, { postWithRetry } from "../utils/api";
 import { formatNPR, getAgingStyle, getStatusStyle, getTerminationStyle, isSanakhatOverdue, sanakhatPendingDays, sanakhatDaysLeft, SANAKHAT_CYCLE_DAYS, SANAKHAT_WARN_DAYS, BRANDS, VEHICLE_STATUS_OPTIONS, formatOwnership } from "../utils/helpers";
@@ -126,7 +127,6 @@ export default function Inventory() {
   const [form, setForm] = useState(EMPTY);
   const [saving, setSaving] = useState(false);
   const [photos, setPhotos] = useState([]);
-  const [hidingUnpriced, setHidingUnpriced] = useState(false);
   const [exportingStock, setExportingStock] = useState(false);
   const [stockMenuOpen, setStockMenuOpen] = useState(false);
   const stockMenuRef = useRef(null);
@@ -182,7 +182,6 @@ export default function Inventory() {
     [vehicles]
   );
 
-  const unpricedVisible = vehicles.filter(v => !v.selling_price && !["sold", "unlisted", "hidden", "scrap", "in_repair"].includes(v.status));
   const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
   const recentlyAdded = vehicles
     .filter(v => v.created_at && new Date(v.created_at).getTime() >= oneDayAgo)
@@ -278,19 +277,6 @@ export default function Inventory() {
     }
     return result.length;
   })();
-
-  const hideUnpriced = async () => {
-    if (unpricedVisible.length === 0) return;
-    if (!window.confirm(`Move ${unpricedVisible.length} vehicle(s) with no selling price to Unlisted?`)) return;
-    setHidingUnpriced(true);
-    try {
-      const results = await Promise.allSettled(unpricedVisible.map(v => api.put(`/vehicles/${v.id}`, { status: "unlisted" })));
-      const failed = results.filter(r => r.status === "rejected").length;
-      if (failed > 0) toast.error(`Moved ${results.length - failed} vehicle(s), ${failed} failed`);
-      else toast.success(`Moved ${results.length} vehicle(s) to Unlisted`);
-      fetchVehicles();
-    } finally { setHidingUnpriced(false); }
-  };
 
   const exportStock = async () => {
     setExportingStock(true);
@@ -452,90 +438,22 @@ export default function Inventory() {
     } catch { toast.error("Failed to delete"); }
   };
 
+  const wideScreen = useMediaQuery("(min-width: 640px)");
+  const { topbarSlot } = useOutletContext() || {};
+  const viewControls = (
+    <>
+      <DateRangeFilter value={dateRange.key} custom={dateRange.custom} onChange={(key, custom) => setDateRange({ key, custom })} testid="inventory-date-filter" />
+      <ViewToggle view={view} onChange={setView} testid="inventory-view-toggle" />
+    </>
+  );
   const sanakhatOverdue = vehicles.filter(isSanakhatOverdue).sort((a, b) => sanakhatPendingDays(b) - sanakhatPendingDays(a));
 
   return (
     <div className="space-y-3 animate-fade-in">
-      {/* Header */}
-      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
-        <p className="text-sm text-slate-500">{filtered.length} vehicles found</p>
-        <div className="flex items-center gap-2 flex-wrap">
-          <DateRangeFilter value={dateRange.key} custom={dateRange.custom} onChange={(key, custom) => setDateRange({ key, custom })} testid="inventory-date-filter" />
-          <ViewToggle view={view} onChange={setView} testid="inventory-view-toggle" />
-          {!isFrontDesk && (
-            <button
-              onClick={() => navigate("/marketing?tab=share")}
-              data-testid="share-stock-button"
-              className="flex items-center gap-2 border border-slate-200 text-slate-700 text-[13px] font-medium px-3 h-9 rounded-lg hover:bg-slate-50 transition-all active:scale-95"
-            >
-              <Share2 size={16} /> Share Stock
-            </button>
-          )}
-          {((!isFrontDesk && !isSocialMedia) || isAdmin) && (
-            <div className="relative" ref={stockMenuRef}>
-              <button
-                onClick={() => setStockMenuOpen(o => !o)}
-                data-testid="stock-data-menu-button"
-                className="flex items-center gap-2 border border-slate-200 text-slate-700 text-[13px] font-medium px-3 h-9 rounded-lg hover:bg-slate-50 transition-all active:scale-95"
-              >
-                <Download size={16} /> Import / Export <ChevronDown size={14} />
-              </button>
-              {stockMenuOpen && (
-                <div className="absolute right-0 mt-1 w-48 bg-white border border-slate-200 rounded-lg shadow-lg z-30 py-1">
-                  {isAdmin && (
-                    <button
-                      onClick={() => { setStockMenuOpen(false); navigate("/import-stock"); }}
-                      data-testid="import-stock-btn"
-                      className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 text-left"
-                    >
-                      <UploadCloud size={16} /> Import Stock
-                    </button>
-                  )}
-                  {!isFrontDesk && !isSocialMedia && (
-                    <button
-                      onClick={() => { setStockMenuOpen(false); exportStock(); }}
-                      disabled={exportingStock}
-                      data-testid="export-stock-button"
-                      className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 text-left disabled:opacity-60"
-                    >
-                      <Download size={16} /> {exportingStock ? "Exporting..." : "Export Stock"}
-                    </button>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
-          {canManageStock && !isFrontDesk && (
-            <button
-              onClick={() => navigate("/sales")}
-              data-testid="sold-stock-link"
-              className="flex items-center gap-2 border border-slate-200 text-slate-700 text-[13px] font-medium px-3 h-9 rounded-lg hover:bg-slate-50 transition-all active:scale-95"
-            >
-              <Archive size={16} /> Sold Stock
-            </button>
-          )}
-          {canManageStock && !isFrontDesk && unpricedVisible.length > 0 && (
-            <button
-              onClick={hideUnpriced}
-              disabled={hidingUnpriced}
-              data-testid="hide-unpriced-button"
-              title="Move every vehicle with no selling price to Unlisted"
-              className="flex items-center gap-2 border border-slate-200 text-slate-700 text-[13px] font-medium px-3 h-9 rounded-lg hover:bg-slate-50 transition-all active:scale-95 disabled:opacity-60"
-            >
-              <EyeOff size={16} /> {hidingUnpriced ? "Moving..." : `Unlist ${unpricedVisible.length} with no price`}
-            </button>
-          )}
-          {canAddVehicle(user?.role) && (
-            <button
-              onClick={() => { setForm(EMPTY); setShowModal(true); }}
-              data-testid="add-vehicle-button"
-              className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-[13px] font-medium px-3 h-9 rounded-lg transition-all active:scale-95 shadow-sm"
-            >
-              <Plus size={16} /> Add Vehicle
-            </button>
-          )}
-        </div>
-      </div>
+      {/* Date range and Cards / List: up in the top bar on wide screens, here on phones */}
+      {wideScreen && topbarSlot
+        ? createPortal(viewControls, topbarSlot)
+        : <div className="flex items-center justify-end gap-2 flex-wrap">{viewControls}</div>}
 
       {/* Sanaakhat pending past 30 days */}
       {canManageStock && sanakhatOverdue.length > 0 && (
@@ -641,8 +559,9 @@ export default function Inventory() {
         </div>
       )}
 
-      {/* Status Toggle */}
-      <div className="flex items-center gap-2 overflow-x-auto" data-testid="status-toggle-group">
+      {/* Status Toggle, with Import / Export and Add Vehicle at the right */}
+      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+      <div className="flex items-center gap-2 overflow-x-auto min-w-0" data-testid="status-toggle-group">
         {STATUSES.map(s => {
           const active = statusFilter === s;
           const Icon = STATUS_ICONS[s] || Filter;
@@ -679,6 +598,52 @@ export default function Inventory() {
           </span>
           <ChevronDown size={14} className={photoMenuOpen ? "rotate-180 transition-transform" : "transition-transform"} />
         </button>
+      </div>
+      <div className="flex items-center gap-2" data-testid="inventory-actions">
+          {((!isFrontDesk && !isSocialMedia) || isAdmin) && (
+            <div className="relative" ref={stockMenuRef}>
+              <button
+                onClick={() => setStockMenuOpen(o => !o)}
+                data-testid="stock-data-menu-button"
+                className="flex items-center gap-2 border border-slate-200 text-slate-700 text-[13px] font-medium px-3 h-9 rounded-lg hover:bg-slate-50 transition-all active:scale-95"
+              >
+                <Download size={16} /> Import / Export <ChevronDown size={14} />
+              </button>
+              {stockMenuOpen && (
+                <div className="absolute right-0 mt-1 w-48 bg-white border border-slate-200 rounded-lg shadow-lg z-30 py-1">
+                  {isAdmin && (
+                    <button
+                      onClick={() => { setStockMenuOpen(false); navigate("/import-stock"); }}
+                      data-testid="import-stock-btn"
+                      className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 text-left"
+                    >
+                      <UploadCloud size={16} /> Import Stock
+                    </button>
+                  )}
+                  {!isFrontDesk && !isSocialMedia && (
+                    <button
+                      onClick={() => { setStockMenuOpen(false); exportStock(); }}
+                      disabled={exportingStock}
+                      data-testid="export-stock-button"
+                      className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 text-left disabled:opacity-60"
+                    >
+                      <Download size={16} /> {exportingStock ? "Exporting..." : "Export Stock"}
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+          {canAddVehicle(user?.role) && (
+            <button
+              onClick={() => { setForm(EMPTY); setShowModal(true); }}
+              data-testid="add-vehicle-button"
+              className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-[13px] font-medium px-3 h-9 rounded-lg transition-all active:scale-95 shadow-sm"
+            >
+              <Plus size={16} /> Add Vehicle
+            </button>
+          )}
+      </div>
       </div>
 
       {photoMenuOpen && photoMenuCoords && createPortal(
@@ -872,6 +837,7 @@ export default function Inventory() {
               <thead>
                 <tr data-testid="vehicle-list-header">
                   <th className="w-10 hidden 2xl:table-cell">SN</th>
+                  <th>Brand</th>
                   <th>Vehicle</th>
                   <th>Bike No.</th>
                   {!hideFinancials && <th className="text-right hidden lg:table-cell">Purchase Price</th>}
@@ -880,7 +846,7 @@ export default function Inventory() {
                   {!hidePricing && <th className="text-right">Selling Price</th>}
                   <th title={`Once done, the days left until it is due again (every ${SANAKHAT_CYCLE_DAYS} days)`}>Sanakhat</th>
                   <th>Status</th>
-                  <th title="Days since the vehicle was bought">In Stock</th>
+                  <th title="How long it has been in stock: days since it was bought, and its stock-age group">Stock Age</th>
                   {isAdmin && <th className="w-10" />}
                 </tr>
               </thead>
@@ -906,13 +872,14 @@ export default function Inventory() {
                       className={`cursor-pointer ${v.status === "scrap" ? "opacity-60 saturate-50" : ""}`}
                     >
                       <td className="hidden 2xl:table-cell text-gray-500">{i + 1}</td>
+                      <td className="whitespace-nowrap font-medium text-gray-700">{v.brand || <span className="text-gray-300">—</span>}</td>
                       <td className="min-w-[10rem]">
                         <div className="flex items-center gap-2.5">
                           <div className="w-9 h-9 rounded-lg overflow-hidden border border-gray-200 shrink-0 bg-gray-50 flex items-center justify-center">
                             {photo ? <LazyThumb src={photo.url} /> : <Package size={15} className="text-gray-300" />}
                           </div>
                           <div className="min-w-0">
-                            <div className="font-semibold text-gray-900 truncate" style={{ fontFamily: "Manrope" }}>{v.brand} {v.model}</div>
+                            <div className="font-semibold text-gray-900 truncate" style={{ fontFamily: "Manrope" }}>{v.model}</div>
                             <div className="text-[11px] text-gray-500 truncate">
                               {v.year} · {formatOwnership(v.ownership_number)}{v.status === "reserved" && v.booking?.customer_name ? ` · Booked by ${v.booking.customer_name}` : ""}{isAdmin && v.created_by ? ` · by ${v.created_by}` : ""}
                             </div>
@@ -949,7 +916,10 @@ export default function Inventory() {
                         )}
                       </td>
                       <td><span className={`${pill} ${st.bg} ${st.text}`}>{st.label}</span></td>
-                      <td><span className={`${pill} ${ag.bg} ${ag.text}`} title={`${v.aging?.days} days in stock · ${ag.label}`}>{v.aging?.days}d</span></td>
+                      <td className="whitespace-nowrap">
+                        <span className={`${pill} ${ag.bg} ${ag.text}`} title={`${v.aging?.days} days in stock · ${ag.label}`}>{v.aging?.days}d</span>
+                        <div className="mt-0.5 text-[11px] text-gray-500">{ag.label}</div>
+                      </td>
                       {isAdmin && (
                         <td onClick={e => e.stopPropagation()}>
                           <button onClick={e => handleDelete(v.id, e)} className="w-8 h-8 flex items-center justify-center hover:bg-red-50 rounded-lg transition-colors" data-testid="delete-vehicle-btn">

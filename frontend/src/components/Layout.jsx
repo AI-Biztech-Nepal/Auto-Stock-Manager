@@ -50,6 +50,7 @@ export default function Layout() {
   const [inventoryOpen, setInventoryOpen] = useState(null); // same for the Inventory dropdown (Product / Spare Parts)...
   const [financeOpen, setFinanceOpen] = useState(null);     // ...the Finance dropdown...
   const [reportOpen, setReportOpen] = useState(null);       // ...and the family of reports under its Report item
+  const [topbarSlot, setTopbarSlot] = useState(null);     // the top bar's spot for a page's own controls
 
   const handleLogout = () => { logout(); navigate("/login"); };
   // Admin's people live in Finance's Ledger now, so the main Ledger item goes for admin; stock and parts supervisors
@@ -366,6 +367,8 @@ export default function Layout() {
               </h1>
             );
           })() : <div className="flex-1" />}
+          {/* Pages put their date range / view switch here (wide screens only); see Inventory. */}
+          <div ref={setTopbarSlot} className="hidden sm:flex items-center gap-2" data-testid="topbar-slot" />
           {canSeeInventory && (
             <div className="relative" ref={notifRef}>
               <button
@@ -465,7 +468,7 @@ export default function Layout() {
           {/* Boundary here (not only at the app root) so a lazy page loading keeps the
               sidebar/header on screen instead of swapping the whole layout for a spinner. */}
           <Suspense fallback={<div className="flex items-center justify-center h-64"><div className="animate-spin w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full" /></div>}>
-            <Outlet context={{ newLeads }} />
+            <Outlet context={{ newLeads, topbarSlot }} />
           </Suspense>
           <div className="pb-safe" aria-hidden="true" />
         </main>
