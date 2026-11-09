@@ -1993,6 +1993,16 @@ async def reset_password(request: Request, req: ResetPasswordRequest):
     await db.users.update_one({"id": rec["user_id"]}, {"$set": {"password_hash": await hash_pw_async(req.new_password)}})
     return {"message": "Password reset — you can now sign in with your new password."}
 
+@api_router.get("/brand")
+async def get_brand(cu: dict = Depends(get_current_user)):
+    """The signed-in company's name and logo for the side panel. Any role may read it (the full /settings
+    is admin-only) and it is read live, so a rename or a new logo shows without signing in again."""
+    if not cu.get("company_id"):
+        return {"company_name": None, "logo_url": None}
+    company = await db.companies.find_one({"id": cu["company_id"]}, {"_id": 0, "name": 1})
+    settings = await db.settings.find_one({}, {"_id": 0, "logo_url": 1})
+    return {"company_name": company["name"] if company else None, "logo_url": (settings or {}).get("logo_url") or None}
+
 @api_router.get("/auth/me")
 async def me(cu: dict = Depends(get_current_user)):
     user = await db.users.find_one({"username": cu["username"]}, {"_id": 0, "password_hash": 0})

@@ -151,18 +151,31 @@ export default function Layout() {
     return () => { clearInterval(id); document.removeEventListener("visibilitychange", onVisible); };
   }, [user]);
 
+  // The company's current name and logo for the side panel; a failed call just leaves the login-time name and the initials tile.
+  const [brand, setBrand] = useState(null);
+  useEffect(() => {
+    if (!user || user.role === "platform_owner") return;
+    api.get("/brand").then(r => setBrand(r.data)).catch(() => {});
+  }, [user]);
+
   // A plain render function, not a component: declared inside Layout, a component would be a new type on every render
   // and the whole sidebar would remount (losing taps on its buttons) whenever the polled data refreshed.
   const renderSidebar = (mobile = false) => (
     <aside className={`${mobile ? "fixed inset-0 z-50 flex" : "hidden lg:flex"} flex-col bg-slate-900 text-white ${mobile ? "w-64" : "w-64"} h-app`}>
       {/* Logo */}
       <div className="flex items-center gap-3 px-6 py-5 border-b border-slate-700">
-        <div className="w-9 h-9 rounded-lg bg-blue-600 flex items-center justify-center font-bold text-white text-sm">AS</div>
-        <div>
-          {/* user.company_name comes back from login/signup (see AuthContext) -- this is
-              the signed-in tenant's own business, not the platform's own identity, which
-              only appears pre-login (see Login/SignUp's matching logo block). */}
-          <div className="font-bold text-sm leading-tight" style={{ fontFamily: "Manrope, sans-serif" }}>{user?.company_name || "Auto Stock Manager"}</div>
+        {/* The company's own logo when it has one (on a white tile: logos are drawn for light backgrounds), else the initials tile. */}
+        {brand?.logo_url ? (
+          <div className="h-11 w-[4.25rem] shrink-0 rounded-lg bg-white p-1 flex items-center justify-center">
+            <img src={brand.logo_url} alt="" className="max-h-full max-w-full object-contain" data-testid="sidebar-logo" />
+          </div>
+        ) : (
+          <div className="w-9 h-9 rounded-lg bg-blue-600 flex items-center justify-center font-bold text-white text-sm">AS</div>
+        )}
+        <div className="min-w-0">
+          {/* The signed-in tenant's own business, not the platform's own identity, which only appears pre-login (see
+              Login/SignUp's matching logo block). /brand is read live; user.company_name (stored at login) is the fallback. */}
+          <div className="font-bold text-sm leading-tight" style={{ fontFamily: "Manrope, sans-serif" }}>{brand?.company_name || user?.company_name || "Auto Stock Manager"}</div>
           <div className="text-xs text-slate-400">Inventory Manager</div>
         </div>
         {mobile && (
