@@ -1052,6 +1052,7 @@ export default function Inventory() {
           setPhotos={setPhotos}
           basicOnly={isSocialMedia}
           onImport={isAdmin ? importStock : undefined}
+          vehicles={vehicles}
         />
       )}
 
