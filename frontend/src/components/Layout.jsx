@@ -28,9 +28,9 @@ const navItems = [
   { path: "/",             label: "Dashboard",    icon: LayoutDashboard },
   { path: "/platform",     label: "Companies",    icon: Building2 },
   { path: "/inventory",    label: "Inventory",    icon: Bike },
+  { path: "/sanakhat",     label: "Sanakhat",     icon: FileCheck2 },  // the Sanakhat Desk account's only page; for admin it opens the Sanakhat tab under Sales
   { path: "/marketing",   label: "Marketing",    icon: Megaphone },
   { path: "/sales",        label: "Sales",        icon: ShoppingBag },
-  { path: "/sanakhat",     label: "Sanakhat",     icon: FileCheck2 },  // the Sanakhat Desk account's only page; for admin it opens the Sanakhat tab under Sales
   { path: "/spare-parts",  label: "Spare Parts",  icon: Boxes },
   { path: "/ledger",       label: "Ledger",       icon: BookOpen },
   { path: "/jobs",         label: "Job Cards",    icon: Wrench },
@@ -51,7 +51,9 @@ export default function Layout() {
   const [reportOpen, setReportOpen] = useState(null);       // ...and the family of reports under its Report item
 
   const handleLogout = () => { logout(); navigate("/login"); };
-  const visibleNavItems = navItems.filter(({ path }) => canAccessPath(user?.role, path) && (path !== "/sanakhat" || user?.role === "sanakhat_officer" || canAccessPath(user?.role, "/sales")));
+  // Admin's people live in Finance's Ledger now, so the main Ledger item goes for admin; stock and parts supervisors
+  // (who can't open Finance) keep it as their way to Staff / Vendors. The /ledger page itself still works.
+  const visibleNavItems = navItems.filter(({ path }) => canAccessPath(user?.role, path) && (path !== "/sanakhat" || user?.role === "sanakhat_officer" || canAccessPath(user?.role, "/sales")) && (path !== "/ledger" || (user?.role && user.role !== "admin")));
   // Admin's Sanakhat item is the Sales page's Sanakhat tab, so it and Sales share /sales and only one lights up.
   const onSanakhatTab = pathname === "/sales" && new URLSearchParams(search).get("tab") === "sanakhat";
   const navTarget = (path) => (path === "/sanakhat" && user?.role !== "sanakhat_officer" ? "/sales?tab=sanakhat" : path);
