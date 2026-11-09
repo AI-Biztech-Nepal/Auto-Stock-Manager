@@ -9,6 +9,7 @@ import { AddVehicleModal } from "./AddVehicleModal";
 import { VehicleDetailModal } from "./VehicleDetail";
 import HoverADDate from "../components/HoverADDate";
 import { formatBSDateNumeric } from "../utils/nepali-date";
+import { BOOK_CARD, BookTableStyle } from "../components/BookTable";
 import DateRangeFilter, { resolveDateFilter } from "../components/DateRangeFilter";
 import ViewToggle, { useViewMode } from "../components/ViewToggle";
 import LazyThumb from "../components/LazyThumb";
@@ -23,18 +24,6 @@ const STATUSES = ["all", ...VEHICLE_STATUS_OPTIONS.filter(o => o.value !== "sold
 const STATUS_ICONS = { all: Filter, unlisted: EyeOff, in_repair: Wrench, available: CheckCircle2, reserved: Clock };
 const AGING_CATEGORIES = ["all", "fresh", "normal", "slow", "dead"];
 const AGING_RANGES = { fresh: "0–30 days", normal: "31–45 days", slow: "46–60 days", dead: "60+ days" };
-
-// The list view's table, drawn like the Finance Day Book's: grey header, a rule under every row and between every column.
-const INV_TABLE_CSS = `
-.inv-table table { border-collapse: collapse; width: 100%; font-size: 13px; color: #111827; }
-.inv-table thead th { background: #F9FAFB; color: #4B5563; font-size: 11.5px; font-weight: 700; text-align: left;
-  padding: 8px 10px; border-bottom: 1px solid #D1D5DB; white-space: nowrap; }
-.inv-table thead th.text-right { text-align: right; }
-.inv-table tbody td { padding: 8px 10px; border-bottom: 1px solid #E5E7EB; vertical-align: middle; }
-.inv-table thead th + th, .inv-table tbody td + td { border-left: 1px solid #E5E7EB; }
-.inv-table tbody tr:last-child td { border-bottom: none; }
-.inv-table tbody tr:hover td { background-color: #F8FAFC; }
-`;
 
 // A single photo isn't enough for a storefront listing — this is the bar a vehicle
 // needs to clear before it's considered adequately photographed.
@@ -879,8 +868,8 @@ export default function Inventory() {
           )}
         </div>
       ) : view === "list" ? (
-        <div className="inv-table bg-white border border-gray-200 rounded-2xl shadow-[0_1px_2px_rgba(16,24,40,0.04),0_4px_12px_rgba(16,24,40,0.03)] overflow-hidden" data-testid="vehicle-table">
-          <style>{INV_TABLE_CSS}</style>
+        <div className={BOOK_CARD} data-testid="vehicle-table">
+          <BookTableStyle />
           <div className="overflow-x-auto">
             <table>
               <thead>

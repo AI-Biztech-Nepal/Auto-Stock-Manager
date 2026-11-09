@@ -9,6 +9,7 @@ import { useAuth } from "../context/AuthContext";
 import VehicleComboBox from "../components/VehicleComboBox";
 import BSDatePicker from "../components/BSDatePicker";
 import HoverADDate from "../components/HoverADDate";
+import { BOOK_CARD, BookTableStyle } from "../components/BookTable";
 import WarrantyBadge from "../components/WarrantyBadge";
 import Bookings from "./Bookings";
 import DateRangeFilter, { resolveDateFilter } from "../components/DateRangeFilter";
@@ -654,7 +655,8 @@ export default function Sales() {
       )}
 
       {/* Sales Table */}
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+      <div className={BOOK_CARD}>
+        <BookTableStyle />
         {filtered.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-40 text-slate-500">
             <ShoppingBag size={32} className="mb-2 opacity-30" />
@@ -721,16 +723,25 @@ export default function Sales() {
             {/* Table — sm and up */}
             {/* Bounded height so the sideways scrollbar sits at the bottom of the screen, not the end of a long list */}
             <div className="hidden sm:block overflow-auto max-h-[calc(100vh-16rem)]">
-              <table className="w-full">
-                <thead className="sticky top-0 z-10 bg-white">
-                  <tr className="border-b border-slate-100">
-                    {["Vehicle", "Customer", "Sale Price", "Extra Expenses", "Sanakhat Cost", "Transfer", "Total", "Due", "Payment", "Date", ""].map(h => (
-                      <th key={h} className="text-left text-xs font-semibold uppercase tracking-wider text-slate-500 px-4 py-3 whitespace-nowrap">{h}</th>
-                    ))}
+              <table className="sticky-head">
+                <thead>
+                  <tr>
+                    <th className="w-10">SN</th>
+                    <th>Vehicle</th>
+                    <th>Customer</th>
+                    <th className="text-right">Sale Price</th>
+                    <th className="text-right">Extra Expenses</th>
+                    <th className="text-right">Sanakhat Cost</th>
+                    <th>Transfer</th>
+                    <th className="text-right">Total</th>
+                    <th className="text-right">Due</th>
+                    <th>Payment</th>
+                    <th>Date</th>
+                    <th className="w-10" />
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-50">
-                  {filtered.map(s => {
+                <tbody>
+                  {filtered.map((s, i) => {
                     const v = vehicleById[s.vehicle_id];
                     const margin = marginOf(s, v);
                     const sanakhat = sanakhatOf(s);
@@ -739,46 +750,47 @@ export default function Sales() {
                         key={s.id}
                         data-testid="sale-row"
                         onClick={() => openSale(s)}
-                        className="table-row-hover cursor-pointer transition-colors"
+                        className="cursor-pointer"
                       >
-                        <td className="px-4 py-3">
-                          <div className="font-semibold text-slate-900 text-sm flex items-center gap-1.5">
+                        <td className="text-gray-500">{i + 1}</td>
+                        <td className="min-w-[12rem]">
+                          <div className="font-semibold text-gray-900 flex items-center gap-1.5">
                             {s.vehicle_info || "—"}
                             {s.needs_review && <span className="inline-flex items-center gap-0.5 text-xs font-semibold text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded-full" title={s.review_note || "Imported — might need attention"}><AlertTriangle size={9} /> Review</span>}
                           </div>
                           <div className="flex items-center gap-1 flex-wrap mt-1"><SaleTags sale={s} vehicle={v} booking={bookingBySaleId[s.id]} /></div>
                         </td>
-                        <td className="px-4 py-3">
-                          <div className="text-sm text-slate-700">{s.customer_name}</div>
-                          {s.customer_contact && <div className="text-xs text-slate-400">{s.customer_contact}</div>}
+                        <td>
+                          <div className="text-gray-700">{s.customer_name}</div>
+                          {s.customer_contact && <div className="text-xs text-gray-400">{s.customer_contact}</div>}
                         </td>
-                        <td className="px-4 py-3 text-sm font-medium text-slate-800 whitespace-nowrap">{formatNPR(s.sale_price)}</td>
-                        <td className="px-4 py-3 text-sm text-slate-600 whitespace-nowrap">
+                        <td className="text-right font-medium text-gray-800 whitespace-nowrap">{formatNPR(s.sale_price)}</td>
+                        <td className="text-right whitespace-nowrap">
                           {((s.expenses_total || 0) + (s.job_card_cost || 0)) > 0 ? (
                             <span className="text-orange-600 font-medium">
                               {formatNPR((s.expenses_total || 0) + (s.job_card_cost || 0))}
                               {s.extra_expenses?.length > 0 ? ` (${s.extra_expenses.length} items)` : ""}
                             </span>
-                          ) : <span className="text-slate-400">—</span>}
+                          ) : <span className="text-gray-300">—</span>}
                         </td>
-                        <td className="px-4 py-3 text-sm whitespace-nowrap" title="Sanakhat + re-sanakhat entered on this sale — part of its extra expenses">
+                        <td className="text-right whitespace-nowrap" title="Sanakhat + re-sanakhat entered on this sale — part of its extra expenses">
                           {sanakhat.total > 0 ? (
                             <>
                               <div className="text-orange-600 font-medium">{formatNPR(sanakhat.total)}</div>
-                              {sanakhat.resanakhat > 0 && <div className="text-xs text-slate-400">incl. re-sanakhat {formatNPR(sanakhat.resanakhat)}</div>}
+                              {sanakhat.resanakhat > 0 && <div className="text-xs text-gray-400">incl. re-sanakhat {formatNPR(sanakhat.resanakhat)}</div>}
                             </>
-                          ) : <span className="text-slate-400">—</span>}
+                          ) : <span className="text-gray-300">—</span>}
                         </td>
-                        <td className="px-4 py-3 whitespace-nowrap">
-                          {s.returned ? <span className="text-slate-400">—</span> : <TransferStatus vehicle={v} editable={isAdmin} onChange={updateTransfer} />}
+                        <td className="whitespace-nowrap">
+                          {s.returned ? <span className="text-gray-300">—</span> : <TransferStatus vehicle={v} editable={isAdmin} onChange={updateTransfer} />}
                         </td>
-                        <td className="px-4 py-3 text-sm font-bold text-green-700 whitespace-nowrap">{formatNPR(s.total_amount)}</td>
-                        <td className="px-4 py-3 text-sm font-semibold whitespace-nowrap">
+                        <td className="text-right font-bold text-green-700 whitespace-nowrap">{formatNPR(s.total_amount)}</td>
+                        <td className="text-right font-semibold whitespace-nowrap">
                           {!s.returned && s.due_amount > 0
                             ? <span className="text-red-600">{formatNPR(s.due_amount)}</span>
-                            : <span className="text-slate-400">—</span>}
+                            : <span className="text-gray-300 font-normal">—</span>}
                         </td>
-                        <td className="px-4 py-3">
+                        <td>
                           {s.returned ? (
                             <div className="text-xs text-amber-700 whitespace-nowrap">Refunded {formatNPR(s.refund_amount || 0)}</div>
                           ) : (
@@ -792,8 +804,8 @@ export default function Sales() {
                             </>
                           )}
                         </td>
-                        <td className="px-4 py-3 text-sm text-slate-500 whitespace-nowrap"><HoverADDate date={s.sale_date} /></td>
-                        <td className="px-4 py-3">
+                        <td className="text-gray-500 whitespace-nowrap"><HoverADDate date={s.sale_date} /></td>
+                        <td>
                           <div className="flex items-center gap-1">
                             <button onClick={e => { e.stopPropagation(); navigate(`/sales/${s.id}`); }} className="max-md:min-w-11 max-md:min-h-11 max-md:inline-flex max-md:items-center max-md:justify-center p-1.5 hover:bg-slate-100 rounded-lg transition-colors" title="View / edit sale" data-testid="view-sale-btn">
                               <Eye size={14} className="text-slate-500" />
