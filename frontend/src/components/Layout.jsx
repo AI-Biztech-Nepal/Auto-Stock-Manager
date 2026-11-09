@@ -8,7 +8,7 @@ import FinanceNavGroup from "./FinanceNavGroup";
 import NavGroup from "./NavGroup";
 import { isSanakhatOverdue, sanakhatPendingDays } from "../utils/helpers";
 import {
-  LayoutDashboard, Bike, Wrench, BarChart3, Sparkles, Settings, LogOut, Menu, X, Bell,
+  LayoutDashboard, Bike, Wrench, Sparkles, Settings, LogOut, Menu, X, Bell,
   BookOpen, Wallet, Boxes, ShoppingBag, Building2, ImageOff, FileWarning, ShieldCheck, Megaphone, Inbox, ChevronDown, Share2, Gift, Eye, HeartHandshake, FileCheck2
 } from "lucide-react";
 
@@ -36,13 +36,12 @@ const navItems = [
   { path: "/sales",        label: "Sales",        icon: ShoppingBag },
   { path: "/platform",     label: "Companies",    icon: Building2 },
   { path: "/inventory",    label: "Inventory",    icon: Bike },
-  { path: "/sanakhat",     label: "Sanakhat",     icon: FileCheck2 },  // the Sanakhat Desk account's only page; admin opens the same page
   { path: "/marketing",   label: "Marketing",    icon: Megaphone },
   { path: "/ledger",       label: "Ledger",       icon: BookOpen },
   { path: "/jobs",         label: "Job Cards",    icon: Wrench },
   { path: "/warranty",     label: "Warranty",     icon: ShieldCheck },
   { path: "/finance",      label: "Finance",      icon: Wallet },
-  { path: "/reports",      label: "Reports",      icon: BarChart3 },
+  { path: "/sanakhat",     label: "Sanakhat",     icon: FileCheck2 },  // the Sanakhat Desk account's only page; admin opens the same page
   { path: "/ai",           label: "AI Assistant", icon: Sparkles },
   { path: "/settings",     label: "Settings",     icon: Settings },
 ];
