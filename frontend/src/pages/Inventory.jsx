@@ -559,9 +559,9 @@ export default function Inventory() {
         </div>
       )}
 
-      {/* Status Toggle, with Import / Export and Add Vehicle at the right */}
-      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
-      <div className="flex items-center gap-2 overflow-x-auto min-w-0" data-testid="status-toggle-group">
+      {/* Status chips at the left; Purchase Vehicle at the top right with Import / Export just below it */}
+      <div className="flex flex-col-reverse sm:flex-row sm:items-start sm:justify-between gap-2">
+      <div className="flex items-center gap-1.5 overflow-x-auto min-w-0" data-testid="status-toggle-group">
         {STATUSES.map(s => {
           const active = statusFilter === s;
           const Icon = STATUS_ICONS[s] || Filter;
@@ -570,13 +570,13 @@ export default function Inventory() {
               key={s}
               onClick={() => setStatusFilter(s)}
               data-testid={`status-toggle-${s}`}
-              className={`flex items-center gap-1.5 shrink-0 px-3 py-1.5 rounded-full text-[13px] font-medium border transition-colors whitespace-nowrap ${
+              className={`flex items-center gap-1 shrink-0 px-2.5 py-1 rounded-full text-xs font-medium border transition-colors whitespace-nowrap ${
                 active ? "bg-blue-600 border-blue-600 text-white" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
               }`}
             >
-              <Icon size={14} />
+              <Icon size={13} />
               {s === "all" ? "All Status" : getStatusStyle(s).label}
-              <span className={`text-xs px-1.5 py-0.5 rounded-full ${active ? "bg-white/20 text-white" : "bg-slate-100 text-slate-500"}`}>
+              <span className={`text-[11px] px-1.5 rounded-full ${active ? "bg-white/20 text-white" : "bg-slate-100 text-slate-500"}`}>
                 {statusCounts[s]}
               </span>
             </button>
@@ -587,27 +587,36 @@ export default function Inventory() {
           onClick={() => setPhotoMenuOpen(o => !o)}
           data-testid="photo-filter-toggle"
           title="Filter by photo coverage"
-          className={`flex items-center gap-1.5 shrink-0 px-3 py-1.5 rounded-full text-[13px] font-medium border transition-colors whitespace-nowrap ${
+          className={`flex items-center gap-1 shrink-0 px-2.5 py-1 rounded-full text-xs font-medium border transition-colors whitespace-nowrap ${
             photoFilter ? "bg-blue-600 border-blue-600 text-white" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
           }`}
         >
-          <ImageOff size={14} />
+          <ImageOff size={13} />
           Photo Filter
-          <span className={`text-xs px-1.5 py-0.5 rounded-full ${photoFilter ? "bg-white/20 text-white" : "bg-slate-100 text-slate-500"}`}>
+          <span className={`text-[11px] px-1.5 rounded-full ${photoFilter ? "bg-white/20 text-white" : "bg-slate-100 text-slate-500"}`}>
             {photoFilter === "none" ? noPhotoCount : lowPhotoCount}
           </span>
-          <ChevronDown size={14} className={photoMenuOpen ? "rotate-180 transition-transform" : "transition-transform"} />
+          <ChevronDown size={13} className={photoMenuOpen ? "rotate-180 transition-transform" : "transition-transform"} />
         </button>
       </div>
-      <div className="flex items-center gap-2" data-testid="inventory-actions">
+      <div className="flex sm:flex-col items-stretch gap-1.5 sm:w-40 shrink-0" data-testid="inventory-actions">
+          {canAddVehicle(user?.role) && (
+            <button
+              onClick={() => { setForm(EMPTY); setShowModal(true); }}
+              data-testid="add-vehicle-button"
+              className="w-full flex items-center justify-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium px-2.5 h-8 rounded-lg transition-all active:scale-95 shadow-sm"
+            >
+              <Plus size={14} /> Purchase Vehicle
+            </button>
+          )}
           {((!isFrontDesk && !isSocialMedia) || isAdmin) && (
             <div className="relative" ref={stockMenuRef}>
               <button
                 onClick={() => setStockMenuOpen(o => !o)}
                 data-testid="stock-data-menu-button"
-                className="flex items-center gap-2 border border-slate-200 text-slate-700 text-[13px] font-medium px-3 h-9 rounded-lg hover:bg-slate-50 transition-all active:scale-95"
+                className="w-full flex items-center justify-center gap-1.5 border border-slate-200 bg-white text-slate-700 text-xs font-medium px-2.5 h-8 rounded-lg hover:bg-slate-50 transition-all active:scale-95"
               >
-                <Download size={16} /> Import / Export <ChevronDown size={14} />
+                <Download size={14} /> Import / Export <ChevronDown size={13} />
               </button>
               {stockMenuOpen && (
                 <div className="absolute right-0 mt-1 w-48 bg-white border border-slate-200 rounded-lg shadow-lg z-30 py-1">
@@ -633,15 +642,6 @@ export default function Inventory() {
                 </div>
               )}
             </div>
-          )}
-          {canAddVehicle(user?.role) && (
-            <button
-              onClick={() => { setForm(EMPTY); setShowModal(true); }}
-              data-testid="add-vehicle-button"
-              className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-[13px] font-medium px-3 h-9 rounded-lg transition-all active:scale-95 shadow-sm"
-            >
-              <Plus size={16} /> Add Vehicle
-            </button>
           )}
       </div>
       </div>
@@ -676,7 +676,7 @@ export default function Inventory() {
       )}
 
       {/* Filters — sticky so search/filters stay reachable while scrolling a long list */}
-      <div className="sm:sticky top-0 z-20 bg-white rounded-xl border border-slate-200 shadow-sm p-2.5 flex flex-wrap gap-2 sm:gap-3 items-center">
+      <div className="sm:sticky top-0 z-20 bg-white rounded-xl border border-slate-200 shadow-sm p-2 flex flex-wrap gap-2 sm:gap-3 items-center">
         <div className="relative flex-1 min-w-48">
           <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
           <input
@@ -684,7 +684,7 @@ export default function Inventory() {
             value={search}
             onChange={e => setSearch(e.target.value)}
             placeholder="Search brand, model, reg#..."
-            className="w-full h-9 pl-9 pr-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="w-full h-8 pl-9 pr-3 text-[13px] border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
         </div>
         <div className="grid grid-cols-2 sm:flex items-center gap-2 w-full sm:w-auto">
@@ -692,7 +692,7 @@ export default function Inventory() {
           <select
             value={brandFilter}
             onChange={e => setBrandFilter(e.target.value)}
-            className="h-11 sm:h-9 px-3 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="h-11 sm:h-8 px-2.5 text-[13px] border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
           >
             <option value="all">All Brands</option>
             {BRANDS.map(b => <option key={b}>{b}</option>)}
@@ -706,7 +706,7 @@ export default function Inventory() {
               else setSearchParams({ aging: val });
             }}
             data-testid="aging-filter-select"
-            className="h-11 sm:h-9 px-3 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="h-11 sm:h-8 px-2.5 text-[13px] border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
           >
             {AGING_CATEGORIES.map(a => (
               <option key={a} value={a}>{a === "all" ? "All Stock Age" : `${getAgingStyle(a).label} (${AGING_RANGES[a]})`}</option>
@@ -729,12 +729,12 @@ export default function Inventory() {
               key={c.label}
               onClick={() => setSummaryModalView(c.view)}
               data-testid={`inventory-summary-tile-${c.view}`}
-              className="bg-white px-3.5 py-2 flex items-center gap-2.5 min-w-0 text-left hover:bg-slate-50 transition-colors"
+              className="bg-white px-3 py-1.5 flex items-center gap-2 min-w-0 text-left hover:bg-slate-50 transition-colors"
             >
-              <c.icon size={16} className={`${c.color} shrink-0`} />
+              <c.icon size={14} className={`${c.color} shrink-0`} />
               <span className="min-w-0">
-                <span className="block text-[11px] text-slate-500 font-medium truncate">{c.label}</span>
-                <span className="block text-sm font-bold text-slate-900 leading-tight" style={{ fontFamily: "Manrope" }}>{c.value}</span>
+                <span className="block text-[10px] text-slate-500 font-medium truncate">{c.label}</span>
+                <span className="block text-[13px] font-bold text-slate-900 leading-tight" style={{ fontFamily: "Manrope" }}>{c.value}</span>
               </span>
             </button>
           ))}
