@@ -5,7 +5,7 @@ import api from "../utils/api";
 import { useAuth } from "../context/AuthContext";
 import { canAccessPath, marketingTabsFor } from "../utils/permissions";
 import FinanceNavGroup from "./FinanceNavGroup";
-import InventoryNavGroup from "./InventoryNavGroup";
+import NavGroup from "./NavGroup";
 import { isSanakhatOverdue, sanakhatPendingDays } from "../utils/helpers";
 import {
   LayoutDashboard, Bike, Wrench, BarChart3, Sparkles, Settings, LogOut, Menu, X, Bell,
@@ -24,6 +24,12 @@ const MARKETING_NAV = {
   offers: { label: "Offers", icon: Gift },
   visits: { label: "Visits", icon: Eye },
 };
+
+// What sits under the Service item in the side panel (see the render below).
+const SERVICE_TABS = [
+  { key: "jobs", label: "Job Cards", icon: Wrench, to: "/jobs" },
+  { key: "warranty", label: "Warranty", icon: ShieldCheck, to: "/warranty" },
+];
 
 const navItems = [
   { path: "/",             label: "Dashboard",    icon: LayoutDashboard },
@@ -48,6 +54,7 @@ export default function Layout() {
   const { pathname, search } = useLocation();
   const [marketingOpen, setMarketingOpen] = useState(null); // null = follow the current page
   const [inventoryOpen, setInventoryOpen] = useState(null); // same for the Inventory dropdown (Product / Spare Parts)...
+  const [serviceOpen, setServiceOpen] = useState(null);     // ...the Service dropdown (Job Cards / Warranty)...
   const [financeOpen, setFinanceOpen] = useState(null);     // ...the Finance dropdown...
   const [reportOpen, setReportOpen] = useState(null);       // ...and the family of reports under its Report item
   const [topbarSlot, setTopbarSlot] = useState(null);     // the top bar's spot for a page's own controls
@@ -213,16 +220,40 @@ export default function Layout() {
               canAccessPath(user?.role, "/spare-parts") && { key: "spare-parts", label: "Spare Parts", icon: Boxes, to: "/inventory?tab=spare-parts" },
             ].filter(Boolean);
             if (tabs.length > 1) {
+              const onInventory = pathname.startsWith("/inventory");
+              const parts = new URLSearchParams(search).get("tab") === "spare-parts";
               return (
-                <InventoryNavGroup
+                <NavGroup
                   key={path}
+                  id="inventory"
                   label={label}
                   Icon={Icon}
-                  pathname={pathname}
-                  search={search}
                   tabs={tabs}
+                  activeKey={onInventory ? (parts ? "spare-parts" : "product") : null}
                   open={inventoryOpen}
                   setOpen={setInventoryOpen}
+                  navigate={navigate}
+                  onPick={() => mobile && setSidebarOpen(false)}
+                />
+              );
+            }
+          }
+          if (path === "/jobs" || path === "/warranty") {
+            // Job Cards and Warranty share one Service item, drawn where the first of them the role can open sits.
+            const tabs = SERVICE_TABS.filter(t => canAccessPath(user?.role, t.to));
+            if (path !== tabs[0].to) return null;
+            if (tabs.length > 1) {
+              const active = tabs.find(t => pathname.startsWith(t.to));
+              return (
+                <NavGroup
+                  key="service"
+                  id="service"
+                  label="Service"
+                  Icon={Wrench}
+                  tabs={tabs}
+                  activeKey={active ? active.key : null}
+                  open={serviceOpen}
+                  setOpen={setServiceOpen}
                   navigate={navigate}
                   onPick={() => mobile && setSidebarOpen(false)}
                 />
@@ -298,22 +329,6 @@ export default function Layout() {
           );
         })}
       </nav>
-
-      {/* User */}
-      <div className="px-4 py-3 border-t border-slate-700" style={{ paddingBottom: "max(0.75rem, env(safe-area-inset-bottom))" }}>
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center text-white text-xs font-bold">
-            {user?.name?.[0]?.toUpperCase() || "A"}
-          </div>
-          <div className="flex-1 min-w-0">
-            <div className="text-sm font-medium text-white truncate">{user?.name}</div>
-            <div className="text-xs text-slate-400 capitalize">{user?.role}</div>
-          </div>
-          <button type="button" onClick={handleLogout} aria-label="Sign out" title="Sign out" className="touch-manipulation -mr-2 w-11 h-11 shrink-0 rounded-lg flex items-center justify-center text-slate-400 hover:text-white hover:bg-slate-800 active:bg-slate-700 transition-colors" data-testid="logout-button">
-            <LogOut size={18} />
-          </button>
-        </div>
-      </div>
     </aside>
   );
 
