@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback, useMemo, useRef, useLayoutEffect } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { Plus, Search, Eye, Trash2, Filter, X, UploadCloud, Download, EyeOff, Package, Wallet, DollarSign, Lock, Moon, Archive, Sparkles, Store, User, Wrench, Clock, CheckCircle2, AlertTriangle, ImageOff, ChevronDown, Share2 } from "lucide-react";
+import { Plus, Search, Trash2, Filter, X, UploadCloud, Download, EyeOff, Package, Wallet, DollarSign, Lock, Moon, Archive, Sparkles, Store, User, Wrench, Clock, CheckCircle2, AlertTriangle, ImageOff, ChevronDown, Share2 } from "lucide-react";
 import { toast } from "sonner";
 import api, { postWithRetry } from "../utils/api";
 import { formatNPR, getAgingStyle, getStatusStyle, getTerminationStyle, isSanakhatOverdue, sanakhatPendingDays, SANAKHAT_WARN_DAYS, BRANDS, VEHICLE_STATUS_OPTIONS, formatOwnership } from "../utils/helpers";
@@ -10,7 +10,6 @@ import { VehicleDetailModal } from "./VehicleDetail";
 import HoverADDate from "../components/HoverADDate";
 import DateRangeFilter, { resolveDateFilter } from "../components/DateRangeFilter";
 import ViewToggle, { useViewMode } from "../components/ViewToggle";
-import ListRow from "../components/ListRow";
 import LazyThumb from "../components/LazyThumb";
 import { useAuth } from "../context/AuthContext";
 import { hasFullVehicleAccess, canAddVehicle, isBasicStockRole, hidesVehiclePricing } from "../utils/permissions";
@@ -197,6 +196,22 @@ export default function Inventory() {
   // Vehicles" popup (the one summary tile parts_supervisor can actually reach) doesn't
   // leak investment/selling figures to a role the other three tiles are already hidden from.
   const showFinRow = !hideFinancials || !hidePricing;
+
+  // List view columns from md up, with the header above them: Vehicle | Bike No. | Cost Price | Investment |
+  // Selling Price | Status | In Stock | delete. Money columns drop out for the roles that don't see that money.
+  const listColumns = [
+    { key: "vehicle", label: "Vehicle", width: "minmax(0,2fr)" },
+    { key: "bike", label: "Bike No.", width: "7rem" },
+    ...(hideFinancials ? [] : [
+      { key: "cost", label: "Cost Price", width: "6.5rem", right: true },
+      { key: "investment", label: "Investment", width: "6.5rem", right: true },
+    ]),
+    ...(hidePricing ? [] : [{ key: "selling", label: "Selling Price", width: "6.5rem", right: true }]),
+    { key: "status", label: "Status", width: "9rem" },
+    { key: "stock", label: "In Stock", width: "4.5rem", title: "Days since the vehicle was bought" },
+    ...(isAdmin ? [{ key: "actions", label: "", width: "2.5rem" }] : []),
+  ];
+  const listGrid = listColumns.map(c => c.width).join(" ");
 
   // Dedicated report popup for each summary tile above — null | "all" | "investment" | "locked" | "selling".
   const [summaryModalView, setSummaryModalView] = useState(null);
@@ -867,55 +882,81 @@ export default function Inventory() {
           )}
         </div>
       ) : view === "list" ? (
-        <div className="space-y-2">
+        <div className="space-y-2" style={{ "--cols": listGrid }}>
+          {/* Column headers (md and up; on phones each row carries its own labels) */}
+          <div className="hidden md:grid md:[grid-template-columns:var(--cols)] gap-x-3 px-3 text-[11px] font-semibold uppercase tracking-wide text-slate-500" data-testid="vehicle-list-header">
+            {listColumns.map(c => (
+              <div key={c.key} className={c.right ? "text-right" : ""} title={c.title}>{c.label}</div>
+            ))}
+          </div>
           {filtered.map(v => {
             const ag = getAgingStyle(v.aging?.category);
             const st = getStatusStyle(v.status);
+            const tm = getTerminationStyle(v.ownership_termination_status);
+            const late = isSanakhatOverdue(v);
+            const pendingDays = sanakhatPendingDays(v);
             const photo = v.thumb_photos?.[0];
+            const pill = "px-2 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wide";
+            const money = "text-xs md:text-[13px] md:text-right";
             return (
-              <ListRow
+              <div
                 key={v.id}
-                testid="vehicle-row"
-                dim={v.status === "scrap"}
+                data-testid="vehicle-row"
                 onClick={() => setSelectedVehicleId(v.id)}
-                thumb={photo ? <LazyThumb src={photo.url} /> : <Package size={16} className="text-slate-300" />}
-                title={`${v.brand} ${v.model}`}
-                subtitle={`${v.year} · ${v.registration_number || "No reg."} · ${formatOwnership(v.ownership_number)}${v.status === "reserved" && v.booking?.customer_name ? ` · Booked by ${v.booking.customer_name}` : ""}${isAdmin && v.created_by ? ` · by ${v.created_by}` : ""}`}
-                meta={!hideFinancials && (
-                  <div className="flex items-baseline gap-x-3 flex-wrap md:block">
-                    <div className="font-semibold text-slate-800 text-sm md:text-xs">{formatNPR(v.total_investment)}</div>
-                    {!hidePricing && <div className="text-slate-500">{v.selling_price ? formatNPR(v.selling_price) : "—"} selling</div>}
+                className={`flex flex-wrap items-center gap-x-3 gap-y-1.5 md:grid md:[grid-template-columns:var(--cols)] bg-white border border-slate-200 rounded-lg px-3 py-2.5 cursor-pointer hover:shadow-sm hover:border-slate-300 transition-all ${v.status === "scrap" ? "opacity-60 saturate-50" : ""}`}
+              >
+                {/* Vehicle */}
+                <div className="flex items-center gap-3 min-w-0 flex-1 md:flex-none">
+                  <div className="w-10 h-10 rounded-lg overflow-hidden border border-slate-200 shrink-0 bg-slate-50 flex items-center justify-center">
+                    {photo ? <LazyThumb src={photo.url} /> : <Package size={16} className="text-slate-300" />}
                   </div>
-                )}
-                pills={<>
-                  <span className={`px-2 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wide ${st.bg} ${st.text}`}>{st.label}</span>
-                  {(() => {
-                    const tm = getTerminationStyle(v.ownership_termination_status);
-                    const late = isSanakhatOverdue(v);
-                    const days = sanakhatPendingDays(v);
-                    return (
-                      <span
-                        className={`px-2 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wide ${late ? "bg-red-100 text-red-800" : `${tm.bg} ${tm.text}`}`}
-                        title={late ? `Sanaakhat pending for ${days} days` : undefined}
-                        data-testid="vehicle-row-termination"
-                      >
-                        {tm.label}{late && ` · ${days}d`}
-                      </span>
-                    );
-                  })()}
-                  <span className={`px-2 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wide ${ag.bg} ${ag.text}`}>{v.aging?.days}d</span>
-                </>}
-                actions={<>
-                  <button onClick={() => setSelectedVehicleId(v.id)} className="w-11 h-11 md:w- md:h- flex items-center justify-center hover:bg-slate-100 rounded-lg transition-colors" data-testid="view-vehicle-btn">
-                    <Eye size={14} className="text-slate-500" />
-                  </button>
-                  {isAdmin && (
-                    <button onClick={e => handleDelete(v.id, e)} className="w-11 h-11 md:w- md:h- flex items-center justify-center hover:bg-red-50 rounded-lg transition-colors" data-testid="delete-vehicle-btn">
+                  <div className="min-w-0">
+                    <div className="font-semibold text-slate-900 text-sm truncate" style={{ fontFamily: "Manrope" }}>{v.brand} {v.model}</div>
+                    <div className="text-xs text-slate-500 truncate">
+                      {v.year}
+                      <span className="md:hidden"> · {v.registration_number || "No reg."}</span>
+                      {` · ${formatOwnership(v.ownership_number)}${v.status === "reserved" && v.booking?.customer_name ? ` · Booked by ${v.booking.customer_name}` : ""}${isAdmin && v.created_by ? ` · by ${v.created_by}` : ""}`}
+                    </div>
+                  </div>
+                </div>
+                {/* Bike No. */}
+                <div className="hidden md:block min-w-0 text-[13px] font-mono text-slate-700 truncate">
+                  {v.registration_number || <span className="font-sans text-xs text-slate-400">No reg.</span>}
+                </div>
+                {/* Delete: line one beside the vehicle on phones, last column on md */}
+                {isAdmin && (
+                  <div className="order-2 md:order-last flex items-center justify-end" onClick={e => e.stopPropagation()}>
+                    <button onClick={e => handleDelete(v.id, e)} className="w-11 h-11 md:w-8 md:h-8 flex items-center justify-center hover:bg-red-50 rounded-lg transition-colors" data-testid="delete-vehicle-btn">
                       <Trash2 size={14} className="text-red-400" />
                     </button>
+                  </div>
+                )}
+                {/* Everything else: its own second line on phones (indented under the title), columns on md */}
+                <div className="order-3 basis-full pl-[3.25rem] flex flex-wrap items-center gap-x-3 gap-y-1.5 md:contents">
+                  {!hideFinancials && (
+                    <>
+                      <div className={`${money} text-slate-800 font-medium`}><span className="md:hidden text-slate-400 font-normal">Cost </span>{formatNPR(v.purchase_price)}</div>
+                      <div className={`${money} text-slate-800 font-semibold`}><span className="md:hidden text-slate-400 font-normal">Investment </span>{formatNPR(v.total_investment)}</div>
+                    </>
                   )}
-                </>}
-              />
+                  {!hidePricing && (
+                    <div className={`${money} text-slate-800`}><span className="md:hidden text-slate-400">Selling </span>{v.selling_price ? formatNPR(v.selling_price) : "—"}</div>
+                  )}
+                  <div className="flex flex-wrap items-center md:flex-col md:items-start gap-1">
+                    <span className={`${pill} ${st.bg} ${st.text}`}>{st.label}</span>
+                    <span
+                      className={`${pill} ${late ? "bg-red-100 text-red-800" : `${tm.bg} ${tm.text}`}`}
+                      title={late ? `Sanaakhat pending for ${pendingDays} days` : undefined}
+                      data-testid="vehicle-row-termination"
+                    >
+                      {tm.label}{late && ` · ${pendingDays}d`}
+                    </span>
+                  </div>
+                  <div>
+                    <span className={`${pill} ${ag.bg} ${ag.text}`} title={`${v.aging?.days} days in stock · ${ag.label}`}>{v.aging?.days}d</span>
+                  </div>
+                </div>
+              </div>
             );
           })}
         </div>
@@ -1039,13 +1080,6 @@ export default function Inventory() {
                     })}
                   </div>
                   <div className="flex items-center gap-1 shrink-0">
-                    <button
-                      onClick={e => { e.stopPropagation(); setSelectedVehicleId(v.id); }}
-                      className="w-11 h-11 flex items-center justify-center hover:bg-slate-100 rounded-lg transition-colors"
-                      data-testid="view-vehicle-btn"
-                    >
-                      <Eye size={15} className="text-slate-500" />
-                    </button>
                     {isAdmin && (
                       <button
                         onClick={e => handleDelete(v.id, e)}
