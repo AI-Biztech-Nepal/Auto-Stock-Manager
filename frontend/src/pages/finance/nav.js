@@ -10,6 +10,7 @@ import {
 export const FINANCE_NAV = [
   {
     key: "daybook", label: "Day Book", icon: BookOpen,
+    hidden: true, // left out of the side panel for now; the page and its ?tab= links still work
     children: [
       { key: "received", label: "Received", icon: ArrowDownCircle },
       { key: "paid", label: "Paid", icon: ArrowUpCircle },

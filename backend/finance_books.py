@@ -46,6 +46,7 @@ UPGRADE_MESSAGE = ("Rent and bill services need one more database update, which 
 RENT_SOURCE = "rental_rent"
 _RENT_NS = uuid.UUID("5b0c6a4e-8f3a-4c57-9f0e-2a6c1d7b9e10")
 _rent_lock = asyncio.Lock()
+_ledger_sync_lock = asyncio.Lock()
 
 # ── the second half's schema, applied at start-up ─────────────────────────
 # Same idempotent pattern server.py uses for its other post-schema additions (CREATE TABLE IF NOT EXISTS,
@@ -204,6 +205,15 @@ def _clean(s: Optional[str]) -> Optional[str]:
 def _phone(s: Optional[str]) -> Optional[str]:
     digits = re.sub(r"\D", "", s or "")
     return digits or None
+
+
+def _ledger_phone(s: Optional[str]) -> Optional[str]:
+    """A main-Ledger phone as a Finance party stores it: 10 digits (a leading 977 country code dropped), or None
+    for anything that cannot be one (a landline, a typo), so such a person is matched by name instead."""
+    digits = re.sub(r"\D", "", s or "")
+    if len(digits) > 10:
+        digits = digits[-10:]
+    return digits if len(digits) == 10 else None
 
 
 def _amount(v) -> float:
@@ -553,6 +563,48 @@ def register(api_router, db, admin_only):
             if missing:
                 await ledger.insert_many(missing)
 
+    async def _sync_main_ledger(party_types: list):
+        """Put everyone in the main Ledger (customers, vendors, staff) into the Finance Ledger, typed Customer /
+        Vendor / Employee. Someone already there is left exactly as they are: matched by phone, or by name when
+        either side has no phone. It only adds, never edits or deletes, so entries and edits made in Finance
+        stay, and it is idempotent, so it is safe to call on every read. Never raises: the books open without
+        it if it fails."""
+        try:
+            async with _ledger_sync_lock:
+                type_ids = {t["name"]: t["id"] for t in party_types}
+                parties = await db.fin_parties.find({}, {"_id": 0, "id": 1, "name": 1, "phone": 1}).to_list(100000)
+                by_phone = {p["phone"]: p for p in parties if p.get("phone")}
+                by_name = {}
+                for p in parties:
+                    by_name.setdefault((p.get("name") or "").strip().lower(), []).append(p)
+                now = _now()
+                sources = ((db.customers, "contact_number", "Customer"), (db.vendors, "phone", "Vendor"),
+                           (db.team_members, "contact", "Employee"))
+                for coll, phone_field, type_name in sources:
+                    rows = await coll.find({}, {"_id": 0, "name": 1, phone_field: 1, "address": 1}).to_list(100000)
+                    for r in rows:
+                        name, phone = _clean(r.get("name")), _ledger_phone(r.get(phone_field))
+                        if not name:
+                            continue
+                        key = name.lower()
+                        if phone in by_phone:
+                            continue
+                        if any(phone is None or not p.get("phone") for p in by_name.get(key, [])):
+                            continue
+                        doc = {"id": _id(), "name": name[:200], "phone": phone, "address": (_clean(r.get("address")) or "")[:300] or None,
+                               "created_at": now, "updated_at": now}
+                        if _types_ready:
+                            doc["party_type_id"] = type_ids.get(type_name)
+                        try:
+                            await db.fin_parties.insert_one(doc)
+                        except Exception:  # noqa: BLE001 -- the phone was taken by a request that got there first
+                            continue
+                        if phone:
+                            by_phone[phone] = doc
+                        by_name.setdefault(key, []).append(doc)
+        except Exception:  # noqa: BLE001
+            logger.warning("Could not copy the main Ledger into the Finance Ledger", exc_info=True)
+
     async def _optional(coll, sort_field="created_at"):
         """A table from migration_add_finance_rent.sql: None until that migration has been run, so the
         rest of the books keep working in the meantime."""
@@ -583,6 +635,7 @@ def register(api_router, db, admin_only):
                 except Exception:  # noqa: BLE001 -- another request made it first (unique name)
                     pass
             party_types = await _all(db.fin_party_types, "name")
+        await _sync_main_ledger(party_types or [])
         return {
             "party_types": party_types or [],
             "types_ready": _types_ready and party_types is not None,

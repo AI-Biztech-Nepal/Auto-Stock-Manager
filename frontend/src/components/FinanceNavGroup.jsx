@@ -43,7 +43,7 @@ export default function FinanceNavGroup({ label, Icon, pathname, search, navigat
       </button>
       {isOpen && (
         <div className="mt-0.5 ml-5 pl-3 border-l border-slate-700 space-y-0.5">
-          {FINANCE_NAV.map((item) => {
+          {FINANCE_NAV.filter((item) => !item.hidden).map((item) => {
             if (!item.children) return link(item);
             return (
               <div key={item.key}>
