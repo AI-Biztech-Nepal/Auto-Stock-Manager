@@ -455,11 +455,11 @@ export default function Inventory() {
   const sanakhatOverdue = vehicles.filter(isSanakhatOverdue).sort((a, b) => sanakhatPendingDays(b) - sanakhatPendingDays(a));
 
   return (
-    <div className="space-y-5 animate-fade-in">
+    <div className="space-y-3 animate-fade-in">
       {/* Header */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-900">Inventory</h1>
+      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+        <div className="flex items-baseline gap-2.5">
+          <h1 className="text-xl font-bold text-slate-900">Inventory</h1>
           <p className="text-sm text-slate-500">{filtered.length} vehicles found</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
@@ -469,7 +469,7 @@ export default function Inventory() {
             <button
               onClick={() => navigate("/marketing?tab=share")}
               data-testid="share-stock-button"
-              className="flex items-center gap-2 border border-slate-200 text-slate-700 text-sm font-medium px-4 py-3 rounded-lg hover:bg-slate-50 transition-all active:scale-95"
+              className="flex items-center gap-2 border border-slate-200 text-slate-700 text-[13px] font-medium px-3 h-9 rounded-lg hover:bg-slate-50 transition-all active:scale-95"
             >
               <Share2 size={16} /> Share Stock
             </button>
@@ -479,7 +479,7 @@ export default function Inventory() {
               <button
                 onClick={() => setStockMenuOpen(o => !o)}
                 data-testid="stock-data-menu-button"
-                className="flex items-center gap-2 border border-slate-200 text-slate-700 text-sm font-medium px-4 py-3 rounded-lg hover:bg-slate-50 transition-all active:scale-95"
+                className="flex items-center gap-2 border border-slate-200 text-slate-700 text-[13px] font-medium px-3 h-9 rounded-lg hover:bg-slate-50 transition-all active:scale-95"
               >
                 <Download size={16} /> Import / Export <ChevronDown size={14} />
               </button>
@@ -512,7 +512,7 @@ export default function Inventory() {
             <button
               onClick={() => navigate("/sales")}
               data-testid="sold-stock-link"
-              className="flex items-center gap-2 border border-slate-200 text-slate-700 text-sm font-medium px-4 py-3 rounded-lg hover:bg-slate-50 transition-all active:scale-95"
+              className="flex items-center gap-2 border border-slate-200 text-slate-700 text-[13px] font-medium px-3 h-9 rounded-lg hover:bg-slate-50 transition-all active:scale-95"
             >
               <Archive size={16} /> Sold Stock
             </button>
@@ -522,16 +522,17 @@ export default function Inventory() {
               onClick={hideUnpriced}
               disabled={hidingUnpriced}
               data-testid="hide-unpriced-button"
-              className="flex items-center gap-2 border border-slate-200 text-slate-700 text-sm font-medium px-4 py-3 rounded-lg hover:bg-slate-50 transition-all active:scale-95 disabled:opacity-60"
+              title="Move every vehicle with no selling price to Unlisted"
+              className="flex items-center gap-2 border border-slate-200 text-slate-700 text-[13px] font-medium px-3 h-9 rounded-lg hover:bg-slate-50 transition-all active:scale-95 disabled:opacity-60"
             >
-              <EyeOff size={16} /> {hidingUnpriced ? "Moving..." : `Move ${unpricedVisible.length} With No Price To Unlisted`}
+              <EyeOff size={16} /> {hidingUnpriced ? "Moving..." : `Unlist ${unpricedVisible.length} with no price`}
             </button>
           )}
           {canAddVehicle(user?.role) && (
             <button
               onClick={() => { setForm(EMPTY); setShowModal(true); }}
               data-testid="add-vehicle-button"
-              className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-3 rounded-lg transition-all active:scale-95 shadow-sm"
+              className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-[13px] font-medium px-3 h-9 rounded-lg transition-all active:scale-95 shadow-sm"
             >
               <Plus size={16} /> Add Vehicle
             </button>
@@ -644,7 +645,7 @@ export default function Inventory() {
       )}
 
       {/* Status Toggle */}
-      <div className="flex items-center gap-2 overflow-x-auto pb-1" data-testid="status-toggle-group">
+      <div className="flex items-center gap-2 overflow-x-auto" data-testid="status-toggle-group">
         {STATUSES.map(s => {
           const active = statusFilter === s;
           const Icon = STATUS_ICONS[s] || Filter;
@@ -653,7 +654,7 @@ export default function Inventory() {
               key={s}
               onClick={() => setStatusFilter(s)}
               data-testid={`status-toggle-${s}`}
-              className={`flex items-center gap-1.5 shrink-0 px-3.5 py-3 rounded-full text-sm font-medium border transition-colors whitespace-nowrap ${
+              className={`flex items-center gap-1.5 shrink-0 px-3 py-1.5 rounded-full text-[13px] font-medium border transition-colors whitespace-nowrap ${
                 active ? "bg-blue-600 border-blue-600 text-white" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
               }`}
             >
@@ -670,7 +671,7 @@ export default function Inventory() {
           onClick={() => setPhotoMenuOpen(o => !o)}
           data-testid="photo-filter-toggle"
           title="Filter by photo coverage"
-          className={`flex items-center gap-1.5 shrink-0 px-3.5 py-3 rounded-full text-sm font-medium border transition-colors whitespace-nowrap ${
+          className={`flex items-center gap-1.5 shrink-0 px-3 py-1.5 rounded-full text-[13px] font-medium border transition-colors whitespace-nowrap ${
             photoFilter ? "bg-blue-600 border-blue-600 text-white" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
           }`}
         >
@@ -713,7 +714,7 @@ export default function Inventory() {
       )}
 
       {/* Filters — sticky so search/filters stay reachable while scrolling a long list */}
-      <div className="sm:sticky top-0 z-20 bg-white rounded-xl border border-slate-200 shadow-sm p-3 sm:p-4 flex flex-wrap gap-2 sm:gap-3 items-center">
+      <div className="sm:sticky top-0 z-20 bg-white rounded-xl border border-slate-200 shadow-sm p-2.5 flex flex-wrap gap-2 sm:gap-3 items-center">
         <div className="relative flex-1 min-w-48">
           <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
           <input
@@ -752,37 +753,36 @@ export default function Inventory() {
         </div>
       </div>
 
-      {/* Summary */}
+      {/* Summary: one slim strip, so the vehicles start near the top of the page */}
       {!loading && !isFrontDesk && (
-        <div className="grid grid-cols-2 lg:grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-2 sm:gap-4">
+        <div className="grid grid-cols-2 lg:grid-flow-col lg:auto-cols-fr gap-px bg-slate-200 rounded-xl border border-slate-200 shadow-sm overflow-hidden">
           {[
-            { label: "Total Vehicles", value: filtered.length, icon: Package, color: "bg-blue-500", view: "all" },
-            !hideFinancials && { label: "Total Investment", value: formatNPR(totalInvestment), icon: Wallet, color: "bg-indigo-500", view: "investment" },
-            !hideFinancials && { label: "Locked Capital", value: formatNPR(lockedCapital), icon: Lock, color: "bg-purple-500", view: "locked" },
-            !hidePricing && { label: "Total Selling Price", value: formatNPR(totalSellingPrice), icon: DollarSign, color: "bg-green-500", view: "selling" },
+            { label: "Total Vehicles", value: filtered.length, icon: Package, color: "text-blue-600", view: "all" },
+            !hideFinancials && { label: "Total Investment", value: formatNPR(totalInvestment), icon: Wallet, color: "text-indigo-600", view: "investment" },
+            !hideFinancials && { label: "Locked Capital", value: formatNPR(lockedCapital), icon: Lock, color: "text-purple-600", view: "locked" },
+            !hidePricing && { label: "Total Selling Price", value: formatNPR(totalSellingPrice), icon: DollarSign, color: "text-green-600", view: "selling" },
           ].filter(Boolean).map(c => (
-            <div
+            <button
+              type="button"
               key={c.label}
               onClick={() => setSummaryModalView(c.view)}
               data-testid={`inventory-summary-tile-${c.view}`}
-              className="bg-white rounded-xl border border-slate-200 shadow-sm p-2.5 sm:p-4 flex items-center gap-3 min-w-0 cursor-pointer hover:shadow-md active:scale-[0.98] transition-all"
+              className="bg-white px-3.5 py-2 flex items-center gap-2.5 min-w-0 text-left hover:bg-slate-50 transition-colors"
             >
-              <div className={`hidden sm:flex w-9 h-9 rounded-lg ${c.color} items-center justify-center shrink-0`}>
-                <c.icon size={16} className="text-white" />
-              </div>
-              <div className="min-w-0">
-                <div className="text-xs text-slate-500 font-medium truncate">{c.label}</div>
-                <div className="text-sm sm:text-lg font-bold text-slate-900 leading-tight" style={{ fontFamily: "Manrope" }}>{c.value}</div>
-              </div>
-            </div>
+              <c.icon size={16} className={`${c.color} shrink-0`} />
+              <span className="min-w-0">
+                <span className="block text-[11px] text-slate-500 font-medium truncate">{c.label}</span>
+                <span className="block text-sm font-bold text-slate-900 leading-tight" style={{ fontFamily: "Manrope" }}>{c.value}</span>
+              </span>
+            </button>
           ))}
         </div>
       )}
 
       {/* Recently Added Highlight */}
       {!loading && !isFrontDesk && statusFilter === "all" && recentlyAdded.length > 0 && (
-        <div className="bg-amber-50 rounded-xl border border-amber-200 shadow-sm p-4" data-testid="recently-added-section">
-          <div className="flex items-center gap-2 mb-3">
+        <div className="bg-amber-50 rounded-xl border border-amber-200 shadow-sm p-3" data-testid="recently-added-section">
+          <div className="flex items-center gap-2 mb-2">
             <Sparkles size={16} className="text-amber-600" />
             <h2 className="text-sm font-bold text-amber-900">Recently Added</h2>
             <span className="text-xs font-medium text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">
@@ -797,7 +797,7 @@ export default function Inventory() {
                   key={v.id}
                   onClick={() => setSelectedVehicleId(v.id)}
                   data-testid="recently-added-card"
-                  className="shrink-0 w-56 bg-white rounded-lg border border-amber-100 shadow-sm p-3 hover:shadow-md transition-shadow cursor-pointer"
+                  className="shrink-0 w-48 bg-white rounded-lg border border-amber-100 shadow-sm p-2.5 hover:shadow-md transition-shadow cursor-pointer"
                 >
                   <div className="flex items-start justify-between gap-2 mb-1">
                     <div className="font-bold text-slate-900 text-sm truncate" style={{ fontFamily: "Manrope" }}>{v.brand} {v.model}</div>
@@ -874,7 +874,7 @@ export default function Inventory() {
             <table>
               <thead>
                 <tr data-testid="vehicle-list-header">
-                  <th className="w-10 hidden sm:table-cell">SN</th>
+                  <th className="w-10 hidden 2xl:table-cell">SN</th>
                   <th>Vehicle</th>
                   <th>Bike No.</th>
                   {!hideFinancials && <th className="text-right hidden lg:table-cell">Purchase Price</th>}
@@ -908,8 +908,8 @@ export default function Inventory() {
                       onClick={() => setSelectedVehicleId(v.id)}
                       className={`cursor-pointer ${v.status === "scrap" ? "opacity-60 saturate-50" : ""}`}
                     >
-                      <td className="hidden sm:table-cell text-gray-500">{i + 1}</td>
-                      <td className="min-w-[12rem]">
+                      <td className="hidden 2xl:table-cell text-gray-500">{i + 1}</td>
+                      <td className="min-w-[10rem]">
                         <div className="flex items-center gap-2.5">
                           <div className="w-9 h-9 rounded-lg overflow-hidden border border-gray-200 shrink-0 bg-gray-50 flex items-center justify-center">
                             {photo ? <LazyThumb src={photo.url} /> : <Package size={15} className="text-gray-300" />}
