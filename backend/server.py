@@ -5755,6 +5755,7 @@ async def visits_search(days: int = 30, skip: int = 0, cu: dict = Depends(admin_
         raise HTTPException(502, f"Could not reach Google Search Console ({type(ex).__name__}). Try again in a minute.")
     for p in pages:  # show the path, not the full address
         p["name"] = urlparse(p["name"]).path or "/"
+    for p in pages: p["views"] = p["clicks"]  # _name_vehicle_pages reads "views" on every page row (GA/beacon rows have it, Search Console rows don't)
     pages = (await _name_vehicle_pages({"top_pages": pages}))["top_pages"]
     daily = sorted(({"date": d["name"], "clicks": d["clicks"], "impressions": d["impressions"]} for d in daily), key=lambda d: d["date"])
     months = {}
