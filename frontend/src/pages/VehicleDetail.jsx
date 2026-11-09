@@ -48,6 +48,14 @@ const Row = ({ label, children }) => (
   </div>
 );
 
+// A titled group of overview rows, two to a line on wider screens.
+const Section = ({ title, children }) => (
+  <div>
+    <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 mb-1">{title}</div>
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-1">{children}</div>
+  </div>
+);
+
 // Rendered either as a routed page (/inventory/:id, via the default-exported VehicleDetail
 // wrapper below) or embedded directly by Inventory.jsx with local state — the latter keeps
 // the Inventory page mounted underneath instead of unmounting/refetching it on open/close.
@@ -663,64 +671,78 @@ export function VehicleDetailModal({ id, onClose }) {
                   </div>
                 </div>
               ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-1">
-                  <Row label="Registration"><span className="text-sm font-medium text-slate-900 sm:text-right">{vehicle.registration_number || "Not entered"}</span></Row>
-                  <Row label="Color"><span className="text-sm font-medium text-slate-900 sm:text-right">{vehicle.color || "Not specified"}</span></Row>
-                  <Row label="Condition"><span className="text-sm font-medium text-slate-900 sm:text-right">{vehicle.condition}</span></Row>
-                  <Row label="Purchase Source"><span className="text-sm font-medium text-slate-900 sm:text-right">{vehicle.purchase_source}</span></Row>
-                  <Row label="Name of Source">
-                    {vehicle.linked_contact_name ? (
-                      <span className="text-sm font-medium text-slate-900 sm:text-right flex items-center gap-1.5 sm:justify-end">
-                        {vehicle.linked_contact_type === "customer" ? <User size={13} className="text-slate-400 shrink-0" /> : <Store size={13} className="text-slate-400 shrink-0" />}
-                        {vehicle.linked_contact_name}
+                <div className="space-y-5">
+                  <Section title="Vehicle">
+                    <Row label="Registration"><span className="text-sm font-medium text-slate-900 sm:text-right">{vehicle.registration_number || "Not entered"}</span></Row>
+                    <Row label="Color"><span className="text-sm font-medium text-slate-900 sm:text-right">{vehicle.color || "Not specified"}</span></Row>
+                    <Row label="Condition"><span className="text-sm font-medium text-slate-900 sm:text-right">{vehicle.condition}</span></Row>
+                    <Row label="Ownership"><span className="text-sm font-medium text-slate-900 sm:text-right">{formatOwnership(vehicle.ownership_number)}</span></Row>
+                  </Section>
+
+                  <Section title="Purchase">
+                    <Row label="Purchase Date"><span className="text-sm font-medium text-slate-900 sm:text-right"><HoverADDate date={vehicle.purchase_date} /></span></Row>
+                    <Row label="Purchase Source"><span className="text-sm font-medium text-slate-900 sm:text-right">{vehicle.purchase_source}</span></Row>
+                    <Row label="Name of Source">
+                      {vehicle.linked_contact_name ? (
+                        <span className="text-sm font-medium text-slate-900 sm:text-right flex items-center gap-1.5 sm:justify-end">
+                          {vehicle.linked_contact_type === "customer" ? <User size={13} className="text-slate-400 shrink-0" /> : <Store size={13} className="text-slate-400 shrink-0" />}
+                          {vehicle.linked_contact_name}
+                        </span>
+                      ) : <span className="text-sm font-medium text-slate-900 sm:text-right">—</span>}
+                    </Row>
+                    {!hideFinancials && <Row label="Purchase Price"><span className="text-sm font-medium text-slate-900 sm:text-right">{formatNPR(vehicle.purchase_price)}</span></Row>}
+                  </Section>
+
+                  {(!hidePricing || !hideFinancials || vehicle.sold_date) && (
+                    <Section title="Selling">
+                      {!hidePricing && <Row label="Selling Price"><span className="text-sm font-medium text-slate-900 sm:text-right">{vehicle.selling_price ? formatNPR(vehicle.selling_price) : "Not set"}</span></Row>}
+                      {!hideFinancials && <Row label="Minimum Selling Price"><span className="text-sm font-medium text-slate-900 sm:text-right">{vehicle.minimum_selling_price ? formatNPR(vehicle.minimum_selling_price) : "Not set"}</span></Row>}
+                      <Row label="Sold Date"><span className="text-sm font-medium text-slate-900 sm:text-right">{vehicle.sold_date ? <HoverADDate date={vehicle.sold_date} /> : "—"}</span></Row>
+                    </Section>
+                  )}
+
+                  <Section title="Sanaakhat">
+                    <Row label="Ownership Termination">
+                      {canManageStock ? (
+                        <select
+                          data-testid="ownership-termination-select"
+                          value={vehicle.ownership_termination_status || "pending"}
+                          onChange={e => updateOwnershipTermination(e.target.value)}
+                          disabled={savingTermination}
+                          className="text-sm font-medium text-slate-900 sm:text-right border border-slate-200 rounded-lg px-2 py-1 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-60"
+                        >
+                          <option value="pending">Pending</option>
+                          <option value="yes">Yes</option>
+                          <option value="no">No</option>
+                        </select>
+                      ) : (
+                        <span className="text-sm font-medium text-slate-900 sm:text-right capitalize">{vehicle.ownership_termination_status || "pending"}</span>
+                      )}
+                    </Row>
+                    <Row label={skState === "yes" ? "Done On" : skState === "pending" ? "Started" : "Date"}>
+                      <span className="text-sm font-medium text-slate-900 sm:text-right" data-testid="vehicle-sanakhat-date">
+                        {skDate ? <HoverADDate date={skDate} /> : skState === "yes" ? <span className="text-amber-600">No date saved (add it in Edit)</span> : "Not received yet"}
                       </span>
-                    ) : <span className="text-sm font-medium text-slate-900 sm:text-right">—</span>}
-                  </Row>
-                  <Row label="Ownership"><span className="text-sm font-medium text-slate-900 sm:text-right">{formatOwnership(vehicle.ownership_number)}</span></Row>
-                  <Row label="Ownership Termination">
-                    {canManageStock ? (
-                      <select
-                        data-testid="ownership-termination-select"
-                        value={vehicle.ownership_termination_status || "pending"}
-                        onChange={e => updateOwnershipTermination(e.target.value)}
-                        disabled={savingTermination}
-                        className="text-sm font-medium text-slate-900 sm:text-right border border-slate-200 rounded-lg px-2 py-1 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-60"
-                      >
-                        <option value="pending">Pending</option>
-                        <option value="yes">Yes</option>
-                        <option value="no">No</option>
-                      </select>
-                    ) : (
-                      <span className="text-sm font-medium text-slate-900 sm:text-right capitalize">{vehicle.ownership_termination_status || "pending"}</span>
+                    </Row>
+                    {skDue && (
+                      <Row label="Next Due">
+                        <span className={`text-sm font-medium sm:text-right ${skLeft < 0 ? "text-red-600" : skLeft <= 7 ? "text-amber-600" : "text-slate-900"}`} data-testid="vehicle-sanakhat-due">
+                          <HoverADDate date={skDue} /> · {sanakhatLeftText(skLeft)}
+                        </span>
+                      </Row>
                     )}
-                  </Row>
-                  <Row label={skState === "yes" ? "Sanaakhat Done On" : skState === "pending" ? "Sanaakhat Started" : "Sanaakhat Date"}>
-                    <span className="text-sm font-medium text-slate-900 sm:text-right" data-testid="vehicle-sanakhat-date">
-                      {skDate ? <HoverADDate date={skDate} /> : skState === "yes" ? <span className="text-amber-600">No date saved (add it in Edit)</span> : "Not received yet"}
-                    </span>
-                  </Row>
-                  {skDue && (
-                    <Row label="Next Sanaakhat Due">
-                      <span className={`text-sm font-medium sm:text-right ${skLeft < 0 ? "text-red-600" : skLeft <= 7 ? "text-amber-600" : "text-slate-900"}`} data-testid="vehicle-sanakhat-due">
-                        <HoverADDate date={skDue} /> · {sanakhatLeftText(skLeft)}
-                      </span>
-                    </Row>
-                  )}
-                  {skWaiting !== null && (
-                    <Row label="Sanaakhat Waiting">
-                      <span className={`text-sm font-medium sm:text-right ${skWaiting > SANAKHAT_WARN_DAYS ? "text-red-600" : "text-slate-900"}`} data-testid="vehicle-sanakhat-waiting">
-                        {skWaiting === 0 ? "Since today" : `${skWaiting} day${skWaiting > 1 ? "s" : ""}`}
-                      </span>
-                    </Row>
-                  )}
-                  {!hideFinancials && <Row label="Sanaakhat Cost"><span className="text-sm font-medium text-slate-900 sm:text-right">{vehicle.sanakhat_cost ? formatNPR(vehicle.sanakhat_cost) : "—"}</span></Row>}
-                  <Row label="Purchase Date"><span className="text-sm font-medium text-slate-900 sm:text-right"><HoverADDate date={vehicle.purchase_date} /></span></Row>
-                  {!hideFinancials && <Row label="Purchase Price"><span className="text-sm font-medium text-slate-900 sm:text-right">{formatNPR(vehicle.purchase_price)}</span></Row>}
-                  {!hidePricing && <Row label="Selling Price"><span className="text-sm font-medium text-slate-900 sm:text-right">{vehicle.selling_price ? formatNPR(vehicle.selling_price) : "Not set"}</span></Row>}
-                  {!hideFinancials && <Row label="Minimum Selling Price"><span className="text-sm font-medium text-slate-900 sm:text-right">{vehicle.minimum_selling_price ? formatNPR(vehicle.minimum_selling_price) : "Not set"}</span></Row>}
-                  <Row label="Sold Date"><span className="text-sm font-medium text-slate-900 sm:text-right">{vehicle.sold_date ? <HoverADDate date={vehicle.sold_date} /> : "—"}</span></Row>
+                    {skWaiting !== null && (
+                      <Row label="Waiting">
+                        <span className={`text-sm font-medium sm:text-right ${skWaiting > SANAKHAT_WARN_DAYS ? "text-red-600" : "text-slate-900"}`} data-testid="vehicle-sanakhat-waiting">
+                          {skWaiting === 0 ? "Since today" : `${skWaiting} day${skWaiting > 1 ? "s" : ""}`}
+                        </span>
+                      </Row>
+                    )}
+                    {!hideFinancials && <Row label="Sanaakhat Cost"><span className="text-sm font-medium text-slate-900 sm:text-right">{vehicle.sanakhat_cost ? formatNPR(vehicle.sanakhat_cost) : "—"}</span></Row>}
+                  </Section>
+
                   {vehicle.notes && (
-                    <div className="col-span-1 sm:col-span-2 mt-2">
+                    <div>
                       <div className="text-xs text-slate-500 mb-1">Notes</div>
                       <div className="text-sm text-slate-700 bg-slate-50 rounded-lg p-3">{vehicle.notes}</div>
                     </div>
