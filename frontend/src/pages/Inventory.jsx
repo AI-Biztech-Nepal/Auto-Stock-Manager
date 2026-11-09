@@ -127,7 +127,6 @@ export default function Inventory() {
   const [form, setForm] = useState(EMPTY);
   const [saving, setSaving] = useState(false);
   const [photos, setPhotos] = useState([]);
-  const [exportingStock, setExportingStock] = useState(false);
   // Opening a vehicle renders VehicleDetailModal inline instead of navigating to /inventory/:id,
   // so the Inventory page underneath stays mounted (no refetch, no lost scroll/filter state).
   const [selectedVehicleId, setSelectedVehicleId] = useState(null);
@@ -269,19 +268,6 @@ export default function Inventory() {
     }
     return result.length;
   })();
-
-  const exportStock = async () => {
-    setExportingStock(true);
-    try {
-      const res = await api.get("/reports/inventory-pipeline-export", { responseType: "blob" });
-      const blob = new Blob([res.data], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url; a.download = `GG_Auto_Inventory_Pipeline_${new Date().toISOString().slice(0, 10)}.xlsx`; a.click();
-      URL.revokeObjectURL(url);
-    } catch { toast.error("Failed to export stock"); }
-    finally { setExportingStock(false); }
-  };
 
   const clearStagedPhotos = () => {
     photos.forEach(p => URL.revokeObjectURL(p.previewUrl));
@@ -559,7 +545,7 @@ export default function Inventory() {
       )}
 
       {/* One line: the six status chips at the left, Purchase Vehicle at the right end (on phones it drops under the
-          chips, full width). Import / Export live inside the Purchase Vehicle form. */}
+          chips, full width). Import Stock lives inside the Purchase Vehicle form. */}
       <div className="flex flex-wrap lg:flex-nowrap items-center justify-between gap-2">
       <div className="flex items-center gap-1.5 overflow-x-auto min-w-0" data-testid="status-toggle-group">
         {STATUSES.map(s => {
@@ -1049,8 +1035,6 @@ export default function Inventory() {
           setPhotos={setPhotos}
           basicOnly={isSocialMedia}
           onImport={isAdmin ? importStock : undefined}
-          onExport={!isFrontDesk && !isSocialMedia ? exportStock : undefined}
-          exporting={exportingStock}
         />
       )}
 
