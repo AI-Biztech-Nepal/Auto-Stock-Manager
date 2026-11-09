@@ -24,6 +24,8 @@ import { hasFullVehicleAccess, canAddVehicle, isBasicStockRole, hidesVehiclePric
 const STATUSES = ["all", ...VEHICLE_STATUS_OPTIONS.filter(o => o.value !== "sold" && o.value !== "scrap").map(o => o.value)];
 const STATUS_ICONS = { all: Filter, unlisted: EyeOff, in_repair: Wrench, available: CheckCircle2, reserved: Clock };
 const AGING_CATEGORIES = ["all", "fresh", "normal", "slow", "dead"];
+// Amounts in the vehicle table: no "Rs." prefix, to keep the columns narrow.
+const rs = (n) => new Intl.NumberFormat("en-IN").format(Math.round(n || 0));
 const AGING_RANGES = { fresh: "0–30 days", normal: "31–45 days", slow: "46–60 days", dead: "60+ days" };
 
 // A single photo isn't enough for a storefront listing — this is the bar a vehicle
@@ -782,20 +784,20 @@ export default function Inventory() {
           )}
         </div>
       ) : view === "list" ? (
-        <div className={BOOK_CARD} data-testid="vehicle-table">
+        <div className={`${BOOK_CARD} compact`} data-testid="vehicle-table">
           <BookTableStyle />
           <div className="overflow-x-auto">
             <table>
               <thead>
                 <tr data-testid="vehicle-list-header">
                   <th className="w-10 hidden 2xl:table-cell">SN</th>
-                  <th>Brand</th>
                   <th>Vehicle</th>
+                  <th>Brand</th>
                   <th>Bike No.</th>
-                  {!hideFinancials && <th className="text-right hidden lg:table-cell">Purchase Price</th>}
-                  {!hideFinancials && <th className="text-right hidden lg:table-cell" title="Expenses, job cards, accessories and Sanakhat cost added after buying">Repair Price</th>}
-                  {!hideFinancials && <th className="text-right" title="Purchase + repair">Cost Price</th>}
-                  {!hidePricing && <th className="text-right">Selling Price</th>}
+                  {!hideFinancials && <th className="text-right hidden lg:table-cell" title="Amount in Rs.">Purchase Price</th>}
+                  {!hideFinancials && <th className="text-right hidden lg:table-cell" title="In Rs.: expenses, job cards, accessories and Sanakhat cost added after buying">Repair Price</th>}
+                  {!hideFinancials && <th className="text-right" title="In Rs.: purchase + repair">Cost Price</th>}
+                  {!hidePricing && <th className="text-right" title="Amount in Rs.">Selling Price</th>}
                   <th title={`Once done, the days left until it is due again (every ${SANAKHAT_CYCLE_DAYS} days)`}>Sanakhat</th>
                   <th>Status</th>
                   <th title="How long it has been in stock: days since it was bought, and its stock-age group">Stock Age</th>
@@ -824,13 +826,12 @@ export default function Inventory() {
                       className={`cursor-pointer ${v.status === "scrap" ? "opacity-60 saturate-50" : ""}`}
                     >
                       <td className="hidden 2xl:table-cell text-gray-500">{i + 1}</td>
-                      <td className="whitespace-nowrap font-medium text-gray-700">{v.brand || <span className="text-gray-300">—</span>}</td>
-                      <td className="min-w-[10rem]">
-                        <div className="flex items-center gap-2.5">
-                          <div className="w-9 h-9 rounded-lg overflow-hidden border border-gray-200 shrink-0 bg-gray-50 flex items-center justify-center">
-                            {photo ? <LazyThumb src={photo.url} /> : <Package size={15} className="text-gray-300" />}
+                      <td>
+                        <div className="flex items-center gap-2">
+                          <div className="w-8 h-8 rounded-lg overflow-hidden border border-gray-200 shrink-0 bg-gray-50 flex items-center justify-center">
+                            {photo ? <LazyThumb src={photo.url} /> : <Package size={14} className="text-gray-300" />}
                           </div>
-                          <div className="min-w-0">
+                          <div className="min-w-0 max-w-[10.5rem]">
                             <div className="font-semibold text-gray-900 truncate" style={{ fontFamily: "Manrope" }}>{v.model}</div>
                             <div className="text-[11px] text-gray-500 truncate">
                               {v.year} · {formatOwnership(v.ownership_number)}{v.status === "reserved" && v.booking?.customer_name ? ` · Booked by ${v.booking.customer_name}` : ""}{isAdmin && v.created_by ? ` · by ${v.created_by}` : ""}
@@ -838,11 +839,12 @@ export default function Inventory() {
                           </div>
                         </div>
                       </td>
-                      <td className="font-mono whitespace-nowrap text-gray-700">{v.registration_number || <span className="font-sans text-xs text-gray-400">No reg.</span>}</td>
-                      {!hideFinancials && <td className={`${money} hidden lg:table-cell`}>{formatNPR(purchase)}</td>}
-                      {!hideFinancials && <td className={`${money} hidden lg:table-cell`}>{repair > 0 ? formatNPR(repair) : <span className="text-gray-300">—</span>}</td>}
-                      {!hideFinancials && <td className={`${money} font-bold`}>{formatNPR(purchase + repair)}</td>}
-                      {!hidePricing && <td className={money}>{v.selling_price ? formatNPR(v.selling_price) : <span className="text-gray-300">—</span>}</td>}
+                      <td className="whitespace-nowrap font-medium text-gray-700">{v.brand || <span className="text-gray-300">—</span>}</td>
+                      <td className="font-mono text-xs whitespace-nowrap text-gray-700">{v.registration_number || <span className="font-sans text-xs text-gray-400">No reg.</span>}</td>
+                      {!hideFinancials && <td className={`${money} hidden lg:table-cell`}>{rs(purchase)}</td>}
+                      {!hideFinancials && <td className={`${money} hidden lg:table-cell`}>{repair > 0 ? rs(repair) : <span className="text-gray-300">—</span>}</td>}
+                      {!hideFinancials && <td className={`${money} font-bold`}>{rs(purchase + repair)}</td>}
+                      {!hidePricing && <td className={money}>{v.selling_price ? rs(v.selling_price) : <span className="text-gray-300">—</span>}</td>}
                       {/* Sanakhat: Done shows the day it was done and the days left until it is due again, Pending the days it has waited */}
                       <td data-testid="vehicle-row-sanakhat">
                         <span
@@ -854,11 +856,12 @@ export default function Inventory() {
                         </span>
                         {daysLeft !== null && (
                           <div
-                            className={`mt-0.5 text-[11px] font-semibold ${daysLeft < 0 ? "text-red-600" : daysLeft <= 7 ? "text-amber-600" : "text-gray-500"}`}
+                            className={`mt-0.5 text-[11px] leading-tight font-semibold ${daysLeft < 0 ? "text-red-600" : daysLeft <= 7 ? "text-amber-600" : "text-gray-500"}`}
                             title={`Sanaakhat has to be done again every ${SANAKHAT_CYCLE_DAYS} days`}
                             data-testid="vehicle-row-sanakhat-left"
                           >
-                            {formatBSDateNumeric(v.sanakhat_date.slice(0, 10))} · {daysLeft < 0 ? `${-daysLeft}d overdue` : daysLeft === 0 ? "due today" : `${daysLeft}d left`}
+                            <div>{formatBSDateNumeric(v.sanakhat_date.slice(0, 10))}</div>
+                            <div>{daysLeft < 0 ? `${-daysLeft}d overdue` : daysLeft === 0 ? "due today" : `${daysLeft}d left`}</div>
                           </div>
                         )}
                         {doneNoDate && (
@@ -870,7 +873,7 @@ export default function Inventory() {
                       <td><span className={`${pill} ${st.bg} ${st.text}`}>{st.label}</span></td>
                       <td className="whitespace-nowrap">
                         <span className={`${pill} ${ag.bg} ${ag.text}`} title={`${v.aging?.days} days in stock · ${ag.label}`}>{v.aging?.days}d</span>
-                        <div className="mt-0.5 text-[11px] text-gray-500">{ag.label}</div>
+                        <div className="mt-0.5 text-[10px] leading-tight text-gray-500">{ag.label}</div>
                       </td>
                       {isAdmin && (
                         <td onClick={e => e.stopPropagation()}>
