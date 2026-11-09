@@ -1993,15 +1993,26 @@ async def reset_password(request: Request, req: ResetPasswordRequest):
     await db.users.update_one({"id": rec["user_id"]}, {"$set": {"password_hash": await hash_pw_async(req.new_password)}})
     return {"message": "Password reset — you can now sign in with your new password."}
 
+# The stock photo every fresh install used to get as its "logo". It is no longer seeded, and where it is
+# still stored it counts as no logo at all.
+_PLACEHOLDER_LOGO = "https://images.unsplash.com/photo-1777288411485-1eb05bd4a289"
+# The original company's own logo, shipped with the web app (frontend/public/brand/).
+DEFAULT_COMPANY_LOGO = "/brand/default-logo.png"
+
 @api_router.get("/brand")
 async def get_brand(cu: dict = Depends(get_current_user)):
     """The signed-in company's name and logo for the side panel. Any role may read it (the full /settings
-    is admin-only) and it is read live, so a rename or a new logo shows without signing in again."""
+    is admin-only) and it is read live, so a rename or a new logo shows without signing in again.
+    Logo: the company's own (Settings -> Logo Image URL) if it set a real one; otherwise the original company
+    gets the shipped default logo, and every other company gets none (the panel shows its initials tile)."""
     if not cu.get("company_id"):
         return {"company_name": None, "logo_url": None}
     company = await db.companies.find_one({"id": cu["company_id"]}, {"_id": 0, "name": 1})
     settings = await db.settings.find_one({}, {"_id": 0, "logo_url": 1})
-    return {"company_name": company["name"] if company else None, "logo_url": (settings or {}).get("logo_url") or None}
+    logo = ((settings or {}).get("logo_url") or "").strip()
+    if not logo or logo.startswith(_PLACEHOLDER_LOGO):
+        logo = DEFAULT_COMPANY_LOGO if cu["company_id"] == await _default_company_id() else None
+    return {"company_name": company["name"] if company else None, "logo_url": logo}
 
 @api_router.get("/auth/me")
 async def me(cu: dict = Depends(get_current_user)):
@@ -6111,7 +6122,7 @@ async def _run_startup_tasks():
     if not await db.settings.find_one({"id": "general"}):
         await db.settings.insert_one({
             "id": "general", "company_id": default_company_id,
-            "logo_url": "https://images.unsplash.com/photo-1777288411485-1eb05bd4a289?q=80&w=880&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D",
+            "logo_url": "",
             "business_name": "My Auto Dealership",
             "contact_phone": "98XXXXXXXX",
             "contact_email": "info@example.com",
