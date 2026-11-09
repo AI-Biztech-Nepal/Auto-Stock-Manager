@@ -559,8 +559,9 @@ export default function Inventory() {
         </div>
       )}
 
-      {/* Status chips at the left; Purchase Vehicle at the top right with Import / Export just below it */}
-      <div className="flex flex-col-reverse sm:flex-row sm:items-start sm:justify-between gap-2">
+      {/* One line: the six status chips at the left, Import / Export and Purchase Vehicle at the right end
+          (on phones the two buttons drop under the chips) */}
+      <div className="flex flex-wrap lg:flex-nowrap items-center justify-between gap-2">
       <div className="flex items-center gap-1.5 overflow-x-auto min-w-0" data-testid="status-toggle-group">
         {STATUSES.map(s => {
           const active = statusFilter === s;
@@ -599,22 +600,13 @@ export default function Inventory() {
           <ChevronDown size={13} className={photoMenuOpen ? "rotate-180 transition-transform" : "transition-transform"} />
         </button>
       </div>
-      <div className="flex sm:flex-col items-stretch gap-1.5 sm:w-40 shrink-0" data-testid="inventory-actions">
-          {canAddVehicle(user?.role) && (
-            <button
-              onClick={() => { setForm(EMPTY); setShowModal(true); }}
-              data-testid="add-vehicle-button"
-              className="w-full flex items-center justify-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium px-2.5 h-8 rounded-lg transition-all active:scale-95 shadow-sm"
-            >
-              <Plus size={14} /> Purchase Vehicle
-            </button>
-          )}
+      <div className="flex items-center gap-1.5 shrink-0" data-testid="inventory-actions">
           {((!isFrontDesk && !isSocialMedia) || isAdmin) && (
             <div className="relative" ref={stockMenuRef}>
               <button
                 onClick={() => setStockMenuOpen(o => !o)}
                 data-testid="stock-data-menu-button"
-                className="w-full flex items-center justify-center gap-1.5 border border-slate-200 bg-white text-slate-700 text-xs font-medium px-2.5 h-8 rounded-lg hover:bg-slate-50 transition-all active:scale-95"
+                className="flex items-center justify-center gap-1.5 border border-slate-200 bg-white text-slate-700 text-xs font-medium px-2.5 h-8 rounded-lg hover:bg-slate-50 transition-all active:scale-95"
               >
                 <Download size={14} /> Import / Export <ChevronDown size={13} />
               </button>
@@ -642,6 +634,15 @@ export default function Inventory() {
                 </div>
               )}
             </div>
+          )}
+          {canAddVehicle(user?.role) && (
+            <button
+              onClick={() => { setForm(EMPTY); setShowModal(true); }}
+              data-testid="add-vehicle-button"
+              className="flex items-center justify-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium px-2.5 h-8 rounded-lg transition-all active:scale-95 shadow-sm"
+            >
+              <Plus size={14} /> Purchase Vehicle
+            </button>
           )}
       </div>
       </div>
