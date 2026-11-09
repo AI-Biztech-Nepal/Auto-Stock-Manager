@@ -15,13 +15,13 @@ export default function FinanceNavGroup({ label, Icon, pathname, search, navigat
 
   const row = (active, nested = false) =>
     `flex items-center gap-2.5 ${nested ? "px-3 py-2" : "px-3 py-2.5"} rounded-lg text-sm font-medium transition-all duration-150 ${active ? "bg-slate-800 text-white" : "text-slate-400 hover:text-white hover:bg-slate-800"}`;
-  const link = (item, nested = false) => (
+  const link = (item, nested = false, alsoActive = false) => (
     <NavLink
       key={item.key}
       to={`/finance?tab=${item.key}`}
       replace={onFinance}
       onClick={onPick}
-      className={row(current === item.key, nested)}
+      className={row(current === item.key || alsoActive, nested)}
       data-testid={`nav-finance-${item.key}`}
     >
       <item.icon size={15} />
@@ -43,8 +43,10 @@ export default function FinanceNavGroup({ label, Icon, pathname, search, navigat
       </button>
       {isOpen && (
         <div className="mt-0.5 ml-5 pl-3 border-l border-slate-700 space-y-0.5">
-          {FINANCE_NAV.filter((item) => !item.hidden).map((item) => {
+          {FINANCE_NAV.map((item) => {
             if (!item.children) return link(item);
+            // Dropdown hidden: the item stands alone, lit up for any page that would have been under it.
+            if (item.hideChildren) return link(item, false, item.children.some((c) => c.key === current));
             return (
               <div key={item.key}>
                 <div className="flex items-center gap-1">
