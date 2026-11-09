@@ -125,6 +125,15 @@ export const sanakhatDaysLeft = (v) => {
   if (isNaN(done)) return null;
   return SANAKHAT_CYCLE_DAYS - Math.max(0, Math.floor((Date.now() - done.getTime()) / 86400000));
 };
+// The day (YYYY-MM-DD) the next Sanaakhat is due: SANAKHAT_CYCLE_DAYS after the day it was done. null when sanakhatDaysLeft is.
+export const sanakhatDueDate = (v) => {
+  if (sanakhatDaysLeft(v) === null) return null;
+  const d = new Date(`${v.sanakhat_date.slice(0, 10)}T00:00:00`);
+  d.setDate(d.getDate() + SANAKHAT_CYCLE_DAYS);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
+// "12d left" / "due today" / "3d overdue" for a sanakhatDaysLeft value.
+export const sanakhatLeftText = (left) => (left < 0 ? `${-left}d overdue` : left === 0 ? "due today" : `${left}d left`);
 
 export const BRANDS = ["Honda", "Yamaha", "TVS", "Bajaj", "Suzuki", "Hero", "KTM", "Royal Enfield", "Lifan", "Other"];
 export const SOURCES = ["Direct Owner", "Auction", "Exchange", "Dealer", "Other"];

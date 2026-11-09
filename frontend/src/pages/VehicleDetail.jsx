@@ -3,7 +3,7 @@ import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { Plus, Trash2, Edit, CheckCircle, AlertCircle, Clock, QrCode, Undo2, Store, User, Download, FileText, Package, ChevronLeft, ChevronRight, GripVertical } from "lucide-react";
 import { toast } from "sonner";
 import api, { postWithRetry } from "../utils/api";
-import { formatNPR, getAgingStyle, getStatusStyle, getDocStyle, EXPENSE_CATEGORIES, VEHICLE_STATUS_OPTIONS, CONDITIONS, SOURCES, BRANDS, FUEL_TYPES, OWNERSHIP_OPTIONS, formatOwnership } from "../utils/helpers";
+import { formatNPR, getAgingStyle, getStatusStyle, getTerminationStyle, sanakhatDaysLeft, sanakhatPendingDays, sanakhatDueDate, sanakhatLeftText, SANAKHAT_CYCLE_DAYS, SANAKHAT_WARN_DAYS, getDocStyle, EXPENSE_CATEGORIES, VEHICLE_STATUS_OPTIONS, CONDITIONS, SOURCES, BRANDS, FUEL_TYPES, OWNERSHIP_OPTIONS, formatOwnership } from "../utils/helpers";
 import { ExpenseModal, QRLabelModal, ReturnModal, Field, inp, sel } from "./VehicleModals";
 import HoverADDate from "../components/HoverADDate";
 import BSDatePicker from "../components/BSDatePicker";
@@ -124,15 +124,20 @@ export function VehicleDetailModal({ id, onClose }) {
   const updateOwnershipTermination = async (val) => {
     const prev = vehicle?.ownership_termination_status;
     if (val === prev) return;
-    setVehicle(v => ({ ...v, ownership_termination_status: val }));
-    setEditForm(f => ({ ...f, ownership_termination_status: val }));
+    // Marking it Done with no date saved dates it today, as the Sanakhat page does, so the 35-day countdown has a start.
+    const prevDate = vehicle?.sanakhat_date;
+    const now = new Date();
+    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+    const change = { ownership_termination_status: val, ...(val === "yes" && !(prevDate || "").slice(0, 10) ? { sanakhat_date: today } : {}) };
+    setVehicle(v => ({ ...v, ...change }));
+    setEditForm(f => ({ ...f, ...change }));
     setSavingTermination(true);
     try {
-      await api.put(`/vehicles/${id}`, { ownership_termination_status: val });
+      await api.put(`/vehicles/${id}`, change);
       toast.success("Ownership termination updated");
     } catch {
-      setVehicle(v => ({ ...v, ownership_termination_status: prev }));
-      setEditForm(f => ({ ...f, ownership_termination_status: prev }));
+      setVehicle(v => ({ ...v, ownership_termination_status: prev, sanakhat_date: prevDate }));
+      setEditForm(f => ({ ...f, ownership_termination_status: prev, sanakhat_date: prevDate }));
       toast.error("Failed to update ownership termination");
     } finally { setSavingTermination(false); }
   };
@@ -387,6 +392,19 @@ export function VehicleDetailModal({ id, onClose }) {
   const ag = getAgingStyle(vehicle.aging?.category);
   const st = getStatusStyle(vehicle.status);
 
+  // Sanaakhat at a glance (header pill + overview rows): Done counts down the SANAKHAT_CYCLE_DAYS to the next one,
+  // Pending counts the days it has waited. Either needs sanakhat_date; a Done one without it says so.
+  const skState = vehicle.ownership_termination_status || "pending";
+  const skDate = (vehicle.sanakhat_date || "").slice(0, 10);
+  const skLeft = sanakhatDaysLeft(vehicle);
+  const skWaiting = sanakhatPendingDays(vehicle);
+  const skDue = sanakhatDueDate(vehicle);
+  const skTone = skLeft !== null && skLeft < 0 ? "bg-red-100 text-red-800"
+    : skLeft !== null && skLeft <= 7 ? "bg-amber-100 text-amber-800"
+    : skWaiting !== null && skWaiting > SANAKHAT_WARN_DAYS ? "bg-red-100 text-red-800"
+    : `${getTerminationStyle(skState).bg} ${getTerminationStyle(skState).text}`;
+  const skPill = `${getTerminationStyle(skState).label}${skLeft !== null ? ` · ${sanakhatLeftText(skLeft)}` : skState === "yes" && !skDate ? " · no date" : skWaiting !== null ? ` · ${skWaiting}d` : ""}`;
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 sm:p-4">
       <div className="bg-white sm:rounded-2xl shadow-2xl w-full h-full sm:h-auto sm:max-w-3xl sm:max-h-[90vh] overflow-y-auto">
@@ -437,6 +455,7 @@ export function VehicleDetailModal({ id, onClose }) {
           {/* Status + Actions */}
           <div className="flex items-center gap-2 flex-wrap px-4 sm:px-5 pb-4 sm:pb-5">
             <span className={`px-2.5 py-1 rounded-full text-xs font-semibold uppercase tracking-wide ${ag.bg} ${ag.text}`}>{vehicle.aging?.days}d · {ag.label}</span>
+            <span className={`px-2.5 py-1 rounded-full text-xs font-semibold uppercase tracking-wide ${skTone}`} title={`Sanaakhat has to be done again every ${SANAKHAT_CYCLE_DAYS} days`} data-testid="vehicle-sanakhat-pill">{skPill}</span>
             {!isEditing && (
               <select
                 value={vehicle.status}
@@ -675,7 +694,25 @@ export function VehicleDetailModal({ id, onClose }) {
                       <span className="text-sm font-medium text-slate-900 sm:text-right capitalize">{vehicle.ownership_termination_status || "pending"}</span>
                     )}
                   </Row>
-                  <Row label="Sanaakhat Date"><span className="text-sm font-medium text-slate-900 sm:text-right">{vehicle.sanakhat_date ? <HoverADDate date={vehicle.sanakhat_date} /> : "Not received yet"}</span></Row>
+                  <Row label={skState === "yes" ? "Sanaakhat Done On" : skState === "pending" ? "Sanaakhat Started" : "Sanaakhat Date"}>
+                    <span className="text-sm font-medium text-slate-900 sm:text-right" data-testid="vehicle-sanakhat-date">
+                      {skDate ? <HoverADDate date={skDate} /> : skState === "yes" ? <span className="text-amber-600">No date saved (add it in Edit)</span> : "Not received yet"}
+                    </span>
+                  </Row>
+                  {skDue && (
+                    <Row label="Next Sanaakhat Due">
+                      <span className={`text-sm font-medium sm:text-right ${skLeft < 0 ? "text-red-600" : skLeft <= 7 ? "text-amber-600" : "text-slate-900"}`} data-testid="vehicle-sanakhat-due">
+                        <HoverADDate date={skDue} /> · {sanakhatLeftText(skLeft)}
+                      </span>
+                    </Row>
+                  )}
+                  {skWaiting !== null && (
+                    <Row label="Sanaakhat Waiting">
+                      <span className={`text-sm font-medium sm:text-right ${skWaiting > SANAKHAT_WARN_DAYS ? "text-red-600" : "text-slate-900"}`} data-testid="vehicle-sanakhat-waiting">
+                        {skWaiting === 0 ? "Since today" : `${skWaiting} day${skWaiting > 1 ? "s" : ""}`}
+                      </span>
+                    </Row>
+                  )}
                   {!hideFinancials && <Row label="Sanaakhat Cost"><span className="text-sm font-medium text-slate-900 sm:text-right">{vehicle.sanakhat_cost ? formatNPR(vehicle.sanakhat_cost) : "—"}</span></Row>}
                   <Row label="Purchase Date"><span className="text-sm font-medium text-slate-900 sm:text-right"><HoverADDate date={vehicle.purchase_date} /></span></Row>
                   {!hideFinancials && <Row label="Purchase Price"><span className="text-sm font-medium text-slate-900 sm:text-right">{formatNPR(vehicle.purchase_price)}</span></Row>}
