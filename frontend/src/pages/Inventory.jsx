@@ -425,6 +425,16 @@ export default function Inventory() {
     } catch { toast.error("Failed to delete"); }
   };
 
+  // The vehicle table's columns and their share of the card's width (colgroup below). Roles that don't see some
+  // money, or can't delete, lose those columns and the rest share the room.
+  const tableCols = [
+    { key: "sn", w: 4 }, { key: "vehicle", w: 15 }, { key: "brand", w: 9 }, { key: "bike", w: 9 },
+    ...(hideFinancials ? [] : [{ key: "purchase", w: 8 }, { key: "repair", w: 7 }, { key: "cost", w: 9 }]),
+    ...(hidePricing ? [] : [{ key: "selling", w: 8 }]),
+    { key: "sanakhat", w: 9 }, { key: "status", w: 9 }, { key: "stock", w: 8 },
+    ...(isAdmin ? [{ key: "actions", w: 5 }] : []),
+  ];
+  const tableColsTotal = tableCols.reduce((n, c) => n + c.w, 0);
   const wideScreen = useMediaQuery("(min-width: 640px)");
   const { topbarSlot } = useOutletContext() || {};
   const viewControls = (
@@ -787,21 +797,24 @@ export default function Inventory() {
         <div className={`${BOOK_CARD} compact`} data-testid="vehicle-table">
           <BookTableStyle />
           <div className="overflow-x-auto">
-            <table>
+            <table className="fixed-cols" style={{ minWidth: "56rem" }}>
+              <colgroup>
+                {tableCols.map(c => <col key={c.key} style={{ width: `${(c.w / tableColsTotal * 100).toFixed(2)}%` }} />)}
+              </colgroup>
               <thead>
                 <tr data-testid="vehicle-list-header">
-                  <th className="w-10 hidden 2xl:table-cell">SN</th>
+                  <th>SN</th>
                   <th>Vehicle</th>
                   <th>Brand</th>
                   <th>Bike No.</th>
-                  {!hideFinancials && <th className="text-right hidden lg:table-cell" title="Amount in Rs.">Purchase Price</th>}
-                  {!hideFinancials && <th className="text-right hidden lg:table-cell" title="In Rs.: expenses, job cards, accessories and Sanakhat cost added after buying">Repair Price</th>}
+                  {!hideFinancials && <th className="text-right" title="Amount in Rs.">Purchase Price</th>}
+                  {!hideFinancials && <th className="text-right" title="In Rs.: expenses, job cards, accessories and Sanakhat cost added after buying">Repair Price</th>}
                   {!hideFinancials && <th className="text-right" title="In Rs.: purchase + repair">Cost Price</th>}
                   {!hidePricing && <th className="text-right" title="Amount in Rs.">Selling Price</th>}
                   <th title={`Once done, the days left until it is due again (every ${SANAKHAT_CYCLE_DAYS} days)`}>Sanakhat</th>
                   <th>Status</th>
                   <th title="How long it has been in stock: days since it was bought, and its stock-age group">Stock Age</th>
-                  {isAdmin && <th className="w-10" />}
+                  {isAdmin && <th />}
                 </tr>
               </thead>
               <tbody>
@@ -815,7 +828,7 @@ export default function Inventory() {
                   const photo = v.thumb_photos?.[0];
                   const purchase = v.purchase_price || 0;
                   const repair = Math.max(0, (v.total_investment || 0) - purchase);
-                  const pill = "inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold uppercase tracking-wide whitespace-nowrap";
+                  const pill = "inline-flex items-center px-1.5 py-0.5 rounded-full text-[10.5px] font-semibold uppercase whitespace-nowrap";
                   const money = "text-right whitespace-nowrap";
                   const doneNoDate = v.ownership_termination_status === "yes" && v.status !== "sold" && v.status !== "scrap" && !(v.sanakhat_date || "").slice(0, 10);
                   return (
@@ -825,13 +838,13 @@ export default function Inventory() {
                       onClick={() => setSelectedVehicleId(v.id)}
                       className={`cursor-pointer ${v.status === "scrap" ? "opacity-60 saturate-50" : ""}`}
                     >
-                      <td className="hidden 2xl:table-cell text-gray-500">{i + 1}</td>
+                      <td className="text-gray-500">{i + 1}</td>
                       <td>
                         <div className="flex items-center gap-2">
                           <div className="w-8 h-8 rounded-lg overflow-hidden border border-gray-200 shrink-0 bg-gray-50 flex items-center justify-center">
                             {photo ? <LazyThumb src={photo.url} /> : <Package size={14} className="text-gray-300" />}
                           </div>
-                          <div className="min-w-0 max-w-[10.5rem]">
+                          <div className="min-w-0">
                             <div className="font-semibold text-gray-900 truncate" style={{ fontFamily: "Manrope" }}>{v.model}</div>
                             <div className="text-[11px] text-gray-500 truncate">
                               {v.year} · {formatOwnership(v.ownership_number)}{v.status === "reserved" && v.booking?.customer_name ? ` · Booked by ${v.booking.customer_name}` : ""}{isAdmin && v.created_by ? ` · by ${v.created_by}` : ""}
@@ -841,8 +854,8 @@ export default function Inventory() {
                       </td>
                       <td className="whitespace-nowrap font-medium text-gray-700">{v.brand || <span className="text-gray-300">—</span>}</td>
                       <td className="font-mono text-xs whitespace-nowrap text-gray-700">{v.registration_number || <span className="font-sans text-xs text-gray-400">No reg.</span>}</td>
-                      {!hideFinancials && <td className={`${money} hidden lg:table-cell`}>{rs(purchase)}</td>}
-                      {!hideFinancials && <td className={`${money} hidden lg:table-cell`}>{repair > 0 ? rs(repair) : <span className="text-gray-300">—</span>}</td>}
+                      {!hideFinancials && <td className={money}>{rs(purchase)}</td>}
+                      {!hideFinancials && <td className={money}>{repair > 0 ? rs(repair) : <span className="text-gray-300">—</span>}</td>}
                       {!hideFinancials && <td className={`${money} font-bold`}>{rs(purchase + repair)}</td>}
                       {!hidePricing && <td className={money}>{v.selling_price ? rs(v.selling_price) : <span className="text-gray-300">—</span>}</td>}
                       {/* Sanakhat: Done shows the day it was done and the days left until it is due again, Pending the days it has waited */}
@@ -852,8 +865,9 @@ export default function Inventory() {
                           title={late ? `Sanaakhat pending for ${pendingDays} days` : undefined}
                           data-testid="vehicle-row-termination"
                         >
-                          {tm.label.replace("Sanaakhat: ", "")}{late && ` · ${pendingDays}d`}
+                          {tm.label.replace("Sanaakhat: ", "")}
                         </span>
+                        {late && <div className="mt-0.5 text-[11px] leading-tight font-semibold text-red-600">{pendingDays}d waiting</div>}
                         {daysLeft !== null && (
                           <div
                             className={`mt-0.5 text-[11px] leading-tight font-semibold ${daysLeft < 0 ? "text-red-600" : daysLeft <= 7 ? "text-amber-600" : "text-gray-500"}`}
