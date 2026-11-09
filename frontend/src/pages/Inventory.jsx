@@ -4,7 +4,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { Plus, Search, Trash2, Filter, X, UploadCloud, Download, EyeOff, Package, Wallet, DollarSign, Lock, Moon, Archive, Sparkles, Store, User, Wrench, Clock, CheckCircle2, AlertTriangle, ImageOff, ChevronDown, Share2 } from "lucide-react";
 import { toast } from "sonner";
 import api, { postWithRetry } from "../utils/api";
-import { formatNPR, getAgingStyle, getStatusStyle, getTerminationStyle, isSanakhatOverdue, sanakhatPendingDays, SANAKHAT_WARN_DAYS, BRANDS, VEHICLE_STATUS_OPTIONS, formatOwnership } from "../utils/helpers";
+import { formatNPR, getAgingStyle, getStatusStyle, getTerminationStyle, isSanakhatOverdue, sanakhatPendingDays, sanakhatDaysLeft, SANAKHAT_CYCLE_DAYS, SANAKHAT_WARN_DAYS, BRANDS, VEHICLE_STATUS_OPTIONS, formatOwnership } from "../utils/helpers";
 import { AddVehicleModal } from "./AddVehicleModal";
 import { VehicleDetailModal } from "./VehicleDetail";
 import HoverADDate from "../components/HoverADDate";
@@ -197,19 +197,22 @@ export default function Inventory() {
   // leak investment/selling figures to a role the other three tiles are already hidden from.
   const showFinRow = !hideFinancials || !hidePricing;
 
-  // List view columns from md up, with the header above them: Vehicle | Bike No. | Cost Price | Investment |
-  // Selling Price | Status | In Stock | delete. Money columns drop out for the roles that don't see that money.
+  // List view columns from lg up, with the header above them: Vehicle | Bike No. | Purchase Price | Repair Price |
+  // Cost Price | Selling Price | Sanakhat | Status | In Stock | delete. Money columns drop out for the roles that
+  // don't see that money. Cost Price is purchase + repair, i.e. the same total as the vehicle's Investment.
   const listColumns = [
-    { key: "vehicle", label: "Vehicle", width: "minmax(0,2fr)" },
-    { key: "bike", label: "Bike No.", width: "7rem" },
+    { key: "vehicle", label: "Vehicle", width: "minmax(10rem,2fr)" },
+    { key: "bike", label: "Bike No.", width: "6.25rem" },
     ...(hideFinancials ? [] : [
-      { key: "cost", label: "Cost Price", width: "6.5rem", right: true },
-      { key: "investment", label: "Investment", width: "6.5rem", right: true },
+      { key: "purchase", label: "Purchase Price", width: "5.75rem", right: true },
+      { key: "repair", label: "Repair Price", width: "5.5rem", right: true, title: "Expenses, job cards, accessories and Sanakhat cost added after buying" },
+      { key: "cost", label: "Cost Price", width: "5.75rem", right: true, title: "Purchase + repair" },
     ]),
-    ...(hidePricing ? [] : [{ key: "selling", label: "Selling Price", width: "6.5rem", right: true }]),
-    { key: "status", label: "Status", width: "9rem" },
-    { key: "stock", label: "In Stock", width: "4.5rem", title: "Days since the vehicle was bought" },
-    ...(isAdmin ? [{ key: "actions", label: "", width: "2.5rem" }] : []),
+    ...(hidePricing ? [] : [{ key: "selling", label: "Selling Price", width: "5.75rem", right: true }]),
+    { key: "sanakhat", label: "Sanakhat", width: "7.5rem", title: `Once done, the days left until it is due again (every ${SANAKHAT_CYCLE_DAYS} days)` },
+    { key: "status", label: "Status", width: "6.5rem" },
+    { key: "stock", label: "In Stock", width: "3.75rem", title: "Days since the vehicle was bought" },
+    ...(isAdmin ? [{ key: "actions", label: "", width: "2.25rem" }] : []),
   ];
   const listGrid = listColumns.map(c => c.width).join(" ");
 
@@ -882,9 +885,10 @@ export default function Inventory() {
           )}
         </div>
       ) : view === "list" ? (
-        <div className="space-y-2" style={{ "--cols": listGrid }}>
-          {/* Column headers (md and up; on phones each row carries its own labels) */}
-          <div className="hidden md:grid md:[grid-template-columns:var(--cols)] gap-x-3 px-3 text-[11px] font-semibold uppercase tracking-wide text-slate-500" data-testid="vehicle-list-header">
+        <div className="lg:overflow-x-auto">
+        <div className="space-y-2 lg:min-w-[66rem]" style={{ "--cols": listGrid }}>
+          {/* Column headers (lg and up; below that each row carries its own labels) */}
+          <div className="hidden lg:grid lg:[grid-template-columns:var(--cols)] gap-x-2 px-3 text-[11px] font-semibold uppercase tracking-wide text-slate-500" data-testid="vehicle-list-header">
             {listColumns.map(c => (
               <div key={c.key} className={c.right ? "text-right" : ""} title={c.title}>{c.label}</div>
             ))}
@@ -895,18 +899,22 @@ export default function Inventory() {
             const tm = getTerminationStyle(v.ownership_termination_status);
             const late = isSanakhatOverdue(v);
             const pendingDays = sanakhatPendingDays(v);
+            const daysLeft = sanakhatDaysLeft(v);
             const photo = v.thumb_photos?.[0];
+            const purchase = v.purchase_price || 0;
+            const repair = Math.max(0, (v.total_investment || 0) - purchase);
             const pill = "px-2 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wide";
-            const money = "text-xs md:text-[13px] md:text-right";
+            const money = "text-xs lg:text-[13px] lg:text-right";
+            const label = "lg:hidden text-slate-400 font-normal";
             return (
               <div
                 key={v.id}
                 data-testid="vehicle-row"
                 onClick={() => setSelectedVehicleId(v.id)}
-                className={`flex flex-wrap items-center gap-x-3 gap-y-1.5 md:grid md:[grid-template-columns:var(--cols)] bg-white border border-slate-200 rounded-lg px-3 py-2.5 cursor-pointer hover:shadow-sm hover:border-slate-300 transition-all ${v.status === "scrap" ? "opacity-60 saturate-50" : ""}`}
+                className={`flex flex-wrap items-center gap-x-3 gap-y-1.5 lg:gap-x-2 lg:grid lg:[grid-template-columns:var(--cols)] bg-white border border-slate-200 rounded-lg px-3 py-2.5 cursor-pointer hover:shadow-sm hover:border-slate-300 transition-all ${v.status === "scrap" ? "opacity-60 saturate-50" : ""}`}
               >
                 {/* Vehicle */}
-                <div className="flex items-center gap-3 min-w-0 flex-1 md:flex-none">
+                <div className="flex items-center gap-3 min-w-0 flex-1 lg:flex-none">
                   <div className="w-10 h-10 rounded-lg overflow-hidden border border-slate-200 shrink-0 bg-slate-50 flex items-center justify-center">
                     {photo ? <LazyThumb src={photo.url} /> : <Package size={16} className="text-slate-300" />}
                   </div>
@@ -914,43 +922,56 @@ export default function Inventory() {
                     <div className="font-semibold text-slate-900 text-sm truncate" style={{ fontFamily: "Manrope" }}>{v.brand} {v.model}</div>
                     <div className="text-xs text-slate-500 truncate">
                       {v.year}
-                      <span className="md:hidden"> · {v.registration_number || "No reg."}</span>
+                      <span className="lg:hidden"> · {v.registration_number || "No reg."}</span>
                       {` · ${formatOwnership(v.ownership_number)}${v.status === "reserved" && v.booking?.customer_name ? ` · Booked by ${v.booking.customer_name}` : ""}${isAdmin && v.created_by ? ` · by ${v.created_by}` : ""}`}
                     </div>
                   </div>
                 </div>
                 {/* Bike No. */}
-                <div className="hidden md:block min-w-0 text-[13px] font-mono text-slate-700 truncate">
+                <div className="hidden lg:block min-w-0 text-[13px] font-mono text-slate-700 truncate">
                   {v.registration_number || <span className="font-sans text-xs text-slate-400">No reg.</span>}
                 </div>
-                {/* Delete: line one beside the vehicle on phones, last column on md */}
+                {/* Delete: line one beside the vehicle on phones, last column on lg */}
                 {isAdmin && (
-                  <div className="order-2 md:order-last flex items-center justify-end" onClick={e => e.stopPropagation()}>
-                    <button onClick={e => handleDelete(v.id, e)} className="w-11 h-11 md:w-8 md:h-8 flex items-center justify-center hover:bg-red-50 rounded-lg transition-colors" data-testid="delete-vehicle-btn">
+                  <div className="order-2 lg:order-last flex items-center justify-end" onClick={e => e.stopPropagation()}>
+                    <button onClick={e => handleDelete(v.id, e)} className="w-11 h-11 lg:w-8 lg:h-8 flex items-center justify-center hover:bg-red-50 rounded-lg transition-colors" data-testid="delete-vehicle-btn">
                       <Trash2 size={14} className="text-red-400" />
                     </button>
                   </div>
                 )}
-                {/* Everything else: its own second line on phones (indented under the title), columns on md */}
-                <div className="order-3 basis-full pl-[3.25rem] flex flex-wrap items-center gap-x-3 gap-y-1.5 md:contents">
+                {/* Everything else: its own second line on phones (indented under the title), columns on lg */}
+                <div className="order-3 basis-full pl-[3.25rem] flex flex-wrap items-center gap-x-3 gap-y-1.5 lg:contents">
                   {!hideFinancials && (
                     <>
-                      <div className={`${money} text-slate-800 font-medium`}><span className="md:hidden text-slate-400 font-normal">Cost </span>{formatNPR(v.purchase_price)}</div>
-                      <div className={`${money} text-slate-800 font-semibold`}><span className="md:hidden text-slate-400 font-normal">Investment </span>{formatNPR(v.total_investment)}</div>
+                      <div className={`${money} text-slate-800`}><span className={label}>Purchase </span>{formatNPR(purchase)}</div>
+                      <div className={`${money} text-slate-800`}><span className={label}>Repair </span>{repair > 0 ? formatNPR(repair) : "—"}</div>
+                      <div className={`${money} text-slate-900 font-semibold`}><span className={`${label} font-normal`}>Cost </span>{formatNPR(purchase + repair)}</div>
                     </>
                   )}
                   {!hidePricing && (
-                    <div className={`${money} text-slate-800`}><span className="md:hidden text-slate-400">Selling </span>{v.selling_price ? formatNPR(v.selling_price) : "—"}</div>
+                    <div className={`${money} text-slate-800`}><span className={label}>Selling </span>{v.selling_price ? formatNPR(v.selling_price) : "—"}</div>
                   )}
-                  <div className="flex flex-wrap items-center md:flex-col md:items-start gap-1">
-                    <span className={`${pill} ${st.bg} ${st.text}`}>{st.label}</span>
+                  {/* Sanakhat: Done shows the days left until it is due again, Pending the days it has waited */}
+                  <div className="flex flex-col items-start gap-0.5" data-testid="vehicle-row-sanakhat">
                     <span
                       className={`${pill} ${late ? "bg-red-100 text-red-800" : `${tm.bg} ${tm.text}`}`}
                       title={late ? `Sanaakhat pending for ${pendingDays} days` : undefined}
                       data-testid="vehicle-row-termination"
                     >
-                      {tm.label}{late && ` · ${pendingDays}d`}
+                      {tm.label.replace("Sanaakhat: ", "")}{late && ` · ${pendingDays}d`}
                     </span>
+                    {daysLeft !== null && (
+                      <span
+                        className={`text-[11px] font-semibold ${daysLeft < 0 ? "text-red-600" : daysLeft <= 7 ? "text-amber-600" : "text-slate-500"}`}
+                        title={`Sanaakhat has to be done again every ${SANAKHAT_CYCLE_DAYS} days`}
+                        data-testid="vehicle-row-sanakhat-left"
+                      >
+                        {daysLeft < 0 ? `${-daysLeft}d overdue` : daysLeft === 0 ? "due today" : `${daysLeft}d left`}
+                      </span>
+                    )}
+                  </div>
+                  <div>
+                    <span className={`${pill} ${st.bg} ${st.text}`}>{st.label}</span>
                   </div>
                   <div>
                     <span className={`${pill} ${ag.bg} ${ag.text}`} title={`${v.aging?.days} days in stock · ${ag.label}`}>{v.aging?.days}d</span>
@@ -959,6 +980,7 @@ export default function Inventory() {
               </div>
             );
           })}
+        </div>
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">

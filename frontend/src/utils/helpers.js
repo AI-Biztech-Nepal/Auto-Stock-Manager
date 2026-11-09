@@ -114,6 +114,18 @@ export const sanakhatPendingDays = (v) => {
 };
 export const isSanakhatOverdue = (v) => (sanakhatPendingDays(v) ?? -1) > SANAKHAT_WARN_DAYS;
 
+// Once Sanaakhat is marked Done, sanakhat_date is the day it was done, and it has to be done again within
+// SANAKHAT_CYCLE_DAYS of that. Days left until then (negative = overdue); null when it isn't Done, has no
+// date, or the vehicle is sold / scrap.
+export const SANAKHAT_CYCLE_DAYS = 35;
+export const sanakhatDaysLeft = (v) => {
+  if (!v || v.status === "sold" || v.status === "scrap") return null;
+  if (v.ownership_termination_status !== "yes") return null;
+  const done = new Date(`${(v.sanakhat_date || "").slice(0, 10)}T00:00:00`);
+  if (isNaN(done)) return null;
+  return SANAKHAT_CYCLE_DAYS - Math.max(0, Math.floor((Date.now() - done.getTime()) / 86400000));
+};
+
 export const BRANDS = ["Honda", "Yamaha", "TVS", "Bajaj", "Suzuki", "Hero", "KTM", "Royal Enfield", "Lifan", "Other"];
 export const SOURCES = ["Direct Owner", "Auction", "Exchange", "Dealer", "Other"];
 export const CONDITIONS = ["Excellent", "Good", "Fair", "Poor"];
