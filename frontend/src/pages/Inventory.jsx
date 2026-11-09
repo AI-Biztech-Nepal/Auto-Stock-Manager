@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback, useMemo, useRef, useLayoutEffect } fr
 import { createPortal } from "react-dom";
 import { useNavigate, useOutletContext, useSearchParams } from "react-router-dom";
 import useMediaQuery from "../hooks/useMediaQuery";
-import { Plus, Search, Trash2, Filter, X, UploadCloud, Download, EyeOff, Package, Wallet, DollarSign, Lock, Moon, Sparkles, Store, User, Wrench, Clock, CheckCircle2, AlertTriangle, ImageOff, ChevronDown } from "lucide-react";
+import { Plus, Search, Trash2, Filter, X, EyeOff, Package, Wallet, DollarSign, Lock, Moon, Sparkles, Store, User, Wrench, Clock, CheckCircle2, AlertTriangle, ImageOff, ChevronDown } from "lucide-react";
 import { toast } from "sonner";
 import api, { postWithRetry } from "../utils/api";
 import { formatNPR, getAgingStyle, getStatusStyle, getTerminationStyle, isSanakhatOverdue, sanakhatPendingDays, sanakhatDaysLeft, SANAKHAT_CYCLE_DAYS, SANAKHAT_WARN_DAYS, BRANDS, VEHICLE_STATUS_OPTIONS, formatOwnership } from "../utils/helpers";
@@ -128,14 +128,6 @@ export default function Inventory() {
   const [saving, setSaving] = useState(false);
   const [photos, setPhotos] = useState([]);
   const [exportingStock, setExportingStock] = useState(false);
-  const [stockMenuOpen, setStockMenuOpen] = useState(false);
-  const stockMenuRef = useRef(null);
-  useEffect(() => {
-    if (!stockMenuOpen) return;
-    const close = (e) => { if (!stockMenuRef.current?.contains(e.target)) setStockMenuOpen(false); };
-    document.addEventListener("mousedown", close);
-    return () => document.removeEventListener("mousedown", close);
-  }, [stockMenuOpen]);
   // Opening a vehicle renders VehicleDetailModal inline instead of navigating to /inventory/:id,
   // so the Inventory page underneath stays mounted (no refetch, no lost scroll/filter state).
   const [selectedVehicleId, setSelectedVehicleId] = useState(null);
@@ -294,6 +286,13 @@ export default function Inventory() {
   const clearStagedPhotos = () => {
     photos.forEach(p => URL.revokeObjectURL(p.previewUrl));
     setPhotos([]);
+  };
+
+  // Import Stock is its own page, so leaving the form for it asks first, as closing the form does.
+  const importStock = () => {
+    const dirty = photos.length > 0 || JSON.stringify(form) !== JSON.stringify(EMPTY);
+    if (dirty && !window.confirm("You have unsaved changes. Leave without saving?")) return;
+    navigate("/import-stock");
   };
 
   const closeAddModal = () => {
@@ -559,8 +558,8 @@ export default function Inventory() {
         </div>
       )}
 
-      {/* One line: the six status chips at the left, Import / Export and Purchase Vehicle at the right end
-          (on phones the two buttons drop under the chips) */}
+      {/* One line: the six status chips at the left, Purchase Vehicle at the right end (on phones it drops under the
+          chips, full width). Import / Export live inside the Purchase Vehicle form. */}
       <div className="flex flex-wrap lg:flex-nowrap items-center justify-between gap-2">
       <div className="flex items-center gap-1.5 overflow-x-auto min-w-0" data-testid="status-toggle-group">
         {STATUSES.map(s => {
@@ -600,46 +599,12 @@ export default function Inventory() {
           <ChevronDown size={13} className={photoMenuOpen ? "rotate-180 transition-transform" : "transition-transform"} />
         </button>
       </div>
-      <div className="flex items-center gap-1.5 shrink-0" data-testid="inventory-actions">
-          {((!isFrontDesk && !isSocialMedia) || isAdmin) && (
-            <div className="relative" ref={stockMenuRef}>
-              <button
-                onClick={() => setStockMenuOpen(o => !o)}
-                data-testid="stock-data-menu-button"
-                className="flex items-center justify-center gap-1.5 border border-slate-200 bg-white text-slate-700 text-xs font-medium px-2.5 h-8 rounded-lg hover:bg-slate-50 transition-all active:scale-95"
-              >
-                <Download size={14} /> Import / Export <ChevronDown size={13} />
-              </button>
-              {stockMenuOpen && (
-                <div className="absolute right-0 mt-1 w-48 bg-white border border-slate-200 rounded-lg shadow-lg z-30 py-1">
-                  {isAdmin && (
-                    <button
-                      onClick={() => { setStockMenuOpen(false); navigate("/import-stock"); }}
-                      data-testid="import-stock-btn"
-                      className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 text-left"
-                    >
-                      <UploadCloud size={16} /> Import Stock
-                    </button>
-                  )}
-                  {!isFrontDesk && !isSocialMedia && (
-                    <button
-                      onClick={() => { setStockMenuOpen(false); exportStock(); }}
-                      disabled={exportingStock}
-                      data-testid="export-stock-button"
-                      className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 text-left disabled:opacity-60"
-                    >
-                      <Download size={16} /> {exportingStock ? "Exporting..." : "Export Stock"}
-                    </button>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
+      <div className="flex items-center gap-1.5 w-full lg:w-auto shrink-0" data-testid="inventory-actions">
           {canAddVehicle(user?.role) && (
             <button
               onClick={() => { setForm(EMPTY); setShowModal(true); }}
               data-testid="add-vehicle-button"
-              className="flex items-center justify-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium px-2.5 h-8 rounded-lg transition-all active:scale-95 shadow-sm"
+              className="flex-1 lg:flex-none flex items-center justify-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium px-2.5 h-8 rounded-lg transition-all active:scale-95 shadow-sm"
             >
               <Plus size={14} /> Purchase Vehicle
             </button>
@@ -1083,6 +1048,9 @@ export default function Inventory() {
           photos={photos}
           setPhotos={setPhotos}
           basicOnly={isSocialMedia}
+          onImport={isAdmin ? importStock : undefined}
+          onExport={!isFrontDesk && !isSocialMedia ? exportStock : undefined}
+          exporting={exportingStock}
         />
       )}
 

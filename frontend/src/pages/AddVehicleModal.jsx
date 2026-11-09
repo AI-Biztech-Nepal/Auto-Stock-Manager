@@ -2,7 +2,7 @@
  * AddVehicleModal.jsx — extracted Add Vehicle form modal for Inventory page
  */
 import { useState } from "react";
-import { Plus, Trash2 } from "lucide-react";
+import { Plus, Trash2, UploadCloud, Download } from "lucide-react";
 import BSDatePicker from "../components/BSDatePicker";
 import CustomerVendorPicker from "../components/CustomerVendorPicker";
 import { BRANDS, SOURCES, CONDITIONS, FUEL_TYPES, VEHICLE_STATUS_OPTIONS, OWNERSHIP_OPTIONS } from "../utils/helpers";
@@ -12,7 +12,9 @@ import { usePhotoCropQueue } from "../hooks/usePhotoCropQueue";
 
 // basicOnly: Social Media accounts add basic details + photos only -- purchase, pricing,
 // status, source, notes and paperwork fields are hidden (the backend drops them anyway).
-export function AddVehicleModal({ form, setForm, onClose, onSubmit, saving, photos, setPhotos, basicOnly = false }) {
+// onImport / onExport: the stock spreadsheet actions (Import Stock opens its own page, Export Stock downloads);
+// each is left out for roles that may not use it.
+export function AddVehicleModal({ form, setForm, onClose, onSubmit, saving, photos, setPhotos, basicOnly = false, onImport, onExport, exporting = false }) {
   const [selected, setSelected] = useState(() => new Set());
   const [previewPhoto, setPreviewPhoto] = useState(null);
 
@@ -44,6 +46,21 @@ export function AddVehicleModal({ form, setForm, onClose, onSubmit, saving, phot
           <h2 className="text-lg font-bold text-slate-900" style={{ fontFamily: "Manrope, sans-serif" }}>Purchase Vehicle</h2>
           <button onClick={onClose} className="w-11 h-11 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500 shrink-0">✕</button>
         </div>
+        {(onImport || onExport) && (
+          <div className="flex flex-wrap items-center gap-2 px-4 sm:px-5 pt-3" data-testid="purchase-import-export">
+            <span className="text-xs text-slate-500">Buying a list of vehicles?</span>
+            {onImport && (
+              <button type="button" onClick={onImport} data-testid="import-stock-btn" className="flex items-center gap-1.5 border border-slate-200 text-slate-700 text-xs font-medium px-2.5 h-8 rounded-lg hover:bg-slate-50">
+                <UploadCloud size={14} /> Import Stock
+              </button>
+            )}
+            {onExport && (
+              <button type="button" onClick={onExport} disabled={exporting} data-testid="export-stock-button" className="flex items-center gap-1.5 border border-slate-200 text-slate-700 text-xs font-medium px-2.5 h-8 rounded-lg hover:bg-slate-50 disabled:opacity-60">
+                <Download size={14} /> {exporting ? "Exporting..." : "Export Stock"}
+              </button>
+            )}
+          </div>
+        )}
         <form onSubmit={onSubmit} className="p-4 sm:p-5 space-y-4">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Field label="Brand" required>
