@@ -28,7 +28,7 @@ const navItems = [
   { path: "/",             label: "Dashboard",    icon: LayoutDashboard },
   { path: "/platform",     label: "Companies",    icon: Building2 },
   { path: "/inventory",    label: "Inventory",    icon: Bike },
-  { path: "/sanakhat",     label: "Sanakhat",     icon: FileCheck2 },  // the Sanakhat Desk account's only page; for admin it opens the Sanakhat tab under Sales
+  { path: "/sanakhat",     label: "Sanakhat",     icon: FileCheck2 },  // the Sanakhat Desk account's only page; admin opens the same page
   { path: "/marketing",   label: "Marketing",    icon: Megaphone },
   { path: "/sales",        label: "Sales",        icon: ShoppingBag },
   { path: "/spare-parts",  label: "Spare Parts",  icon: Boxes },
@@ -54,11 +54,6 @@ export default function Layout() {
   // Admin's people live in Finance's Ledger now, so the main Ledger item goes for admin; stock and parts supervisors
   // (who can't open Finance) keep it as their way to Staff / Vendors. The /ledger page itself still works.
   const visibleNavItems = navItems.filter(({ path }) => canAccessPath(user?.role, path) && (path !== "/sanakhat" || user?.role === "sanakhat_officer" || canAccessPath(user?.role, "/sales")) && (path !== "/ledger" || (user?.role && user.role !== "admin")));
-  // Admin's Sanakhat item is the Sales page's Sanakhat tab, so it and Sales share /sales and only one lights up.
-  const onSanakhatTab = pathname === "/sales" && new URLSearchParams(search).get("tab") === "sanakhat";
-  const navTarget = (path) => (path === "/sanakhat" && user?.role !== "sanakhat_officer" ? "/sales?tab=sanakhat" : path);
-  const navActive = (path, isActive) =>
-    path === "/sanakhat" && user?.role !== "sanakhat_officer" ? onSanakhatTab : path === "/sales" ? isActive && !onSanakhatTab : isActive;
 
   // Missing-data notifications: flags active-stock vehicles missing a photo or a
   // registration number so gaps get caught without staff having to go hunting for
@@ -204,12 +199,12 @@ export default function Layout() {
             return (
               <NavLink
                 key={path}
-                to={navTarget(path)}
+                to={path}
                 end={path === "/"}
                 onClick={() => mobile && setSidebarOpen(false)}
                 className={({ isActive }) =>
                   `flex items-center gap-3 px-3 py-3 rounded-lg text-sm font-medium transition-all duration-150 ${
-                    navActive(path, isActive)
+                    isActive
                       ? "bg-blue-600 text-white"
                       : "text-slate-400 hover:text-white hover:bg-slate-800"
                   }`

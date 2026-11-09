@@ -8,6 +8,7 @@ import { formatNPR, getAgingStyle, getStatusStyle, getTerminationStyle, isSanakh
 import { AddVehicleModal } from "./AddVehicleModal";
 import { VehicleDetailModal } from "./VehicleDetail";
 import HoverADDate from "../components/HoverADDate";
+import { formatBSDateNumeric } from "../utils/nepali-date";
 import DateRangeFilter, { resolveDateFilter } from "../components/DateRangeFilter";
 import ViewToggle, { useViewMode } from "../components/ViewToggle";
 import LazyThumb from "../components/LazyThumb";
@@ -22,6 +23,18 @@ const STATUSES = ["all", ...VEHICLE_STATUS_OPTIONS.filter(o => o.value !== "sold
 const STATUS_ICONS = { all: Filter, unlisted: EyeOff, in_repair: Wrench, available: CheckCircle2, reserved: Clock };
 const AGING_CATEGORIES = ["all", "fresh", "normal", "slow", "dead"];
 const AGING_RANGES = { fresh: "0–30 days", normal: "31–45 days", slow: "46–60 days", dead: "60+ days" };
+
+// The list view's table, drawn like the Finance Day Book's: grey header, a rule under every row and between every column.
+const INV_TABLE_CSS = `
+.inv-table table { border-collapse: collapse; width: 100%; font-size: 13px; color: #111827; }
+.inv-table thead th { background: #F9FAFB; color: #4B5563; font-size: 11.5px; font-weight: 700; text-align: left;
+  padding: 8px 10px; border-bottom: 1px solid #D1D5DB; white-space: nowrap; }
+.inv-table thead th.text-right { text-align: right; }
+.inv-table tbody td { padding: 8px 10px; border-bottom: 1px solid #E5E7EB; vertical-align: middle; }
+.inv-table thead th + th, .inv-table tbody td + td { border-left: 1px solid #E5E7EB; }
+.inv-table tbody tr:last-child td { border-bottom: none; }
+.inv-table tbody tr:hover td { background-color: #F8FAFC; }
+`;
 
 // A single photo isn't enough for a storefront listing — this is the bar a vehicle
 // needs to clear before it's considered adequately photographed.
@@ -196,25 +209,6 @@ export default function Inventory() {
   // Vehicles" popup (the one summary tile parts_supervisor can actually reach) doesn't
   // leak investment/selling figures to a role the other three tiles are already hidden from.
   const showFinRow = !hideFinancials || !hidePricing;
-
-  // List view columns from lg up, with the header above them: Vehicle | Bike No. | Purchase Price | Repair Price |
-  // Cost Price | Selling Price | Sanakhat | Status | In Stock | delete. Money columns drop out for the roles that
-  // don't see that money. Cost Price is purchase + repair, i.e. the same total as the vehicle's Investment.
-  const listColumns = [
-    { key: "vehicle", label: "Vehicle", width: "minmax(10rem,2fr)" },
-    { key: "bike", label: "Bike No.", width: "6.25rem" },
-    ...(hideFinancials ? [] : [
-      { key: "purchase", label: "Purchase Price", width: "5.75rem", right: true },
-      { key: "repair", label: "Repair Price", width: "5.5rem", right: true, title: "Expenses, job cards, accessories and Sanakhat cost added after buying" },
-      { key: "cost", label: "Cost Price", width: "5.75rem", right: true, title: "Purchase + repair" },
-    ]),
-    ...(hidePricing ? [] : [{ key: "selling", label: "Selling Price", width: "5.75rem", right: true }]),
-    { key: "sanakhat", label: "Sanakhat", width: "7.5rem", title: `Once done, the days left until it is due again (every ${SANAKHAT_CYCLE_DAYS} days)` },
-    { key: "status", label: "Status", width: "6.5rem" },
-    { key: "stock", label: "In Stock", width: "3.75rem", title: "Days since the vehicle was bought" },
-    ...(isAdmin ? [{ key: "actions", label: "", width: "2.25rem" }] : []),
-  ];
-  const listGrid = listColumns.map(c => c.width).join(" ");
 
   // Dedicated report popup for each summary tile above — null | "all" | "investment" | "locked" | "selling".
   const [summaryModalView, setSummaryModalView] = useState(null);
@@ -885,102 +879,104 @@ export default function Inventory() {
           )}
         </div>
       ) : view === "list" ? (
-        <div className="lg:overflow-x-auto">
-        <div className="space-y-2 lg:min-w-[66rem]" style={{ "--cols": listGrid }}>
-          {/* Column headers (lg and up; below that each row carries its own labels) */}
-          <div className="hidden lg:grid lg:[grid-template-columns:var(--cols)] gap-x-2 px-3 text-[11px] font-semibold uppercase tracking-wide text-slate-500" data-testid="vehicle-list-header">
-            {listColumns.map(c => (
-              <div key={c.key} className={c.right ? "text-right" : ""} title={c.title}>{c.label}</div>
-            ))}
-          </div>
-          {filtered.map(v => {
-            const ag = getAgingStyle(v.aging?.category);
-            const st = getStatusStyle(v.status);
-            const tm = getTerminationStyle(v.ownership_termination_status);
-            const late = isSanakhatOverdue(v);
-            const pendingDays = sanakhatPendingDays(v);
-            const daysLeft = sanakhatDaysLeft(v);
-            const photo = v.thumb_photos?.[0];
-            const purchase = v.purchase_price || 0;
-            const repair = Math.max(0, (v.total_investment || 0) - purchase);
-            const pill = "px-2 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wide";
-            const money = "text-xs lg:text-[13px] lg:text-right";
-            const label = "lg:hidden text-slate-400 font-normal";
-            return (
-              <div
-                key={v.id}
-                data-testid="vehicle-row"
-                onClick={() => setSelectedVehicleId(v.id)}
-                className={`flex flex-wrap items-center gap-x-3 gap-y-1.5 lg:gap-x-2 lg:grid lg:[grid-template-columns:var(--cols)] bg-white border border-slate-200 rounded-lg px-3 py-2.5 cursor-pointer hover:shadow-sm hover:border-slate-300 transition-all ${v.status === "scrap" ? "opacity-60 saturate-50" : ""}`}
-              >
-                {/* Vehicle */}
-                <div className="flex items-center gap-3 min-w-0 flex-1 lg:flex-none">
-                  <div className="w-10 h-10 rounded-lg overflow-hidden border border-slate-200 shrink-0 bg-slate-50 flex items-center justify-center">
-                    {photo ? <LazyThumb src={photo.url} /> : <Package size={16} className="text-slate-300" />}
-                  </div>
-                  <div className="min-w-0">
-                    <div className="font-semibold text-slate-900 text-sm truncate" style={{ fontFamily: "Manrope" }}>{v.brand} {v.model}</div>
-                    <div className="text-xs text-slate-500 truncate">
-                      {v.year}
-                      <span className="lg:hidden"> · {v.registration_number || "No reg."}</span>
-                      {` · ${formatOwnership(v.ownership_number)}${v.status === "reserved" && v.booking?.customer_name ? ` · Booked by ${v.booking.customer_name}` : ""}${isAdmin && v.created_by ? ` · by ${v.created_by}` : ""}`}
-                    </div>
-                  </div>
-                </div>
-                {/* Bike No. */}
-                <div className="hidden lg:block min-w-0 text-[13px] font-mono text-slate-700 truncate">
-                  {v.registration_number || <span className="font-sans text-xs text-slate-400">No reg.</span>}
-                </div>
-                {/* Delete: line one beside the vehicle on phones, last column on lg */}
-                {isAdmin && (
-                  <div className="order-2 lg:order-last flex items-center justify-end" onClick={e => e.stopPropagation()}>
-                    <button onClick={e => handleDelete(v.id, e)} className="w-11 h-11 lg:w-8 lg:h-8 flex items-center justify-center hover:bg-red-50 rounded-lg transition-colors" data-testid="delete-vehicle-btn">
-                      <Trash2 size={14} className="text-red-400" />
-                    </button>
-                  </div>
-                )}
-                {/* Everything else: its own second line on phones (indented under the title), columns on lg */}
-                <div className="order-3 basis-full pl-[3.25rem] flex flex-wrap items-center gap-x-3 gap-y-1.5 lg:contents">
-                  {!hideFinancials && (
-                    <>
-                      <div className={`${money} text-slate-800`}><span className={label}>Purchase </span>{formatNPR(purchase)}</div>
-                      <div className={`${money} text-slate-800`}><span className={label}>Repair </span>{repair > 0 ? formatNPR(repair) : "—"}</div>
-                      <div className={`${money} text-slate-900 font-semibold`}><span className={`${label} font-normal`}>Cost </span>{formatNPR(purchase + repair)}</div>
-                    </>
-                  )}
-                  {!hidePricing && (
-                    <div className={`${money} text-slate-800`}><span className={label}>Selling </span>{v.selling_price ? formatNPR(v.selling_price) : "—"}</div>
-                  )}
-                  {/* Sanakhat: Done shows the days left until it is due again, Pending the days it has waited */}
-                  <div className="flex flex-col items-start gap-0.5" data-testid="vehicle-row-sanakhat">
-                    <span
-                      className={`${pill} ${late ? "bg-red-100 text-red-800" : `${tm.bg} ${tm.text}`}`}
-                      title={late ? `Sanaakhat pending for ${pendingDays} days` : undefined}
-                      data-testid="vehicle-row-termination"
+        <div className="inv-table bg-white border border-gray-200 rounded-2xl shadow-[0_1px_2px_rgba(16,24,40,0.04),0_4px_12px_rgba(16,24,40,0.03)] overflow-hidden" data-testid="vehicle-table">
+          <style>{INV_TABLE_CSS}</style>
+          <div className="overflow-x-auto">
+            <table>
+              <thead>
+                <tr data-testid="vehicle-list-header">
+                  <th className="w-10 hidden sm:table-cell">SN</th>
+                  <th>Vehicle</th>
+                  <th>Bike No.</th>
+                  {!hideFinancials && <th className="text-right hidden lg:table-cell">Purchase Price</th>}
+                  {!hideFinancials && <th className="text-right hidden lg:table-cell" title="Expenses, job cards, accessories and Sanakhat cost added after buying">Repair Price</th>}
+                  {!hideFinancials && <th className="text-right" title="Purchase + repair">Cost Price</th>}
+                  {!hidePricing && <th className="text-right">Selling Price</th>}
+                  <th title={`Once done, the days left until it is due again (every ${SANAKHAT_CYCLE_DAYS} days)`}>Sanakhat</th>
+                  <th>Status</th>
+                  <th title="Days since the vehicle was bought">In Stock</th>
+                  {isAdmin && <th className="w-10" />}
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((v, i) => {
+                  const ag = getAgingStyle(v.aging?.category);
+                  const st = getStatusStyle(v.status);
+                  const tm = getTerminationStyle(v.ownership_termination_status);
+                  const late = isSanakhatOverdue(v);
+                  const pendingDays = sanakhatPendingDays(v);
+                  const daysLeft = sanakhatDaysLeft(v);
+                  const photo = v.thumb_photos?.[0];
+                  const purchase = v.purchase_price || 0;
+                  const repair = Math.max(0, (v.total_investment || 0) - purchase);
+                  const pill = "inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold uppercase tracking-wide whitespace-nowrap";
+                  const money = "text-right whitespace-nowrap";
+                  const doneNoDate = v.ownership_termination_status === "yes" && v.status !== "sold" && v.status !== "scrap" && !(v.sanakhat_date || "").slice(0, 10);
+                  return (
+                    <tr
+                      key={v.id}
+                      data-testid="vehicle-row"
+                      onClick={() => setSelectedVehicleId(v.id)}
+                      className={`cursor-pointer ${v.status === "scrap" ? "opacity-60 saturate-50" : ""}`}
                     >
-                      {tm.label.replace("Sanaakhat: ", "")}{late && ` · ${pendingDays}d`}
-                    </span>
-                    {daysLeft !== null && (
-                      <span
-                        className={`text-[11px] font-semibold ${daysLeft < 0 ? "text-red-600" : daysLeft <= 7 ? "text-amber-600" : "text-slate-500"}`}
-                        title={`Sanaakhat has to be done again every ${SANAKHAT_CYCLE_DAYS} days`}
-                        data-testid="vehicle-row-sanakhat-left"
-                      >
-                        {daysLeft < 0 ? `${-daysLeft}d overdue` : daysLeft === 0 ? "due today" : `${daysLeft}d left`}
-                      </span>
-                    )}
-                  </div>
-                  <div>
-                    <span className={`${pill} ${st.bg} ${st.text}`}>{st.label}</span>
-                  </div>
-                  <div>
-                    <span className={`${pill} ${ag.bg} ${ag.text}`} title={`${v.aging?.days} days in stock · ${ag.label}`}>{v.aging?.days}d</span>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
+                      <td className="hidden sm:table-cell text-gray-500">{i + 1}</td>
+                      <td className="min-w-[12rem]">
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-9 h-9 rounded-lg overflow-hidden border border-gray-200 shrink-0 bg-gray-50 flex items-center justify-center">
+                            {photo ? <LazyThumb src={photo.url} /> : <Package size={15} className="text-gray-300" />}
+                          </div>
+                          <div className="min-w-0">
+                            <div className="font-semibold text-gray-900 truncate" style={{ fontFamily: "Manrope" }}>{v.brand} {v.model}</div>
+                            <div className="text-[11px] text-gray-500 truncate">
+                              {v.year} · {formatOwnership(v.ownership_number)}{v.status === "reserved" && v.booking?.customer_name ? ` · Booked by ${v.booking.customer_name}` : ""}{isAdmin && v.created_by ? ` · by ${v.created_by}` : ""}
+                            </div>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="font-mono whitespace-nowrap text-gray-700">{v.registration_number || <span className="font-sans text-xs text-gray-400">No reg.</span>}</td>
+                      {!hideFinancials && <td className={`${money} hidden lg:table-cell`}>{formatNPR(purchase)}</td>}
+                      {!hideFinancials && <td className={`${money} hidden lg:table-cell`}>{repair > 0 ? formatNPR(repair) : <span className="text-gray-300">—</span>}</td>}
+                      {!hideFinancials && <td className={`${money} font-bold`}>{formatNPR(purchase + repair)}</td>}
+                      {!hidePricing && <td className={money}>{v.selling_price ? formatNPR(v.selling_price) : <span className="text-gray-300">—</span>}</td>}
+                      {/* Sanakhat: Done shows the day it was done and the days left until it is due again, Pending the days it has waited */}
+                      <td data-testid="vehicle-row-sanakhat">
+                        <span
+                          className={`${pill} ${late ? "bg-red-100 text-red-800" : `${tm.bg} ${tm.text}`}`}
+                          title={late ? `Sanaakhat pending for ${pendingDays} days` : undefined}
+                          data-testid="vehicle-row-termination"
+                        >
+                          {tm.label.replace("Sanaakhat: ", "")}{late && ` · ${pendingDays}d`}
+                        </span>
+                        {daysLeft !== null && (
+                          <div
+                            className={`mt-0.5 text-[11px] font-semibold ${daysLeft < 0 ? "text-red-600" : daysLeft <= 7 ? "text-amber-600" : "text-gray-500"}`}
+                            title={`Sanaakhat has to be done again every ${SANAKHAT_CYCLE_DAYS} days`}
+                            data-testid="vehicle-row-sanakhat-left"
+                          >
+                            {formatBSDateNumeric(v.sanakhat_date.slice(0, 10))} · {daysLeft < 0 ? `${-daysLeft}d overdue` : daysLeft === 0 ? "due today" : `${daysLeft}d left`}
+                          </div>
+                        )}
+                        {doneNoDate && (
+                          <div className="mt-0.5 text-[11px] font-semibold text-amber-600" title="Marked Done but no date was saved. Set it on the Sanakhat page, or Edit the vehicle." data-testid="vehicle-row-sanakhat-nodate">
+                            no date saved
+                          </div>
+                        )}
+                      </td>
+                      <td><span className={`${pill} ${st.bg} ${st.text}`}>{st.label}</span></td>
+                      <td><span className={`${pill} ${ag.bg} ${ag.text}`} title={`${v.aging?.days} days in stock · ${ag.label}`}>{v.aging?.days}d</span></td>
+                      {isAdmin && (
+                        <td onClick={e => e.stopPropagation()}>
+                          <button onClick={e => handleDelete(v.id, e)} className="w-8 h-8 flex items-center justify-center hover:bg-red-50 rounded-lg transition-colors" data-testid="delete-vehicle-btn">
+                            <Trash2 size={14} className="text-red-400" />
+                          </button>
+                        </td>
+                      )}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">

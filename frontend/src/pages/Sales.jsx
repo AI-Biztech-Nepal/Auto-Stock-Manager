@@ -11,7 +11,6 @@ import BSDatePicker from "../components/BSDatePicker";
 import HoverADDate from "../components/HoverADDate";
 import WarrantyBadge from "../components/WarrantyBadge";
 import Bookings from "./Bookings";
-import SanakhatPortal from "./SanakhatPortal";
 import DateRangeFilter, { resolveDateFilter } from "../components/DateRangeFilter";
 import SourceField, { ReferredByField } from "../components/SourceField";
 import SoldBySelect from "../components/SoldBySelect";
@@ -269,7 +268,7 @@ export default function Sales() {
   // Arrived from the Bookings page (/sales?booking=ID): open the sale form for that booking
   // once bookings have loaded, then drop the param so a refresh doesn't reopen it.
   const tabParam = new URLSearchParams(location.search).get("tab");
-  const tab = tabParam === "bookings" ? "bookings" : tabParam === "sanakhat" ? "sanakhat" : "sales";
+  const tab = tabParam === "bookings" ? "bookings" : "sales";
   const setTab = (t) => navigate(t === "sales" ? "/sales" : `/sales?tab=${t}`, { replace: true });
   const bookingParam = new URLSearchParams(location.search).get("booking");
   useEffect(() => {
@@ -497,7 +496,7 @@ export default function Sales() {
   return (
     <div className="space-y-5 animate-fade-in">
       <div className="flex items-center gap-1 border-b border-slate-200" data-testid="sales-tabs">
-        {[{ key: "sales", label: "Sales" }, { key: "bookings", label: `Bookings${openBookings.length ? ` (${openBookings.length})` : ""}` }, { key: "sanakhat", label: "Sanakhat" }].map(t => (
+        {[{ key: "sales", label: "Sales" }, { key: "bookings", label: `Bookings${openBookings.length ? ` (${openBookings.length})` : ""}` }].map(t => (
           <button key={t.key} onClick={() => setTab(t.key)} data-testid={`sales-tab-${t.key}`}
             className={`px-4 h-10 text-sm font-semibold border-b-2 -mb-px transition-colors ${tab === t.key ? "border-blue-600 text-blue-600" : "border-transparent text-slate-500 hover:text-slate-700"}`}>
             {t.label}
@@ -505,9 +504,7 @@ export default function Sales() {
         ))}
       </div>
 
-      {tab === "sanakhat" ? (
-        <SanakhatPortal embedded />
-      ) : tab === "bookings" ? (
+      {tab === "bookings" ? (
         <Bookings key={`${sales.length}-${openBookings.length}`} embedded onRecordSale={openModal} />
       ) : (
       <>
