@@ -33,11 +33,11 @@ const SERVICE_TABS = [
 
 const navItems = [
   { path: "/",             label: "Dashboard",    icon: LayoutDashboard },
+  { path: "/sales",        label: "Sales",        icon: ShoppingBag },
   { path: "/platform",     label: "Companies",    icon: Building2 },
   { path: "/inventory",    label: "Inventory",    icon: Bike },
   { path: "/sanakhat",     label: "Sanakhat",     icon: FileCheck2 },  // the Sanakhat Desk account's only page; admin opens the same page
   { path: "/marketing",   label: "Marketing",    icon: Megaphone },
-  { path: "/sales",        label: "Sales",        icon: ShoppingBag },
   { path: "/ledger",       label: "Ledger",       icon: BookOpen },
   { path: "/jobs",         label: "Job Cards",    icon: Wrench },
   { path: "/warranty",     label: "Warranty",     icon: ShieldCheck },
