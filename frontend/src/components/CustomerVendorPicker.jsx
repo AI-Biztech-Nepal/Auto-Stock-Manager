@@ -15,8 +15,10 @@ const fieldInp = "h-8 px-2 text-sm border border-slate-200 rounded-lg focus:outl
  * onChange - called with the next { type, id, name }
  * vendorType - passed through to /vendors/search and used as the default
  *              vendor_type when creating a new vendor from here
+ * combined - no Vendor/Customer toggle: one search over both lists, the type comes from the
+ *            record picked; "add new" asks vendor or customer inside its own form
  */
-export default function CustomerVendorPicker({ value, onChange, vendorType = "" }) {
+export default function CustomerVendorPicker({ value, onChange, vendorType = "", combined = false }) {
   const type = value?.type || "vendor";
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
@@ -24,9 +26,12 @@ export default function CustomerVendorPicker({ value, onChange, vendorType = "" 
   const [customers, setCustomers] = useState(null);
   const [loading, setLoading] = useState(false);
   const [showAddNew, setShowAddNew] = useState(false);
+  const [newType, setNewType] = useState("vendor"); // combined mode only: what "add new" creates
   const [newEntity, setNewEntity] = useState({ name: "", contact: "", address: "" });
   const [saving, setSaving] = useState(false);
   const ref = useRef(null);
+  const addType = combined ? newType : type;
+  const noun = combined ? "name" : type;
 
   useEffect(() => {
     const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
@@ -65,14 +70,21 @@ export default function CustomerVendorPicker({ value, onChange, vendorType = "" 
     const next = !open;
     setOpen(next);
     setSearch("");
-    if (next) ensureLoaded(type);
+    if (next) { if (combined) { ensureLoaded("vendor"); ensureLoaded("customer"); } else ensureLoaded(type); }
   };
 
-  const list = type === "vendor" ? vendors : customers;
+  // Combined mode lists both kinds together, each tagged with its own type. The two lists load side by side,
+  // so "loading" is whichever is still empty rather than the single flag.
+  const itemType = (item) => item._type || type;
+  const list = combined
+    ? [...(vendors || []).map(v => ({ ...v, _type: "vendor" })), ...(customers || []).map(c => ({ ...c, _type: "customer" }))]
+        .sort((a, b) => a.name.localeCompare(b.name))
+    : (type === "vendor" ? vendors : customers);
   const filtered = (list || []).filter(item => item.name.toLowerCase().includes(search.toLowerCase()));
+  const busy = combined ? vendors === null || customers === null : loading;
 
   const select = (item) => {
-    onChange({ type, id: item.id, name: item.name });
+    onChange({ type: itemType(item), id: item.id, name: item.name });
     setOpen(false);
     setSearch("");
   };
@@ -89,7 +101,7 @@ export default function CustomerVendorPicker({ value, onChange, vendorType = "" 
     }
     setSaving(true);
     try {
-      if (type === "vendor") {
+      if (addType === "vendor") {
         const r = await api.post("/vendors", {
           name: newEntity.name, phone: newEntity.contact,
           address: newEntity.address || null, vendor_type: vendorType || "both",
@@ -110,7 +122,7 @@ export default function CustomerVendorPicker({ value, onChange, vendorType = "" 
       setOpen(false);
       setNewEntity({ name: "", contact: "", address: "" });
     } catch (err) {
-      toast.error(err.response?.data?.detail || `Failed to add ${type}`);
+      toast.error(err.response?.data?.detail || `Failed to add ${addType}`);
     } finally {
       setSaving(false);
     }
@@ -118,24 +130,26 @@ export default function CustomerVendorPicker({ value, onChange, vendorType = "" 
 
   return (
     <div ref={ref} className="relative">
-      <div className="flex gap-1 mb-1.5">
-        <button
-          type="button"
-          data-testid="cv-picker-type-vendor"
-          onClick={() => switchType("vendor")}
-          className={`flex items-center gap-1 px-2 h-6 rounded-md text-xs font-medium transition-colors ${type === "vendor" ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}
-        >
-          <Store size={11} /> Vendor
-        </button>
-        <button
-          type="button"
-          data-testid="cv-picker-type-customer"
-          onClick={() => switchType("customer")}
-          className={`flex items-center gap-1 px-2 h-6 rounded-md text-xs font-medium transition-colors ${type === "customer" ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}
-        >
-          <User size={11} /> Customer
-        </button>
-      </div>
+      {!combined && (
+        <div className="flex gap-1 mb-1.5">
+          <button
+            type="button"
+            data-testid="cv-picker-type-vendor"
+            onClick={() => switchType("vendor")}
+            className={`flex items-center gap-1 px-2 h-6 rounded-md text-xs font-medium transition-colors ${type === "vendor" ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}
+          >
+            <Store size={11} /> Vendor
+          </button>
+          <button
+            type="button"
+            data-testid="cv-picker-type-customer"
+            onClick={() => switchType("customer")}
+            className={`flex items-center gap-1 px-2 h-6 rounded-md text-xs font-medium transition-colors ${type === "customer" ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}
+          >
+            <User size={11} /> Customer
+          </button>
+        </div>
+      )}
 
       <button
         type="button"
@@ -148,7 +162,7 @@ export default function CustomerVendorPicker({ value, onChange, vendorType = "" 
               {type === "vendor" ? <Store size={13} className="text-slate-400 shrink-0" /> : <User size={13} className="text-slate-400 shrink-0" />}
               <span className="truncate">{value.name}</span>
             </span>
-          : <span className="text-slate-400">{`Select ${type}...`}</span>}
+          : <span className="text-slate-400">{`Select ${noun}...`}</span>}
         <ChevronDown size={14} className="text-slate-400 shrink-0 ml-1" />
       </button>
 
@@ -159,27 +173,28 @@ export default function CustomerVendorPicker({ value, onChange, vendorType = "" 
               autoFocus
               value={search}
               onChange={e => setSearch(e.target.value)}
-              placeholder={`Search ${type}s...`}
+              placeholder={`Search ${noun}s...`}
               className="w-full h-7 px-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
               data-testid="cv-picker-search-input"
             />
           </div>
 
           <div className="overflow-y-auto flex-1">
-            {loading && <div className="px-3 py-2 text-xs text-slate-400">Loading...</div>}
-            {!loading && filtered.length === 0 && (
-              <div className="px-3 py-2 text-xs text-slate-400">No {type}s found</div>
+            {busy && <div className="px-3 py-2 text-xs text-slate-400">Loading...</div>}
+            {!busy && filtered.length === 0 && (
+              <div className="px-3 py-2 text-xs text-slate-400">No {noun}s found</div>
             )}
-            {!loading && filtered.map(item => (
+            {!busy && filtered.map(item => (
               <button
                 type="button"
-                key={item.id}
+                key={`${itemType(item)}-${item.id}`}
                 data-testid={`cv-picker-option-${item.id}`}
                 onClick={() => select(item)}
                 className={`w-full text-left px-3 py-2 text-sm hover:bg-blue-50 flex items-center justify-between transition-colors ${value?.id === item.id ? "bg-blue-50 text-blue-700" : "text-slate-700"}`}
               >
                 <div className="flex items-center gap-2 truncate">
                   {value?.id === item.id && <Check size={11} className="text-blue-600 shrink-0" />}
+                  {combined && (itemType(item) === "vendor" ? <Store size={12} className="text-slate-400 shrink-0" /> : <User size={12} className="text-slate-400 shrink-0" />)}
                   <span className={`truncate ${value?.id === item.id ? "font-medium" : ""}`}>{item.name}</span>
                 </div>
                 {(item.phone || item.contact_number) && <span className="text-xs text-slate-400 shrink-0 ml-2">{item.phone || item.contact_number}</span>}
@@ -199,7 +214,7 @@ export default function CustomerVendorPicker({ value, onChange, vendorType = "" 
               onClick={() => setShowAddNew(true)}
               className="w-full text-left px-3 py-2 text-xs text-blue-600 hover:bg-blue-50 font-medium flex items-center gap-1.5 transition-colors border-t border-slate-100"
             >
-              <Plus size={11} /> {`Add New ${type === "vendor" ? "Vendor" : "Customer"}`}
+              <Plus size={11} /> {combined ? "Add new" : `Add New ${type === "vendor" ? "Vendor" : "Customer"}`}
             </button>
           </div>
         </div>
@@ -207,9 +222,23 @@ export default function CustomerVendorPicker({ value, onChange, vendorType = "" 
 
       {showAddNew && (
         <div className="mt-2 p-3 bg-blue-50 border border-blue-100 rounded-xl space-y-2" data-testid="cv-picker-add-new-form">
-          <p className="text-xs font-semibold text-blue-700 flex items-center gap-1.5">
-            {type === "vendor" ? <Store size={11} /> : <User size={11} />} New {type === "vendor" ? "Vendor" : "Customer"}
-          </p>
+          {combined ? (
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs font-semibold text-blue-700 mr-1">New</span>
+              {[["vendor", "Vendor", Store], ["customer", "Customer", User]].map(([t, label, Icon]) => (
+                <button
+                  key={t} type="button" data-testid={`cv-picker-new-type-${t}`} onClick={() => setNewType(t)}
+                  className={`flex items-center gap-1 px-2 h-6 rounded-md text-xs font-medium transition-colors ${newType === t ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-100"}`}
+                >
+                  <Icon size={11} /> {label}
+                </button>
+              ))}
+            </div>
+          ) : (
+            <p className="text-xs font-semibold text-blue-700 flex items-center gap-1.5">
+              {type === "vendor" ? <Store size={11} /> : <User size={11} />} New {type === "vendor" ? "Vendor" : "Customer"}
+            </p>
+          )}
           <div className="grid grid-cols-2 gap-2">
             <input
               value={newEntity.name}
