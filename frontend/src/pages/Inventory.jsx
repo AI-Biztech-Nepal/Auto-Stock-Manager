@@ -5,7 +5,7 @@ import useMediaQuery from "../hooks/useMediaQuery";
 import { Plus, Search, Trash2, Filter, X, EyeOff, Package, Wallet, DollarSign, Lock, Moon, Sparkles, Store, User, Wrench, Clock, CheckCircle2, AlertTriangle, ImageOff, ChevronDown } from "lucide-react";
 import { toast } from "sonner";
 import api, { postWithRetry } from "../utils/api";
-import { resizeImageFile } from "../utils/resizeImage";
+import { EMPTY_DOC_PHOTOS, flattenStagedDocs, revokeStagedDocs, uploadStagedDocs } from "../utils/stagedDocs";
 import { formatNPR, getAgingStyle, getStatusStyle, getTerminationStyle, isSanakhatOverdue, sanakhatPendingDays, sanakhatDaysLeft, SANAKHAT_CYCLE_DAYS, SANAKHAT_WARN_DAYS, BRANDS, VEHICLE_STATUS_OPTIONS, formatOwnership } from "../utils/helpers";
 import { AddVehicleModal } from "./AddVehicleModal";
 import { VehicleDetailModal } from "./VehicleDetail";
@@ -51,8 +51,6 @@ const EMPTY = {
   bluebook_status: "pending", tax_clearance_status: "pending", transfer_status: "pending",
   ownership_termination_status: "pending"
 };
-
-const EMPTY_DOC_PHOTOS = { bluebook: [], tax_clearance: [], transfer: [] };
 
 export default function Inventory() {
   const navigate = useNavigate();
@@ -276,12 +274,12 @@ export default function Inventory() {
     return result.length;
   })();
 
-  const stagedDocs = Object.entries(docPhotos).flatMap(([docType, list]) => list.map(d => ({ docType, ...d })));
+  const stagedDocs = flattenStagedDocs(docPhotos);
 
   const clearStagedPhotos = () => {
     photos.forEach(p => URL.revokeObjectURL(p.previewUrl));
     setPhotos([]);
-    stagedDocs.forEach(d => d.previewUrl && URL.revokeObjectURL(d.previewUrl));
+    revokeStagedDocs(stagedDocs);
     setDocPhotos(EMPTY_DOC_PHOTOS);
   };
 
@@ -401,14 +399,8 @@ export default function Inventory() {
         }));
         if (results.some(res => res.status === "rejected")) toast.error("Vehicle saved, but some photos failed to upload");
       }
-      if (stagedDocs.length > 0) {
-        // Same as the vehicle page's document upload: a phone photo is shrunk first, a PDF goes as it is.
-        const results = await Promise.allSettled(stagedDocs.map(async d => {
-          const upload = d.file.type.startsWith("image/") ? await resizeImageFile(d.file) : d.file;
-          const fd = new FormData(); fd.append("file", upload); fd.append("doc_type", d.docType);
-          return postWithRetry(`/vehicles/${r.data.id}/legal-documents`, fd, { headers: { "Content-Type": "multipart/form-data" } });
-        }));
-        if (results.some(res => res.status === "rejected")) toast.error("Vehicle saved, but some paperwork photos failed to upload. Add them from the vehicle page.");
+      if (stagedDocs.length > 0 && await uploadStagedDocs(r.data.id, stagedDocs)) {
+        toast.error("Vehicle saved, but some paperwork photos failed to upload. Add them from the vehicle page.");
       }
       toast.success("Vehicle added successfully!");
       setShowModal(false);

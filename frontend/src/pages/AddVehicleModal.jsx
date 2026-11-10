@@ -1,15 +1,18 @@
 /**
- * AddVehicleModal.jsx — the Purchase Vehicle form (opened from the Inventory page).
+ * AddVehicleModal.jsx — the Purchase Vehicle form (opened from the Inventory page), and with `editing` the same form
+ * filled in to change a vehicle (opened from its details).
  *
  * Four sections on one scrolling page (Purchase, Vehicle, Paperwork, Photos & notes; phones get chips to jump between
- * them), and a footer that keeps the cost price, selling price and margin in view while you fill it in. Inventory's
- * handleSave does the saving, including uploading the vehicle photos and the paperwork photos staged here.
+ * them), and a footer that keeps the cost price, selling price and margin in view while you fill it in. The page that
+ * opens it does the saving, including uploading the paperwork photos staged here. Editing adds the fields only an
+ * existing vehicle has (minimum selling price, any status, ownership termination and the Sanaakhat date) and leaves
+ * out the vehicle photos, which stay on the vehicle's page.
  */
 import { useMemo, useRef, useState } from "react";
 import { Plus, Trash2, UploadCloud, Check, X, ImagePlus, AlertCircle, FileText } from "lucide-react";
 import BSDatePicker from "../components/BSDatePicker";
 import CustomerVendorPicker from "../components/CustomerVendorPicker";
-import { BRANDS, SOURCES, CONDITIONS, FUEL_TYPES, OWNERSHIP_OPTIONS, formatNPR } from "../utils/helpers";
+import { BRANDS, SOURCES, CONDITIONS, FUEL_TYPES, OWNERSHIP_OPTIONS, VEHICLE_STATUS_OPTIONS, formatNPR } from "../utils/helpers";
 import { PhotoCropperModal } from "../components/PhotoCropperModal";
 import { usePhotoCropQueue } from "../hooks/usePhotoCropQueue";
 
@@ -24,6 +27,7 @@ const DATE_BOX = "w-full h-11 px-3 text-base sm:text-sm border rounded-[10px]";
 const GRID = "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4";
 
 const LISTING = [{ value: "available", label: "Available" }, { value: "unlisted", label: "Unlisted" }, { value: "in_repair", label: "In repair" }];
+const TERMINATION = [{ value: "pending", label: "Pending" }, { value: "yes", label: "Yes" }, { value: "no", label: "No" }];
 const VEHICLE_TYPES = [{ value: "bike", label: "Bike" }, { value: "scooter", label: "Scooter" }];
 const DOC_STATUS = [{ value: "pending", label: "Pending", tone: "text-amber-800" }, { value: "ok", label: "OK", tone: "text-emerald-700" }, { value: "missing", label: "Missing", tone: "text-red-700" }];
 // [document type, label]: the type is what the paperwork photos are filed under, and `${type}_status` is its status field.
@@ -76,11 +80,12 @@ function Money({ id, value, onChange, testid, error }) {
 // onImport: opens the Import Stock page; left out for roles that may not use it.
 // vehicles: the stock list, so the plate can be checked while it is typed.
 // docPhotos / setDocPhotos: paperwork photos waiting to be uploaded, { bluebook: [{ file, previewUrl }], tax_clearance: [], transfer: [] }.
-export function AddVehicleModal({ form, setForm, onClose, onSubmit, saving, photos, setPhotos, docPhotos, setDocPhotos, basicOnly = false, onImport, vehicles = [] }) {
+// editing: change an existing vehicle instead of adding one; existingDocs says how many documents of each type are already on file.
+export function AddVehicleModal({ form, setForm, onClose, onSubmit, saving, photos = [], setPhotos = () => {}, docPhotos, setDocPhotos, basicOnly = false, onImport, vehicles = [], editing = false, existingDocs = {} }) {
   const [selected, setSelected] = useState(() => new Set());
   const [previewPhoto, setPreviewPhoto] = useState(null);
   const [attempted, setAttempted] = useState(false);
-  const [showSanakhat, setShowSanakhat] = useState(() => !!(form.sanakhat_date || form.sanakhat_cost));
+  const [showSanakhat, setShowSanakhat] = useState(() => editing || !!(form.sanakhat_date || form.sanakhat_cost));
   const [active, setActive] = useState("vehicle");
   const scrollRef = useRef(null);
   const set = (patch) => setForm({ ...form, ...patch });
@@ -106,26 +111,32 @@ export function AddVehicleModal({ form, setForm, onClose, onSubmit, saving, phot
   };
 
   // Paperwork photos are not cropped. Saving one files it under its document and marks that document OK (the server
-  // does the same on upload), so the status follows: OK once a photo is on, back to Pending if the last one comes off.
+  // does the same on upload), so the status follows: OK once a photo is waiting, and back to what it was when the last
+  // one comes off.
+  const statusBeforePhotos = useRef({});
   const addDocFiles = (doc, fileList) => {
     const added = Array.from(fileList).map(file => ({ file, previewUrl: file.type.startsWith("image/") ? URL.createObjectURL(file) : null }));
     if (!added.length) return;
+    const key = `${doc}_status`;
+    if (!(docPhotos[doc] || []).length) statusBeforePhotos.current[doc] = form[key];
     setDocPhotos(prev => ({ ...prev, [doc]: [...(prev[doc] || []), ...added] }));
-    if (form[`${doc}_status`] !== "ok") set({ [`${doc}_status`]: "ok" });
+    if (form[key] !== "ok") set({ [key]: "ok" });
   };
   const removeDocFile = (doc, idx) => {
     const list = docPhotos[doc] || [];
+    const key = `${doc}_status`;
     if (list[idx]?.previewUrl) URL.revokeObjectURL(list[idx].previewUrl);
     setDocPhotos(prev => ({ ...prev, [doc]: (prev[doc] || []).filter((_, i) => i !== idx) }));
-    if (list.length === 1 && form[`${doc}_status`] === "ok") set({ [`${doc}_status`]: "pending" });
+    if (list.length === 1 && form[key] === "ok") set({ [key]: statusBeforePhotos.current[doc] ?? "pending" });
   };
 
   // What Save needs (the same list Inventory's handleSave checks); shown on the fields after a first try. In page
-  // order, so the first one is the field that gets focus.
+  // order, so the first one is the field that gets focus. Editing leaves out the date and source: an older record may
+  // have neither, and that should not stop a change to something else.
   const missing = [
     ...(basicOnly ? [] : [
-      !form.purchase_date && ["purchase_date", "purchase date"],
-      !form.purchase_source && ["purchase_source", "bought from"],
+      !editing && !form.purchase_date && ["purchase_date", "purchase date"],
+      !editing && !form.purchase_source && ["purchase_source", "bought from"],
       !form.purchase_price && ["purchase_price", "purchase price"],
     ]),
     !form.brand && ["brand", "brand"],
@@ -145,7 +156,7 @@ export function AddVehicleModal({ form, setForm, onClose, onSubmit, saving, phot
   };
 
   // The plate, checked against stock as it is typed (the server has the final say).
-  const plate = normPlate(form.registration_number);
+  const plate = editing ? "" : normPlate(form.registration_number);
   const plateHit = useMemo(() => {
     if (!plate) return null;
     const hits = vehicles.filter(v => normPlate(v.registration_number) === plate);
@@ -159,12 +170,13 @@ export function AddVehicleModal({ form, setForm, onClose, onSubmit, saving, phot
   const selling = digits(form.selling_price);
   const margin = cost > 0 && selling > 0 ? ((selling - cost) / selling) * 100 : null;
   const listing = form.status === "available" && !selling ? "Unlisted" : (LISTING.find(l => l.value === form.status)?.label || form.status);
+  const statusOptions = editing ? VEHICLE_STATUS_OPTIONS : LISTING; // an existing vehicle can be in any status, sold included
 
   const sections = [
     ...(basicOnly ? [] : [{ id: "purchase", label: "Purchase", done: !!(form.purchase_price && form.purchase_date && form.purchase_source) }]),
     { id: "vehicle", label: "Vehicle", done: !!(form.brand && form.model && form.registration_number) },
     ...(basicOnly ? [] : [{ id: "paperwork", label: "Paperwork", done: false }]),
-    { id: "photos", label: basicOnly ? "Photos" : "Photos & notes", done: photos.length > 0 },
+    { id: "photos", label: editing ? "Notes" : basicOnly ? "Photos" : "Photos & notes", done: editing ? !!form.notes : photos.length > 0 },
   ];
   const go = (id) => document.getElementById(`pv-section-${id}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
   const onScroll = (e) => {
@@ -184,8 +196,8 @@ export function AddVehicleModal({ form, setForm, onClose, onSubmit, saving, phot
         {/* Header */}
         <div className="flex items-center gap-3 pl-4 sm:pl-7 pr-2 sm:pr-4 py-3 border-b border-slate-200">
           <div className="flex-1 min-w-0">
-            <h2 className="text-xl font-extrabold text-slate-900 truncate" style={{ fontFamily: "Manrope, sans-serif" }}>Purchase Vehicle</h2>
-            <p className="hidden sm:block text-[13px] text-slate-500">Add a vehicle you have bought to your stock <span className="text-slate-400">· <span className="text-red-600">*</span> needed to save</span></p>
+            <h2 className="text-xl font-extrabold text-slate-900 truncate" style={{ fontFamily: "Manrope, sans-serif" }}>{editing ? "Edit Vehicle" : "Purchase Vehicle"}</h2>
+            <p className="hidden sm:block text-[13px] text-slate-500">{editing ? "Change this vehicle's details" : "Add a vehicle you have bought to your stock"} <span className="text-slate-400">· <span className="text-red-600">*</span> needed to save</span></p>
           </div>
           {onImport && (
             <button type="button" onClick={onImport} data-testid="import-stock-btn" className="flex items-center gap-2 h-11 px-3 sm:px-4 border border-slate-300 rounded-[10px] text-[13px] font-semibold text-slate-700 hover:bg-slate-50">
@@ -230,12 +242,12 @@ export function AddVehicleModal({ form, setForm, onClose, onSubmit, saving, phot
                   <div className={GRID}>
                     <div>
                       <span id="pv-purchase_date" tabIndex={-1} className={LBL}>Purchase date (BS) <span className="text-red-600">*</span></span>
-                      <BSDatePicker data-testid="purchase-date-input" value={form.purchase_date} onChange={val => set({ purchase_date: val })} required triggerClassName={`${DATE_BOX} ${bad("purchase_date") ? BAD : OK}`} />
+                      <BSDatePicker data-testid="purchase-date-input" value={form.purchase_date || ""} onChange={val => set({ purchase_date: val })} required triggerClassName={`${DATE_BOX} ${bad("purchase_date") ? BAD : OK}`} />
                       {bad("purchase_date") && <p className="mt-1.5 text-xs font-semibold text-red-700">Pick the date you bought it</p>}
                     </div>
                     <div>
                       <label htmlFor="pv-purchase_source" className={LBL}>Bought from <span className="text-red-600">*</span></label>
-                      <select id="pv-purchase_source" data-testid="source-select" value={form.purchase_source} onChange={e => set({ purchase_source: e.target.value })} className={`${BOX} ${bad("purchase_source") ? BAD : OK}`}>
+                      <select id="pv-purchase_source" data-testid="source-select" value={form.purchase_source ?? ""} onChange={e => set({ purchase_source: e.target.value })} className={`${BOX} ${bad("purchase_source") ? BAD : OK}`}>
                         <option value="">Select source</option>
                         {SOURCES.map(s => <option key={s}>{s}</option>)}
                       </select>
@@ -259,10 +271,16 @@ export function AddVehicleModal({ form, setForm, onClose, onSubmit, saving, phot
                       <label htmlFor="pv-selling" className={LBL}>Selling price</label>
                       <Money id="pv-selling" value={form.selling_price} onChange={v => set({ selling_price: v })} />
                     </div>
+                    {editing && (
+                      <div>
+                        <label htmlFor="pv-minimum" className={LBL}>Minimum selling price</label>
+                        <Money id="pv-minimum" testid="minimum-selling-price-input" value={form.minimum_selling_price} onChange={v => set({ minimum_selling_price: v })} />
+                      </div>
+                    )}
                     <div>
-                      <label htmlFor="pv-status" className={LBL}>Listing</label>
-                      <select id="pv-status" data-testid="add-status-select" value={form.status} onChange={e => set({ status: e.target.value })} className={`${BOX} ${OK}`}>
-                        {LISTING.map(l => <option key={l.value} value={l.value}>{l.label}</option>)}
+                      <label htmlFor="pv-status" className={LBL}>{editing ? "Status" : "Listing"}</label>
+                      <select id="pv-status" data-testid={editing ? "edit-status-select" : "add-status-select"} value={form.status ?? ""} onChange={e => set({ status: e.target.value })} className={`${BOX} ${OK}`}>
+                        {statusOptions.map(l => <option key={l.value} value={l.value}>{l.label}</option>)}
                       </select>
                       <p className="mt-1 text-xs text-slate-500">Available needs a selling price</p>
                     </div>
@@ -276,46 +294,46 @@ export function AddVehicleModal({ form, setForm, onClose, onSubmit, saving, phot
                 <div className={GRID}>
                   <div>
                     <label htmlFor="pv-brand" className={LBL}>Brand <span className="text-red-600">*</span></label>
-                    <select id="pv-brand" data-testid="brand-select" value={form.brand} onChange={e => set({ brand: e.target.value })} className={`${BOX} ${bad("brand") ? BAD : OK}`}>
+                    <select id="pv-brand" data-testid="brand-select" value={form.brand ?? ""} onChange={e => set({ brand: e.target.value })} className={`${BOX} ${bad("brand") ? BAD : OK}`}>
                       <option value="">Select brand</option>
                       {BRANDS.map(b => <option key={b}>{b}</option>)}
                     </select>
                   </div>
                   <div>
                     <label htmlFor="pv-model" className={LBL}>Model <span className="text-red-600">*</span></label>
-                    <input id="pv-model" data-testid="model-input" value={form.model} onChange={e => set({ model: e.target.value })} placeholder="e.g. CB Shine, FZ-S" className={`${BOX} ${bad("model") ? BAD : OK}`} />
+                    <input id="pv-model" data-testid="model-input" value={form.model ?? ""} onChange={e => set({ model: e.target.value })} placeholder="e.g. CB Shine, FZ-S" className={`${BOX} ${bad("model") ? BAD : OK}`} />
                   </div>
                   <div>
                     <label htmlFor="pv-year" className={LBL}>Year <span className="text-red-600">*</span></label>
-                    <input id="pv-year" type="text" inputMode="numeric" pattern="[0-9]*" value={form.year} onChange={e => set({ year: e.target.value })} placeholder="e.g. 2020" className={`${BOX} ${OK}`} />
+                    <input id="pv-year" type="text" inputMode="numeric" pattern="[0-9]*" value={form.year ?? ""} onChange={e => set({ year: e.target.value })} placeholder="e.g. 2020" className={`${BOX} ${OK}`} />
                   </div>
                   <div>
                     <label htmlFor="pv-cc" className={LBL}>Engine CC</label>
-                    <input id="pv-cc" type="text" inputMode="numeric" pattern="[0-9]*" value={form.engine_cc} onChange={e => set({ engine_cc: e.target.value })} placeholder="e.g. 125" className={`${BOX} ${OK}`} />
+                    <input id="pv-cc" type="text" inputMode="numeric" pattern="[0-9]*" value={form.engine_cc ?? ""} onChange={e => set({ engine_cc: e.target.value })} placeholder="e.g. 125" className={`${BOX} ${OK}`} />
                   </div>
 
                   <div>
                     <label htmlFor="pv-type" className={LBL}>Type <span className="text-red-600">*</span></label>
-                    <select id="pv-type" data-testid="vehicle-type-select" value={form.vehicle_type} onChange={e => set({ vehicle_type: e.target.value })} className={`${BOX} ${OK}`}>
+                    <select id="pv-type" data-testid="vehicle-type-select" value={form.vehicle_type || "bike"} onChange={e => set({ vehicle_type: e.target.value })} className={`${BOX} ${OK}`}>
                       {VEHICLE_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
                     </select>
                   </div>
                   <div>
                     <label htmlFor="pv-fuel" className={LBL}>Fuel</label>
-                    <select id="pv-fuel" value={form.fuel_type} onChange={e => set({ fuel_type: e.target.value })} className={`${BOX} ${OK}`}>
+                    <select id="pv-fuel" value={form.fuel_type ?? ""} onChange={e => set({ fuel_type: e.target.value })} className={`${BOX} ${OK}`}>
                       {FUEL_TYPES.map(f => <option key={f}>{f}</option>)}
                     </select>
                   </div>
                   <div>
                     <label htmlFor="pv-owner" className={LBL}>Ownership</label>
-                    <select id="pv-owner" data-testid="ownership-select" value={form.ownership_number} onChange={e => set({ ownership_number: e.target.value })} className={`${BOX} ${OK}`}>
+                    <select id="pv-owner" data-testid="ownership-select" value={form.ownership_number ?? ""} onChange={e => set({ ownership_number: e.target.value })} className={`${BOX} ${OK}`}>
                       <option value="">Not known yet</option>
                       {OWNERSHIP_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
                     </select>
                   </div>
                   <div>
                     <label htmlFor="pv-cond" className={LBL}>Condition</label>
-                    <select id="pv-cond" value={form.condition} onChange={e => set({ condition: e.target.value })} className={`${BOX} ${OK}`}>
+                    <select id="pv-cond" value={form.condition ?? ""} onChange={e => set({ condition: e.target.value })} className={`${BOX} ${OK}`}>
                       {CONDITIONS.map(c => <option key={c}>{c}</option>)}
                     </select>
                   </div>
@@ -323,7 +341,7 @@ export function AddVehicleModal({ form, setForm, onClose, onSubmit, saving, phot
                   <div className="sm:col-span-2">
                     <label htmlFor="pv-registration_number" className={LBL}>Registration number <span className="text-red-600">*</span></label>
                     <input
-                      id="pv-registration_number" data-testid="registration-number-input" value={form.registration_number}
+                      id="pv-registration_number" data-testid="registration-number-input" value={form.registration_number ?? ""}
                       onChange={e => set({ registration_number: e.target.value })} placeholder="e.g. 052/0164"
                       aria-invalid={plateBlocked || bad("registration_number") || undefined}
                       className={`w-full h-12 px-3.5 border rounded-[10px] bg-white text-slate-900 font-mono text-lg font-semibold tracking-wide focus:outline-none focus:ring-2 focus:ring-blue-500 ${plateBlocked || bad("registration_number") ? BAD : "border-slate-400"}`}
@@ -343,7 +361,7 @@ export function AddVehicleModal({ form, setForm, onClose, onSubmit, saving, phot
                   </div>
                   <div className="sm:col-span-2">
                     <label htmlFor="pv-color" className={LBL}>Color</label>
-                    <input id="pv-color" value={form.color} onChange={e => set({ color: e.target.value })} placeholder="e.g. Red, Black" className={`w-full h-12 px-3.5 text-base sm:text-sm border rounded-[10px] bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 ${OK}`} />
+                    <input id="pv-color" value={form.color ?? ""} onChange={e => set({ color: e.target.value })} placeholder="e.g. Red, Black" className={`w-full h-12 px-3.5 text-base sm:text-sm border rounded-[10px] bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 ${OK}`} />
                   </div>
                 </div>
               </section>
@@ -358,8 +376,8 @@ export function AddVehicleModal({ form, setForm, onClose, onSubmit, saving, phot
                       const files = docPhotos[doc] || [];
                       return (
                         <div key={doc} data-testid={`doc-photos-${doc}`}>
-                          <span className={LBL}>{label}</span>
-                          <Seg label={label} value={form[`${doc}_status`]} onChange={v => set({ [`${doc}_status`]: v })} options={DOC_STATUS} />
+                          <span className={LBL}>{label}{(existingDocs[doc] || 0) > 0 && <span className="ml-1.5 font-medium text-slate-500">· {existingDocs[doc]} on file</span>}</span>
+                          <Seg label={label} value={form[`${doc}_status`] || "pending"} onChange={v => set({ [`${doc}_status`]: v })} options={DOC_STATUS} />
                           <label className="mt-2 flex items-center justify-center gap-2 w-full h-11 border border-dashed border-slate-400 rounded-[10px] bg-white text-[13px] font-semibold text-slate-700 cursor-pointer hover:bg-slate-50">
                             <ImagePlus size={16} /> Add photo
                             <input type="file" accept="image/*,.pdf" multiple className="hidden" data-testid={`doc-photo-input-${doc}`} onChange={e => { addDocFiles(doc, e.target.files); e.target.value = ""; }} />
@@ -386,13 +404,24 @@ export function AddVehicleModal({ form, setForm, onClose, onSubmit, saving, phot
                       );
                     })}
                     <div>
-                      <span className={`${LBL} hidden sm:block`} aria-hidden="true">&nbsp;</span>
-                      <button
-                        type="button" onClick={() => setShowSanakhat(s => !s)} aria-expanded={showSanakhat}
-                        className="flex items-center justify-center gap-2 w-full h-11 border border-dashed border-slate-400 rounded-[10px] bg-white text-[13px] font-semibold text-slate-700 hover:bg-slate-50"
-                      >
-                        <Plus size={14} /> Sanaakhat date &amp; cost
-                      </button>
+                      {editing ? (
+                        <>
+                          <label htmlFor="pv-termination" className={LBL}>Ownership termination</label>
+                          <select id="pv-termination" data-testid="termination-select" value={form.ownership_termination_status || "pending"} onChange={e => set({ ownership_termination_status: e.target.value })} className={`${BOX} ${OK}`}>
+                            {TERMINATION.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                          </select>
+                        </>
+                      ) : (
+                        <>
+                          <span className={`${LBL} hidden sm:block`} aria-hidden="true">&nbsp;</span>
+                          <button
+                            type="button" onClick={() => setShowSanakhat(s => !s)} aria-expanded={showSanakhat}
+                            className="flex items-center justify-center gap-2 w-full h-11 border border-dashed border-slate-400 rounded-[10px] bg-white text-[13px] font-semibold text-slate-700 hover:bg-slate-50"
+                          >
+                            <Plus size={14} /> Sanaakhat date &amp; cost
+                          </button>
+                        </>
+                      )}
                     </div>
                     {showSanakhat && (
                       <>
@@ -413,13 +442,14 @@ export function AddVehicleModal({ form, setForm, onClose, onSubmit, saving, phot
               {/* 4 Photos and notes */}
               <section id="pv-section-photos" className={SECTION}>
                 <div className="flex items-center justify-between mb-4 gap-2">
-                  <h3 className="text-base font-bold text-slate-900" style={{ fontFamily: "Manrope, sans-serif" }}>{basicOnly ? "Photos" : "Photos & notes"}</h3>
+                  <h3 className="text-base font-bold text-slate-900" style={{ fontFamily: "Manrope, sans-serif" }}>{editing ? "Notes" : basicOnly ? "Photos" : "Photos & notes"}</h3>
                   {selected.size > 0 && (
                     <button type="button" onClick={removeSelected} className="flex items-center gap-1.5 h-9 px-3 rounded-lg text-xs font-semibold bg-red-600 hover:bg-red-700 text-white">
                       <Trash2 size={13} /> Remove selected ({selected.size})
                     </button>
                   )}
                 </div>
+                {!editing && (<>
                 <div className="flex flex-wrap gap-3">
                   <label className="w-full sm:w-44 h-14 sm:h-32 shrink-0 flex flex-row sm:flex-col items-center justify-center gap-2 border-2 border-dashed border-slate-400 rounded-[14px] bg-slate-50 text-slate-700 cursor-pointer hover:bg-slate-100">
                     <ImagePlus size={24} />
@@ -443,12 +473,13 @@ export function AddVehicleModal({ form, setForm, onClose, onSubmit, saving, phot
                   ))}
                 </div>
                 <p className="mt-2 text-xs text-slate-500">Two or more photos are needed before this shows as fully photographed.</p>
+                </>)}
 
                 {!basicOnly && (
                   <>
-                    <label htmlFor="pv-notes" className={`${LBL} mt-5`}>Notes</label>
+                    <label htmlFor="pv-notes" className={`${LBL} ${editing ? "" : "mt-5"}`}>Notes</label>
                     <textarea
-                      id="pv-notes" value={form.notes} onChange={e => set({ notes: e.target.value })} placeholder="Anything worth remembering about this vehicle" rows={3}
+                      id="pv-notes" value={form.notes ?? ""} onChange={e => set({ notes: e.target.value })} placeholder="Anything worth remembering about this vehicle" rows={3}
                       className="w-full px-3 py-2.5 text-base sm:text-sm border border-slate-300 rounded-[10px] bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
                     />
                   </>
@@ -473,17 +504,17 @@ export function AddVehicleModal({ form, setForm, onClose, onSubmit, saving, phot
                   <div className="text-[11px] font-semibold text-slate-500">Expected margin</div>
                   <div className={`text-lg font-extrabold ${margin === null ? "text-slate-400" : margin < 8 ? "text-red-700" : "text-emerald-700"}`} style={{ fontFamily: "Manrope, sans-serif" }} data-testid="purchase-margin">{margin === null ? "—" : `${margin.toFixed(1)}%`}</div>
                 </div>
-                <span className="hidden md:inline-block text-xs font-semibold text-blue-800 bg-blue-100 rounded-full px-3 py-1.5">{form.status === "available" && !selling ? "Will be saved as Unlisted (no selling price yet)" : `Will be listed as ${listing}`}</span>
+                {!editing && <span className="hidden md:inline-block text-xs font-semibold text-blue-800 bg-blue-100 rounded-full px-3 py-1.5">{form.status === "available" && !selling ? "Will be saved as Unlisted (no selling price yet)" : `Will be listed as ${listing}`}</span>}
               </>
             )}
             <div className="flex-1" />
             <div className="flex gap-3 w-full sm:w-auto">
               <button type="button" onClick={onClose} className="flex-1 sm:flex-none h-12 px-6 border border-slate-300 rounded-[10px] bg-white text-sm font-semibold text-slate-700 hover:bg-slate-50">Cancel</button>
               <button
-                data-testid="save-vehicle-button" type="submit" disabled={saving}
+                data-testid={editing ? "save-vehicle-btn" : "save-vehicle-button"} type="submit" disabled={saving}
                 className="flex-1 sm:flex-none h-12 px-7 rounded-[10px] bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold shadow-sm transition-all active:scale-95 disabled:opacity-60"
               >
-                {saving ? "Saving..." : "Purchase Vehicle"}
+                {saving ? "Saving..." : editing ? "Save Changes" : "Purchase Vehicle"}
               </button>
             </div>
           </div>

@@ -3,16 +3,16 @@ import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { Plus, Trash2, Edit, CheckCircle, AlertCircle, Clock, QrCode, Undo2, Store, User, Download, FileText, Package, ChevronLeft, ChevronRight, GripVertical } from "lucide-react";
 import { toast } from "sonner";
 import api, { postWithRetry } from "../utils/api";
-import { formatNPR, getAgingStyle, getStatusStyle, getTerminationStyle, sanakhatDaysLeft, sanakhatPendingDays, sanakhatDueDate, sanakhatLeftText, SANAKHAT_CYCLE_DAYS, SANAKHAT_WARN_DAYS, getDocStyle, EXPENSE_CATEGORIES, VEHICLE_STATUS_OPTIONS, CONDITIONS, SOURCES, BRANDS, FUEL_TYPES, OWNERSHIP_OPTIONS, formatOwnership } from "../utils/helpers";
-import { ExpenseModal, QRLabelModal, ReturnModal, Field, inp, sel } from "./VehicleModals";
+import { formatNPR, getAgingStyle, getStatusStyle, getTerminationStyle, sanakhatDaysLeft, sanakhatPendingDays, sanakhatDueDate, sanakhatLeftText, SANAKHAT_CYCLE_DAYS, SANAKHAT_WARN_DAYS, getDocStyle, EXPENSE_CATEGORIES, VEHICLE_STATUS_OPTIONS, formatOwnership } from "../utils/helpers";
+import { ExpenseModal, QRLabelModal, ReturnModal } from "./VehicleModals";
+import { AddVehicleModal } from "./AddVehicleModal";
 import HoverADDate from "../components/HoverADDate";
-import BSDatePicker from "../components/BSDatePicker";
-import CustomerVendorPicker from "../components/CustomerVendorPicker";
 import { useAuth } from "../context/AuthContext";
 import { hasFullVehicleAccess, canManageVehiclePhotos, hidesVehiclePricing, isBasicStockRole, PARTS_ALLOWED_VEHICLE_STATUSES } from "../utils/permissions";
 import { PhotoCropperModal } from "../components/PhotoCropperModal";
 import { usePhotoCropQueue } from "../hooks/usePhotoCropQueue";
 import { resizeImageFile } from "../utils/resizeImage";
+import { EMPTY_DOC_PHOTOS, flattenStagedDocs, revokeStagedDocs, uploadStagedDocs } from "../utils/stagedDocs";
 
 const DocCard = ({ label, status }) => {
   const s = getDocStyle(status);
@@ -80,6 +80,9 @@ export function VehicleDetailModal({ id, onClose }) {
   const [isEditing, setIsEditing] = useState(false);
   const [expForm, setExpForm] = useState({ category: "servicing", amount: "", description: "", date: "" });
   const [editForm, setEditForm] = useState({});
+  // Paperwork photos picked in the edit form, uploaded once the changes are saved.
+  const [docPhotos, setDocPhotos] = useState(EMPTY_DOC_PHOTOS);
+  const stagedDocs = flattenStagedDocs(docPhotos);
   const [saving, setSaving] = useState(false);
 
   const [showReturnModal, setShowReturnModal] = useState(false);
@@ -186,11 +189,16 @@ export function VehicleDetailModal({ id, onClose }) {
     if (!isFrontDesk && !editForm.purchase_price) { toast.error("Purchase Price is required"); return; }
     setSaving(true);
     try {
-      const payload = { ...editForm, selling_price: editForm.selling_price ? Number(editForm.selling_price) : null, sanakhat_cost: editForm.sanakhat_cost !== "" && editForm.sanakhat_cost != null ? Number(editForm.sanakhat_cost) : null, year: Number(editForm.year), engine_cc: Number(editForm.engine_cc), ownership_number: Number(editForm.ownership_number), confirm_reused_registration: confirmReusedRegistration };
+      const payload = { ...editForm, selling_price: editForm.selling_price ? Number(editForm.selling_price) : null, sanakhat_cost: editForm.sanakhat_cost !== "" && editForm.sanakhat_cost != null ? Number(editForm.sanakhat_cost) : null, year: Number(editForm.year), engine_cc: Number(editForm.engine_cc), ownership_number: editForm.ownership_number ? Number(editForm.ownership_number) : null, confirm_reused_registration: confirmReusedRegistration };
       if (isFrontDesk) { delete payload.purchase_price; delete payload.minimum_selling_price; delete payload.accessories_cost; }
       else { payload.purchase_price = Number(editForm.purchase_price); payload.minimum_selling_price = editForm.minimum_selling_price ? Number(editForm.minimum_selling_price) : null; }
       await api.put(`/vehicles/${id}`, payload);
-      toast.success("Vehicle updated"); setIsEditing(false); fetchVehicle();
+      if (stagedDocs.length > 0 && await uploadStagedDocs(id, stagedDocs)) {
+        toast.error("Saved, but some paperwork photos failed to upload. Add them under Legal Documents.");
+      }
+      toast.success("Vehicle updated");
+      revokeStagedDocs(stagedDocs); setDocPhotos(EMPTY_DOC_PHOTOS);
+      setIsEditing(false); fetchVehicle(); loadDocs();
       setSaving(false);
     } catch (err) {
       setSaving(false);
@@ -205,7 +213,8 @@ export function VehicleDetailModal({ id, onClose }) {
     }
   };
 
-  const cancelEdit = () => { setEditForm(vehicle); setIsEditing(false); };
+  const openEdit = () => { setEditForm(vehicle); setIsEditing(true); };
+  const cancelEdit = () => { setEditForm(vehicle); revokeStagedDocs(stagedDocs); setDocPhotos(EMPTY_DOC_PHOTOS); setIsEditing(false); };
 
   const [showQR, setShowQR] = useState(false);
   const [qrData, setQrData] = useState(null);
@@ -352,6 +361,7 @@ export function VehicleDetailModal({ id, onClose }) {
   };
 
   useEffect(() => { if (id) { loadPhotos(); loadDocs(); } }, [id, loadPhotos, loadDocs]);
+  const docsOnFile = legalDocs.reduce((n, d) => ({ ...n, [d.doc_type]: (n[d.doc_type] || 0) + 1 }), {});
 
   const loadQR = async () => {
     try {
@@ -482,16 +492,9 @@ export function VehicleDetailModal({ id, onClose }) {
               </select>
             )}
             <div className="flex-1" />
-            {canManageStock && (isEditing ? (
-              <>
-                <button type="button" onClick={cancelEdit} className="flex items-center gap-1.5 px-3 py-3 border border-slate-200 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors">Cancel</button>
-                <button type="button" onClick={saveEdit} disabled={saving} className="flex items-center gap-1.5 px-3 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-semibold disabled:opacity-60 transition-colors" data-testid="save-vehicle-btn">
-                  {saving ? "Saving..." : "Save Changes"}
-                </button>
-              </>
-            ) : (
-              <button onClick={() => { setIsEditing(true); setActiveTab("overview"); }} className="flex items-center gap-1.5 px-3 py-3 border border-slate-200 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors" data-testid="edit-vehicle-btn"><Edit size={14} /> Edit</button>
-            ))}
+            {canManageStock && (
+              <button onClick={openEdit} className="flex items-center gap-1.5 px-3 py-3 border border-slate-200 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors" data-testid="edit-vehicle-btn"><Edit size={14} /> Edit</button>
+            )}
             {isAdmin && vehicle.status === "sold" && !isEditing && (
               <button onClick={openReturnModal} className="flex items-center gap-1.5 px-3 py-3 border border-amber-200 text-amber-700 rounded-lg text-sm font-medium hover:bg-amber-50 transition-colors" data-testid="record-return-btn"><Undo2 size={14} /> Record Return</button>
             )}
@@ -540,137 +543,9 @@ export function VehicleDetailModal({ id, onClose }) {
             </div>
 
             <div className="p-5">
-              {/* Overview Tab — stays mounted (hidden via CSS) instead of unmounting on tab
-                 switch, so in-progress edits survive, including uncommitted state inside
-                 child pickers like CustomerVendorPicker's "add new" form. */}
+              {/* Overview Tab — stays mounted (hidden via CSS) instead of unmounting on tab switch.
+                 Editing opens the same form as Purchase Vehicle (AddVehicleModal), over this one. */}
               <div className={activeTab === "overview" ? "" : "hidden"}>
-              {isEditing ? (
-                /* Edit form — mirrors the Add Vehicle form field-for-field so nothing entered
-                   at creation time is missing from editing. */
-                <div className="space-y-4">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <Field label="Brand" required>
-                      <select data-testid="edit-brand-select" value={editForm.brand || ""} onChange={e => setEditForm({ ...editForm, brand: e.target.value })} className={sel}>
-                        <option value="">Select Brand</option>
-                        {BRANDS.map(b => <option key={b}>{b}</option>)}
-                      </select>
-                    </Field>
-                    <Field label="Model" required>
-                      <input data-testid="edit-model-input" value={editForm.model || ""} onChange={e => setEditForm({ ...editForm, model: e.target.value })} placeholder="e.g. CB Shine, FZ-S" className={inp} />
-                    </Field>
-                    <Field label="Year" required>
-                      <input data-testid="edit-year-input" type="text" inputMode="numeric" pattern="[0-9]*" value={editForm.year || ""} onChange={e => setEditForm({ ...editForm, year: e.target.value })} placeholder="e.g. 2020" className={inp} />
-                    </Field>
-                    <Field label="Engine CC">
-                      <input data-testid="edit-engine-cc-input" type="text" inputMode="numeric" pattern="[0-9]*" value={editForm.engine_cc || ""} onChange={e => setEditForm({ ...editForm, engine_cc: e.target.value })} placeholder="e.g. 125" className={inp} />
-                    </Field>
-                    <Field label="Fuel Type">
-                      <select data-testid="edit-fuel-type-select" value={editForm.fuel_type || ""} onChange={e => setEditForm({ ...editForm, fuel_type: e.target.value })} className={sel}>
-                        {FUEL_TYPES.map(f => <option key={f}>{f}</option>)}
-                      </select>
-                    </Field>
-                    <Field label="Type" required>
-                      <select data-testid="edit-vehicle-type-select" value={editForm.vehicle_type || "bike"} onChange={e => setEditForm({ ...editForm, vehicle_type: e.target.value })} className={sel}>
-                        <option value="bike">Bike</option>
-                        <option value="scooter">Scooter</option>
-                      </select>
-                    </Field>
-                    <Field label="Ownership Number">
-                      <select value={editForm.ownership_number || 1} onChange={e => setEditForm({ ...editForm, ownership_number: Number(e.target.value) })} className={sel}>
-                        {OWNERSHIP_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-                      </select>
-                    </Field>
-                    {!hideFinancials && (
-                      <Field label="Purchase Price (NPR)" required>
-                        <input data-testid="edit-purchase-price-input" type="text" inputMode="numeric" pattern="[0-9]*" value={editForm.purchase_price ?? ""} onChange={e => setEditForm({ ...editForm, purchase_price: e.target.value })} placeholder="e.g. 150000" className={inp} />
-                      </Field>
-                    )}
-                    {!hidePricing && (
-                      <Field label="Selling Price (NPR)">
-                        <input data-testid="edit-selling-price-input" type="text" inputMode="numeric" pattern="[0-9]*" value={editForm.selling_price ?? ""} onChange={e => setEditForm({ ...editForm, selling_price: e.target.value })} placeholder="e.g. 185000" className={inp} />
-                      </Field>
-                    )}
-                    {!hideFinancials && (
-                      <Field label="Minimum Selling Price (NPR)">
-                        <input data-testid="edit-minimum-selling-price-input" type="text" inputMode="numeric" pattern="[0-9]*" value={editForm.minimum_selling_price ?? ""} onChange={e => setEditForm({ ...editForm, minimum_selling_price: e.target.value })} placeholder="e.g. 170000" className={inp} />
-                      </Field>
-                    )}
-                    <Field label="Status">
-                      <select data-testid="edit-status-select" value={editForm.status || ""} onChange={e => setEditForm({ ...editForm, status: e.target.value })} className={sel}>
-                        {VEHICLE_STATUS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-                      </select>
-                    </Field>
-                    <Field label="Ownership Termination">
-                      <select value={editForm.ownership_termination_status || "pending"} onChange={e => setEditForm({ ...editForm, ownership_termination_status: e.target.value })} className={sel}>
-                        <option value="pending">Pending</option>
-                        <option value="yes">Yes</option>
-                        <option value="no">No</option>
-                      </select>
-                    </Field>
-                    <Field label="Sanaakhat Date (BS)">
-                      <BSDatePicker value={editForm.sanakhat_date || ""} onChange={val => setEditForm({ ...editForm, sanakhat_date: val })} />
-                    </Field>
-                    {!hideFinancials && (
-                      <Field label="Sanaakhat Cost (NPR)">
-                        <input data-testid="edit-sanakhat-cost-input" type="text" inputMode="numeric" pattern="[0-9]*" value={editForm.sanakhat_cost ?? ""} onChange={e => setEditForm({ ...editForm, sanakhat_cost: e.target.value })} placeholder="0" className={inp} />
-                      </Field>
-                    )}
-                    <Field label="Purchase Date (BS)" required full>
-                      <BSDatePicker value={editForm.purchase_date || ""} onChange={val => setEditForm({ ...editForm, purchase_date: val })} required />
-                    </Field>
-                    <Field label="Purchase Source" required>
-                      <select value={editForm.purchase_source || ""} onChange={e => setEditForm({ ...editForm, purchase_source: e.target.value })} className={sel}>
-                        <option value="">Select Source</option>
-                        {SOURCES.map(s => <option key={s}>{s}</option>)}
-                      </select>
-                    </Field>
-                    <Field label="Name of Source (Customer/Vendor)">
-                      <CustomerVendorPicker
-                        value={{ type: editForm.linked_contact_type || "vendor", id: editForm.linked_contact_id || null, name: editForm.linked_contact_name || "" }}
-                        onChange={next => setEditForm({ ...editForm, linked_contact_type: next.type, linked_contact_id: next.id, linked_contact_name: next.name })}
-                        vendorType="vehicles"
-                      />
-                    </Field>
-                    <Field label="Condition">
-                      <select value={editForm.condition || ""} onChange={e => setEditForm({ ...editForm, condition: e.target.value })} className={sel}>
-                        {CONDITIONS.map(c => <option key={c}>{c}</option>)}
-                      </select>
-                    </Field>
-                    <Field label="Registration Number" required>
-                      <input data-testid="edit-registration-number-input" value={editForm.registration_number || ""} onChange={e => setEditForm({ ...editForm, registration_number: e.target.value })} placeholder="e.g. Ba 1 Pa 1234" className={inp} />
-                    </Field>
-                    <Field label="Color">
-                      <input value={editForm.color || ""} onChange={e => setEditForm({ ...editForm, color: e.target.value })} placeholder="e.g. Red, Black" className={inp} />
-                    </Field>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-medium text-slate-600 mb-1">Notes</label>
-                    <textarea
-                      value={editForm.notes || ""}
-                      onChange={e => setEditForm({ ...editForm, notes: e.target.value })}
-                      placeholder="Additional notes..."
-                      rows={2}
-                      className="w-full px-3 py-2 text-base sm:text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
-                    />
-                  </div>
-
-                  <div className="border-t border-slate-100 pt-4">
-                    <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Document Status</p>
-                    <div className="grid grid-cols-2 gap-3">
-                      {[["bluebook_status", "Bluebook"], ["tax_clearance_status", "Tax Clearance"], ["transfer_status", "Transfer"]].map(([key, label]) => (
-                        <Field key={key} label={label}>
-                          <select value={editForm[key] || "pending"} onChange={e => setEditForm({ ...editForm, [key]: e.target.value })} className={sel}>
-                            <option value="pending">Pending</option>
-                            <option value="ok">OK</option>
-                            <option value="missing">Missing</option>
-                          </select>
-                        </Field>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              ) : (
                 <div className="space-y-5">
                   <Section title="Vehicle">
                     <Row label="Registration"><span className="text-sm font-medium text-slate-900 sm:text-right">{vehicle.registration_number || "Not entered"}</span></Row>
@@ -748,7 +623,6 @@ export function VehicleDetailModal({ id, onClose }) {
                     </div>
                   )}
                 </div>
-              )}
               </div>
 
               {/* Expenses Tab — also kept mounted, hidden via CSS when inactive. */}
@@ -1001,6 +875,20 @@ export function VehicleDetailModal({ id, onClose }) {
       </div>
 
       {/* Nested modals */}
+      {isEditing && (
+        <AddVehicleModal
+          editing
+          form={editForm}
+          setForm={setEditForm}
+          onClose={cancelEdit}
+          onSubmit={saveEdit}
+          saving={saving}
+          docPhotos={docPhotos}
+          setDocPhotos={setDocPhotos}
+          existingDocs={docsOnFile}
+        />
+      )}
+
       {showExpenseModal && (
         <ExpenseModal
           onClose={() => setShowExpenseModal(false)}
