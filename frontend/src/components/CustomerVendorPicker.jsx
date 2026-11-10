@@ -155,7 +155,7 @@ export default function CustomerVendorPicker({ value, onChange, vendorType = "",
         type="button"
         data-testid="cv-picker-trigger"
         onClick={toggleOpen}
-        className="w-full h-10 sm:h-9 px-3 text-base sm:text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white flex items-center justify-between text-left"
+        className={`w-full px-3 text-base sm:text-sm border focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white flex items-center justify-between text-left ${combined ? "h-11 border-slate-300 rounded-[10px]" : "h-10 sm:h-9 border-slate-200 rounded-lg"}`}
       >
         {value?.id
           ? <span className="text-slate-900 flex items-center gap-1.5 truncate">
@@ -239,7 +239,7 @@ export default function CustomerVendorPicker({ value, onChange, vendorType = "",
               {type === "vendor" ? <Store size={11} /> : <User size={11} />} New {type === "vendor" ? "Vendor" : "Customer"}
             </p>
           )}
-          <div className="grid grid-cols-2 gap-2">
+          <div className={`grid gap-2 ${combined ? "grid-cols-1" : "grid-cols-2"}`}>
             <input
               value={newEntity.name}
               onChange={e => setNewEntity({ ...newEntity, name: e.target.value })}

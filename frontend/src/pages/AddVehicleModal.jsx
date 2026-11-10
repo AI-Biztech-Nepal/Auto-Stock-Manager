@@ -19,6 +19,8 @@ const OK = "border-slate-300";
 const BAD = "border-red-500 ring-1 ring-red-500";
 const SECTION = "px-4 sm:px-7 py-6 border-b border-slate-200 last:border-b-0 scroll-mt-2";
 const H2 = "mb-4 text-base font-bold text-slate-900";
+// The date picker's trigger, sized like BOX (the picker draws its own background and focus ring).
+const DATE_BOX = "w-full h-11 px-3 text-base sm:text-sm border rounded-[10px]";
 const GRID = "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4";
 
 const LISTING = [{ value: "available", label: "Available" }, { value: "unlisted", label: "Unlisted" }, { value: "in_repair", label: "In repair" }];
@@ -228,7 +230,7 @@ export function AddVehicleModal({ form, setForm, onClose, onSubmit, saving, phot
                   <div className={GRID}>
                     <div>
                       <span id="pv-purchase_date" tabIndex={-1} className={LBL}>Purchase date (BS) <span className="text-red-600">*</span></span>
-                      <BSDatePicker data-testid="purchase-date-input" value={form.purchase_date} onChange={val => set({ purchase_date: val })} required />
+                      <BSDatePicker data-testid="purchase-date-input" value={form.purchase_date} onChange={val => set({ purchase_date: val })} required triggerClassName={`${DATE_BOX} ${bad("purchase_date") ? BAD : OK}`} />
                       {bad("purchase_date") && <p className="mt-1.5 text-xs font-semibold text-red-700">Pick the date you bought it</p>}
                     </div>
                     <div>
@@ -238,7 +240,7 @@ export function AddVehicleModal({ form, setForm, onClose, onSubmit, saving, phot
                         {SOURCES.map(s => <option key={s}>{s}</option>)}
                       </select>
                     </div>
-                    <div className="sm:col-span-2">
+                    <div>
                       <span className={LBL}>Name</span>
                       <CustomerVendorPicker
                         combined
@@ -351,43 +353,14 @@ export function AddVehicleModal({ form, setForm, onClose, onSubmit, saving, phot
                 <section id="pv-section-paperwork" className={SECTION}>
                   <h3 className={H2} style={{ fontFamily: "Manrope, sans-serif" }}>Paperwork <span className="ml-1 text-xs font-medium text-slate-500" style={{ fontFamily: "Inter, sans-serif" }}>optional, can be filled in later</span></h3>
                   <div className={GRID}>
-                    {DOCS.map(([doc, label]) => (
-                      <div key={doc}>
-                        <span className={LBL}>{label}</span>
-                        <Seg label={label} value={form[`${doc}_status`]} onChange={v => set({ [`${doc}_status`]: v })} options={DOC_STATUS} />
-                      </div>
-                    ))}
-                    <div className="flex items-end">
-                      <button
-                        type="button" onClick={() => setShowSanakhat(s => !s)} aria-expanded={showSanakhat}
-                        className="flex items-center justify-center gap-2 w-full h-11 border border-dashed border-slate-400 rounded-[10px] bg-white text-[13px] font-semibold text-slate-700 hover:bg-slate-50"
-                      >
-                        <Plus size={14} /> Sanaakhat date &amp; cost
-                      </button>
-                    </div>
-                    {showSanakhat && (
-                      <>
-                        <div className="sm:col-span-2">
-                          <span className={LBL}>Sanaakhat date (BS)</span>
-                          <BSDatePicker value={form.sanakhat_date || ""} onChange={val => set({ sanakhat_date: val })} />
-                        </div>
-                        <div className="sm:col-span-2 lg:col-span-1">
-                          <label htmlFor="pv-sanakhat" className={LBL}>Sanaakhat cost</label>
-                          <Money id="pv-sanakhat" testid="sanakhat-cost-input" value={form.sanakhat_cost} onChange={v => set({ sanakhat_cost: v })} />
-                        </div>
-                      </>
-                    )}
-                  </div>
-
-                  {/* A photo (or scan) of each document, uploaded once the vehicle is saved */}
-                  <h4 className="mt-6 mb-3 text-sm font-bold text-slate-900">Document photos</h4>
-                  <div className={GRID}>
+                    {/* Each document: its status, then a photo (or scan) of it, uploaded once the vehicle is saved */}
                     {DOCS.map(([doc, label]) => {
                       const files = docPhotos[doc] || [];
                       return (
                         <div key={doc} data-testid={`doc-photos-${doc}`}>
                           <span className={LBL}>{label}</span>
-                          <label className="flex items-center justify-center gap-2 w-full h-11 border border-dashed border-slate-400 rounded-[10px] bg-white text-[13px] font-semibold text-slate-700 cursor-pointer hover:bg-slate-50">
+                          <Seg label={label} value={form[`${doc}_status`]} onChange={v => set({ [`${doc}_status`]: v })} options={DOC_STATUS} />
+                          <label className="mt-2 flex items-center justify-center gap-2 w-full h-11 border border-dashed border-slate-400 rounded-[10px] bg-white text-[13px] font-semibold text-slate-700 cursor-pointer hover:bg-slate-50">
                             <ImagePlus size={16} /> Add photo
                             <input type="file" accept="image/*,.pdf" multiple className="hidden" data-testid={`doc-photo-input-${doc}`} onChange={e => { addDocFiles(doc, e.target.files); e.target.value = ""; }} />
                           </label>
@@ -412,6 +385,27 @@ export function AddVehicleModal({ form, setForm, onClose, onSubmit, saving, phot
                         </div>
                       );
                     })}
+                    <div>
+                      <span className={`${LBL} hidden sm:block`} aria-hidden="true">&nbsp;</span>
+                      <button
+                        type="button" onClick={() => setShowSanakhat(s => !s)} aria-expanded={showSanakhat}
+                        className="flex items-center justify-center gap-2 w-full h-11 border border-dashed border-slate-400 rounded-[10px] bg-white text-[13px] font-semibold text-slate-700 hover:bg-slate-50"
+                      >
+                        <Plus size={14} /> Sanaakhat date &amp; cost
+                      </button>
+                    </div>
+                    {showSanakhat && (
+                      <>
+                        <div className="sm:col-span-2">
+                          <span className={LBL}>Sanaakhat date (BS)</span>
+                          <BSDatePicker value={form.sanakhat_date || ""} onChange={val => set({ sanakhat_date: val })} triggerClassName={`${DATE_BOX} ${OK}`} />
+                        </div>
+                        <div className="sm:col-span-2 lg:col-span-1">
+                          <label htmlFor="pv-sanakhat" className={LBL}>Sanaakhat cost</label>
+                          <Money id="pv-sanakhat" testid="sanakhat-cost-input" value={form.sanakhat_cost} onChange={v => set({ sanakhat_cost: v })} />
+                        </div>
+                      </>
+                    )}
                   </div>
                 </section>
               )}
