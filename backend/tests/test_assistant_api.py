@@ -112,3 +112,87 @@ def test_people_numbers_are_added_to_the_briefing_without_breaking_it():
     out = a.build_briefing([], {}, "2026-11-10", "2026-11", _revenue, people={"customers": {"total": 3}})
     assert out["customers"] == {"total": 3} and out["today"]["sales"] == 0
     assert "customers" not in a.build_briefing([], {}, "2026-11-10", "2026-11", _revenue)
+
+
+# ---- lookups -------------------------------------------------------------
+from datetime import date as _date  # noqa: E402
+
+TODAY = _date(2026, 11, 10)
+CUSTOMERS = [
+    {"id": "c1", "name": "Ram Thapa", "contact_number": "9841000001"},
+    {"id": "c2", "name": "Sita Rai", "contact_number": "+977 9841000002"},
+    {"id": "c3", "name": "Ramesh Karki", "contact_number": "9841000003"},
+]
+VEHICLES = [
+    {"id": "v1", "brand": "Honda", "model": "Dio", "year": 2018, "color": "Grey", "registration_number": "046/5845",
+     "status": "available", "selling_price": 145000, "purchase_price": 110000, "kilometer_run": 21000},
+    {"id": "v2", "brand": "Honda", "model": "Aviator", "year": 2019, "color": "Black", "registration_number": "52/4129",
+     "status": "sold", "selling_price": 175000, "purchase_price": 140000},
+    {"id": "v3", "brand": "Yamaha", "model": "Fascino", "year": 2017, "color": "Blue", "registration_number": None, "status": "available"},
+]
+SALES = [
+    {"customer_id": "c1", "vehicle_id": "v2", "sale_price": 175000, "due_amount": 25000, "due_date": "2026-11-01",
+     "sale_date": "2026-11-03", "sold_by_name": "Hari"},
+    {"customer_id": "c1", "vehicle_id": "v1", "sale_price": 140000, "due_amount": 0, "sale_date": "2026-09-15", "sold_by_name": "Hari"},
+    {"customer_id": "c2", "vehicle_id": "v3", "sale_price": 90000, "due_amount": 40000, "due_date": "2026-12-01",
+     "sale_date": "2026-11-10", "sold_by_name": "Gita"},
+    {"customer_id": "c2", "vehicle_id": "v1", "sale_price": 99999, "due_amount": 99999, "sale_date": "2026-11-09", "returned": True,
+     "retained_amount": 5000},
+]
+
+
+def test_period_names_become_date_ranges():
+    assert a.period_range("today", TODAY) == (TODAY, TODAY)
+    assert a.period_range("this_month", TODAY) == (_date(2026, 11, 1), TODAY)
+    assert a.period_range("last_month", TODAY) == (_date(2026, 10, 1), _date(2026, 10, 31))
+    assert a.period_range("2026-12", TODAY) == (_date(2026, 12, 1), _date(2026, 12, 31))
+    assert a.period_range("2026-11-03", TODAY) == (_date(2026, 11, 3), _date(2026, 11, 3))
+    assert a.period_range("someday", TODAY) is None
+
+
+def test_customer_found_by_name_or_phone_with_dues_and_days_since():
+    r = a.lookup_customer("ram", CUSTOMERS, SALES, TODAY)
+    assert r["matches"] == 2                                         # Ram Thapa and Ramesh Karki
+    ram = r["customers"][0]
+    assert ram["name"] == "Ram Thapa" and ram["bought"] == 2 and ram["owes_rs"] == 25000
+    assert ram["bought_total_rs"] == 315000 and ram["last_purchase_days_ago"] == 7
+    by_phone = a.lookup_customer("+977 98410-00002", CUSTOMERS, SALES, TODAY)
+    assert by_phone["customers"][0]["name"] == "Sita Rai"
+    assert by_phone["customers"][0]["owes_rs"] == 40000              # the returned sale's due is not counted
+    assert a.lookup_customer("", CUSTOMERS, SALES, TODAY)["error"]
+
+
+def test_dues_rank_by_amount_and_split_out_what_is_overdue():
+    r = a.lookup_dues(5, CUSTOMERS, SALES, TODAY)
+    assert r["customers_owing"] == 2 and r["total_owed_rs"] == 65000 and r["total_overdue_rs"] == 25000
+    assert [row["name"] for row in r["top"]] == ["Sita Rai", "Ram Thapa"]
+    assert r["top"][1]["overdue_rs"] == 25000 and r["top"][1]["oldest_due_days_ago"] == 9
+
+
+def test_sales_in_a_period_with_the_best_groups():
+    r = a.lookup_sales("this_month", "seller", SALES, VEHICLES, TODAY, _revenue)
+    assert r["sales"] == 3 and r["revenue_rs"] == 175000 + 90000 + 5000      # the return counts at what was kept
+    assert [g["name"] for g in r["groups"]] == ["Hari", "Gita", "(not recorded)"]    # equal sales: biggest revenue first
+    assert r["groups"][0] == {"name": "Hari", "sales": 1, "revenue_rs": 175000}
+    assert r["groups"][2] == {"name": "(not recorded)", "sales": 1, "revenue_rs": 5000}     # the return, at what was kept
+    by_model = a.lookup_sales("2026-11-03", "model", SALES, VEHICLES, TODAY, _revenue)
+    assert by_model["groups"] == [{"name": "Honda Aviator", "sales": 1, "revenue_rs": 175000}]
+    assert "error" in a.lookup_sales("someday", "", SALES, VEHICLES, TODAY, _revenue)
+
+
+def test_vehicle_found_by_plate_in_any_spelling_or_by_words():
+    by_plate = a.lookup_vehicle("046 5845", "", VEHICLES)
+    assert by_plate["matches"] == 1 and by_plate["vehicles"][0]["selling_price_rs"] == 145000
+    assert by_plate["vehicles"][0]["year"] == 2018 and by_plate["vehicles"][0]["kilometers"] == 21000
+    assert a.lookup_vehicle("honda", "", VEHICLES)["matches"] == 2
+    assert a.lookup_vehicle("honda", "available", VEHICLES)["matches"] == 1
+    assert a.lookup_vehicle("grey dio", "", VEHICLES)["vehicles"][0]["name"] == "Honda Dio"
+    assert a.lookup_vehicle("", "", VEHICLES)["error"]
+
+
+def test_run_lookup_only_runs_the_named_read_only_lookups():
+    data = {"customers": CUSTOMERS, "sales": SALES, "vehicles": VEHICLES}
+    assert a.run_lookup("dues", {"top": 1}, data, TODAY, _revenue)["top"][0]["name"] == "Sita Rai"
+    assert "error" in a.run_lookup("drop_table", {}, data, TODAY, _revenue)
+    assert "error" in a.run_lookup("customer", "not a dict", data, TODAY, _revenue)
+    assert len(a.lookup_dues(99, CUSTOMERS, SALES, TODAY)["top"]) <= a.MAX_ROWS          # results stay small

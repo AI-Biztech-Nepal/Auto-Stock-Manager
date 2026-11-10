@@ -4692,6 +4692,35 @@ async def assistant_key(request: Request, cu: dict = Depends(admin_only)):
         raise HTTPException(400, "This account has no company")
     return {"company_id": cid, "key": assistant_api.derive_key(JWT_SECRET, cid)}
 
+class AssistantLookup(BaseModel):
+    name: str = Field(max_length=20)
+    args: dict = Field(default_factory=dict)
+
+@api_router.post("/assistant/lookup")
+@limiter.limit("60/minute")
+async def assistant_lookup(request: Request, body: AssistantLookup):
+    """One named, read-only lookup for the phone assistant (customer, dues, sales, vehicle): see assistant_api.run_lookup.
+
+    Same X-Assistant-Key as /assistant/briefing, so it only ever reads one company's data. It runs a fixed list
+    of lookups with a few options each, never free-form queries, and every result is small."""
+    presented = request.headers.get("x-assistant-key", "")
+    cid = (assistant_api.company_for_key(presented, os.environ.get("ASSISTANT_KEYS", ""))
+           or assistant_api.company_for_derived_key(presented, JWT_SECRET))
+    if not cid:
+        raise HTTPException(401, "Invalid assistant key")
+    current_company_id.set(cid)
+    data = {}
+    if body.name in ("customer", "dues", "sales"):
+        data["sales"] = await db.sales.find({}, {"_id": 0}).to_list(50000)
+    if body.name in ("customer", "dues"):
+        data["customers"] = await db.customers.find({}, {"_id": 0, "id": 1, "name": 1, "contact_number": 1}).to_list(50000)
+    if body.name in ("sales", "vehicle"):
+        data["vehicles"] = await db.vehicles.find({}, {"_id": 0, "id": 1, "brand": 1, "model": 1, "variant": 1, "year": 1, "color": 1,
+                                                       "registration_number": 1, "status": 1, "selling_price": 1, "purchase_price": 1,
+                                                       "kilometer_run": 1}).to_list(50000)
+    today = datetime.fromisoformat(assistant_api.nepal_today()[0]).date()
+    return assistant_api.run_lookup(body.name, body.args, data, today, _sale_revenue)
+
 # ── REPORTS ───────────────────────────────────────────────────────────
 @api_router.get("/reports/dashboard")
 async def dashboard_stats(cu: dict = Depends(admin_only)):
