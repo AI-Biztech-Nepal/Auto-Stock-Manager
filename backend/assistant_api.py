@@ -45,6 +45,27 @@ def company_for_key(presented: str, keys_json: str) -> str | None:
     return found
 
 
+def derive_key(secret: str, company_id: str) -> str:
+    """The assistant key for one company, worked out from the server's own secret (JWT_SECRET).
+
+    Nothing is stored: the key is "<company id>.<HMAC of the company id>", so the server can check any
+    presented key by recomputing it. An admin fetches it from /api/assistant/key; it can only read the
+    briefing, and knowing it does not reveal the secret.
+    """
+    mac = hmac.new(secret.encode(), f"assistant:{company_id}".encode(), hashlib.sha256).hexdigest()
+    return f"{company_id}.{mac}"
+
+
+def company_for_derived_key(presented: str, secret: str) -> str | None:
+    """The company a derived key belongs to, or None when it does not verify."""
+    if not presented or not secret or "." not in presented:
+        return None
+    company_id = presented.rsplit(".", 1)[0]
+    if not company_id or not hmac.compare_digest(presented, derive_key(secret, company_id)):
+        return None
+    return company_id
+
+
 def nepal_today(now: datetime | None = None) -> tuple[str, str]:
     """(today's date, this month) as ISO strings, in Nepal time: "2026-11-10", "2026-11"."""
     local = (now or datetime.now(timezone.utc)).astimezone(NEPAL)

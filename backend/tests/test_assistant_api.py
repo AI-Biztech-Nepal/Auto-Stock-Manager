@@ -58,3 +58,21 @@ def test_briefing_with_no_sales_is_all_zeros_not_an_error():
     out = a.build_briefing([], {}, "2026-11-10", "2026-11", _revenue)
     assert out["today"] == {"sales": 0, "revenue": 0}
     assert out["dues"] == {"total": 0, "customers_owing": 0, "overdue": 0}
+
+
+def test_derived_key_verifies_for_its_company_and_nobody_else():
+    key = a.derive_key("server-secret", "co-1")
+    assert a.company_for_derived_key(key, "server-secret") == "co-1"
+    assert a.company_for_derived_key(key, "another-secret") is None            # not this server's key
+    other = a.derive_key("server-secret", "co-2")
+    assert other != key and a.company_for_derived_key(other, "server-secret") == "co-2"
+
+
+def test_a_tampered_or_malformed_derived_key_is_refused():
+    key = a.derive_key("server-secret", "co-1")
+    swapped = "co-2." + key.split(".", 1)[1]                                   # another company, first company's proof
+    assert a.company_for_derived_key(swapped, "server-secret") is None
+    assert a.company_for_derived_key(key[:-1] + ("0" if key[-1] != "0" else "1"), "server-secret") is None
+    for bad in ("", "nodot", ".", "co-1.", ".abc"):
+        assert a.company_for_derived_key(bad, "server-secret") is None
+    assert a.company_for_derived_key(key, "") is None

@@ -4659,10 +4659,13 @@ async def finance_summary(cu: dict = Depends(admin_only)):
 async def assistant_briefing(request: Request):
     """The owner's numbers (today's and this month's sales, dues, profit, stock) for the phone assistant.
 
-    Authenticated by a per-company key in the X-Assistant-Key header (ASSISTANT_KEYS env, see
-    assistant_api.py), not by a user login. It reads this one summary for that one company and
-    nothing else; there is no write route behind it."""
-    cid = assistant_api.company_for_key(request.headers.get("x-assistant-key", ""), os.environ.get("ASSISTANT_KEYS", ""))
+    Authenticated by a per-company key in the X-Assistant-Key header, not by a user login: either an
+    entry in the ASSISTANT_KEYS env or the key derived from JWT_SECRET (see assistant_api.py and
+    /assistant/key). It reads this one summary for that one company and nothing else; there is no
+    write route behind it."""
+    presented = request.headers.get("x-assistant-key", "")
+    cid = (assistant_api.company_for_key(presented, os.environ.get("ASSISTANT_KEYS", ""))
+           or assistant_api.company_for_derived_key(presented, JWT_SECRET))
     if not cid:
         raise HTTPException(401, "Invalid assistant key")
     current_company_id.set(cid)          # every db.<collection> call below is now scoped to this company
@@ -4670,6 +4673,17 @@ async def assistant_briefing(request: Request):
     sales = await db.sales.find({}, {"_id": 0}).to_list(5000)
     today, month = assistant_api.nepal_today()
     return assistant_api.build_briefing(sales, finance, today, month, _sale_revenue)
+
+@api_router.get("/assistant/key")
+@limiter.limit("10/minute")
+async def assistant_key(request: Request, cu: dict = Depends(admin_only)):
+    """The assistant key for the signed-in admin's own company, to hand to the Hanuman voice assistant.
+
+    Admin-only. The key is derived from JWT_SECRET (nothing is stored) and can only read /assistant/briefing."""
+    cid = cu.get("company_id")
+    if not cid:
+        raise HTTPException(400, "This account has no company")
+    return {"company_id": cid, "key": assistant_api.derive_key(JWT_SECRET, cid)}
 
 # ── REPORTS ───────────────────────────────────────────────────────────
 @api_router.get("/reports/dashboard")
