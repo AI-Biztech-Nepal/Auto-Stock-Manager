@@ -15,10 +15,11 @@ const fieldInp = "h-8 px-2 text-sm border border-slate-200 rounded-lg focus:outl
  * onChange - called with the next { type, id, name }
  * vendorType - passed through to /vendors/search and used as the default
  *              vendor_type when creating a new vendor from here
+ * placeholder - what the box says while nothing is picked (default "Select vendor...", or "Select name..." when combined)
  * combined - no Vendor/Customer toggle: one search over both lists, the type comes from the
  *            record picked; "add new" asks vendor or customer inside its own form
  */
-export default function CustomerVendorPicker({ value, onChange, vendorType = "", combined = false }) {
+export default function CustomerVendorPicker({ value, onChange, vendorType = "", combined = false, placeholder }) {
   const type = value?.type || "vendor";
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
@@ -155,15 +156,15 @@ export default function CustomerVendorPicker({ value, onChange, vendorType = "",
         type="button"
         data-testid="cv-picker-trigger"
         onClick={toggleOpen}
-        className={`w-full px-3 text-base sm:text-sm border focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white flex items-center justify-between text-left ${combined ? "h-11 border-slate-300 rounded-[10px]" : "h-10 sm:h-9 border-slate-200 rounded-lg"}`}
+        className={`w-full px-3 text-base sm:text-sm border focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white group disabled:bg-slate-50 disabled:cursor-default flex items-center justify-between text-left ${combined ? "h-11 border-slate-300 rounded-[10px]" : "h-10 sm:h-9 border-slate-200 rounded-lg"}`}
       >
         {value?.id
           ? <span className="text-slate-900 flex items-center gap-1.5 truncate">
               {type === "vendor" ? <Store size={13} className="text-slate-400 shrink-0" /> : <User size={13} className="text-slate-400 shrink-0" />}
               <span className="truncate">{value.name}</span>
             </span>
-          : <span className="text-slate-400">{`Select ${noun}...`}</span>}
-        <ChevronDown size={14} className="text-slate-400 shrink-0 ml-1" />
+          : <span className="text-slate-400">{placeholder || `Select ${noun}...`}</span>}
+        <ChevronDown size={14} className="text-slate-400 shrink-0 ml-1 group-disabled:invisible" />
       </button>
 
       {open && (

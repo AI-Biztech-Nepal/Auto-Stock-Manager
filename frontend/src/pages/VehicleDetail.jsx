@@ -1,11 +1,11 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
-import { Plus, Trash2, Edit, CheckCircle, AlertCircle, Clock, QrCode, Undo2, Store, User, Download, FileText, Package, ChevronLeft, ChevronRight, GripVertical } from "lucide-react";
+import { Plus, Trash2, Edit, CheckCircle, AlertCircle, Clock, QrCode, Undo2, Download, FileText, Package, ChevronLeft, ChevronRight, GripVertical } from "lucide-react";
 import { toast } from "sonner";
 import api, { postWithRetry } from "../utils/api";
-import { formatNPR, getAgingStyle, getStatusStyle, getTerminationStyle, sanakhatDaysLeft, sanakhatPendingDays, sanakhatDueDate, sanakhatLeftText, SANAKHAT_CYCLE_DAYS, SANAKHAT_WARN_DAYS, getDocStyle, EXPENSE_CATEGORIES, VEHICLE_STATUS_OPTIONS, formatOwnership } from "../utils/helpers";
+import { formatNPR, getAgingStyle, getStatusStyle, getTerminationStyle, sanakhatDaysLeft, sanakhatPendingDays, sanakhatDueDate, sanakhatLeftText, SANAKHAT_CYCLE_DAYS, SANAKHAT_WARN_DAYS, getDocStyle, EXPENSE_CATEGORIES, VEHICLE_STATUS_OPTIONS } from "../utils/helpers";
 import { ExpenseModal, QRLabelModal, ReturnModal } from "./VehicleModals";
-import { AddVehicleModal } from "./AddVehicleModal";
+import { VehicleFormBody, vehicleMissing } from "./AddVehicleModal";
 import HoverADDate from "../components/HoverADDate";
 import { useAuth } from "../context/AuthContext";
 import { hasFullVehicleAccess, canManageVehiclePhotos, hidesVehiclePricing, isBasicStockRole, PARTS_ALLOWED_VEHICLE_STATUSES } from "../utils/permissions";
@@ -41,21 +41,6 @@ const describeUploadError = (e) => {
   return `Upload failed (${e.response.status})`;
 };
 
-const Row = ({ label, children }) => (
-  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1.5 sm:gap-3 py-2 border-b border-slate-50">
-    <span className="text-sm text-slate-500 shrink-0">{label}</span>
-    {children}
-  </div>
-);
-
-// A titled group of overview rows, two to a line on wider screens.
-const Section = ({ title, children }) => (
-  <div>
-    <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 mb-1">{title}</div>
-    <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-1">{children}</div>
-  </div>
-);
-
 // Rendered either as a routed page (/inventory/:id, via the default-exported VehicleDetail
 // wrapper below) or embedded directly by Inventory.jsx with local state — the latter keeps
 // the Inventory page mounted underneath instead of unmounting/refetching it on open/close.
@@ -82,6 +67,7 @@ export function VehicleDetailModal({ id, onClose }) {
   const [editForm, setEditForm] = useState({});
   // Paperwork photos picked in the edit form, uploaded once the changes are saved.
   const [docPhotos, setDocPhotos] = useState(EMPTY_DOC_PHOTOS);
+  const [showErrors, setShowErrors] = useState(false); // Save was pressed with something missing
   const stagedDocs = flattenStagedDocs(docPhotos);
   const [saving, setSaving] = useState(false);
 
@@ -128,31 +114,6 @@ export function VehicleDetailModal({ id, onClose }) {
     } catch (err) { toast.error(err.response?.data?.detail || "Failed"); }
   };
 
-  // Ownership termination is handled entirely by the government office, so we never
-  // hold the paperwork — it's tracked as a Yes/No/Pending flag that stays editable
-  // straight from the overview, without entering the full edit mode.
-  const [savingTermination, setSavingTermination] = useState(false);
-  const updateOwnershipTermination = async (val) => {
-    const prev = vehicle?.ownership_termination_status;
-    if (val === prev) return;
-    // Marking it Done with no date saved dates it today, as the Sanakhat page does, so the 35-day countdown has a start.
-    const prevDate = vehicle?.sanakhat_date;
-    const now = new Date();
-    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
-    const change = { ownership_termination_status: val, ...(val === "yes" && !(prevDate || "").slice(0, 10) ? { sanakhat_date: today } : {}) };
-    setVehicle(v => ({ ...v, ...change }));
-    setEditForm(f => ({ ...f, ...change }));
-    setSavingTermination(true);
-    try {
-      await api.put(`/vehicles/${id}`, change);
-      toast.success("Ownership termination updated");
-    } catch {
-      setVehicle(v => ({ ...v, ownership_termination_status: prev, sanakhat_date: prevDate }));
-      setEditForm(f => ({ ...f, ownership_termination_status: prev, sanakhat_date: prevDate }));
-      toast.error("Failed to update ownership termination");
-    } finally { setSavingTermination(false); }
-  };
-
   const openReturnModal = async () => {
     try {
       const r = await api.get(`/vehicles/${id}/active-sale`);
@@ -185,8 +146,12 @@ export function VehicleDetailModal({ id, onClose }) {
 
   const saveEdit = async (e, confirmReusedRegistration = false) => {
     e.preventDefault();
-    if (!editForm.registration_number) { toast.error("Registration Number is required"); return; }
-    if (!isFrontDesk && !editForm.purchase_price) { toast.error("Purchase Price is required"); return; }
+    const missing = vehicleMissing(editForm, { editing: true });
+    if (missing.length) {
+      setShowErrors(true);
+      document.getElementById(`pv-${missing[0][0]}`)?.focus();
+      return;
+    }
     setSaving(true);
     try {
       const payload = { ...editForm, selling_price: editForm.selling_price ? Number(editForm.selling_price) : null, sanakhat_cost: editForm.sanakhat_cost !== "" && editForm.sanakhat_cost != null ? Number(editForm.sanakhat_cost) : null, year: Number(editForm.year), engine_cc: Number(editForm.engine_cc), ownership_number: editForm.ownership_number ? Number(editForm.ownership_number) : null, confirm_reused_registration: confirmReusedRegistration };
@@ -198,7 +163,7 @@ export function VehicleDetailModal({ id, onClose }) {
       }
       toast.success("Vehicle updated");
       revokeStagedDocs(stagedDocs); setDocPhotos(EMPTY_DOC_PHOTOS);
-      setIsEditing(false); fetchVehicle(); loadDocs();
+      setShowErrors(false); setIsEditing(false); fetchVehicle(); loadDocs();
       setSaving(false);
     } catch (err) {
       setSaving(false);
@@ -213,8 +178,8 @@ export function VehicleDetailModal({ id, onClose }) {
     }
   };
 
-  const openEdit = () => { setEditForm(vehicle); setIsEditing(true); };
-  const cancelEdit = () => { setEditForm(vehicle); revokeStagedDocs(stagedDocs); setDocPhotos(EMPTY_DOC_PHOTOS); setIsEditing(false); };
+  const openEdit = () => { setEditForm(vehicle); setShowErrors(false); setIsEditing(true); };
+  const cancelEdit = () => { setEditForm(vehicle); revokeStagedDocs(stagedDocs); setDocPhotos(EMPTY_DOC_PHOTOS); setShowErrors(false); setIsEditing(false); };
 
   const [showQR, setShowQR] = useState(false);
   const [qrData, setQrData] = useState(null);
@@ -423,9 +388,16 @@ export function VehicleDetailModal({ id, onClose }) {
     : `${getTerminationStyle(skState).bg} ${getTerminationStyle(skState).text}`;
   const skPill = `${getTerminationStyle(skState).label}${skLeft !== null ? ` · ${sanakhatLeftText(skLeft)}` : skState === "yes" && !skDate ? " · no date" : skWaiting !== null ? ` · ${skWaiting}d` : ""}`;
 
+  // The line under the Sanaakhat date in the form: when the next one is due, or how long this one has waited.
+  const sanakhatNote = skDue
+    ? <span className={skLeft < 0 ? "text-red-600" : skLeft <= 7 ? "text-amber-600" : ""}>Next due <HoverADDate date={skDue} /> · {sanakhatLeftText(skLeft)}</span>
+    : skWaiting !== null
+      ? <span className={skWaiting > SANAKHAT_WARN_DAYS ? "text-red-600" : ""}>{skWaiting === 0 ? "Waiting since today" : `Waiting ${skWaiting} day${skWaiting > 1 ? "s" : ""}`}</span>
+      : skState === "yes" && !skDate ? <span className="text-amber-600">Done, but no date saved yet</span> : null;
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 sm:p-4">
-      <div className="bg-white sm:rounded-2xl shadow-2xl w-full h-full sm:h-auto sm:max-w-3xl sm:max-h-[90vh] overflow-y-auto">
+      <div className="bg-white sm:rounded-2xl shadow-2xl w-full h-full sm:h-auto sm:max-w-5xl sm:max-h-[90vh] overflow-y-auto">
         {/* Header + Status/Actions — sticky as one block so Cancel/Save Changes
            (and the other action buttons) stay reachable without scrolling back
            up, no matter how far down the form the fields go. */}
@@ -492,9 +464,16 @@ export function VehicleDetailModal({ id, onClose }) {
               </select>
             )}
             <div className="flex-1" />
-            {canManageStock && (
+            {canManageStock && (isEditing ? (
+              <>
+                <button type="button" onClick={cancelEdit} className="flex items-center gap-1.5 px-3 py-3 border border-slate-200 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors" data-testid="cancel-edit-btn">Cancel</button>
+                <button type="button" onClick={saveEdit} disabled={saving} className="flex items-center gap-1.5 px-3 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-semibold disabled:opacity-60 transition-colors" data-testid="save-vehicle-btn">
+                  {saving ? "Saving..." : "Save Changes"}
+                </button>
+              </>
+            ) : (
               <button onClick={openEdit} className="flex items-center gap-1.5 px-3 py-3 border border-slate-200 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors" data-testid="edit-vehicle-btn"><Edit size={14} /> Edit</button>
-            )}
+            ))}
             {isAdmin && vehicle.status === "sold" && !isEditing && (
               <button onClick={openReturnModal} className="flex items-center gap-1.5 px-3 py-3 border border-amber-200 text-amber-700 rounded-lg text-sm font-medium hover:bg-amber-50 transition-colors" data-testid="record-return-btn"><Undo2 size={14} /> Record Return</button>
             )}
@@ -543,86 +522,23 @@ export function VehicleDetailModal({ id, onClose }) {
             </div>
 
             <div className="p-5">
-              {/* Overview Tab — stays mounted (hidden via CSS) instead of unmounting on tab switch.
-                 Editing opens the same form as Purchase Vehicle (AddVehicleModal), over this one. */}
-              <div className={activeTab === "overview" ? "" : "hidden"}>
-                <div className="space-y-5">
-                  <Section title="Vehicle">
-                    <Row label="Registration"><span className="text-sm font-medium text-slate-900 sm:text-right">{vehicle.registration_number || "Not entered"}</span></Row>
-                    <Row label="Color"><span className="text-sm font-medium text-slate-900 sm:text-right">{vehicle.color || "Not specified"}</span></Row>
-                    <Row label="Condition"><span className="text-sm font-medium text-slate-900 sm:text-right">{vehicle.condition}</span></Row>
-                    <Row label="Ownership"><span className="text-sm font-medium text-slate-900 sm:text-right">{formatOwnership(vehicle.ownership_number)}</span></Row>
-                  </Section>
-
-                  <Section title="Purchase">
-                    <Row label="Purchase Date"><span className="text-sm font-medium text-slate-900 sm:text-right"><HoverADDate date={vehicle.purchase_date} /></span></Row>
-                    <Row label="Purchase Source"><span className="text-sm font-medium text-slate-900 sm:text-right">{vehicle.purchase_source}</span></Row>
-                    <Row label="Name of Source">
-                      {vehicle.linked_contact_name ? (
-                        <span className="text-sm font-medium text-slate-900 sm:text-right flex items-center gap-1.5 sm:justify-end">
-                          {vehicle.linked_contact_type === "customer" ? <User size={13} className="text-slate-400 shrink-0" /> : <Store size={13} className="text-slate-400 shrink-0" />}
-                          {vehicle.linked_contact_name}
-                        </span>
-                      ) : <span className="text-sm font-medium text-slate-900 sm:text-right">—</span>}
-                    </Row>
-                    {!hideFinancials && <Row label="Purchase Price"><span className="text-sm font-medium text-slate-900 sm:text-right">{formatNPR(vehicle.purchase_price)}</span></Row>}
-                  </Section>
-
-                  {(!hidePricing || !hideFinancials || vehicle.sold_date) && (
-                    <Section title="Selling">
-                      {!hidePricing && <Row label="Selling Price"><span className="text-sm font-medium text-slate-900 sm:text-right">{vehicle.selling_price ? formatNPR(vehicle.selling_price) : "Not set"}</span></Row>}
-                      {!hideFinancials && <Row label="Minimum Selling Price"><span className="text-sm font-medium text-slate-900 sm:text-right">{vehicle.minimum_selling_price ? formatNPR(vehicle.minimum_selling_price) : "Not set"}</span></Row>}
-                      <Row label="Sold Date"><span className="text-sm font-medium text-slate-900 sm:text-right">{vehicle.sold_date ? <HoverADDate date={vehicle.sold_date} /> : "—"}</span></Row>
-                    </Section>
-                  )}
-
-                  <Section title="Sanaakhat">
-                    <Row label="Ownership Termination">
-                      {canManageStock ? (
-                        <select
-                          data-testid="ownership-termination-select"
-                          value={vehicle.ownership_termination_status || "pending"}
-                          onChange={e => updateOwnershipTermination(e.target.value)}
-                          disabled={savingTermination}
-                          className="text-sm font-medium text-slate-900 sm:text-right border border-slate-200 rounded-lg px-2 py-1 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-60"
-                        >
-                          <option value="pending">Pending</option>
-                          <option value="yes">Yes</option>
-                          <option value="no">No</option>
-                        </select>
-                      ) : (
-                        <span className="text-sm font-medium text-slate-900 sm:text-right capitalize">{vehicle.ownership_termination_status || "pending"}</span>
-                      )}
-                    </Row>
-                    <Row label={skState === "yes" ? "Done On" : skState === "pending" ? "Started" : "Date"}>
-                      <span className="text-sm font-medium text-slate-900 sm:text-right" data-testid="vehicle-sanakhat-date">
-                        {skDate ? <HoverADDate date={skDate} /> : skState === "yes" ? <span className="text-amber-600">No date saved (add it in Edit)</span> : "Not received yet"}
-                      </span>
-                    </Row>
-                    {skDue && (
-                      <Row label="Next Due">
-                        <span className={`text-sm font-medium sm:text-right ${skLeft < 0 ? "text-red-600" : skLeft <= 7 ? "text-amber-600" : "text-slate-900"}`} data-testid="vehicle-sanakhat-due">
-                          <HoverADDate date={skDue} /> · {sanakhatLeftText(skLeft)}
-                        </span>
-                      </Row>
-                    )}
-                    {skWaiting !== null && (
-                      <Row label="Waiting">
-                        <span className={`text-sm font-medium sm:text-right ${skWaiting > SANAKHAT_WARN_DAYS ? "text-red-600" : "text-slate-900"}`} data-testid="vehicle-sanakhat-waiting">
-                          {skWaiting === 0 ? "Since today" : `${skWaiting} day${skWaiting > 1 ? "s" : ""}`}
-                        </span>
-                      </Row>
-                    )}
-                    {!hideFinancials && <Row label="Sanaakhat Cost"><span className="text-sm font-medium text-slate-900 sm:text-right">{vehicle.sanakhat_cost ? formatNPR(vehicle.sanakhat_cost) : "—"}</span></Row>}
-                  </Section>
-
-                  {vehicle.notes && (
-                    <div>
-                      <div className="text-xs text-slate-500 mb-1">Notes</div>
-                      <div className="text-sm text-slate-700 bg-slate-50 rounded-lg p-3">{vehicle.notes}</div>
-                    </div>
-                  )}
-                </div>
+              {/* Overview Tab — stays mounted (hidden via CSS) instead of unmounting on tab switch. It is the Purchase
+                 Vehicle form (VehicleFormBody) filled in: read-only until Edit, then the same fields can be changed.
+                 -m-5 lets its sections run edge to edge, as they do in that form. */}
+              <div className={activeTab === "overview" ? "-m-5" : "hidden"}>
+                <VehicleFormBody
+                  editing
+                  readOnly={!isEditing}
+                  attempted={showErrors}
+                  form={editForm}
+                  setForm={setEditForm}
+                  docPhotos={docPhotos}
+                  setDocPhotos={setDocPhotos}
+                  existingDocs={docsOnFile}
+                  hideCost={hideFinancials}
+                  hidePricing={hidePricing}
+                  sanakhatNote={sanakhatNote}
+                />
               </div>
 
               {/* Expenses Tab — also kept mounted, hidden via CSS when inactive. */}
@@ -875,20 +791,6 @@ export function VehicleDetailModal({ id, onClose }) {
       </div>
 
       {/* Nested modals */}
-      {isEditing && (
-        <AddVehicleModal
-          editing
-          form={editForm}
-          setForm={setEditForm}
-          onClose={cancelEdit}
-          onSubmit={saveEdit}
-          saving={saving}
-          docPhotos={docPhotos}
-          setDocPhotos={setDocPhotos}
-          existingDocs={docsOnFile}
-        />
-      )}
-
       {showExpenseModal && (
         <ExpenseModal
           onClose={() => setShowExpenseModal(false)}
