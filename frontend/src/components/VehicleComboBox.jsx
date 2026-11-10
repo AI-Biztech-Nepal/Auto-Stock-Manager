@@ -20,7 +20,10 @@ const makeNamer = (vehicles) => {
   };
 };
 
-export default function VehicleComboBox({ vehicles, value, onChange, placeholder = "Search or select a vehicle...", formatLabel, testId = "vehicle", tagStatus = false, showPrice = false }) {
+const DEFAULT_BOX = "w-full h-9 pl-9 pr-8 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white cursor-pointer";
+
+// inputId / inputClassName: for a form whose boxes are another size (keep room for the search icon on the left, pl-9, and the arrow on the right, pr-8).
+export default function VehicleComboBox({ vehicles, value, onChange, placeholder = "Search or select a vehicle...", formatLabel, testId = "vehicle", tagStatus = false, showPrice = false, inputId, inputClassName = DEFAULT_BOX }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const wrapRef = useRef(null);
@@ -53,14 +56,15 @@ export default function VehicleComboBox({ vehicles, value, onChange, placeholder
           onChange={e => { setQuery(e.target.value); if (!open) setOpen(true); }}
           onFocus={() => { setQuery(""); setOpen(true); }}
           placeholder={placeholder}
-          className="w-full h-9 pl-9 pr-8 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white cursor-pointer"
+          id={inputId}
+          className={inputClassName}
           data-testid={`${testId}-combobox`}
           autoComplete="off"
         />
         <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
       </div>
       {open && (
-        <div className="absolute left-0 right-0 top-10 z-20 bg-white border border-slate-200 rounded-lg shadow-lg max-h-56 overflow-y-auto" data-testid={`${testId}-dropdown`}>
+        <div className="absolute left-0 right-0 top-full mt-1 z-20 bg-white border border-slate-200 rounded-lg shadow-lg max-h-56 overflow-y-auto" data-testid={`${testId}-dropdown`}>
           {filtered.length === 0 ? (
             <div className="px-3 py-2 text-xs text-slate-400">No matching vehicles</div>
           ) : filtered.map(v => (

@@ -1,45 +1,18 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
-import { Plus, Search, Trash2, Eye, TrendingUp, DollarSign, Calendar, ShoppingBag, X, ChevronDown, ChevronUp, UserPlus, AlertTriangle, UploadCloud, FileSpreadsheet, CheckCircle2, Undo2, BookmarkCheck, ArrowRight, Tags } from "lucide-react";
+import { Plus, Search, Trash2, Eye, TrendingUp, DollarSign, Calendar, ShoppingBag, AlertTriangle, UploadCloud, FileSpreadsheet, CheckCircle2, Undo2, BookmarkCheck, ArrowRight, Tags } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
-import { formatNPR, splitSanakhatExpenses, withSanakhatExpenses, deleteSaleConfirm, TRANSFER_STATUS_OPTIONS, getTransferStatusStyle } from "../utils/helpers";
+import { formatNPR, splitSanakhatExpenses, deleteSaleConfirm, TRANSFER_STATUS_OPTIONS, getTransferStatusStyle } from "../utils/helpers";
 import { getCurrentBSMonthRange } from "../utils/nepali-date";
 import { useAuth } from "../context/AuthContext";
-import VehicleComboBox from "../components/VehicleComboBox";
-import BSDatePicker from "../components/BSDatePicker";
 import HoverADDate from "../components/HoverADDate";
 import { BOOK_CARD, BookTableStyle } from "../components/BookTable";
 import WarrantyBadge from "../components/WarrantyBadge";
 import Bookings from "./Bookings";
+import SaleVehicleModal from "./SaleVehicleModal";
 import DateRangeFilter, { resolveDateFilter } from "../components/DateRangeFilter";
-import SourceField, { ReferredByField } from "../components/SourceField";
-import SoldBySelect from "../components/SoldBySelect";
-import { EMPTY_REFERRER, EMPTY_SOURCE, SOURCE_LABEL, isSourceComplete, sourcePayload } from "../utils/crm";
-
-const PRESET_EXPENSES = [
-  { name: "Registration Transfer Fee", amount: 2000 },
-  { name: "Insurance Transfer Fee", amount: 1500 },
-  { name: "Road Tax Clearance", amount: 1000 },
-  { name: "Bluebook Copy Fee", amount: 500 },
-  { name: "Notary / Document Fee", amount: 800 },
-  { name: "Delivery / Transport", amount: 1200 },
-];
-
-const inp = "w-full h-9 px-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500";
-const sel = `${inp} bg-white`;
-const miniInp = "w-full h-8 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 bg-white";
-
-// One labelled row inside the Buyer / Witness panels. The label is pinned to a single
-// line (truncate) so it never wraps — the two panels then line up row-for-row.
-const MiniField = ({ label, required, children }) => (
-  <div>
-    <label className="block text-xs font-medium text-slate-500 mb-0.5 truncate">
-      {label}{required && <span className="text-red-500 ml-0.5">*</span>}
-    </label>
-    {children}
-  </div>
-);
+import { SOURCE_LABEL } from "../utils/crm";
 
 function getErrMsg(err, fallback) {
   if (!err.response) return "Network error - could not reach the server";
@@ -48,36 +21,6 @@ function getErrMsg(err, fallback) {
   if (Array.isArray(detail)) return detail.map((d) => d.msg || JSON.stringify(d)).join(", ");
   return fallback || `Server error (${err.response.status})`;
 }
-
-const Field = ({ label, required, children }) => (
-  <div>
-    <label className="block text-xs font-medium text-slate-600 mb-1">
-      {label}{required && <span className="text-red-500 ml-0.5">*</span>}
-    </label>
-    {children}
-  </div>
-);
-
-const EMPTY_FORM = {
-  vehicle_id: "", customer_id: "", sale_price: "",
-  payment_method: "Cash", paid_cash: "", paid_bank: "", advance_payment: "",
-  due_amount: "", due_date: "", sale_date: "", ownership_transfer_date: "", notes: "",
-  sold_by_id: "",
-  sanakhat_cost: "", resanakhat_cost: "",
-  exchange_valuation: "", exchange_brand: "", exchange_model: "", exchange_reg_no: "", exchange_year: "",
-  witness_name: "", witness_address: "", witness_phone: "", witness_id_number: "",
-};
-
-const EMPTY_BUYER = { name: "", contact_number: "", address: "", id_number: "" };
-
-// One row of the Buyer | Witness split. Rendering each row as its own 2-col grid keeps
-// the two halves the exact same height, so the panels line up no matter what.
-const DEED_ROWS = [
-  { label: "Name", ph: "Full name", bkey: "name", wkey: "witness_name" },
-  { label: "Address", ph: "Address", bkey: "address", wkey: "witness_address" },
-  { label: "Phone No.", ph: "Phone number", bkey: "contact_number", wkey: "witness_phone" },
-  { label: "Licence / Citizenship No.", ph: "Licence / citizenship no.", bkey: "id_number", wkey: "witness_id_number" },
-];
 
 // Status tags from the sold vehicle's own record (what the old Sold Stock tab showed):
 // returned marker, name-transfer status and warranty. Sanakhat cost has its own column.
@@ -160,9 +103,8 @@ export default function Sales() {
   const [dateRange, setDateRange] = useState({ key: "all", custom: null }); // key "all" = off
   const [statusFilter, setStatusFilter] = useState("all"); // "all" | "sold" | "returned"
   const [showModal, setShowModal] = useState(false);
-  const [saving, setSaving] = useState(false);
 
-  // "Record Sale" on a booking (strip below or Bookings page) opens this same sale form
+  // "Sale Vehicle" on a booking (strip below or Bookings page) opens this same sale form
   // pre-filled, with the booking kept in activeBooking.
   const [activeBooking, setActiveBooking] = useState(null);
 
@@ -177,27 +119,6 @@ export default function Sales() {
   const [noteLeads, setNoteLeads] = useState(null);       // null while loading, else the sales the notes say something about
   const [noteLeadPicks, setNoteLeadPicks] = useState({}); // sale id -> ticked
   const [noteLeadsBusy, setNoteLeadsBusy] = useState(false);
-
-  // Modal state
-  const [form, setForm] = useState(EMPTY_FORM);
-  const [vehicles, setVehicles] = useState([]);
-  const [customers, setCustomers] = useState([]);
-
-  // Buyer + Witness panel — hidden until the "+" button beside the dropdown is clicked.
-  // Used for a fresh buyer (spins up a customer record) plus the sale-deed witness block,
-  // which is required whenever this panel is in use.
-  const [showAddCust, setShowAddCust] = useState(false);
-  const [buyer, setBuyer] = useState(EMPTY_BUYER);
-  const [leadSource, setLeadSource] = useState(EMPTY_SOURCE); // how the buyer found the shop; kept on the sale, and tags a NEW buyer
-  const [referrer, setReferrer] = useState(EMPTY_REFERRER); // who referred the buyer; kept on the sale, and tags a NEW buyer
-  const [addingCust, setAddingCust] = useState(false);
-
-  // Extra expenses state
-  const [expenseItems, setExpenseItems] = useState([]);          // [{name, amount}] - added one by one
-  const [presetToAdd, setPresetToAdd] = useState("");
-  const [newExpName, setNewExpName] = useState("");
-  const [newExpAmt, setNewExpAmt] = useState("");
-  const [showPresets, setShowPresets] = useState(true);
 
   // Admin-only diagnostic: sales whose linked vehicle no longer has status "sold", or a
   // vehicle marked sold with no sale behind it.
@@ -241,29 +162,7 @@ export default function Sales() {
   // a returned sale only exists as the sale itself.
   const openSale = (s) => navigate(!s.returned && s.vehicle_id && vehicleById[s.vehicle_id] ? `/sales/vehicle/${s.vehicle_id}` : `/sales/${s.id}`);
 
-  const openModal = async (booking = null) => {
-    setActiveBooking(booking);
-    setForm(booking ? {
-      ...EMPTY_FORM,
-      vehicle_id: booking.vehicle_id,
-      customer_id: booking.customer_id || "",
-      sale_price: String(booking.agreed_price ?? booking.vehicle_selling_price ?? ""),
-      advance_payment: String(booking.booking_amount ?? ""),
-    } : EMPTY_FORM);
-    setExpenseItems([]);
-    setPresetToAdd("");
-    setNewExpName(""); setNewExpAmt("");
-    setBuyer(EMPTY_BUYER);
-    setLeadSource(EMPTY_SOURCE);
-    setReferrer(EMPTY_REFERRER);
-    setShowAddCust(false);
-    setShowModal(true);
-    try {
-      const [v, c] = await Promise.all([booking ? api.get(`/vehicles/${booking.vehicle_id}`).then(r => ({ data: [r.data] })) : api.get("/vehicles?status=available"), api.get("/customers")]);
-      setVehicles(v.data); setCustomers(c.data);
-    } catch { toast.error("Failed to load vehicles/customers"); }
-  };
-
+  const openModal = (booking = null) => { setActiveBooking(booking); setShowModal(true); };
   const closeModal = () => { setShowModal(false); setActiveBooking(null); };
 
   // Arrived from the Bookings page (/sales?booking=ID): open the sale form for that booking
@@ -280,142 +179,6 @@ export default function Sales() {
       if (b) openModal(b); else toast.error("That booking is no longer open");
     }).catch(() => toast.error("Failed to load booking"));
   }, [bookingParam, loading]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const selectedCustomer = customers.find(c => c.id === form.customer_id) || null;
-
-  const buyerComplete = buyer.name.trim() && buyer.address.trim() && buyer.contact_number.trim();
-  const witnessComplete = form.witness_name.trim() && form.witness_address.trim() && form.witness_phone.trim();
-
-  // The CRM keeps one source per customer, so a new buyer is tagged as referred when a referrer is named, else with the lead.
-  const referrerNamed = !!referrer.referred_by_id || !!referrer.source_note.trim();
-  const buyerSource = referrerNamed ? { source: "referral", ...referrer } : leadSource;
-  const sourceMissing = () => "Pick a Lead, or say who referred the buyer";
-
-  const saveNewCustomer = async () => {
-    if (!buyerComplete) { toast.error("Fill in the buyer's name, address, and phone number"); return; }
-    if (!isSourceComplete(buyerSource)) { toast.error(sourceMissing()); return; }
-    setAddingCust(true);
-    try {
-      const r = await api.post("/customers", {
-        name: buyer.name.trim(),
-        contact_number: buyer.contact_number.trim(),
-        address: buyer.address.trim() || null,
-        id_number: buyer.id_number.trim() || null,
-        ...sourcePayload(buyerSource),
-      });
-      setCustomers(prev => [r.data, ...prev]);
-      setForm(f => ({ ...f, customer_id: r.data.id }));
-      toast.success("Customer added — now fill the witness details");
-    } catch (err) { toast.error(err.response?.data?.detail || "Failed to add customer"); }
-    finally { setAddingCust(false); }
-  };
-
-  // Compute total extra expenses — sanakhat / re-sanakhat are extra expenses too, entered in
-  // their own fields and saved as named lines alongside the others.
-  const extraExpenses = withSanakhatExpenses(expenseItems, form.sanakhat_cost, form.resanakhat_cost);
-  const expensesTotal = extraExpenses.reduce((s, e) => s + Number(e.amount || 0), 0);
-  const grandTotal = (Number(form.sale_price) || 0) + expensesTotal;
-  const exchangeValuation = Number(form.exchange_valuation) || 0; // old vehicle taken in part payment
-  const amountPaid = (Number(form.paid_cash) || 0) + (Number(form.paid_bank) || 0) + (Number(form.advance_payment) || 0) + exchangeValuation;
-  const autoDue = Math.max(Number((grandTotal - amountPaid).toFixed(2)), 0);
-  // Due Amount field: shows the auto figure until the user types over it (blank ⇒ auto).
-  const amountDue = form.due_amount === "" ? autoDue : Math.max(Number(form.due_amount) || 0, 0);
-
-  const availablePresets = PRESET_EXPENSES.filter(p => !expenseItems.some(e => e.name === p.name));
-
-  const addPresetExpense = (name) => {
-    const preset = PRESET_EXPENSES.find(p => p.name === name);
-    if (!preset) return;
-    setExpenseItems(prev => [...prev, { name: preset.name, amount: preset.amount }]);
-    setPresetToAdd("");
-  };
-
-  const addCustomExpense = () => {
-    if (!newExpName || !newExpAmt) { toast.error("Enter name and amount"); return; }
-    setExpenseItems(prev => [...prev, { name: newExpName, amount: Number(newExpAmt) }]);
-    setNewExpName(""); setNewExpAmt("");
-  };
-
-  const updateExpenseAmount = (idx, amount) => setExpenseItems(prev => prev.map((e, i) => i === idx ? { ...e, amount } : e));
-
-  const removeExpenseItem = (idx) => setExpenseItems(prev => prev.filter((_, i) => i !== idx));
-
-  const handleSave = async (e) => {
-    e.preventDefault();
-    if (!form.vehicle_id || !form.sale_price) { toast.error("Vehicle and Sale Price are required"); return; }
-    // The Buyer + Witness panel is only in play when it's open. When it is, both blocks
-    // are mandatory (sale deed); a typed-but-not-yet-saved buyer gets created on the way
-    // through. An existing customer picked from the dropdown covers the buyer half itself.
-    const enteringNewBuyer = showAddCust && !form.customer_id;
-    if (showAddCust) {
-      if (enteringNewBuyer && !buyerComplete) {
-        toast.error("Fill in the buyer's name, address, and phone number"); return;
-      }
-      // Lead and Referred by are optional, except that a new buyer must be tagged with one or the other.
-      if (enteringNewBuyer && !isSourceComplete(buyerSource)) {
-        toast.error(sourceMissing()); return;
-      }
-      if (!witnessComplete) {
-        toast.error("Fill in the witness's name, address, and phone number"); return;
-      }
-    }
-    setSaving(true);
-    try {
-      let customerId = form.customer_id || null;
-      if (enteringNewBuyer) {
-        const r = await api.post("/customers", {
-          name: buyer.name.trim(),
-          contact_number: buyer.contact_number.trim(),
-          address: buyer.address.trim() || null,
-          id_number: buyer.id_number.trim() || null,
-          ...sourcePayload(buyerSource),
-        });
-        setCustomers(prev => [r.data, ...prev]);
-        customerId = r.data.id;
-      }
-      const payMethodParts = [];
-      if (Number(form.paid_cash) > 0) payMethodParts.push("Cash");
-      if (Number(form.paid_bank) > 0) payMethodParts.push("Bank Transfer");
-      if (Number(form.advance_payment) > 0) payMethodParts.push("Advance");
-      const payload = {
-        vehicle_id: form.vehicle_id,
-        ...(activeBooking ? { booking_id: activeBooking.id } : {}),
-        customer_id: customerId,
-        sale_price: Number(form.sale_price),
-        extra_expenses: extraExpenses.map(e => ({ name: e.name, amount: Number(e.amount) || 0 })),
-        payment_method: payMethodParts.length ? payMethodParts.join(" + ") : "Due",
-        paid_cash: Number(form.paid_cash) || 0,
-        paid_bank: Number(form.paid_bank) || 0,
-        advance_payment: Number(form.advance_payment) || 0,
-        due_amount: form.due_amount === "" ? undefined : (Number(form.due_amount) || 0),
-        due_date: form.due_date || undefined,
-        sale_date: form.sale_date || undefined,
-        ownership_transfer_date: form.ownership_transfer_date || undefined,
-        sold_by_id: form.sold_by_id || null,
-        ...(leadSource.source ? { lead_source: leadSource.source, lead_note: leadSource.source_note.trim() || null } : {}),
-        ...(referrerNamed ? { referred_by_id: referrer.referred_by_id || null, referred_by_name: referrer.source_note.trim() || null } : {}),
-        notes: form.notes,
-        exchange_valuation: exchangeValuation,
-        exchange_brand: form.exchange_brand.trim() || undefined,
-        exchange_model: form.exchange_model.trim() || undefined,
-        exchange_reg_no: form.exchange_reg_no.trim() || undefined,
-        exchange_year: form.exchange_year.trim() || undefined,
-        ...(showAddCust ? {
-          witness_name: form.witness_name.trim(),
-          witness_address: form.witness_address.trim(),
-          witness_phone: form.witness_phone.trim(),
-          witness_id_number: form.witness_id_number.trim(),
-        } : {}),
-      };
-
-      await api.post("/sales", payload);
-      toast.success(activeBooking ? "Booking converted to a sale!" : "Sale recorded successfully!");
-
-      closeModal();
-      fetchAll();
-    } catch (err) { toast.error(getErrMsg(err, "Failed to save sale")); }
-    finally { setSaving(false); }
-  };
 
   const runImport = async (confirm) => {
     if (!importFile) { toast.error("Choose the spreadsheet first"); return; }
@@ -531,7 +294,7 @@ export default function Sales() {
             </button>
           )}
           <button onClick={() => openModal()} data-testid="new-sale-btn" className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-3 rounded-lg transition-all active:scale-95 shadow-sm">
-            <Plus size={16} /> Record Sale
+            <Plus size={16} /> Sale Vehicle
           </button>
         </div>
       </div>
@@ -623,7 +386,7 @@ export default function Sales() {
         </select>
       </div>
 
-      {/* Open bookings — deposits waiting on the balance; Record Sale opens the normal sale form pre-filled */}
+      {/* Open bookings — deposits waiting on the balance; Sale Vehicle opens the normal sale form pre-filled */}
       {openBookings.length > 0 && (
         <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4" data-testid="open-bookings-strip">
           <div className="flex items-center justify-between gap-2 mb-2">
@@ -645,7 +408,7 @@ export default function Sales() {
                     </div>
                   </div>
                   <button onClick={() => openModal(b)} className="shrink-0 flex items-center gap-1.5 h-9 px-3 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-medium active:scale-95 transition-all">
-                    Record Sale <ArrowRight size={14} />
+                    Sale Vehicle <ArrowRight size={14} />
                   </button>
                 </div>
               );
@@ -661,7 +424,7 @@ export default function Sales() {
           <div className="flex flex-col items-center justify-center h-40 text-slate-500">
             <ShoppingBag size={32} className="mb-2 opacity-30" />
             <p className="font-medium">{anyFilter ? "No sales match this filter" : "No sales recorded yet"}</p>
-            <p className="text-xs mt-1 text-slate-400">{anyFilter ? "Try clearing the search or filters" : 'Click "Record Sale" to add one'}</p>
+            <p className="text-xs mt-1 text-slate-400">{anyFilter ? "Try clearing the search or filters" : 'Click "Sale Vehicle" to add one'}</p>
           </div>
         ) : (
           <>
@@ -830,267 +593,8 @@ export default function Sales() {
       </>
       )}
 
-      {/* Record Sale Modal */}
-      {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 sm:p-4">
-          <div className="bg-white sm:rounded-2xl shadow-2xl w-full h-full sm:h-auto sm:max-w-xl sm:max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between p-4 sm:p-5 border-b border-slate-100 sticky top-0 bg-white z-10">
-              <h2 className="text-lg font-bold text-slate-900">{activeBooking ? "Record Sale from Booking" : "Record Sale"}</h2>
-              <button onClick={closeModal} className="w-11 h-11 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500 shrink-0">✕</button>
-            </div>
-            <form onSubmit={handleSave} className="p-4 sm:p-5 space-y-4">
-
-              {activeBooking && (
-                <div className="bg-yellow-50 border border-yellow-200 rounded-xl px-4 py-3 text-sm text-yellow-900" data-testid="booking-banner">
-                  Booking deposit of <strong>{formatNPR(activeBooking.booking_amount)}</strong> is filled in as the advance payment. Enter what the customer pays now as cash / bank below.
-                </div>
-              )}
-
-              {/* Vehicle */}
-              <Field label="Vehicle" required>
-                {activeBooking ? (
-                  <div className="h-9 px-3 flex items-center text-sm bg-slate-50 border border-slate-200 rounded-lg text-slate-700">{activeBooking.vehicle_info}</div>
-                ) : <VehicleComboBox
-                  vehicles={vehicles}
-                  value={form.vehicle_id}
-                  onChange={id => setForm({...form, vehicle_id: id})}
-                  placeholder="Search or select available vehicle..."
-                  testId="sale-vehicle"
-                  showPrice
-                />}
-              </Field>
-
-              {/* Dates */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <Field label="Sale Date">
-                  <BSDatePicker value={form.sale_date} onChange={val => setForm({...form, sale_date: val})} data-testid="sale-date-input" />
-                </Field>
-                <Field label="Vehicle Pass Date">
-                  <BSDatePicker value={form.ownership_transfer_date} onChange={val => setForm({...form, ownership_transfer_date: val})} data-testid="vehicle-pass-date-input" />
-                </Field>
-              </div>
-
-              <Field label="Sold by">
-                <SoldBySelect value={form.sold_by_id} onChange={v => setForm({ ...form, sold_by_id: v })} className={sel} testid="sale-sold-by-select" />
-              </Field>
-
-              <div data-testid="sale-lead">
-                <SourceField value={leadSource} onChange={setLeadSource} customers={customers} label="Lead" hideReferral />
-              </div>
-
-              <ReferredByField value={referrer} onChange={setReferrer} customers={customers} />
-
-              {/* Customer */}
-              <Field label="Customer">
-                <div className="flex gap-2">
-                  <select value={form.customer_id} onChange={e => setForm({...form, customer_id: e.target.value})} className={sel} data-testid="sale-customer-select">
-                    <option value="">Walk-in / No customer record</option>
-                    {customers.map(c => (
-                      <option key={c.id} value={c.id}>{c.name} — {c.contact_number}</option>
-                    ))}
-                  </select>
-                  <button type="button" onClick={() => setShowAddCust(!showAddCust)} title="Add buyer + witness details" data-testid="add-customer-inline-btn" className={`shrink-0 w-11 h-11 flex items-center justify-center rounded-lg border transition-colors ${showAddCust ? "bg-blue-600 text-white border-blue-600" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}>
-                    <UserPlus size={15} />
-                  </button>
-                </div>
-
-                {showAddCust && (
-                  <>
-                    <div className="mt-2 p-3 bg-blue-50 border border-blue-100 rounded-xl space-y-2" data-testid="add-customer-form">
-                      <div className="grid grid-cols-2 gap-x-3">
-                        <p className="text-xs font-semibold text-blue-700 uppercase tracking-wide" data-testid="buyer-details-panel">Buyer's Details</p>
-                        <p className="text-xs font-semibold text-blue-700 uppercase tracking-wide" data-testid="witness-details-panel">Witness Details</p>
-                      </div>
-
-                      {DEED_ROWS.map(({ label, ph, bkey, wkey }) => (
-                        <div key={bkey} className="grid grid-cols-2 gap-x-3">
-                          {selectedCustomer ? (
-                            <div className="text-sm text-slate-700 self-center min-w-0 truncate">
-                              <span className="text-slate-400">{label}: </span>{selectedCustomer[bkey] || "—"}
-                            </div>
-                          ) : (
-                            <MiniField label={label} required={bkey !== "id_number"}>
-                              <input value={buyer[bkey]} onChange={e => setBuyer({ ...buyer, [bkey]: e.target.value })} placeholder={ph} className={miniInp} data-testid={`buyer-${bkey.replace(/_/g, "-")}`} />
-                            </MiniField>
-                          )}
-                          <MiniField label={label} required={wkey !== "witness_id_number"}>
-                            <input value={form[wkey]} onChange={e => setForm({ ...form, [wkey]: e.target.value })} placeholder={ph} className={miniInp} data-testid={wkey.replace(/_/g, "-")} />
-                          </MiniField>
-                        </div>
-                      ))}
-
-                      {selectedCustomer && (
-                        <button type="button" onClick={() => setForm({ ...form, customer_id: "" })} className="text-xs text-blue-600 hover:underline">
-                          Enter a different buyer
-                        </button>
-                      )}
-                    </div>
-
-                    {!selectedCustomer && (
-                      <div className="mt-2 flex justify-end">
-                        <button type="button" onClick={saveNewCustomer} disabled={addingCust} data-testid="save-new-cust-btn" className="px-3 h-8 text-xs bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-60 font-medium">{addingCust ? "Saving..." : "Create & Select"}</button>
-                      </div>
-                    )}
-                  </>
-                )}
-              </Field>
-
-              {/* Sale Price + Payment */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <Field label="Sale Price (NPR)" required>
-                  <input type="text" inputMode="numeric" value={form.sale_price} onChange={e => setForm({...form, sale_price: e.target.value})} placeholder="e.g. 185000" className={inp} data-testid="sale-price-input" />
-                </Field>
-                <Field label="Advance Payment (NPR)">
-                  <input type="text" inputMode="numeric" value={form.advance_payment} onChange={e => setForm({...form, advance_payment: e.target.value})} placeholder="0" className={inp} data-testid="advance-payment-input" />
-                </Field>
-                <Field label="Paid by Cash (NPR)">
-                  <input type="text" inputMode="numeric" value={form.paid_cash} onChange={e => setForm({...form, paid_cash: e.target.value})} placeholder="0" className={inp} data-testid="paid-cash-input" />
-                </Field>
-                <Field label="Paid by Bank Transfer (NPR)">
-                  <input type="text" inputMode="numeric" value={form.paid_bank} onChange={e => setForm({...form, paid_bank: e.target.value})} placeholder="0" className={inp} data-testid="paid-bank-input" />
-                </Field>
-                <Field label="Due Amount (NPR)">
-                  <input type="text" inputMode="numeric" value={form.due_amount === "" ? autoDue : form.due_amount} onChange={e => setForm({...form, due_amount: e.target.value})} className={inp} data-testid="due-amount-input" />
-                  <p className="text-xs text-slate-400 mt-1">Auto: Grand Total − paid. Type to override.</p>
-                </Field>
-              </div>
-
-              {/* Exchange: the customer's old vehicle; its valuation is deducted from what they owe */}
-              <div className="border border-slate-200 rounded-xl p-4 space-y-3" data-testid="exchange-section">
-                <div>
-                  <p className="text-sm font-semibold text-slate-700">Exchange</p>
-                  <p className="text-xs text-slate-400 mt-0.5">The old vehicle is added to Inventory when you save, at its valuation, unlisted until you set a selling price.</p>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <Field label="Valuation (NPR)">
-                    <input type="text" inputMode="numeric" value={form.exchange_valuation} onChange={e => setForm({...form, exchange_valuation: e.target.value})} placeholder="0" className={inp} data-testid="exchange-valuation-input" />
-                  </Field>
-                  <Field label="Reg No.">
-                    <input value={form.exchange_reg_no} onChange={e => setForm({...form, exchange_reg_no: e.target.value})} className={inp} data-testid="exchange-reg-input" />
-                  </Field>
-                  <Field label="Brand">
-                    <input value={form.exchange_brand} onChange={e => setForm({...form, exchange_brand: e.target.value})} className={inp} data-testid="exchange-brand-input" />
-                  </Field>
-                  <Field label="Model">
-                    <input value={form.exchange_model} onChange={e => setForm({...form, exchange_model: e.target.value})} className={inp} data-testid="exchange-model-input" />
-                  </Field>
-                  <Field label="Year">
-                    <input value={form.exchange_year} onChange={e => setForm({...form, exchange_year: e.target.value})} inputMode="numeric" className={inp} data-testid="exchange-year-input" />
-                  </Field>
-                </div>
-              </div>
-
-              {/* Extra Expenses */}
-              <div className="border border-slate-200 rounded-xl overflow-hidden">
-                <button type="button" onClick={() => setShowPresets(!showPresets)} className="w-full flex items-center justify-between px-4 py-3 bg-slate-50 text-sm font-semibold text-slate-700 hover:bg-slate-100 transition-colors">
-                  <span>Extra Expenses</span>
-                  <div className="flex items-center gap-2">
-                    {extraExpenses.length > 0 && <span className="text-xs bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full font-medium">{extraExpenses.length} added · {formatNPR(expensesTotal)}</span>}
-                    {showPresets ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
-                  </div>
-                </button>
-
-                {showPresets && (
-                  <div className="p-4 space-y-3">
-                    {/* Sanakhat / re-sanakhat — always-there fields rather than presets, since
-                        nearly every sale has them and the amount varies */}
-                    <div className="grid grid-cols-2 gap-3">
-                      <Field label="Sanakhat Cost (NPR)">
-                        <input type="text" inputMode="numeric" value={form.sanakhat_cost} onChange={e => setForm({...form, sanakhat_cost: e.target.value})} placeholder="0" className={inp} data-testid="sale-sanakhat-cost-input" />
-                      </Field>
-                      <Field label="Re-Sanakhat Cost (NPR)">
-                        <input type="text" inputMode="numeric" value={form.resanakhat_cost} onChange={e => setForm({...form, resanakhat_cost: e.target.value})} placeholder="0" className={inp} data-testid="sale-resanakhat-cost-input" />
-                      </Field>
-                    </div>
-
-                    {/* Preset dropdown - select to add one by one */}
-                    <div className="border-t border-slate-100 pt-3">
-                      <p className="text-xs text-slate-500 font-medium mb-2">Add Preset Fee</p>
-                      <select
-                        value={presetToAdd}
-                        onChange={e => addPresetExpense(e.target.value)}
-                        className={sel}
-                        disabled={availablePresets.length === 0}
-                        data-testid="preset-expense-select"
-                      >
-                        <option value="">{availablePresets.length === 0 ? "All preset fees added" : "Select a fee to add..."}</option>
-                        {availablePresets.map(e => (
-                          <option key={e.name} value={e.name}>{e.name} — {formatNPR(e.amount)}</option>
-                        ))}
-                      </select>
-                    </div>
-
-                    {/* Custom expenses */}
-                    <div className="border-t border-slate-100 pt-3">
-                      <p className="text-xs text-slate-500 font-medium mb-2">Custom Expense</p>
-                      <div className="flex gap-2 items-center">
-                        <input value={newExpName} onChange={e => setNewExpName(e.target.value)} placeholder="Expense name" className="flex-1 h-8 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500" data-testid="custom-exp-name" />
-                        <input type="text" inputMode="numeric" value={newExpAmt} onChange={e => setNewExpAmt(e.target.value)} placeholder="Amount" className="w-24 h-8 px-2 text-sm text-right border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500" data-testid="custom-exp-amount" />
-                        <button type="button" onClick={addCustomExpense} className="h-8 px-3 bg-blue-600 text-white rounded-lg text-xs font-medium hover:bg-blue-700 transition-colors shrink-0" data-testid="add-custom-exp-btn">Add</button>
-                      </div>
-                    </div>
-
-                    {/* Added expenses list */}
-                    {expenseItems.length > 0 && (
-                      <div className="border-t border-slate-100 pt-3 space-y-1">
-                        <p className="text-xs text-slate-500 font-medium mb-1">Added Expenses</p>
-                        {expenseItems.map((ex, i) => (
-                          <div key={i} className="flex items-center justify-between text-xs bg-slate-50 rounded-lg px-2 py-1.5 border border-slate-100">
-                            <span className="text-slate-700">{ex.name}</span>
-                            <div className="flex items-center gap-2">
-                              <input
-                                type="text" inputMode="numeric"
-                                value={ex.amount}
-                                onChange={ev => updateExpenseAmount(i, ev.target.value)}
-                                className="w-20 h-6 px-1.5 text-xs text-right border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
-                              />
-                              <button type="button" onClick={() => removeExpenseItem(i)} className="text-red-400 hover:text-red-600"><X size={11} /></button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              {/* Grand Total */}
-              <div className="bg-green-50 border border-green-200 rounded-xl px-4 py-3 flex items-center justify-between" data-testid="grand-total-section">
-                <div className="text-sm text-slate-600">
-                  <div>Sale Price: <span className="font-medium text-slate-800">{formatNPR(Number(form.sale_price) || 0)}</span></div>
-                  <div>Advance Payment: <span className="font-medium text-green-700">{formatNPR(Number(form.advance_payment) || 0)}</span></div>
-                  {exchangeValuation > 0 && <div>Exchange valuation: <span className="font-medium text-green-700">− {formatNPR(exchangeValuation)}</span></div>}
-                  {expensesTotal > 0 && <div>Extra Expenses: <span className="font-medium text-orange-700">{formatNPR(expensesTotal)}</span></div>}
-                  {(Number(form.paid_cash) || 0) + (Number(form.paid_bank) || 0) > 0 && (
-                    <div>Paid (cash + bank): <span className="font-medium text-green-700">{formatNPR((Number(form.paid_cash) || 0) + (Number(form.paid_bank) || 0))}</span></div>
-                  )}
-                </div>
-                <div className="text-right">
-                  <div className="text-xs text-slate-500">Grand Total</div>
-                  <div className="text-xl font-bold text-green-700" style={{ fontFamily: "Manrope" }} data-testid="grand-total-value">{formatNPR(grandTotal)}</div>
-                  {amountDue > 0 && (
-                    <span className="inline-block mt-1 text-xs font-semibold text-red-700 bg-red-100 px-2 py-0.5 rounded-full" data-testid="due-amount-bubble">
-                      Due: {formatNPR(amountDue)}
-                    </span>
-                  )}
-                </div>
-              </div>
-
-              {/* Notes */}
-              <Field label="Notes">
-                <input value={form.notes} onChange={e => setForm({...form, notes: e.target.value})} placeholder="Any notes about this sale..." className={inp} />
-              </Field>
-
-              <div className="flex flex-col-reverse sm:flex-row gap-3 pt-4 sm:pt-1 sticky bottom-0 sm:static -mx-4 sm:mx-0 px-4 sm:px-0 pb-4 sm:pb-0 bg-white border-t sm:border-t-0 border-slate-100">
-                <button type="button" onClick={closeModal} className="flex-1 h-14 sm:h-11 border border-slate-200 text-slate-700 rounded-lg text-base sm:text-sm font-semibold hover:bg-slate-50">Cancel</button>
-                <button type="submit" disabled={saving} data-testid="save-sale-btn" className="flex-1 h-14 sm:h-11 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-base sm:text-sm font-semibold disabled:opacity-60 active:scale-95 transition-all">
-                  {saving ? "Saving..." : "Record Sale"}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      {/* Sale Vehicle form */}
+      {showModal && <SaleVehicleModal booking={activeBooking} onClose={closeModal} onSaved={fetchAll} />}
 
       {/* Leads from Notes modal: what the notes say, for review before anything is saved */}
       {showNoteLeads && (

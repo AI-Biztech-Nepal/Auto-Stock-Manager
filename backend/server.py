@@ -4219,7 +4219,7 @@ async def get_team(cu: dict = Depends(require("team", "view"))):
 # ── BOOKINGS ──────────────────────────────────────────────────────────
 # A booking is a customer's deposit on a vehicle before the sale. It is NOT a sale: nothing
 # here counts toward sales/revenue. The vehicle sits at "reserved" while the booking is active;
-# the booking then ends one of two ways — "Record Sale" (POST /sales with booking_id, which
+# the booking then ends one of two ways — "Sale Vehicle" (POST /sales with booking_id, which
 # marks it converted and the deposit rides along as the sale's advance payment) or a
 # withdrawal (cancel below, which frees the vehicle and records how much deposit was refunded).
 async def _enrich_bookings(bookings: list) -> list:

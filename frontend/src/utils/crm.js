@@ -36,7 +36,7 @@ export const referredByLabel = (c) => {
 export const leadLabel = (c) => (c.source ? SOURCE_LABEL[c.source] : "");
 
 export const EMPTY_SOURCE ={ source: "", source_note: "", referred_by_id: "" };
-// "Referred by" on its own (the Record Sale form): a customer, or source_note = the typed name of someone who isn't one.
+// "Referred by" on its own (the Sale Vehicle form): a customer, or source_note = the typed name of someone who isn't one.
 export const EMPTY_REFERRER = { referred_by_id: "", source_note: "" };
 
 export const sourceFromCustomer = (c) => ({

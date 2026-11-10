@@ -9,11 +9,15 @@ import { SOURCES } from "../utils/crm";
 // `customers` is optional: when the caller doesn't have the list handy, the field loads it itself
 // the first time "Referral" is picked.
 const inp = "w-full h-9 px-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white";
+// size="lg": the boxes of the big forms (Purchase / Sale Vehicle)
+const inpLg = "w-full h-11 px-3 text-base sm:text-sm border border-slate-300 rounded-[10px] focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white";
+const labelCls = (big) => (big ? "block text-xs font-semibold text-slate-600 mb-1.5" : "block text-xs font-medium text-slate-600 mb-1");
 
 // One box for the referrer: type a name and the customers we know that match drop down to pick from. Pick one and they
 // are linked (shown as a chip); leave it typed and it is kept as the plain name of someone who isn't a customer.
 // onChange gets just the fields that changed.
-function ReferrerInput({ customers, value, onChange, excludeId }) {
+function ReferrerInput({ customers, value, onChange, excludeId, big = false }) {
+  const box = big ? inpLg : inp;
   const [open, setOpen] = useState(false);
   const [hi, setHi] = useState(-1); // keyboard-highlighted match; -1 keeps Enter from swapping a typed name for a near match
   const picked = customers.find(c => c.id === value.referred_by_id);
@@ -27,7 +31,7 @@ function ReferrerInput({ customers, value, onChange, excludeId }) {
 
   if (picked) {
     return (
-      <div className="flex items-center justify-between gap-2 h-9 px-3 rounded-lg bg-amber-50 border border-amber-200 text-sm text-amber-900" data-testid="referrer-picked">
+      <div className={`flex items-center justify-between gap-2 px-3 bg-amber-50 border border-amber-200 text-sm text-amber-900 ${big ? "h-11 rounded-[10px]" : "h-9 rounded-lg"}`} data-testid="referrer-picked">
         <span className="truncate font-medium">{picked.name}<span className="font-normal text-amber-700"> · {picked.contact_number}</span></span>
         <button type="button" onClick={() => onChange({ referred_by_id: "" })} aria-label="Remove referrer" className="shrink-0 text-amber-700 hover:text-amber-900"><X size={14} /></button>
       </div>
@@ -54,7 +58,7 @@ function ReferrerInput({ customers, value, onChange, excludeId }) {
         autoComplete="off"
         role="combobox"
         aria-expanded={open}
-        className={`${inp} pl-8`}
+        className={`${box} pl-8`}
         data-testid="referrer-input"
       />
       {open && (matches.length > 0 || text.trim()) && (
@@ -77,17 +81,19 @@ function ReferrerInput({ customers, value, onChange, excludeId }) {
 
 // "Referred by" as a section of its own, independent of the lead: value is { referred_by_id, source_note } where
 // source_note is the typed name of a referrer who isn't a customer.
-export function ReferredByField({ value, onChange, customers = [], excludeId }) {
+export function ReferredByField({ value, onChange, customers = [], excludeId, size }) {
+  const big = size === "lg";
   return (
     <div data-testid="referred-by-field">
-      <label className="block text-xs font-medium text-slate-600 mb-1">Referred by</label>
-      <ReferrerInput customers={customers} value={value} onChange={patch => onChange({ ...value, ...patch })} excludeId={excludeId} />
+      <label className={labelCls(big)}>Referred by</label>
+      <ReferrerInput customers={customers} value={value} onChange={patch => onChange({ ...value, ...patch })} excludeId={excludeId} big={big} />
     </div>
   );
 }
 
 // `hideReferral` drops the Referral button, for a form that asks "Referred by" separately.
-export default function SourceField({ value, onChange, customers, excludeId, required = false, label = "How did they find us?", hideReferral = false }) {
+export default function SourceField({ value, onChange, customers, excludeId, required = false, label = "How did they find us?", hideReferral = false, size }) {
+  const big = size === "lg";
   const [loaded, setLoaded] = useState(null);
   const list = customers || loaded || [];
   const needList = value.source === "referral" && !customers && !loaded;
@@ -104,7 +110,7 @@ export default function SourceField({ value, onChange, customers, excludeId, req
 
   return (
     <div data-testid="source-field">
-      <label className="block text-xs font-medium text-slate-600 mb-1">{label}{required && <span className="text-red-500 ml-0.5">*</span>}</label>
+      <label className={labelCls(big)}>{label}{required && <span className="text-red-500 ml-0.5">*</span>}</label>
       <div className="flex flex-wrap gap-1.5" role="group" aria-label={label}>
         {SOURCES.filter(s => !(hideReferral && s.key === "referral")).map(({ key, label: l, Icon }) => {
           const on = value.source === key;
@@ -115,7 +121,7 @@ export default function SourceField({ value, onChange, customers, excludeId, req
               onClick={() => pick(on && !required ? "" : key)}
               aria-pressed={on}
               data-testid={`source-${key}`}
-              className={`h-9 px-2.5 inline-flex items-center gap-1.5 rounded-lg text-xs font-semibold border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${on ? "bg-blue-600 text-white border-blue-600" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"}`}
+              className={`inline-flex items-center gap-1.5 font-semibold border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${big ? "h-11 px-3 rounded-[10px] text-[13px]" : "h-9 px-2.5 rounded-lg text-xs"} ${on ? "bg-blue-600 text-white border-blue-600" : `bg-white text-slate-600 hover:bg-slate-50 ${big ? "border-slate-300" : "border-slate-200"}`}`}
             >
               <Icon size={14} />{l}
             </button>
@@ -125,11 +131,11 @@ export default function SourceField({ value, onChange, customers, excludeId, req
       {value.source === "referral" && (
         <div className="mt-2 space-y-1.5">
           <p className="text-xs font-medium text-slate-600">Referred by</p>
-          <ReferrerInput customers={list} value={value} onChange={set} excludeId={excludeId} />
+          <ReferrerInput customers={list} value={value} onChange={set} excludeId={excludeId} big={big} />
         </div>
       )}
       {value.source === "other" && (
-        <input value={value.source_note} onChange={e => set({ source_note: e.target.value })} placeholder="Where? e.g. Instagram, signboard, Hamro Bazar" className={`${inp} mt-2`} data-testid="source-note" />
+        <input value={value.source_note} onChange={e => set({ source_note: e.target.value })} placeholder="Where? e.g. Instagram, signboard, Hamro Bazar" className={`${big ? inpLg : inp} mt-2`} data-testid="source-note" />
       )}
     </div>
   );

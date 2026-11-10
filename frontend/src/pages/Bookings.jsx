@@ -47,7 +47,7 @@ const EMPTY_BOOKING = {
 };
 
 // Bookings: deposits taken before a sale. Not sales — they only become one when the customer
-// pays the balance ("Record Sale" hands the booking to the Sales page, which opens the normal
+// pays the balance ("Sale Vehicle" hands the booking to the Sales page, which opens the normal
 // sale form pre-filled from it).
 export default function Bookings({ embedded = false, onRecordSale: onRecordSaleProp }) {
   const navigate = useNavigate();
@@ -171,7 +171,7 @@ export default function Bookings({ embedded = false, onRecordSale: onRecordSaleP
       {b.status === "active" && (
         <>
           <button onClick={() => onRecordSale(b)} data-testid="booking-record-sale-btn" className="flex items-center gap-1.5 h-9 px-3 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-medium active:scale-95 transition-all whitespace-nowrap">
-            Record Sale <ArrowRight size={14} />
+            Sale Vehicle <ArrowRight size={14} />
           </button>
           <button onClick={() => openForm(b)} title="Edit booking" data-testid="booking-edit-btn" className="w-11 h-11 md:w- md:h- flex items-center justify-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50"><Pencil size={14} /></button>
           {isAdmin && <button onClick={() => openWithdraw(b)} title="Customer withdraws" data-testid="booking-withdraw-btn" className="w-11 h-11 md:w- md:h- flex items-center justify-center rounded-lg border border-amber-200 text-amber-700 hover:bg-amber-50"><Undo2 size={14} /></button>}

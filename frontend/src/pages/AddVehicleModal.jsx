@@ -12,20 +12,9 @@ import BSDatePicker from "../components/BSDatePicker";
 import CustomerVendorPicker from "../components/CustomerVendorPicker";
 import { BRANDS, SOURCES, CONDITIONS, FUEL_TYPES, OWNERSHIP_OPTIONS, VEHICLE_STATUS_OPTIONS, formatNPR } from "../utils/helpers";
 import { EMPTY_DOC_PHOTOS } from "../utils/stagedDocs";
+import { LBL, RO, BOX, OK, BAD, SECTION, H2, DATE_BOX, GRID, Money, digits } from "../components/formKit";
 import { PhotoCropperModal } from "../components/PhotoCropperModal";
 import { usePhotoCropQueue } from "../hooks/usePhotoCropQueue";
-
-const LBL = "block text-xs font-semibold text-slate-600 mb-1.5";
-// A box that is switched off (the form is read-only) keeps its text dark, drops the grey-out and, for a dropdown, the arrow.
-const RO = "disabled:bg-slate-50 disabled:text-slate-900 disabled:[-webkit-text-fill-color:#0f172a] disabled:opacity-100 disabled:cursor-default disabled:appearance-none";
-const BOX = `w-full h-11 px-3 text-base sm:text-sm border rounded-[10px] bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 ${RO}`;
-const OK = "border-slate-300";
-const BAD = "border-red-500 ring-1 ring-red-500";
-const SECTION = "px-4 sm:px-7 py-6 border-b border-slate-200 last:border-b-0 scroll-mt-2";
-const H2 = "mb-4 text-base font-bold text-slate-900";
-// The date picker's trigger, sized like BOX (the picker draws its own focus ring).
-const DATE_BOX = "w-full h-11 px-3 text-base sm:text-sm border rounded-[10px] bg-white disabled:bg-slate-50 disabled:cursor-default disabled:hover:border-slate-300";
-const GRID = "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4";
 
 const LISTING = [{ value: "available", label: "Available" }, { value: "unlisted", label: "Unlisted" }, { value: "in_repair", label: "In repair" }];
 const TERMINATION = [{ value: "pending", label: "Pending" }, { value: "yes", label: "Yes" }, { value: "no", label: "No" }];
@@ -36,7 +25,6 @@ const DOCS = [["bluebook", "Bluebook"], ["tax_clearance", "Tax clearance"], ["tr
 
 // Plates compare without spaces, slashes or case, the same rule the Inventory page uses for duplicates.
 const normPlate = (s) => (s || "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
-const digits = (x) => Number(String(x ?? "").replace(/[^\d.]/g, "")) || 0;
 
 // What Save needs, as [field, name] in page order (the first one is the field that gets focus). Editing leaves out the
 // date and source: an older record may have neither, and that should not stop a change to something else.
@@ -79,24 +67,6 @@ function Seg({ value, onChange, options, label, testid }) {
           </button>
         );
       })}
-    </div>
-  );
-}
-
-// An amount field: "Rs." in front, digits only (what the form saves), the formatted figure under it.
-function Money({ id, value, onChange, testid, error, placeholder = "0" }) {
-  const n = digits(value);
-  return (
-    <div>
-      <div className={`flex items-center h-11 border rounded-[10px] bg-white has-[:disabled]:bg-slate-50 focus-within:ring-2 focus-within:ring-blue-500 focus-within:border-blue-500 ${error ? BAD : OK}`}>
-        <span className="pl-3 pr-1 text-[13px] font-semibold text-slate-500">Rs.</span>
-        <input
-          id={id} data-testid={testid} type="text" inputMode="numeric" pattern="[0-9]*"
-          value={value ?? ""} onChange={e => onChange(e.target.value)} placeholder={placeholder}
-          className="flex-1 min-w-0 h-full pr-3 text-base sm:text-sm text-slate-900 bg-transparent outline-none disabled:cursor-default disabled:[-webkit-text-fill-color:#0f172a] disabled:opacity-100"
-        />
-      </div>
-      {n > 0 && <p className="mt-1 text-xs text-slate-500">{formatNPR(n)}</p>}
     </div>
   );
 }
