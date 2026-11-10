@@ -61,7 +61,7 @@ export default function VehicleComboBox({ vehicles, value, onChange, placeholder
           data-testid={`${testId}-combobox`}
           autoComplete="off"
         />
-        <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+        <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none peer-disabled:hidden" />
       </div>
       {open && (
         <div className="absolute left-0 right-0 top-full mt-1 z-20 bg-white border border-slate-200 rounded-lg shadow-lg max-h-56 overflow-y-auto" data-testid={`${testId}-dropdown`}>

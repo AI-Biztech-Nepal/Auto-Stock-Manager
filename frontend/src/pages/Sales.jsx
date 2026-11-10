@@ -11,6 +11,7 @@ import { BOOK_CARD, BookTableStyle } from "../components/BookTable";
 import WarrantyBadge from "../components/WarrantyBadge";
 import Bookings from "./Bookings";
 import SaleVehicleModal from "./SaleVehicleModal";
+import SaleDetailModal from "./SaleDetailModal";
 import DateRangeFilter, { resolveDateFilter } from "../components/DateRangeFilter";
 import { SOURCE_LABEL } from "../utils/crm";
 
@@ -158,9 +159,10 @@ export default function Sales() {
     }
   };
 
-  // A live sale opens its sold-vehicle record (warranty, service history, transfer, return);
-  // a returned sale only exists as the sale itself.
-  const openSale = (s) => navigate(!s.returned && s.vehicle_id && vehicleById[s.vehicle_id] ? `/sales/vehicle/${s.vehicle_id}` : `/sales/${s.id}`);
+  // A sale opens as a pop-up over this list: its details as the Sale Vehicle form, with the warranty and service history of a
+  // sold vehicle, and Edit, Return and Delete.
+  const [detailId, setDetailId] = useState(null);
+  const openSale = (s) => setDetailId(s.id);
 
   const openModal = (booking = null) => { setActiveBooking(booking); setShowModal(true); };
   const closeModal = () => { setShowModal(false); setActiveBooking(null); };
@@ -343,7 +345,7 @@ export default function Sales() {
           </p>
           <div className="space-y-1.5">
             {mismatches.map(m => (
-              <div key={m.sale_id || m.vehicle_id} onClick={() => navigate(m.sale_id ? `/sales/${m.sale_id}` : `/inventory/${m.vehicle_id}`)} className="flex items-center justify-between text-sm px-3 py-2 rounded-lg bg-white hover:bg-amber-100 cursor-pointer transition-colors">
+              <div key={m.sale_id || m.vehicle_id} onClick={() => (m.sale_id ? openSale({ id: m.sale_id }) : navigate(`/inventory/${m.vehicle_id}`))} className="flex items-center justify-between text-sm px-3 py-2 rounded-lg bg-white hover:bg-amber-100 cursor-pointer transition-colors">
                 <div className="text-slate-700">
                   {m.issue === "orphan_sold_vehicle"
                     ? `${m.vehicle_info || "Vehicle"} — marked Sold on ${m.sale_date}, no sale record`
@@ -570,7 +572,7 @@ export default function Sales() {
                         <td className="text-gray-500 whitespace-nowrap"><HoverADDate date={s.sale_date} /></td>
                         <td>
                           <div className="flex items-center gap-1">
-                            <button onClick={e => { e.stopPropagation(); navigate(`/sales/${s.id}`); }} className="max-md:min-w-11 max-md:min-h-11 max-md:inline-flex max-md:items-center max-md:justify-center p-1.5 hover:bg-slate-100 rounded-lg transition-colors" title="View / edit sale" data-testid="view-sale-btn">
+                            <button onClick={e => { e.stopPropagation(); openSale(s); }} className="max-md:min-w-11 max-md:min-h-11 max-md:inline-flex max-md:items-center max-md:justify-center p-1.5 hover:bg-slate-100 rounded-lg transition-colors" title="View / edit sale" data-testid="view-sale-btn">
                               <Eye size={14} className="text-slate-500" />
                             </button>
                             {isAdmin && (
@@ -595,6 +597,9 @@ export default function Sales() {
 
       {/* Sale Vehicle form */}
       {showModal && <SaleVehicleModal booking={activeBooking} onClose={closeModal} onSaved={fetchAll} />}
+
+      {/* A sale's details */}
+      {detailId && <SaleDetailModal saleId={detailId} onClose={() => setDetailId(null)} onChanged={fetchAll} />}
 
       {/* Leads from Notes modal: what the notes say, for review before anything is saved */}
       {showNoteLeads && (
