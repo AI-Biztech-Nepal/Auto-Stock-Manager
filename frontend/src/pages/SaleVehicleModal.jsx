@@ -1,7 +1,7 @@
 /**
  * SaleVehicleModal.jsx — the Sale Vehicle form (opened from the Sales page, or from a booking).
  *
- * Built like Purchase Vehicle: one scrolling page of sections (Sale, Buyer, Payment, Exchange, Extra expenses, Notes),
+ * Built like Purchase Vehicle: one scrolling page of sections (Sale, Payment, Exchange, Extra expenses, Notes),
  * chips for phones to jump between them, and a footer that keeps the grand total, what has been paid and what is still
  * due in view. It owns its own state and posts the sale itself; onSaved lets the Sales page reload.
  */
@@ -157,21 +157,21 @@ export default function SaleVehicleModal({ booking = null, onClose, onSaved }) {
   const updateExpenseAmount = (idx, amount) => setExpenseItems(prev => prev.map((e, i) => i === idx ? { ...e, amount } : e));
   const removeExpenseItem = (idx) => setExpenseItems(prev => prev.filter((_, i) => i !== idx));
 
-  // What Save needs, as [field id, name] in page order; shown on the fields after a first try. The Buyer + Witness panel
-  // only counts while it is open: then both blocks are mandatory (sale deed), and a typed-but-not-yet-saved buyer is
+  // What Save needs, as [field id, name] in page order (the first one gets the focus); shown on the fields after a first
+  // try. The Buyer + Witness panel only counts while it is open: then both blocks are mandatory (sale deed), and a typed-but-not-yet-saved buyer is
   // created on the way through. An existing customer picked from the list covers the buyer half itself. Lead and
   // Referred by are optional, except that a new buyer must be tagged with one or the other.
   const enteringNewBuyer = showAddCust && !form.customer_id;
   const missing = [
     !form.vehicle_id && ["sv-vehicle", "vehicle"],
-    !form.sale_price && ["sv-sale_price", "sale price"],
-    enteringNewBuyer && !isSourceComplete(buyerSource) && ["sv-lead", "lead, or who referred the buyer"],
     enteringNewBuyer && !buyer.name.trim() && ["sv-buyer-name", "buyer's name"],
     enteringNewBuyer && !buyer.address.trim() && ["sv-buyer-address", "buyer's address"],
     enteringNewBuyer && !buyer.contact_number.trim() && ["sv-buyer-phone", "buyer's phone"],
     showAddCust && !form.witness_name.trim() && ["sv-witness-name", "witness's name"],
     showAddCust && !form.witness_address.trim() && ["sv-witness-address", "witness's address"],
     showAddCust && !form.witness_phone.trim() && ["sv-witness-phone", "witness's phone"],
+    !form.sale_price && ["sv-sale_price", "sale price"],
+    enteringNewBuyer && !isSourceComplete(buyerSource) && ["sv-lead", "lead, or who referred the buyer"],
   ].filter(Boolean);
   const bad = (id) => attempted && missing.some(m => m[0] === id);
 
@@ -240,8 +240,7 @@ export default function SaleVehicleModal({ booking = null, onClose, onSaved }) {
   };
 
   const sections = [
-    { id: "sale", label: "Sale", done: !!(form.vehicle_id && form.sale_price) },
-    { id: "buyer", label: "Buyer", done: !!form.customer_id },
+    { id: "sale", label: "Sale", done: !!(form.vehicle_id && form.sale_price && form.customer_id) },
     { id: "payment", label: "Payment", done: amountPaid > 0 },
     { id: "exchange", label: "Exchange", done: exchangeValuation > 0 },
     { id: "extras", label: "Extra expenses", done: extraExpenses.length > 0 },
@@ -302,10 +301,28 @@ export default function SaleVehicleModal({ booking = null, onClose, onSaved }) {
               </div>
             )}
 
-            {/* 1 Sale */}
+            {/* 1 Sale: who is buying comes first (at the top, as Name does in Purchase Vehicle), then what and for how much */}
             <section id="sv-section-sale" className={SECTION}>
               <h3 className={H2} style={{ fontFamily: "Manrope, sans-serif" }}>Sale</h3>
               <div className={GRID}>
+                <div className="sm:col-span-2">
+                  <label htmlFor="sv-customer" className={LBL}>Customer name</label>
+                  <div className="flex gap-2">
+                    <select id="sv-customer" value={form.customer_id} onChange={e => set({ customer_id: e.target.value })} className={`${BOX} ${OK}`} data-testid="sale-customer-select">
+                      <option value="">Walk-in / No customer record</option>
+                      {customers.map(c => (
+                        <option key={c.id} value={c.id}>{c.name} — {c.contact_number}</option>
+                      ))}
+                    </select>
+                    <button
+                      type="button" onClick={() => setShowAddCust(s => !s)} aria-pressed={showAddCust} aria-label="Add buyer and witness details" title="Add buyer + witness details" data-testid="add-customer-inline-btn"
+                      className={`shrink-0 w-11 h-11 flex items-center justify-center rounded-[10px] border transition-colors ${showAddCust ? "bg-blue-600 text-white border-blue-600" : "border-slate-300 text-slate-500 hover:bg-slate-50"}`}
+                    >
+                      <UserPlus size={16} />
+                    </button>
+                  </div>
+                  <p className="mt-1 text-xs text-slate-500">Pick a customer, or press the person button to enter a new buyer and the sale-deed witness</p>
+                </div>
                 <div className="sm:col-span-2">
                   <label htmlFor="sv-vehicle" className={LBL}>Vehicle <span className="text-red-600">*</span></label>
                   {booking ? (
@@ -323,57 +340,6 @@ export default function SaleVehicleModal({ booking = null, onClose, onSaved }) {
                     />
                   )}
                   {bad("sv-vehicle") && <p className="mt-1.5 text-xs font-semibold text-red-700">Pick the vehicle being sold</p>}
-                </div>
-                <div>
-                  <label htmlFor="sv-sale_price" className={LBL}>Sale price <span className="text-red-600">*</span></label>
-                  <Money id="sv-sale_price" testid="sale-price-input" value={form.sale_price} onChange={v => set({ sale_price: v })} error={bad("sv-sale_price")} />
-                  {bad("sv-sale_price") && <p className="mt-1 text-xs font-semibold text-red-700">Enter the price it is sold for</p>}
-                </div>
-                <div>
-                  <span className={LBL}>Sale date (BS)</span>
-                  <BSDatePicker value={form.sale_date} onChange={val => set({ sale_date: val })} data-testid="sale-date-input" triggerClassName={`${DATE_BOX} ${OK}`} placeholder="Today" />
-                </div>
-                <div>
-                  <span className={LBL}>Vehicle pass date (BS)</span>
-                  <BSDatePicker value={form.ownership_transfer_date} onChange={val => set({ ownership_transfer_date: val })} data-testid="vehicle-pass-date-input" triggerClassName={`${DATE_BOX} ${OK}`} />
-                </div>
-                <div className="sm:col-span-2 lg:col-span-1">
-                  <span className={LBL}>Sold by</span>
-                  <SoldBySelect value={form.sold_by_id} onChange={v => set({ sold_by_id: v })} className={`${BOX} ${OK}`} testid="sale-sold-by-select" />
-                </div>
-              </div>
-            </section>
-
-            {/* 2 Buyer */}
-            <section id="sv-section-buyer" className={SECTION}>
-              <h3 className={H2} style={{ fontFamily: "Manrope, sans-serif" }}>Buyer</h3>
-              <div className={GRID}>
-                <div className="sm:col-span-2">
-                  <label htmlFor="sv-customer" className={LBL}>Customer</label>
-                  <div className="flex gap-2">
-                    <select id="sv-customer" value={form.customer_id} onChange={e => set({ customer_id: e.target.value })} className={`${BOX} ${OK}`} data-testid="sale-customer-select">
-                      <option value="">Walk-in / No customer record</option>
-                      {customers.map(c => (
-                        <option key={c.id} value={c.id}>{c.name} — {c.contact_number}</option>
-                      ))}
-                    </select>
-                    <button
-                      type="button" onClick={() => setShowAddCust(s => !s)} aria-pressed={showAddCust} aria-label="Add buyer and witness details" title="Add buyer + witness details" data-testid="add-customer-inline-btn"
-                      className={`shrink-0 w-11 h-11 flex items-center justify-center rounded-[10px] border transition-colors ${showAddCust ? "bg-blue-600 text-white border-blue-600" : "border-slate-300 text-slate-500 hover:bg-slate-50"}`}
-                    >
-                      <UserPlus size={16} />
-                    </button>
-                  </div>
-                  <p className="mt-1 text-xs text-slate-500">Pick a customer, or press the person button to enter a new buyer and the sale-deed witness</p>
-                </div>
-                <div className="hidden lg:block lg:col-span-2" />
-
-                <div id="sv-lead" tabIndex={-1} className="sm:col-span-2 outline-none" data-testid="sale-lead">
-                  <SourceField value={leadSource} onChange={setLeadSource} customers={customers} label="Lead" hideReferral size="lg" />
-                  {bad("sv-lead") && <p className="mt-1.5 text-xs font-semibold text-red-700">Pick a lead, or say who referred the buyer</p>}
-                </div>
-                <div className="sm:col-span-2">
-                  <ReferredByField value={referrer} onChange={setReferrer} customers={customers} size="lg" />
                 </div>
 
                 {showAddCust && (
@@ -415,10 +381,36 @@ export default function SaleVehicleModal({ booking = null, onClose, onSaved }) {
                     )}
                   </div>
                 )}
+
+                <div>
+                  <label htmlFor="sv-sale_price" className={LBL}>Sale price <span className="text-red-600">*</span></label>
+                  <Money id="sv-sale_price" testid="sale-price-input" value={form.sale_price} onChange={v => set({ sale_price: v })} error={bad("sv-sale_price")} />
+                  {bad("sv-sale_price") && <p className="mt-1 text-xs font-semibold text-red-700">Enter the price it is sold for</p>}
+                </div>
+                <div>
+                  <span className={LBL}>Sale date (BS)</span>
+                  <BSDatePicker value={form.sale_date} onChange={val => set({ sale_date: val })} data-testid="sale-date-input" triggerClassName={`${DATE_BOX} ${OK}`} placeholder="Today" />
+                </div>
+                <div>
+                  <span className={LBL}>Vehicle pass date (BS)</span>
+                  <BSDatePicker value={form.ownership_transfer_date} onChange={val => set({ ownership_transfer_date: val })} data-testid="vehicle-pass-date-input" triggerClassName={`${DATE_BOX} ${OK}`} />
+                </div>
+                <div className="sm:col-span-2 lg:col-span-1">
+                  <span className={LBL}>Sold by</span>
+                  <SoldBySelect value={form.sold_by_id} onChange={v => set({ sold_by_id: v })} className={`${BOX} ${OK}`} testid="sale-sold-by-select" />
+                </div>
+
+                <div id="sv-lead" tabIndex={-1} className="sm:col-span-2 outline-none" data-testid="sale-lead">
+                  <SourceField value={leadSource} onChange={setLeadSource} customers={customers} label="Lead" hideReferral size="lg" />
+                  {bad("sv-lead") && <p className="mt-1.5 text-xs font-semibold text-red-700">Pick a lead, or say who referred the buyer</p>}
+                </div>
+                <div className="sm:col-span-2">
+                  <ReferredByField value={referrer} onChange={setReferrer} customers={customers} size="lg" />
+                </div>
               </div>
             </section>
 
-            {/* 3 Payment */}
+            {/* 2 Payment */}
             <section id="sv-section-payment" className={SECTION}>
               <h3 className={H2} style={{ fontFamily: "Manrope, sans-serif" }}>Payment</h3>
               <div className={GRID}>
@@ -442,7 +434,7 @@ export default function SaleVehicleModal({ booking = null, onClose, onSaved }) {
               </div>
             </section>
 
-            {/* 4 Exchange: the customer's old vehicle; its valuation is deducted from what they owe */}
+            {/* 3 Exchange: the customer's old vehicle; its valuation is deducted from what they owe */}
             <section id="sv-section-exchange" className={SECTION} data-testid="exchange-section">
               <h3 className={H2} style={{ fontFamily: "Manrope, sans-serif" }}>Exchange <span className="ml-1 text-xs font-medium text-slate-500" style={{ fontFamily: "Inter, sans-serif" }}>optional · the old vehicle is added to Inventory when you save, at its valuation, unlisted until you set a selling price</span></h3>
               <div className={GRID}>
@@ -469,7 +461,7 @@ export default function SaleVehicleModal({ booking = null, onClose, onSaved }) {
               </div>
             </section>
 
-            {/* 5 Extra expenses */}
+            {/* 4 Extra expenses */}
             <section id="sv-section-extras" className={SECTION}>
               <h3 className={H2} style={{ fontFamily: "Manrope, sans-serif" }}>
                 Extra expenses
@@ -534,7 +526,7 @@ export default function SaleVehicleModal({ booking = null, onClose, onSaved }) {
               </div>
             </section>
 
-            {/* 6 Notes */}
+            {/* 5 Notes */}
             <section id="sv-section-notes" className={SECTION}>
               <h3 className={H2} style={{ fontFamily: "Manrope, sans-serif" }}>Notes</h3>
               <label htmlFor="sv-notes" className="sr-only">Notes</label>
