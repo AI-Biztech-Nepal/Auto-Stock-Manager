@@ -76,3 +76,39 @@ def test_a_tampered_or_malformed_derived_key_is_refused():
     for bad in ("", "nodot", ".", "co-1.", ".abc"):
         assert a.company_for_derived_key(bad, "server-secret") is None
     assert a.company_for_derived_key(key, "") is None
+
+
+def _status(stored, purchases):
+    if purchases > 0:
+        return "converted"
+    return stored if stored in ("new", "contacted", "interested", "lost") else "new"
+
+
+def _day(value):
+    from datetime import date
+    return date.fromisoformat(str(value)[:10]) if value else None
+
+
+def test_people_briefing_counts_customers_stages_followups_and_team():
+    from datetime import date
+    customers = [
+        {"id": "a", "created_at": "2026-11-02", "lead_status": "interested"},
+        {"id": "b", "created_at": "2026-11-09", "lead_status": "contacted"},
+        {"id": "c", "created_at": "2026-10-20", "lead_status": "lost"},
+        {"id": "d", "created_at": "2026-08-01", "lead_status": None},
+        {"id": "e", "created_at": "2026-07-01", "lead_status": "interested"},
+    ]
+    sales = [{"customer_id": "a"}, {"customer_id": "e", "returned": True}, {"customer_id": None}]   # a bought; e's sale came back
+    followups = [{"due_at": "2026-11-08"}, {"due_at": "2026-11-10"}, {"due_at": "2026-11-12"}, {"due_at": None}]
+    team = [{"role": "sales", "is_active": 1}, {"role": "sales", "is_active": 0}, {"role": "mechanic"}]
+    out = a.people_briefing(customers, sales, followups, team, date(2026, 11, 10), _status, _day)
+    assert out["customers"]["total"] == 5 and out["customers"]["new_this_month"] == 2
+    assert out["customers"]["by_stage"] == {"new": 1, "contacted": 1, "interested": 1, "converted": 1, "lost": 1}
+    assert out["customers"]["followups_overdue"] == 1 and out["customers"]["followups_today"] == 1
+    assert out["team"] == {"active": 2, "by_role": {"mechanic": 1, "sales": 1}}          # inactive staff are left out
+
+
+def test_people_numbers_are_added_to_the_briefing_without_breaking_it():
+    out = a.build_briefing([], {}, "2026-11-10", "2026-11", _revenue, people={"customers": {"total": 3}})
+    assert out["customers"] == {"total": 3} and out["today"]["sales"] == 0
+    assert "customers" not in a.build_briefing([], {}, "2026-11-10", "2026-11", _revenue)

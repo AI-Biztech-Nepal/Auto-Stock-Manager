@@ -72,7 +72,46 @@ def nepal_today(now: datetime | None = None) -> tuple[str, str]:
     return local.date().isoformat(), local.strftime("%Y-%m")
 
 
-def build_briefing(sales: list[dict], finance: dict, today: str, month: str, revenue_of) -> dict:
+LEAD_STATUSES = ("new", "contacted", "interested", "converted", "lost")
+
+
+def people_briefing(customers: list[dict], sales: list[dict], followups: list[dict], team: list[dict],
+                    today, status_of, date_of) -> dict:
+    """Customers, the CRM's lead stages, follow-ups due and the team, counted the way the CRM page counts them.
+
+    `status_of(stored, purchases)` and `date_of(value)` are the CRM's own helpers (crm.effective_status and
+    crm.npt_date), passed in so this stays testable without the app. A customer who has bought is Converted;
+    a returned sale does not count as a purchase. Staff are counted, never their pay or commission."""
+    from collections import Counter
+    bought = Counter(s.get("customer_id") for s in sales if s.get("customer_id") and not s.get("returned"))
+    stages = Counter(status_of(c.get("lead_status"), bought.get(c.get("id"), 0)) for c in customers)
+    month = today.strftime("%Y-%m")
+    added = [d for d in (date_of(c.get("created_at")) for c in customers) if d is not None]
+    overdue = due_today = 0
+    for f in followups:
+        due = date_of(f.get("due_at"))
+        if due is None:
+            continue
+        if due < today:
+            overdue += 1
+        elif due == today:
+            due_today += 1
+    active = [m for m in team if m.get("is_active", 1) not in (0, False)]
+    roles = Counter(str(m.get("role") or "other") for m in active)
+    return {
+        "customers": {
+            "total": len(customers),
+            "new_this_month": sum(1 for d in added if d.strftime("%Y-%m") == month),
+            "by_stage": {k: stages.get(k, 0) for k in LEAD_STATUSES},
+            "followups_overdue": overdue,
+            "followups_today": due_today,
+        },
+        "team": {"active": len(active), "by_role": dict(sorted(roles.items()))},
+    }
+
+
+def build_briefing(sales: list[dict], finance: dict, today: str, month: str, revenue_of,
+                   people: dict | None = None) -> dict:
     """The owner's numbers. `finance` is what /finance/summary returns; `revenue_of(sale)` counts a
     returned sale at what was kept, the same way the rest of the app does."""
     def on(prefix: str) -> list[dict]:
@@ -81,7 +120,7 @@ def build_briefing(sales: list[dict], finance: dict, today: str, month: str, rev
     todays, months = on(today), on(month)
     owing = [s for s in sales if (s.get("due_amount") or 0) > 0]
     overdue = [s for s in owing if s.get("due_date") and str(s["due_date"])[:10] < today]
-    return {
+    out = {
         "as_of": today,
         "today": {"sales": len(todays), "revenue": round(sum(revenue_of(s) for s in todays), 2)},
         "this_month": {"sales": len(months), "revenue": round(sum(revenue_of(s) for s in months), 2)},
@@ -103,3 +142,5 @@ def build_briefing(sales: list[dict], finance: dict, today: str, month: str, rev
             "vehicles_sold": finance.get("vehicles_sold", 0),
         },
     }
+    out.update(people or {})
+    return out

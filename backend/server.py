@@ -4670,9 +4670,16 @@ async def assistant_briefing(request: Request):
         raise HTTPException(401, "Invalid assistant key")
     current_company_id.set(cid)          # every db.<collection> call below is now scoped to this company
     finance = await finance_summary({"role": "admin"})
-    sales = await db.sales.find({}, {"_id": 0}).to_list(5000)
+    sales = await db.sales.find({}, {"_id": 0}).to_list(50000)
     today, month = assistant_api.nepal_today()
-    return assistant_api.build_briefing(sales, finance, today, month, _sale_revenue)
+    # Customers, the CRM's lead stages, follow-ups due and the team, counted as the CRM page counts them.
+    customers = await db.customers.find({}, {"_id": 0, "id": 1, "created_at": 1, "lead_status": 1}).to_list(50000)
+    followups = await db.crm_followups.find({"status": "pending"}, {"_id": 0, "due_at": 1}).to_list(50000)
+    team = await db.team_members.find({}, {"_id": 0, "role": 1, "is_active": 1}).to_list(500)
+    people = assistant_api.people_briefing(
+        customers, sales, followups, team, datetime.fromisoformat(today).date(),
+        crm.effective_status, crm.npt_date)
+    return assistant_api.build_briefing(sales, finance, today, month, _sale_revenue, people=people)
 
 @api_router.get("/assistant/key")
 @limiter.limit("10/minute")
