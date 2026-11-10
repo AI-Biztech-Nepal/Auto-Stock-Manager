@@ -6,7 +6,7 @@ from starlette.middleware.cors import CORSMiddleware
 from starlette.middleware.gzip import GZipMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from passlib.context import CryptContext
-from typing import Optional, List, Literal
+from typing import Optional, List, Literal, Union
 from datetime import datetime, timezone, timedelta
 from urllib.parse import urlparse, quote
 from pathlib import Path
@@ -1714,6 +1714,17 @@ class SaleUpdate(BaseModel):
     lead_note: Optional[str] = Field(None, max_length=255)
     referred_by_id: Optional[str] = None
     referred_by_name: Optional[str] = Field(None, max_length=255)
+    # The witness and the exchange, as on SaleCreate. Each group is only changed when the form sends any of it (an empty
+    # value clears it). Changing the exchange also changes the old vehicle's Inventory entry: see _plan_exchange_change.
+    witness_name: Optional[str] = None
+    witness_address: Optional[str] = None
+    witness_phone: Optional[str] = None
+    witness_id_number: Optional[str] = None
+    exchange_valuation: Optional[float] = None
+    exchange_brand: Optional[str] = None
+    exchange_model: Optional[str] = None
+    exchange_reg_no: Optional[str] = None
+    exchange_year: Optional[str] = None
 
 class CustomerCreate(BaseModel):
     name: str; contact_number: str
@@ -3823,7 +3834,7 @@ async def get_sales(start_date: Optional[str] = None, end_date: Optional[str] = 
             s["profit_margin"] = round((revenue - investment) / revenue * 100, 2) if revenue else None
     return sales
 
-async def _exchange_vehicle_for_sale(sale: SaleCreate, sold: dict, sale_date: str, exchange_valuation: float, cu: dict) -> Optional[dict]:
+async def _exchange_vehicle_for_sale(sale: Union[SaleCreate, SaleUpdate], sold: dict, sale_date: str, exchange_valuation: float, cu: dict) -> Optional[dict]:
     """The inventory record for the old vehicle a customer hands over in part payment, ready to insert, so it can
     be resold without anyone re-keying it into Inventory. It costs the shop its valuation and stays unlisted until
     it is priced. None when the sale has no exchange. Writes nothing: a plate already in stock raises here,
@@ -3862,6 +3873,56 @@ async def _exchange_vehicle_for_sale(sale: SaleCreate, sold: dict, sale_date: st
         "created_by": cu.get("username"),
     })
     return v
+
+SALE_WITNESS_FIELDS = {"witness_name", "witness_address", "witness_phone", "witness_id_number"}
+SALE_EXCHANGE_FIELDS = {"exchange_valuation", "exchange_brand", "exchange_model", "exchange_reg_no", "exchange_year"}
+
+async def _exchange_entry(sale_doc: dict):
+    """The Inventory entry made for a sale's exchange vehicle, and whether it is still just that: unlisted (so never
+    priced) with no expense or job card on it. Only an untouched entry may follow the sale when it is edited or deleted;
+    once it has been priced, sold or worked on it is real stock. Returns (entry or None, untouched)."""
+    vid = sale_doc.get("exchange_vehicle_id")
+    entry = await db.vehicles.find_one({"id": vid}, {"_id": 0}) if vid else None
+    if not entry:
+        return None, False
+    worked_on = await db.expenses.find_one({"vehicle_id": vid}, {"_id": 0, "id": 1}) or await db.job_cards.find_one({"vehicle_id": vid}, {"_id": 0, "id": 1})
+    return entry, entry.get("status") == "unlisted" and not worked_on
+
+async def _plan_exchange_change(existing: dict, sale: SaleUpdate, sold: dict, sale_date: str, valuation: float, cu: dict) -> dict:
+    """What editing the exchange on a recorded sale does to the old vehicle's Inventory entry, worked out before
+    anything is written (a plate already in stock raises here). Returns {"insert": a new entry, "update": (id, fields),
+    "delete": id, "link": the sale's exchange_vehicle_id afterwards, "note": a sentence for the user or None}.
+    - an untouched entry follows the edit: its details and cost are changed, or it is removed if the exchange is gone;
+    - one that has been priced or worked on is left as it is (the sale's own exchange record still changes);
+    - a sale that had no exchange gets an entry, as a new sale does."""
+    brand, model = (sale.exchange_brand or "").strip(), (sale.exchange_model or "").strip()
+    reg_no, year = (sale.exchange_reg_no or "").strip(), (sale.exchange_year or "").strip()
+    has_exchange = valuation > 0 or bool(brand or model or reg_no or year)
+    entry, untouched = await _exchange_entry(existing)
+    plan = {"insert": None, "update": None, "delete": None, "link": entry["id"] if entry else None, "note": None}
+    if not has_exchange:
+        if entry and untouched:
+            plan["delete"], plan["link"] = entry["id"], None
+        elif entry:
+            plan["note"] = "The exchange vehicle stays in Inventory: it has been priced or worked on."
+        return plan
+    if entry:
+        if not untouched:
+            plan["note"] = "The exchange vehicle in Inventory was left as it is: it has been priced or worked on."
+            return plan
+        if reg_no and reg_no.lower() != (entry.get("registration_number") or "").strip().lower():
+            holder = await _vehicle_holding_plate(reg_no)
+            if holder and holder.get("id") != entry["id"] and holder.get("status") not in ("sold", "scrap"):
+                raise HTTPException(400, f"Exchange vehicle '{reg_no}' is already in stock")
+        plan["update"] = (entry["id"], {
+            "brand": brand or "Unknown", "model": model or "Unknown", "year": int(year) if year.isdigit() else None,
+            "registration_number": reg_no, "purchase_price": valuation,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        })
+        return plan
+    plan["insert"] = await _exchange_vehicle_for_sale(sale, sold, sale_date, valuation, cu)
+    plan["link"] = plan["insert"]["id"]
+    return plan
 
 @api_router.post("/sales")
 async def create_sale(sale: SaleCreate, cu: dict = Depends(require("sales", "create"))):
@@ -4097,10 +4158,14 @@ async def update_sale(sid: str, sale: SaleUpdate, cu: dict = Depends(get_current
     if not v: raise HTTPException(404, "Vehicle not found")
     expenses_total = sum(float(e.get("amount", 0)) for e in sale.extra_expenses)
     total_amount = sale.sale_price + expenses_total
-    paid_total = (sale.paid_cash or 0) + (sale.paid_bank or 0) + (sale.advance_payment or 0) + (existing.get("exchange_valuation") or 0)
+    # The exchange counts as paid at the valuation the form sends, or at the saved one when it does not send it.
+    exchange_sent = bool(sale.model_fields_set & SALE_EXCHANGE_FIELDS)
+    exchange_valuation = max(sale.exchange_valuation or 0, 0) if exchange_sent else (existing.get("exchange_valuation") or 0)
+    paid_total = (sale.paid_cash or 0) + (sale.paid_bank or 0) + (sale.advance_payment or 0) + exchange_valuation
     due_amount = round(sale.due_amount, 2) if sale.due_amount is not None else max(round(total_amount - paid_total, 2), 0)
     payment_status = "Paid" if due_amount <= 0 else ("Partial" if paid_total > 0 else "Unpaid")
     sale_date = sale.sale_date or existing.get("sale_date")
+    exchange_plan = await _plan_exchange_change(existing, sale, v, sale_date, exchange_valuation, cu) if exchange_sent else None
     update_doc = {
         "vehicle_id": sale.vehicle_id,
         "customer_id": sale.customer_id,
@@ -4121,6 +4186,17 @@ async def update_sale(sid: str, sale: SaleUpdate, cu: dict = Depends(get_current
         "updated_by": cu.get("username"),
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
+    if sale.model_fields_set & SALE_WITNESS_FIELDS:
+        update_doc.update({k: (getattr(sale, k) or "").strip() or None for k in SALE_WITNESS_FIELDS})
+    if exchange_plan:
+        update_doc.update({
+            "exchange_valuation": exchange_valuation,
+            "exchange_brand": (sale.exchange_brand or "").strip() or None,
+            "exchange_model": (sale.exchange_model or "").strip() or None,
+            "exchange_reg_no": (sale.exchange_reg_no or "").strip() or None,
+            "exchange_year": (sale.exchange_year or "").strip() or None,
+            "exchange_vehicle_id": exchange_plan["link"],
+        })
     # A form that does not show the seller must not clear it; and nothing is written when there is no seller
     # before or after, so an ordinary edit leaves the sold_by columns alone.
     if "sold_by_id" in sale.model_fields_set and (sale.sold_by_id or existing.get("sold_by_id")):
@@ -4131,7 +4207,25 @@ async def update_sale(sid: str, sale: SaleUpdate, cu: dict = Depends(get_current
         lead = await crm.lead_for_sale(sale.model_dump(), replace=True)
         if any(lead.values()) or any(existing.get(k) for k in lead):
             update_doc.update(lead)
-    await db.sales.update_one({"id": sid}, {"$set": update_doc})
+    if exchange_plan and exchange_plan["insert"]:
+        await db.vehicles.insert_one(exchange_plan["insert"])
+    try:
+        await db.sales.update_one({"id": sid}, {"$set": update_doc})
+    except Exception:
+        # Otherwise a retry would trip over the half-made entry's own plate ("already in stock").
+        if exchange_plan and exchange_plan["insert"]:
+            await db.vehicles.delete_one({"id": exchange_plan["insert"]["id"]})
+        raise
+    if exchange_plan:
+        if exchange_plan["update"]:
+            await db.vehicles.update_one({"id": exchange_plan["update"][0]}, {"$set": exchange_plan["update"][1]})
+        if exchange_plan["delete"]:
+            await db.vehicles.delete_one({"id": exchange_plan["delete"]})
+        if exchange_plan["insert"]:
+            ins = exchange_plan["insert"]
+            await db.audit_logs.insert_one({"action": "vehicle_created", "vehicle_id": ins["id"],
+                "user": cu["username"], "timestamp": datetime.now(timezone.utc).isoformat(),
+                "details": f"Added {ins['brand']} {ins['model']} {ins['year'] or ''}".strip() + " (taken in exchange)"})
     # Keep vehicle record in sync (price/date/customer may have changed). Re-saving an active
     # sale also re-asserts status "sold", so a vehicle that drifted out of Sold Stock (e.g.
     # status edited from Inventory) is repaired by simply saving its sale again.
@@ -4147,6 +4241,8 @@ async def update_sale(sid: str, sale: SaleUpdate, cu: dict = Depends(get_current
     if sale.customer_id:
         await db.customers.update_one({"id": sale.customer_id}, {"$set": {"last_purchase_date": sale_date}})
     updated = await db.sales.find_one({"id": sid}, {"_id": 0})
+    if exchange_plan and exchange_plan["note"]:
+        updated["exchange_note"] = exchange_plan["note"]  # not saved: just tells the form what happened to the Inventory entry
     return updated
 
 @api_router.post("/sales/{sid}/resync-vehicle")
@@ -4179,14 +4275,12 @@ async def delete_sale(sid: str, cu: dict = Depends(get_current_user)):
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }})
     message = "Sale deleted, vehicle restored to available"
-    exchange_id = s.get("exchange_vehicle_id")
-    exchange = await db.vehicles.find_one({"id": exchange_id}, {"_id": 0, "status": 1}) if exchange_id else None
+    exchange, untouched = await _exchange_entry(s)
     if exchange:
         # The old vehicle was only taken in because of this sale. Still unlisted with no spend on it, it goes too; once
         # it has been priced, sold or worked on it is real stock and stays.
-        worked_on = await db.expenses.find_one({"vehicle_id": exchange_id}, {"_id": 0, "id": 1}) or await db.job_cards.find_one({"vehicle_id": exchange_id}, {"_id": 0, "id": 1})
-        if exchange.get("status") == "unlisted" and not worked_on:
-            await db.vehicles.delete_one({"id": exchange_id})
+        if untouched:
+            await db.vehicles.delete_one({"id": exchange["id"]})
             message += ", and the exchange vehicle removed from inventory"
         else:
             message += ". The exchange vehicle stays in inventory"

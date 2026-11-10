@@ -2,7 +2,7 @@
  * SaleDetailModal.jsx — a sale's details as a pop-up over the Sales list, the way a vehicle's details open over Inventory.
  *
  * The Overview tab is the Sale Vehicle form (SaleFormBody) filled in and read-only; Edit makes the same fields editable in
- * place, with Save Changes and Cancel at the top. A sold vehicle also gets a Warranty & service tab. Return, Undo Return
+ * place (the buyer's details, the witness and the exchange too), with Save Changes and Cancel at the top. A sold vehicle also gets a Warranty & service tab. Return, Undo Return
  * and Delete are here too. onChanged lets the Sales page reload after any change.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -64,8 +64,13 @@ function Loaded({ sale, vehicle, booking, reload, onClose, onChanged }) {
     setSaving(true);
     try {
       const customerId = await f.ensureCustomer();
-      await api.put(`/sales/${sale.id}`, f.payload(customerId));
-      toast.success("Sale updated successfully!");
+      const r = await api.put(`/sales/${sale.id}`, f.payload(customerId));
+      // The sale is saved; the changes to the buyer's own details go to the customer's record after it.
+      let buyerSaved = true;
+      try { await f.saveBuyerEdits(); } catch { buyerSaved = false; }
+      if (buyerSaved) toast.success("Sale updated successfully!");
+      else toast.error("The sale was saved, but the buyer's details could not be updated");
+      if (r.data?.exchange_note) toast(r.data.exchange_note);
       await reload(); // shows the saved sale, read-only again
       onChanged?.();
     } catch (err) { toast.error(getErrMsg(err, "Failed to save sale")); setSaving(false); }

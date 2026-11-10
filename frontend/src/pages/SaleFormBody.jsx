@@ -33,8 +33,9 @@ const Static = ({ label, value }) => (
 );
 
 // f: what useSaleForm returns. booking: the booking being turned into this sale. sale: the recorded sale this is the form
-// of (then the exchange and the witness are shown but locked: an edit cannot change them). readOnly: nothing can be
-// changed. attempted: Save was pressed, so the fields still missing are marked.
+// of (then everything can be edited: the buyer's details change the customer's record, the witness and the exchange change
+// the sale and, for the exchange, the old vehicle's Inventory entry). readOnly: nothing can be changed. attempted: Save was
+// pressed, so the fields still missing are marked.
 export default function SaleFormBody({ f, booking = null, sale = null, readOnly = false, attempted = false }) {
   const { form, set } = f;
   const existing = !!sale;
@@ -45,10 +46,7 @@ export default function SaleFormBody({ f, booking = null, sale = null, readOnly 
   const vehicleList = existing && !f.listsLoaded
     ? [{ id: sale.vehicle_id, brand: sale.vehicle_brand, model: sale.vehicle_model, year: sale.vehicle_year, registration_number: sale.registration_number }]
     : f.vehicles;
-  const savedBuyer = existing && form.customer_id && form.customer_id === sale.customer_id
-    ? { name: sale.customer_name, contact_number: sale.customer_contact, address: sale.customer_address, id_number: sale.customer_id_number }
-    : null;
-  const buyerInfo = f.selectedCustomer || savedBuyer;
+  const buyerInfo = f.buyerInfo; // the picked customer's details (editable on a recorded sale), or null for a new buyer
   const hasWitness = existing && !!sale.witness_name;
   const showPanel = existing ? !!(buyerInfo || hasWitness) || f.showAddCust : !readOnly && f.showAddCust;
   const hasExchange = f.exchangeValuation > 0 || ["exchange_brand", "exchange_model", "exchange_reg_no", "exchange_year"].some(k => form[k]);
@@ -113,25 +111,30 @@ export default function SaleFormBody({ f, booking = null, sale = null, readOnly 
                 {(buyerInfo || !readOnly) && (
                   <div className="min-w-0 space-y-3">
                     <p className="text-xs font-semibold text-blue-700 uppercase tracking-wide" data-testid="buyer-details-panel">Buyer's details</p>
-                    {DEED_ROWS.map(({ label, ph: hint, bkey, bid }) => buyerInfo ? (
-                      <Static key={bkey} label={label} value={buyerInfo[bkey]} />
-                    ) : (
-                      <div key={bkey} className="min-w-0">
-                        <label htmlFor={bid} className={LBL}>{label}{bkey !== "id_number" && <span className="text-red-600"> *</span>}</label>
-                        <input id={bid} aria-label={`Buyer ${label}`} value={f.buyer[bkey]} onChange={e => f.setBuyer({ ...f.buyer, [bkey]: e.target.value })} placeholder={hint} className={`${BOX} ${bad(bid) ? BAD : OK}`} data-testid={`buyer-${bkey.replace(/_/g, "-")}`} />
-                      </div>
-                    ))}
+                    {DEED_ROWS.map(({ label, ph: hint, bkey, bid }) => {
+                      if (buyerInfo && !existing) return <Static key={bkey} label={label} value={buyerInfo[bkey]} />;
+                      const known = !!buyerInfo; // a recorded sale's customer: typing here edits the customer's record
+                      return (
+                        <div key={bkey} className="min-w-0">
+                          <label htmlFor={bid} className={LBL}>{label}{bkey !== "id_number" && <span className="text-red-600"> *</span>}</label>
+                          <input
+                            id={bid} aria-label={`Buyer ${label}`} value={known ? buyerInfo[bkey] : f.buyer[bkey]}
+                            onChange={e => (known ? f.setBuyerField(bkey, e.target.value) : f.setBuyer({ ...f.buyer, [bkey]: e.target.value }))}
+                            placeholder={ph(hint)} className={`${BOX} ${bad(bid) ? BAD : OK}`} data-testid={`buyer-${bkey.replace(/_/g, "-")}`}
+                          />
+                        </div>
+                      );
+                    })}
+                    {existing && buyerInfo && !readOnly && <p className="text-xs text-slate-500" data-testid="buyer-edit-hint">Changing these updates the customer's record, wherever it is used.</p>}
                   </div>
                 )}
-                {(!existing || hasWitness) && (
+                {(!existing || hasWitness || !readOnly) && (
                   <div className="min-w-0 space-y-3">
                     <p className="text-xs font-semibold text-blue-700 uppercase tracking-wide" data-testid="witness-details-panel">Witness details <span className="normal-case font-medium text-blue-600/80">· for the sale deed</span></p>
-                    {DEED_ROWS.map(({ label, ph: hint, wkey, wid }) => existing ? (
-                      <Static key={wkey} label={label} value={form[wkey]} />
-                    ) : (
+                    {DEED_ROWS.map(({ label, ph: hint, wkey, wid }) => (
                       <div key={wkey} className="min-w-0">
-                        <label htmlFor={wid} className={LBL}>{label}{wkey !== "witness_id_number" && <span className="text-red-600"> *</span>}</label>
-                        <input id={wid} aria-label={`Witness ${label}`} value={form[wkey]} onChange={e => set({ [wkey]: e.target.value })} placeholder={hint} className={`${BOX} ${bad(wid) ? BAD : OK}`} data-testid={wkey.replace(/_/g, "-")} />
+                        <label htmlFor={wid} className={LBL}>{label}{!existing && wkey !== "witness_id_number" && <span className="text-red-600"> *</span>}</label>
+                        <input id={wid} aria-label={`Witness ${label}`} value={form[wkey]} onChange={e => set({ [wkey]: e.target.value })} placeholder={ph(hint)} className={`${BOX} ${bad(wid) ? BAD : OK}`} data-testid={wkey.replace(/_/g, "-")} />
                       </div>
                     ))}
                   </div>
@@ -208,41 +211,40 @@ export default function SaleFormBody({ f, booking = null, sale = null, readOnly 
         </div>
       </section>
 
-      {/* 3 Exchange: the customer's old vehicle; its valuation is deducted from what they owe. Fixed once the sale is recorded. */}
-      {(!existing || hasExchange) && (
+      {/* 3 Exchange: the customer's old vehicle; its valuation is deducted from what they owe. On a recorded sale it can be
+          edited too: its Inventory entry follows while that is still unlisted and untouched. */}
+      {(!existing || hasExchange || !readOnly) && (
         <section id="sv-section-exchange" className={SECTION} data-testid="exchange-section">
           <h3 className={H2} style={{ fontFamily: "Manrope, sans-serif" }}>
             Exchange{" "}
             <span className="ml-1 text-xs font-medium text-slate-500" style={{ fontFamily: "Inter, sans-serif" }}>
               {existing
-                ? <>fixed once the sale is recorded{sale.exchange_vehicle_id && <> · <Link to={`/inventory/${sale.exchange_vehicle_id}`} className="text-blue-600 hover:underline" data-testid="sale-exchange-inventory-link">In inventory</Link></>}</>
+                ? <>{!readOnly && "a change also changes the old vehicle's entry in Inventory while it is still unlisted"}{sale.exchange_vehicle_id && <>{!readOnly && " · "}<Link to={`/inventory/${sale.exchange_vehicle_id}`} className="text-blue-600 hover:underline" data-testid="sale-exchange-inventory-link">In inventory</Link></>}</>
                 : "optional · the old vehicle is added to Inventory when you save, at its valuation, unlisted until you set a selling price"}
             </span>
           </h3>
-          <fieldset disabled={existing} className="min-w-0 m-0 p-0 border-0">
-            <div className={GRID}>
-              <div>
-                <label htmlFor="sv-ex-valuation" className={LBL}>Valuation</label>
-                <Money id="sv-ex-valuation" testid="exchange-valuation-input" value={form.exchange_valuation} onChange={v => set({ exchange_valuation: v })} />
-              </div>
-              <div>
-                <label htmlFor="sv-ex-brand" className={LBL}>Brand</label>
-                <input id="sv-ex-brand" value={form.exchange_brand} onChange={e => set({ exchange_brand: e.target.value })} placeholder={ph("")} className={`${BOX} ${OK}`} data-testid="exchange-brand-input" />
-              </div>
-              <div>
-                <label htmlFor="sv-ex-model" className={LBL}>Model</label>
-                <input id="sv-ex-model" value={form.exchange_model} onChange={e => set({ exchange_model: e.target.value })} placeholder={ph("")} className={`${BOX} ${OK}`} data-testid="exchange-model-input" />
-              </div>
-              <div>
-                <label htmlFor="sv-ex-year" className={LBL}>Year</label>
-                <input id="sv-ex-year" value={form.exchange_year} onChange={e => set({ exchange_year: e.target.value })} inputMode="numeric" placeholder={ph("")} className={`${BOX} ${OK}`} data-testid="exchange-year-input" />
-              </div>
-              <div className="sm:col-span-2">
-                <label htmlFor="sv-ex-reg" className={LBL}>Registration number</label>
-                <input id="sv-ex-reg" value={form.exchange_reg_no} onChange={e => set({ exchange_reg_no: e.target.value })} placeholder={ph("e.g. 052/0164")} className={PLATE} data-testid="exchange-reg-input" />
-              </div>
+          <div className={GRID}>
+            <div>
+              <label htmlFor="sv-ex-valuation" className={LBL}>Valuation</label>
+              <Money id="sv-ex-valuation" testid="exchange-valuation-input" value={form.exchange_valuation} onChange={v => set({ exchange_valuation: v })} />
             </div>
-          </fieldset>
+            <div>
+              <label htmlFor="sv-ex-brand" className={LBL}>Brand</label>
+              <input id="sv-ex-brand" value={form.exchange_brand} onChange={e => set({ exchange_brand: e.target.value })} placeholder={ph("")} className={`${BOX} ${OK}`} data-testid="exchange-brand-input" />
+            </div>
+            <div>
+              <label htmlFor="sv-ex-model" className={LBL}>Model</label>
+              <input id="sv-ex-model" value={form.exchange_model} onChange={e => set({ exchange_model: e.target.value })} placeholder={ph("")} className={`${BOX} ${OK}`} data-testid="exchange-model-input" />
+            </div>
+            <div>
+              <label htmlFor="sv-ex-year" className={LBL}>Year</label>
+              <input id="sv-ex-year" value={form.exchange_year} onChange={e => set({ exchange_year: e.target.value })} inputMode="numeric" placeholder={ph("")} className={`${BOX} ${OK}`} data-testid="exchange-year-input" />
+            </div>
+            <div className="sm:col-span-2">
+              <label htmlFor="sv-ex-reg" className={LBL}>Registration number</label>
+              <input id="sv-ex-reg" value={form.exchange_reg_no} onChange={e => set({ exchange_reg_no: e.target.value })} placeholder={ph("e.g. 052/0164")} className={PLATE} data-testid="exchange-reg-input" />
+            </div>
+          </div>
         </section>
       )}
 
