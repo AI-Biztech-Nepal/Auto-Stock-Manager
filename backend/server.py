@@ -24,6 +24,7 @@ from google.genai import errors as genai_errors
 import httpx
 import media_storage
 import crm
+import assistant_api
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
@@ -4651,6 +4652,24 @@ async def finance_summary(cu: dict = Depends(admin_only)):
         "vehicles_in_stock": len(avail),
         "vehicles_sold": len(sales_records),
     }
+
+# ── ASSISTANT (read-only; for the Hanuman voice assistant) ─────────────
+@api_router.get("/assistant/briefing")
+@limiter.limit("60/minute")
+async def assistant_briefing(request: Request):
+    """The owner's numbers (today's and this month's sales, dues, profit, stock) for the phone assistant.
+
+    Authenticated by a per-company key in the X-Assistant-Key header (ASSISTANT_KEYS env, see
+    assistant_api.py), not by a user login. It reads this one summary for that one company and
+    nothing else; there is no write route behind it."""
+    cid = assistant_api.company_for_key(request.headers.get("x-assistant-key", ""), os.environ.get("ASSISTANT_KEYS", ""))
+    if not cid:
+        raise HTTPException(401, "Invalid assistant key")
+    current_company_id.set(cid)          # every db.<collection> call below is now scoped to this company
+    finance = await finance_summary({"role": "admin"})
+    sales = await db.sales.find({}, {"_id": 0}).to_list(5000)
+    today, month = assistant_api.nepal_today()
+    return assistant_api.build_briefing(sales, finance, today, month, _sale_revenue)
 
 # ── REPORTS ───────────────────────────────────────────────────────────
 @api_router.get("/reports/dashboard")
