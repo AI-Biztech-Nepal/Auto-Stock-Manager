@@ -59,23 +59,32 @@ async def copy(db):
 
 
 async def check(db):
-    """Rows whose file is in Storage at the recorded size, and the ones that are not."""
+    """Rows whose file is in Storage at the recorded size, and the ones that are not. Sixteen files are looked at at a time
+    (one after another it took most of an hour for a few thousand files)."""
     good, bad = {}, []
-    async with httpx.AsyncClient(timeout=60) as client:
-        for table, bucket in KINDS:
-            good[table] = []
-            for r in await rows(db, table, ("id", "storage_path", "size")):
-                if not r.get("storage_path"):
-                    continue
+    gate = asyncio.Semaphore(16)
+
+    async def look(client, table, bucket, r):
+        async with gate:
+            try:
                 # The first byte only: the answer's Content-Range carries the whole file's size.
                 res = await client.get(f"{media_storage._url()}/storage/v1/object/{bucket}/{quote(r['storage_path'])}",
                                        headers={**media_storage._headers(), "Range": "bytes=0-0"})
-                total = (res.headers.get("content-range") or "").rpartition("/")[2]
-                size = int(total) if total.isdigit() else int(res.headers.get("content-length") or -1)
-                if res.status_code < 300 and (not r.get("size") or size in (-1, r["size"])):
+            except Exception:  # a timeout or a dropped connection counts as "not confirmed", never as a crash
+                return table, r, -1, -1
+        total = (res.headers.get("content-range") or "").rpartition("/")[2]
+        size = int(total) if total.isdigit() else int(res.headers.get("content-length") or -1)
+        return table, r, res.status_code, size
+
+    async with httpx.AsyncClient(timeout=60, limits=httpx.Limits(max_connections=16)) as client:
+        for table, bucket in KINDS:
+            good[table] = []
+            todo = [r for r in await rows(db, table, ("id", "storage_path", "size")) if r.get("storage_path")]
+            for _, r, status, size in await asyncio.gather(*(look(client, table, bucket, r) for r in todo)):
+                if 0 <= status < 300 and (not r.get("size") or size in (-1, r["size"])):
                     good[table].append(r["id"])
                 else:
-                    bad.append((table, r["id"], res.status_code, size, r.get("size")))
+                    bad.append((table, r["id"], status, size, r.get("size")))
     return good, bad
 
 

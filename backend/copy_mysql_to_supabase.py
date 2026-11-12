@@ -26,6 +26,7 @@ import json
 import os
 import re
 import sys
+from contextlib import aclosing
 from pathlib import Path
 
 import aiomysql
@@ -71,7 +72,7 @@ async def tables(conn) -> dict:
     """{table: {"columns": [(name, pg_type)], "pk": [col, ...]}} for every table in the MariaDB database."""
     async with conn.cursor(aiomysql.DictCursor) as cur:
         await cur.execute(
-            "SELECT TABLE_NAME, COLUMN_NAME, DATA_TYPE, COLUMN_TYPE, COLUMN_KEY FROM information_schema.COLUMNS "
+            "SELECT TABLE_NAME, COLUMN_NAME, DATA_TYPE, COLUMN_TYPE, COLUMN_KEY, IS_NULLABLE FROM information_schema.COLUMNS "
             "WHERE TABLE_SCHEMA = DATABASE() ORDER BY TABLE_NAME, ORDINAL_POSITION")
         rows = await cur.fetchall()
     out = {}
@@ -79,7 +80,9 @@ async def tables(conn) -> dict:
         name = r["TABLE_NAME"]
         if name in SKIP_TABLES or r["COLUMN_NAME"] in SKIP_COLUMNS.get(name, set()):
             continue
-        t = out.setdefault(name, {"columns": [], "pk": []})
+        t = out.setdefault(name, {"columns": [], "pk": [], "nullable": set()})
+        if r["IS_NULLABLE"] == "YES":
+            t["nullable"].add(r["COLUMN_NAME"])
         t["columns"].append((r["COLUMN_NAME"], pg_type(r["DATA_TYPE"], r["COLUMN_TYPE"])))
         if r["COLUMN_KEY"] == "PRI":
             t["pk"].append(r["COLUMN_NAME"])
@@ -216,46 +219,126 @@ def upsert_sql(name, cols, pk) -> str:
     return f"{sql} on conflict ({', '.join(q(c) for c in pk)}) {tail}"
 
 
-async def load_into_pg(pg, meta: dict, fetch, defined: set):
-    """The whole copy, in one transaction. `fetch(table, columns)` yields row batches from MariaDB."""
+class CopyFailed(Exception):
+    """One or more tables could not be copied. Nothing was kept: the whole copy is undone."""
+
+
+def short_error(e) -> str:
+    """The first line of a database error plus its DETAIL line (which names the offending key)."""
+    lines = [l.strip() for l in str(e).splitlines() if l.strip()]
+    return " | ".join(lines[:2]) if lines else type(e).__name__
+
+
+def pg_not_null(pg) -> dict:
+    out = {}
+    for t, c in pg.execute("select table_name, column_name from information_schema.columns "
+                           "where table_schema = current_schema() and is_nullable = 'NO'").fetchall():
+        out.setdefault(t, set()).add(c)
+    return out
+
+
+async def relax_not_null(pg, meta: dict, has_nulls=None):
+    """MariaDB lets some columns be empty that the blueprint (schema.sql) marks NOT NULL. Where the data really does have
+    empty values there, follow MariaDB: it is the data being copied and what the app runs on today. (`has_nulls(table,
+    column)` says whether MariaDB holds any; without it every such column is relaxed.)"""
+    nn = pg_not_null(pg)
+    for name, t in meta.items():
+        for c in sorted((t.get("nullable") or set()) & nn.get(name, set())):
+            if c in t["pk"] or (has_nulls is not None and not await has_nulls(name, c)):
+                continue
+            pg.execute(f"alter table {q(name)} alter column {q(c)} drop not null")
+            print(f"{name}.{c}: MariaDB holds empty values here, so Supabase now allows them too")
+
+
+async def copy_table(pg, name, t, pgcols, fetch) -> int:
+    extra = [(c, typ) for c, typ in t["columns"] if c not in pgcols]
+    for c, typ in extra:  # a column only MariaDB has: add it, so none of its data is left behind
+        pg.execute(f"alter table {q(name)} add column if not exists {q(c)} {typ}")
+        pgcols[c] = (typ, False)
+    if extra:
+        print(f"{name}: columns MariaDB has but schema.sql did not - added to Supabase so nothing is left behind: "
+              + ", ".join(c for c, _ in extra))
+    cols = [(c, pgcols[c][0]) for c, _ in t["columns"]]
+    if not t["pk"]:  # no key to match rows on: replace the table's rows rather than duplicate them
+        pg.execute(f"delete from {q(name)}")
+    sql, done = upsert_sql(name, [c for c, _ in cols], t["pk"]), 0
+    async with aclosing(fetch(name, [c for c, _ in cols])) as batches:  # closed even when a batch fails
+        async for batch in batches:
+            rows = [[convert(v, typ) for v, (_, typ) in zip(r, cols)] for r in batch]
+            with pg.cursor() as cur:
+                cur.executemany(sql, rows)
+            done += len(rows)
+    return done
+
+
+def report_leftover_links(pg, names):
+    """Rows whose link (foreign key) points at a row that no longer exists. MariaDB has them; they are copied as they are
+    and listed here so you can see them."""
+    fks = pg.execute(
+        "select c.conname, cl.relname, a.attname, rl.relname, ra.attname from pg_constraint c "
+        "join pg_class cl on cl.oid = c.conrelid join pg_class rl on rl.oid = c.confrelid "
+        "join pg_attribute a on a.attrelid = c.conrelid and a.attnum = c.conkey[1] "
+        "join pg_attribute ra on ra.attrelid = c.confrelid and ra.attnum = c.confkey[1] "
+        "where c.contype = 'f' and array_length(c.conkey, 1) = 1 "
+        "and cl.relnamespace = (select oid from pg_namespace where nspname = current_schema())").fetchall()
+    found = 0
+    for con, child, col, parent, pcol in fks:
+        if child not in names:
+            continue
+        n = pg.execute(f"select count(*) from {q(child)} c where c.{q(col)} is not null and not exists "
+                       f"(select 1 from {q(parent)} p where p.{q(pcol)} = c.{q(col)})").fetchone()[0]
+        if n:
+            found += 1
+            print(f"note: {n} row(s) of {child} have a {col} pointing at a {parent} that no longer exists "
+                  f"- copied as they are, exactly as in MariaDB ({con})")
+    if not found:
+        print("No leftover links: every link between tables points at a row that exists.")
+
+
+async def load_into_pg(pg, meta: dict, fetch, defined: set, has_nulls=None):
+    """The whole copy, in one transaction: all of it lands, or none of it. `fetch(table, columns)` yields row batches
+    from MariaDB. A problem in one table is noted and the other tables still run, so one run reports everything."""
     have = pg_tables(pg)
     absent = sorted(n for n in meta if n not in have and n in defined)
     if absent:
         sys.exit("These tables are not in Supabase yet: " + ", ".join(absent)
-                 + "\nRun backend/supabase/schema.sql in Supabase's SQL Editor first, then run this again.")
-    totals = {}
+                 + "\nRun  copy_mysql_to_supabase.py prepare  first, then run this again.")
+    totals, problems = {}, []
     with pg.transaction():
+        # Foreign keys are not checked while this copy runs (and only then: it is undone when the transaction ends). MariaDB's
+        # data can hold links to rows that no longer exist; they are copied exactly as they are, and new writes stay protected.
+        pg.execute("set local session_replication_role = replica")
         for name in sorted(n for n in meta if n not in have):
             create_generic(pg, name, meta[name])
             print(f"{name}: not in schema.sql - created in Supabase from MariaDB's own definition")
         have = pg_tables(pg)
+        await relax_not_null(pg, meta, has_nulls)
         for name in fk_order(pg, list(meta)):
-            t, pgcols = meta[name], have[name]
-            extra = [(c, typ) for c, typ in t["columns"] if c not in pgcols]
-            for c, typ in extra:  # a column only MariaDB has: add it, so none of its data is left behind
-                pg.execute(f"alter table {q(name)} add column if not exists {q(c)} {typ}")
-                pgcols[c] = (typ, False)
-            if extra:
-                print(f"{name}: columns MariaDB has but schema.sql did not - added to Supabase so nothing is left behind: "
-                      + ", ".join(c for c, _ in extra))
-            cols = [(c, pgcols[c][0]) for c, _ in t["columns"]]
-            if not t["pk"]:  # no key to match rows on: replace the table's rows rather than duplicate them
-                pg.execute(f"delete from {q(name)}")
-            sql, done = upsert_sql(name, [c for c, _ in cols], t["pk"]), 0
-            async for batch in fetch(name, [c for c, _ in cols]):
-                rows = [[convert(v, typ) for v, (_, typ) in zip(r, cols)] for r in batch]
-                with pg.cursor() as cur:
-                    cur.executemany(sql, rows)
-                done += len(rows)
-            totals[name] = done
-            print(f"{name}: {done} rows")
+            try:
+                with pg.transaction():  # a savepoint: a failure in this table undoes only this table
+                    totals[name] = await copy_table(pg, name, meta[name], have[name], fetch)
+                print(f"{name}: {totals[name]} rows")
+            except psycopg.Error as e:
+                problems.append((name, short_error(e)))
+                print(f"{name}: FAILED - {short_error(e)}")
+        if problems:
+            raise CopyFailed("; ".join(f"{n}: {m}" for n, m in problems))
         # Rows came in with their own ids; make the auto-number counters carry on after the highest one.
         for name in totals:
             for c, (_, ident) in have[name].items():
                 if ident:
                     pg.execute(f"select setval(pg_get_serial_sequence(%s, %s), "
                                f"coalesce((select max({q(c)}) from {q(name)}), 0) + 1, false)", (q(name), c))
+        report_leftover_links(pg, set(totals))
     return totals
+
+
+def mysql_has_nulls(conn):
+    async def has_nulls(table, col):
+        async with conn.cursor() as cur:
+            await cur.execute(f"SELECT 1 FROM `{table}` WHERE `{col}` IS NULL LIMIT 1")
+            return await cur.fetchone() is not None
+    return has_nulls
 
 
 async def copy():
@@ -265,7 +348,10 @@ async def copy():
         meta = await tables(conn)
         with pg_connect() as pg:
             apply_sql_files(pg)  # tables and buckets: created or brought up to date first, so no SQL has to be pasted by hand
-            await load_into_pg(pg, meta, mysql_fetch(conn), schema_tables())
+            try:
+                await load_into_pg(pg, meta, mysql_fetch(conn), schema_tables(), mysql_has_nulls(conn))
+            except CopyFailed as e:
+                sys.exit(f"Stopped: these tables could not be copied, so NOTHING was kept (MariaDB is untouched): {e}")
     finally:
         conn.close()
     print("Copy done. Run check to compare the numbers.")
