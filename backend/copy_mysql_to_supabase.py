@@ -38,6 +38,10 @@ load_dotenv(Path(__file__).parent / ".env")
 SKIP_TABLES = {"auth_tokens"}
 SKIP_COLUMNS = {"vehicle_photos": {"data"}, "legal_documents": {"data"}}
 MEDIA_TABLES = ("vehicle_photos", "legal_documents")
+# Tables the live site writes to all day (a visit is logged every minute or two, a login adds an audit row). They are copied LAST,
+# so the gap before the comparison is only seconds, and the comparison tolerates a few newer rows in MariaDB for them.
+LIVE_LOG_TABLES = ("page_views", "audit_logs")
+LAG_OK = 25
 BATCH = 500
 SCHEMA_FILE = Path(__file__).parent / "supabase" / "schema.sql"
 
@@ -313,7 +317,9 @@ async def load_into_pg(pg, meta: dict, fetch, defined: set, has_nulls=None):
             print(f"{name}: not in schema.sql - created in Supabase from MariaDB's own definition")
         have = pg_tables(pg)
         await relax_not_null(pg, meta, has_nulls)
-        for name in fk_order(pg, list(meta)):
+        order = fk_order(pg, list(meta))
+        order = [n for n in order if n not in LIVE_LOG_TABLES] + [n for n in order if n in LIVE_LOG_TABLES]
+        for name in order:
             try:
                 with pg.transaction():  # a savepoint: a failure in this table undoes only this table
                     totals[name] = await copy_table(pg, name, meta[name], have[name], fetch)
@@ -357,6 +363,20 @@ async def copy():
     print("Copy done. Run check to compare the numbers.")
 
 
+def compare(name, cols, mine, theirs):
+    """(differences, note) for one table. `mine` / `theirs` are (row count, sum of each money column...) from MariaDB / Supabase."""
+    diffs, note = [], ""
+    behind = mine[0] - theirs[0]
+    if name in LIVE_LOG_TABLES and 0 < behind <= LAG_OK:
+        note = f"{behind} newer record(s) arrived in MariaDB while the copy ran (visit/login log)"
+    elif mine[0] != theirs[0]:
+        diffs.append(f"rows {mine[0]} vs {theirs[0]}")
+    for c, a, b in zip(cols, mine[1:], theirs[1:]):
+        if abs(float(a) - float(b)) > 1e-6 * max(1.0, abs(float(a))):
+            diffs.append(f"sum of {c}: {a} vs {b}")
+    return diffs, note
+
+
 async def check():
     conn = await mysql_connect()
     try:
@@ -373,14 +393,9 @@ async def check():
                     if name not in have:
                         print(f"MISSING {name:32s} not in Supabase"); bad += 1; continue
                     theirs = pg.execute(f"select count(*){''.join(f', coalesce(sum({q(c)}), 0)' for c in cols)} from {q(name)}").fetchone()
-                    diffs = []
-                    if mine[0] != theirs[0]:
-                        diffs.append(f"rows {mine[0]} vs {theirs[0]}")
-                    for c, a, b in zip(cols, mine[1:], theirs[1:]):
-                        if abs(float(a) - float(b)) > 1e-6 * max(1.0, abs(float(a))):
-                            diffs.append(f"sum of {c}: {a} vs {b}")
+                    diffs, note = compare(name, cols, mine, theirs)
                     bad += bool(diffs)
-                    print(f"{'DIFF' if diffs else 'ok  '} {name:32s} {mine[0]:>8} rows" + (f"   <- {'; '.join(diffs)}" if diffs else ""))
+                    print(f"{'DIFF' if diffs else 'ok  '} {name:32s} {mine[0]:>8} rows" + (f"   <- {'; '.join(diffs)}" if diffs else (f"   ({note})" if note else "")))
         print("Everything matches (row counts and every money/number total)." if not bad else
               f"{bad} tables differ - run copy again (new rows since?), then check. A row deleted in MariaDB after an "
               "earlier copy stays in Supabase, so Supabase can be a little ahead.")

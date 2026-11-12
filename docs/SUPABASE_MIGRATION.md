@@ -70,6 +70,9 @@ venv/bin/python copy_mysql_to_supabase.py copy
 venv/bin/python copy_mysql_to_supabase.py check   # row counts and every money/number total, side by side
 ```
 
+The visit log (`page_views`) and the login log (`audit_logs`) change all day while the live site is used, so they are copied last, and
+`check` accepts up to 25 newer rows of those two in MariaDB (it says so on the line). Everything else must match exactly.
+
 `check` must say everything matches. `copy` refuses to start if a photo or document is still only in MariaDB
 (go back to step 4). The Finance books tables (`fin_*`) are copied like everything else. `auth_tokens` (one-time
 email links) are not.

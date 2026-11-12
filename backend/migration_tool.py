@@ -40,7 +40,7 @@ MAX_LINES = 4000
 STALE_AFTER = 3 * 3600  # a job that has "run" this long is treated as dead, so the tool can never get stuck
 
 PREFLIGHT = r'''
-import asyncio, json, os, sys, urllib.request
+import asyncio, json, os, sys, time, urllib.request
 ok = True
 def say(s): print(s, flush=True)
 try:
@@ -48,6 +48,14 @@ try:
     with psycopg.connect(os.environ["SUPABASE_DB_URL"], connect_timeout=20, prepare_threshold=None) as c:
         has = c.execute("select to_regclass('public.users') is not null").fetchone()[0]
         n = c.execute("select count(*) from information_schema.tables where table_schema='public'").fetchone()[0]
+        c.execute("select 1").fetchone()  # warm-up: the first question is slower
+        times = []
+        for _ in range(10):
+            t0 = time.perf_counter()
+            c.execute("select 1").fetchone()
+            times.append((time.perf_counter() - t0) * 1000)
+        ms = sorted(times)[len(times) // 2]
+    say(f"ok    Supabase speed: one database question takes about {ms:.0f} ms from this server (median of 10) (the app asks 15-35 per screen)")
     if has:
         say(f"ok    Supabase database: connected, {n} tables are ready")
     else:
