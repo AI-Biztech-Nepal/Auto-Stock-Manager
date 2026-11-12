@@ -139,6 +139,14 @@ class PostgresDatabase:
         async with pool.connection() as conn:
             await conn.execute(sql)
 
+    async def fetch_raw(self, sql: str):
+        """One literal read-only statement, rows as dicts (start-up schema checks)."""
+        pool = await self.get_pool()
+        async with pool.connection() as conn:
+            async with conn.cursor(row_factory=dict_row) as cur:
+                await cur.execute(sql)
+                return await cur.fetchall()
+
     def __getattr__(self, name):
         if name.startswith("_") or name not in TABLES:
             raise AttributeError(f"No such collection/table: {name}")

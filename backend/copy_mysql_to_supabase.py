@@ -7,16 +7,17 @@ whole copy is one transaction: it either all lands or none of it does.
 
 Run on the VPS from backend/, with the backend's .env (MariaDB settings + SUPABASE_DB_URL):
 
+    venv/bin/python copy_mysql_to_supabase.py prepare  # creates/updates Supabase's tables and photo buckets (copy does this too)
     venv/bin/python copy_mysql_to_supabase.py copy     # copies every row
     venv/bin/python copy_mysql_to_supabase.py check    # row counts and money totals, MariaDB next to Supabase
 
-Before the first copy, run backend/supabase/schema.sql once in Supabase's SQL Editor (it creates the tables), and
-migrate_media_to_supabase.py copy (it moves the photos and documents into Storage).
+Order: prepare, then migrate_media_to_supabase.py copy (moves the photos and documents into Storage), then copy, check.
+No SQL needs pasting into Supabase's SQL Editor: prepare applies backend/supabase/0001_media_buckets.sql and schema.sql.
 
 Left out, on purpose: the base64 `data` of vehicle_photos / legal_documents (those files live in Supabase Storage -
 copy stops with a message if any file has not been moved there yet), and auth_tokens (one-time email links that expire).
-Tables the app no longer defines (the leftover fin_* tables) are created in Supabase from MariaDB's own definition
-and copied as they are, so nothing is left behind.
+A table or column that exists only in your live MariaDB (added by hand, or by a newer version than schema.sql) is created
+in Supabase from MariaDB's own definition and copied as it is, so nothing is left behind.
 """
 import asyncio
 import datetime
@@ -138,6 +139,25 @@ def schema_tables() -> set:
     return set(re.findall(r'create table if not exists "[^"]+"\."(\w+)"', SCHEMA_FILE.read_text(encoding="utf-8")))
 
 
+SQL_FILES = (Path(__file__).parent / "supabase" / "0001_media_buckets.sql", SCHEMA_FILE)
+
+
+def apply_sql_files(pg, files=None):
+    """Runs the photo-bucket SQL and schema.sql. Both are additive and safe to run again (create ... if not exists,
+    add column if not exists), so this creates what is missing and brings an older copy of the schema up to date."""
+    for f in (files or SQL_FILES):
+        pg.execute(Path(f).read_text(encoding="utf-8"))
+        print(f"applied {Path(f).name}")
+
+
+def prepare():
+    with pg_connect() as pg:
+        apply_sql_files(pg)
+        n = pg.execute("select count(*) from information_schema.tables where table_schema = current_schema() "
+                       "and table_type = 'BASE TABLE'").fetchone()[0]
+    print(f"Supabase is ready: {n} tables, photo buckets in place.")
+
+
 def create_generic(pg, name, t):
     cols = [f"{q(c)} {typ}" for c, typ in t["columns"]]
     if t["pk"]:
@@ -211,10 +231,14 @@ async def load_into_pg(pg, meta: dict, fetch, defined: set):
         have = pg_tables(pg)
         for name in fk_order(pg, list(meta)):
             t, pgcols = meta[name], have[name]
-            cols = [(c, pgcols[c][0]) for c, _ in t["columns"] if c in pgcols]
-            skipped = [c for c, _ in t["columns"] if c not in pgcols]
-            if skipped:
-                print(f"{name}: columns not in Supabase, left out: {', '.join(skipped)}")
+            extra = [(c, typ) for c, typ in t["columns"] if c not in pgcols]
+            for c, typ in extra:  # a column only MariaDB has: add it, so none of its data is left behind
+                pg.execute(f"alter table {q(name)} add column if not exists {q(c)} {typ}")
+                pgcols[c] = (typ, False)
+            if extra:
+                print(f"{name}: columns MariaDB has but schema.sql did not - added to Supabase so nothing is left behind: "
+                      + ", ".join(c for c, _ in extra))
+            cols = [(c, pgcols[c][0]) for c, _ in t["columns"]]
             if not t["pk"]:  # no key to match rows on: replace the table's rows rather than duplicate them
                 pg.execute(f"delete from {q(name)}")
             sql, done = upsert_sql(name, [c for c, _ in cols], t["pk"]), 0
@@ -240,6 +264,7 @@ async def copy():
         await check_media_moved(conn)
         meta = await tables(conn)
         with pg_connect() as pg:
+            apply_sql_files(pg)  # tables and buckets: created or brought up to date first, so no SQL has to be pasted by hand
             await load_into_pg(pg, meta, mysql_fetch(conn), schema_tables())
     finally:
         conn.close()
@@ -279,8 +304,11 @@ async def check():
 
 if __name__ == "__main__":
     step = sys.argv[1] if len(sys.argv) > 1 else ""
-    if step not in ("copy", "check"):
+    if step not in ("prepare", "copy", "check"):
         sys.exit(__doc__)
     if not os.environ.get("SUPABASE_DB_URL"):
         sys.exit("Set SUPABASE_DB_URL in backend/.env first (Supabase -> Connect -> connection string, with your database password).")
-    asyncio.run({"copy": copy, "check": check}[step]())
+    if step == "prepare":
+        prepare()
+    else:
+        asyncio.run({"copy": copy, "check": check}[step]())

@@ -44,6 +44,18 @@ os.environ["REQUESTS_CA_BUNDLE"] = certifi.where()
 # shim over the same db.<collection>.<method>(...) calls below) instead of
 # MongoDB Atlas. Defaults to mongo so this switch is safe to deploy before cutover.
 DB_BACKEND = os.environ.get('DB_BACKEND', 'mongo').lower()
+if DB_BACKEND == 'postgres' and os.environ.get('MYSQL_USER'):
+    # Safety net for a switch nobody is watching: if Supabase cannot be reached when the app starts, run on MariaDB
+    # (still intact) instead of staying down. /api/health then reports "mysql". Anything saved after the switch is in
+    # Supabase only, so a fallback means: fix the Supabase connection, then copy again before switching once more.
+    try:
+        import psycopg
+        with psycopg.connect(os.environ['SUPABASE_DB_URL'], connect_timeout=10, prepare_threshold=None) as _probe:
+            _probe.execute('select 1')
+    except Exception as _e:
+        logging.getLogger("server").error(
+            "DB_BACKEND=postgres but Supabase is not reachable (%s) - FALLING BACK to MariaDB", type(_e).__name__)
+        DB_BACKEND = 'mysql'
 if DB_BACKEND == 'mysql':
     from sqldb import MySQLDatabase
     db = MySQLDatabase()
@@ -6278,6 +6290,12 @@ async def _run_startup_tasks():
             await finance_books.ensure_schema(db)  # Finance's Rent tables and bill-service columns (never raises)
         except Exception:
             logger.warning("Could not ensure the Finance rent tables", exc_info=True)
+    if DB_BACKEND == "postgres":
+        # Supabase: the tables and columns come from backend/supabase/schema.sql; this only registers Finance's late-added ones.
+        try:
+            await finance_books.ensure_schema_postgres(db)
+        except Exception:
+            logger.warning("Could not check the Finance columns", exc_info=True)
     try:
         await _backfill_booking_receipt_numbers()
     except Exception:
@@ -7549,5 +7567,10 @@ async def shutdown():
 import finance_books
 finance_books.register(api_router, db, admin_only)
 crm.register(api_router, db, admin_only, _sale_revenue)
+
+# TEMPORARY - the owner-only tool that moves the data to Supabase without a login on the server. To remove it once the
+# move is finished: delete backend/migration_tool.py and tools/run_migration.py, and delete this comment and the two lines below.
+import migration_tool
+migration_tool.register(api_router, db, get_current_user, logger, lambda: DB_BACKEND)
 
 app.include_router(api_router)

@@ -27,25 +27,27 @@ Pushing this code to `main` is safe: the VPS auto-deploys it, but the backend ke
 
 ## Steps
 
-**Quick way for steps 3–5, in one command.** On the server, after steps 1 and 2:
+**Quick way for steps 2–5, in one command.** On the server, after step 1:
 
 ```bash
 cd ~/auto-stock-manager && git pull && bash deploy/migrate_to_supabase.sh
 ```
 
 It asks for the three Supabase settings (what you type is hidden) and saves them in `backend/.env`, installs the
-packages, checks the Supabase connection, moves the photos and documents, copies every table and runs `check`. It
-never switches the app over and never deletes anything, and it can be run again. Everything it prints is also saved in
+packages, checks the Supabase connection, prepares the tables and buckets, moves the photos and documents, copies every
+table and runs `check`. It never switches the app over and never deletes anything, and it can be run again. Everything it prints is also saved in
 `~/supabase-migration-<date>.log` (table names and numbers, no passwords). The manual steps below do the same thing
 one at a time.
 
 **1. Back up MariaDB.** `deploy/backup-db.sh` (or your usual dump). Keep it until the move is finished.
 
-**2. Set up Supabase (once).** In the Supabase SQL Editor run, in this order:
-1. `backend/supabase/0001_media_buckets.sql` — the photo and document storage buckets
-2. `backend/supabase/schema.sql` — every table, built from `backend/schema.sql` plus the columns and tables the app
-   adds at startup: same columns, defaults, unique rules, indexes and foreign keys (safe to run again). Tables that
-   exist only in your live MariaDB (the old `fin_*` ones) are created by the copy step.
+**2. Supabase tables and photo buckets.** Nothing to paste: the move creates them (and brings an older copy up to
+date) by itself, using `backend/supabase/0001_media_buckets.sql` (the two photo buckets) and
+`backend/supabase/schema.sql` (all 45 tables, built from `backend/schema.sql`, the Finance books migrations
+`migration_add_finance_*.sql` and the columns and tables `server.py` / `finance_books.py` add at startup: same columns,
+defaults, unique rules, indexes and foreign keys). Doing the steps by hand, run `venv/bin/python copy_mysql_to_supabase.py prepare` now, before step 4 (safe
+to run again). If the app gains a table or column later, `schema.sql` has to be regenerated. A table or column
+that exists only in your live MariaDB is added by the copy step, so nothing is left behind.
 
 **3. Get the code and settings onto the VPS.** `git pull`, then in `~/auto-stock-manager/backend/`:
 `venv/bin/pip install -r requirements.txt`, and add the three Supabase settings above to `.env`. Do **not** change
@@ -69,8 +71,8 @@ venv/bin/python copy_mysql_to_supabase.py check   # row counts and every money/n
 ```
 
 `check` must say everything matches. `copy` refuses to start if a photo or document is still only in MariaDB
-(go back to step 4). The leftover `fin_*` tables from the removed Finance section are copied too, so nothing is
-left behind. `auth_tokens` (one-time email links) are not.
+(go back to step 4). The Finance books tables (`fin_*`) are copied like everything else. `auth_tokens` (one-time
+email links) are not.
 
 **6. Switch over, at a quiet time** (nobody entering data):
 1. Run step 5 again (`copy`, then `check`) so Supabase has the latest.
@@ -85,6 +87,31 @@ two. Afterwards MariaDB can be kept as a plain backup.
 
 **7. Later, once it has run without problems for some weeks:** `migrate_media_to_supabase.py purge` (frees the photo
 copies in MariaDB), then retire MariaDB.
+
+## Without a login on the server (temporary tool)
+
+If nobody can log in to the server, the app can do the move itself. `backend/migration_tool.py` (owner-only) runs the
+same two scripts on the server, and `tools/run_migration.py` drives it from any PC using the app's normal login. Nothing
+is deleted anywhere.
+
+1. Commit and push to GitHub. The server updates itself within a minute or two.
+2. On your PC, in the project folder (it reads the three `SUPABASE_` values from `backend/.env`; the password you type
+   for the app is hidden):
+   - `python tools/run_migration.py test` — checks the Supabase and MariaDB connections; copies nothing
+   - `python tools/run_migration.py copy` — moves photos and data and compares them; the app keeps using MariaDB
+   - `python tools/run_migration.py switch` — the same, then only if everything matches makes the app use Supabase and
+     restarts it (do this at a quiet time; it asks you to type SWITCH)
+   - `python tools/run_migration.py rollback` — makes the app use MariaDB again
+3. When the move is done and you are happy: delete `backend/migration_tool.py` and `tools/run_migration.py`, delete the
+   `migration_tool` lines near the bottom of `backend/server.py`, and push again.
+
+Who may use it: the platform owner, or an admin of the original (oldest) business. A company created by a later
+signup can never qualify. The tool never logs or returns the Supabase settings; `switch` writes them to the server's
+`.env` (the old file is kept next to it as `.env.before-migration-<time>`).
+
+Safety net: if the app starts with `DB_BACKEND=postgres` and cannot reach Supabase, it runs on MariaDB instead of
+staying down (`/api/health` then says `"db_backend":"mysql"`). Anything saved after the switch is in Supabase only, so
+after a fallback, fix the connection and copy again before switching once more.
 
 ## What behaves differently on Postgres (already handled in `pgdb.py`)
 

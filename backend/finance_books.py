@@ -183,6 +183,45 @@ async def ensure_schema(db, registry=None):
     except Exception:  # noqa: BLE001
         logger.warning("Could not check fin_parties' columns", exc_info=True)
 
+
+async def ensure_schema_postgres(db, registry=None):
+    """The Supabase (Postgres) counterpart of ensure_schema. The tables and every column already exist there (they
+    come from backend/supabase/schema.sql), so nothing is created; this only checks that the late-added columns are
+    present and tells the SQL layer's table registry about them, exactly as ensure_schema does. Never raises."""
+    global _services_ready, _groups_ready, _types_ready
+    if registry is None:
+        import sqldb
+        registry = sqldb.TABLES
+    _services_ready = _groups_ready = _types_ready = False
+
+    async def columns(table):
+        try:
+            rows = await db.fetch_raw("SELECT column_name FROM information_schema.columns "
+                                      f"WHERE table_schema = current_schema() AND table_name = '{table}'")
+            return {r["column_name"] for r in rows}
+        except Exception:  # noqa: BLE001
+            logger.warning("Could not check %s's columns", table, exc_info=True)
+            return set()
+
+    have = await columns("fin_transactions")
+    if all(col in have for col, _ in SERVICE_COLUMNS):
+        meta = registry["fin_transactions"]
+        meta["columns"].update(col for col, _ in SERVICE_COLUMNS)
+        meta.setdefault("json_cols", set()).add("service_charges")
+        _services_ready = True
+    else:
+        logger.warning("Finance services are off: fin_transactions has no installation_charge / service_charges columns")
+    if "expense_group" in await columns("fin_expense_categories"):
+        registry["fin_expense_categories"]["columns"].add("expense_group")
+        _groups_ready = True
+    else:
+        logger.warning("Finance expense heads are all direct: fin_expense_categories has no expense_group column")
+    if "party_type_id" in await columns("fin_parties"):
+        registry["fin_parties"]["columns"].add("party_type_id")
+        _types_ready = True
+    else:
+        logger.warning("Ledger types are off: fin_parties has no party_type_id column")
+
 LEDGER_SIDES = {"customer": ("fin_customer_ledger", "customer_id"),
                 "vendor": ("fin_vendor_ledger", "vendor_id")}
 BILL_TYPES = {"sale", "purchase", "expense"}

@@ -5,8 +5,8 @@
 #     cd ~/auto-stock-manager && git pull && bash deploy/migrate_to_supabase.sh
 #
 # What it does, in order: asks for the three Supabase settings it is missing (typing is hidden) and saves them in
-# backend/.env; installs what the new code needs; checks the Supabase connection; moves the photos and documents into
-# Supabase Storage; copies every table; compares MariaDB and Supabase.
+# backend/.env; installs what the new code needs; checks the Supabase connection; creates/updates Supabase's tables and photo
+# buckets; moves the photos and documents into Supabase Storage; copies every table; compares MariaDB and Supabase.
 #
 # What it never does: switch the app over (DB_BACKEND is not touched), delete anything, or run "purge".
 #   * MariaDB's tables are only read. The one change to MariaDB is that each moved photo/document row gets a pointer
@@ -73,10 +73,10 @@ trap 'echo; echo "STOPPED. Nothing was deleted and the app was not switched over
 
 echo
 echo "== $(date)  (log: $LOG)"
-echo "== 1/5  Installing what the new code needs"
+echo "== 1/6  Installing what the new code needs"
 venv/bin/pip install -q -r requirements.txt
 
-echo "== 2/5  Checking the Supabase connection"
+echo "== 2/6  Checking the Supabase connection"
 $PY - <<'PYEOF'
 import os, sys
 from dotenv import load_dotenv
@@ -84,26 +84,24 @@ load_dotenv(".env")
 import psycopg
 try:
     with psycopg.connect(os.environ["SUPABASE_DB_URL"], connect_timeout=20, prepare_threshold=None) as c:
-        have = c.execute("select to_regclass('public.users') is not null, "
-                         "(select count(*) from information_schema.tables where table_schema='public')").fetchone()
+        c.execute("select 1")
 except Exception as e:
     print(f"Could not connect to Supabase: {type(e).__name__}. Check SUPABASE_DB_URL (password, and use the Session pooler address).")
     sys.exit(1)
-if not have[0]:
-    print("Connected, but the tables are not there yet. In Supabase > SQL Editor run backend/supabase/0001_media_buckets.sql, then backend/supabase/schema.sql, then run this again.")
-    sys.exit(1)
-print(f"Connected. {have[1]} tables are ready in Supabase.")
+print("Connected to Supabase.")
 PYEOF
 
-echo "== 3/5  Moving photos and documents into Supabase Storage"
+echo "== 3/6  Preparing Supabase (tables and photo buckets)"
+$PY copy_mysql_to_supabase.py prepare
+echo "== 4/6  Moving photos and documents into Supabase Storage, and checking every file arrived"
 $PY migrate_media_to_supabase.py copy
-echo "== 4/5  Checking every file really arrived"
 $PY migrate_media_to_supabase.py verify
-echo "== 5/5  Copying the data, then comparing it"
+echo "== 5/6  Copying the data"
 $PY copy_mysql_to_supabase.py copy
+echo "== 6/6  Comparing MariaDB and Supabase"
 $PY copy_mysql_to_supabase.py check
 
 trap - ERR
 echo
 echo "== DONE. The app was NOT switched over and nothing was deleted."
-echo "== Send the lines above (from '5/5' down) to confirm they all say ok. Log saved at $LOG"
+echo "== Send the lines above (from '6/6' down) to confirm they all say ok. Log saved at $LOG"
