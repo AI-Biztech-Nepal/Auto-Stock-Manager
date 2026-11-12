@@ -125,6 +125,17 @@ until `purge` - the database's "already moved" marks from the earlier project ar
 untouched as a spare. Measured round trip from Nepal (TCP connect to the Supabase pooler): Seoul 160 ms, Singapore 89 ms,
 Mumbai 51 ms; the app asks the database ~30 questions per screen, so the region decides how fast screens feel.
 
+## Backups
+
+After the switch Supabase holds the only live copy, and the free plan has no automatic backups. `tools/backup_supabase.py`
+(double-click `backup-supabase.bat`) saves everything to `%USERPROFILE%\AutoStockBackups`: every table as a compressed CSV in a new
+dated folder (one consistent snapshot, with a manifest of row counts and checksums), and the photos and documents into a folder that
+only ever gains files. It reads from Supabase only and deletes nothing, in Supabase or in the backup folder. `verify` checks a backup
+is complete and undamaged. `restore <dated folder>` loads a backup into an EMPTY project (and `restore-files` uploads the saved photos);
+tested: a restore is identical to the original in every row and column. The data folder contains customers' details and password
+hashes: keep it private, not in a synced or shared folder. Run it weekly (or after busy days); a scheduled run is possible with
+Windows Task Scheduler pointing at `backup-supabase.bat`.
+
 ## Photos and the public storefront
 
 The public storefront (hamroauto.com.np, a separate Next.js site) only loads photos from an approved list of addresses
