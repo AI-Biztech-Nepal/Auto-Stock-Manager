@@ -1,16 +1,19 @@
 import { useEffect, useState, useCallback, useMemo, useRef, useLayoutEffect } from "react";
 import { createPortal } from "react-dom";
-import { useNavigate, useSearchParams } from "react-router-dom";
-import { Plus, Search, Eye, Trash2, Filter, X, UploadCloud, Download, EyeOff, Package, Wallet, DollarSign, Lock, Moon, Archive, Sparkles, Store, User, Wrench, Clock, CheckCircle2, AlertTriangle, ImageOff, ChevronDown, Share2 } from "lucide-react";
+import { useNavigate, useOutletContext, useSearchParams } from "react-router-dom";
+import useMediaQuery from "../hooks/useMediaQuery";
+import { Plus, Search, Trash2, Filter, X, EyeOff, Package, Wallet, DollarSign, Lock, Moon, Sparkles, Store, User, Wrench, Clock, CheckCircle2, AlertTriangle, ImageOff, ChevronDown } from "lucide-react";
 import { toast } from "sonner";
 import api, { postWithRetry } from "../utils/api";
-import { formatNPR, getAgingStyle, getStatusStyle, getTerminationStyle, isSanakhatOverdue, sanakhatPendingDays, SANAKHAT_WARN_DAYS, BRANDS, VEHICLE_STATUS_OPTIONS, formatOwnership } from "../utils/helpers";
+import { EMPTY_DOC_PHOTOS, flattenStagedDocs, revokeStagedDocs, uploadStagedDocs } from "../utils/stagedDocs";
+import { formatNPR, getAgingStyle, getStatusStyle, getTerminationStyle, isSanakhatOverdue, sanakhatPendingDays, sanakhatDaysLeft, SANAKHAT_CYCLE_DAYS, SANAKHAT_WARN_DAYS, BRANDS, VEHICLE_STATUS_OPTIONS, formatOwnership } from "../utils/helpers";
 import { AddVehicleModal } from "./AddVehicleModal";
 import { VehicleDetailModal } from "./VehicleDetail";
 import HoverADDate from "../components/HoverADDate";
+import { formatBSDateNumeric } from "../utils/nepali-date";
+import { BOOK_CARD, BookTableStyle } from "../components/BookTable";
 import DateRangeFilter, { resolveDateFilter } from "../components/DateRangeFilter";
 import ViewToggle, { useViewMode } from "../components/ViewToggle";
-import ListRow from "../components/ListRow";
 import LazyThumb from "../components/LazyThumb";
 import { useAuth } from "../context/AuthContext";
 import { hasFullVehicleAccess, canAddVehicle, isBasicStockRole, hidesVehiclePricing } from "../utils/permissions";
@@ -22,6 +25,8 @@ import { hasFullVehicleAccess, canAddVehicle, isBasicStockRole, hidesVehiclePric
 const STATUSES = ["all", ...VEHICLE_STATUS_OPTIONS.filter(o => o.value !== "sold" && o.value !== "scrap").map(o => o.value)];
 const STATUS_ICONS = { all: Filter, unlisted: EyeOff, in_repair: Wrench, available: CheckCircle2, reserved: Clock };
 const AGING_CATEGORIES = ["all", "fresh", "normal", "slow", "dead"];
+// Amounts in the vehicle table: no "Rs." prefix, to keep the columns narrow.
+const rs = (n) => new Intl.NumberFormat("en-IN").format(Math.round(n || 0));
 const AGING_RANGES = { fresh: "0–30 days", normal: "31–45 days", slow: "46–60 days", dead: "60+ days" };
 
 // A single photo isn't enough for a storefront listing — this is the bar a vehicle
@@ -125,16 +130,8 @@ export default function Inventory() {
   const [form, setForm] = useState(EMPTY);
   const [saving, setSaving] = useState(false);
   const [photos, setPhotos] = useState([]);
-  const [hidingUnpriced, setHidingUnpriced] = useState(false);
-  const [exportingStock, setExportingStock] = useState(false);
-  const [stockMenuOpen, setStockMenuOpen] = useState(false);
-  const stockMenuRef = useRef(null);
-  useEffect(() => {
-    if (!stockMenuOpen) return;
-    const close = (e) => { if (!stockMenuRef.current?.contains(e.target)) setStockMenuOpen(false); };
-    document.addEventListener("mousedown", close);
-    return () => document.removeEventListener("mousedown", close);
-  }, [stockMenuOpen]);
+  // Paperwork photos staged in the Purchase form, by document type; uploaded once the vehicle is saved.
+  const [docPhotos, setDocPhotos] = useState(EMPTY_DOC_PHOTOS);
   // Opening a vehicle renders VehicleDetailModal inline instead of navigating to /inventory/:id,
   // so the Inventory page underneath stays mounted (no refetch, no lost scroll/filter state).
   const [selectedVehicleId, setSelectedVehicleId] = useState(null);
@@ -181,7 +178,6 @@ export default function Inventory() {
     [vehicles]
   );
 
-  const unpricedVisible = vehicles.filter(v => !v.selling_price && !["sold", "unlisted", "hidden", "scrap", "in_repair"].includes(v.status));
   const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
   const recentlyAdded = vehicles
     .filter(v => v.created_at && new Date(v.created_at).getTime() >= oneDayAgo)
@@ -278,39 +274,24 @@ export default function Inventory() {
     return result.length;
   })();
 
-  const hideUnpriced = async () => {
-    if (unpricedVisible.length === 0) return;
-    if (!window.confirm(`Move ${unpricedVisible.length} vehicle(s) with no selling price to Unlisted?`)) return;
-    setHidingUnpriced(true);
-    try {
-      const results = await Promise.allSettled(unpricedVisible.map(v => api.put(`/vehicles/${v.id}`, { status: "unlisted" })));
-      const failed = results.filter(r => r.status === "rejected").length;
-      if (failed > 0) toast.error(`Moved ${results.length - failed} vehicle(s), ${failed} failed`);
-      else toast.success(`Moved ${results.length} vehicle(s) to Unlisted`);
-      fetchVehicles();
-    } finally { setHidingUnpriced(false); }
-  };
-
-  const exportStock = async () => {
-    setExportingStock(true);
-    try {
-      const res = await api.get("/reports/inventory-pipeline-export", { responseType: "blob" });
-      const blob = new Blob([res.data], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url; a.download = `GG_Auto_Inventory_Pipeline_${new Date().toISOString().slice(0, 10)}.xlsx`; a.click();
-      URL.revokeObjectURL(url);
-    } catch { toast.error("Failed to export stock"); }
-    finally { setExportingStock(false); }
-  };
+  const stagedDocs = flattenStagedDocs(docPhotos);
 
   const clearStagedPhotos = () => {
     photos.forEach(p => URL.revokeObjectURL(p.previewUrl));
     setPhotos([]);
+    revokeStagedDocs(stagedDocs);
+    setDocPhotos(EMPTY_DOC_PHOTOS);
+  };
+
+  // Import Stock is its own page, so leaving the form for it asks first, as closing the form does.
+  const importStock = () => {
+    const dirty = photos.length > 0 || stagedDocs.length > 0 || JSON.stringify(form) !== JSON.stringify(EMPTY);
+    if (dirty && !window.confirm("You have unsaved changes. Leave without saving?")) return;
+    navigate("/import-stock");
   };
 
   const closeAddModal = () => {
-    const dirty = photos.length > 0 || JSON.stringify(form) !== JSON.stringify(EMPTY);
+    const dirty = photos.length > 0 || stagedDocs.length > 0 || JSON.stringify(form) !== JSON.stringify(EMPTY);
     if (dirty && !window.confirm("You have unsaved changes. Close without saving?")) return;
     setShowModal(false);
     setForm(EMPTY);
@@ -406,7 +387,6 @@ export default function Inventory() {
         selling_price: form.selling_price ? Number(form.selling_price) : null,
         sanakhat_date: form.sanakhat_date || null,
         sanakhat_cost: form.sanakhat_cost ? Number(form.sanakhat_cost) : null,
-        purchase_due: form.purchase_due ? Number(form.purchase_due) : null,
         year: Number(form.year),
         engine_cc: Number(form.engine_cc),
         ownership_number: form.ownership_number ? Number(form.ownership_number) : null,
@@ -418,6 +398,9 @@ export default function Inventory() {
           return postWithRetry(`/vehicles/${r.data.id}/photos`, fd, { headers: { "Content-Type": "multipart/form-data" } });
         }));
         if (results.some(res => res.status === "rejected")) toast.error("Vehicle saved, but some photos failed to upload");
+      }
+      if (stagedDocs.length > 0 && await uploadStagedDocs(r.data.id, stagedDocs)) {
+        toast.error("Vehicle saved, but some paperwork photos failed to upload. Add them from the vehicle page.");
       }
       toast.success("Vehicle added successfully!");
       setShowModal(false);
@@ -451,92 +434,32 @@ export default function Inventory() {
     } catch { toast.error("Failed to delete"); }
   };
 
+  // The vehicle table's columns and their share of the card's width (colgroup below). Roles that don't see some
+  // money, or can't delete, lose those columns and the rest share the room.
+  const tableCols = [
+    { key: "sn", w: 4 }, { key: "vehicle", w: 15 }, { key: "brand", w: 9 }, { key: "bike", w: 9 },
+    ...(hideFinancials ? [] : [{ key: "purchase", w: 8 }, { key: "repair", w: 7 }, { key: "cost", w: 9 }]),
+    ...(hidePricing ? [] : [{ key: "selling", w: 8 }]),
+    { key: "sanakhat", w: 9 }, { key: "status", w: 9 }, { key: "stock", w: 8 },
+    ...(isAdmin ? [{ key: "actions", w: 5 }] : []),
+  ];
+  const tableColsTotal = tableCols.reduce((n, c) => n + c.w, 0);
+  const wideScreen = useMediaQuery("(min-width: 640px)");
+  const { topbarSlot } = useOutletContext() || {};
+  const viewControls = (
+    <>
+      <DateRangeFilter value={dateRange.key} custom={dateRange.custom} onChange={(key, custom) => setDateRange({ key, custom })} testid="inventory-date-filter" />
+      <ViewToggle view={view} onChange={setView} testid="inventory-view-toggle" />
+    </>
+  );
   const sanakhatOverdue = vehicles.filter(isSanakhatOverdue).sort((a, b) => sanakhatPendingDays(b) - sanakhatPendingDays(a));
 
   return (
-    <div className="space-y-5 animate-fade-in">
-      {/* Header */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-900">Inventory</h1>
-          <p className="text-sm text-slate-500">{filtered.length} vehicles found</p>
-        </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          <DateRangeFilter value={dateRange.key} custom={dateRange.custom} onChange={(key, custom) => setDateRange({ key, custom })} testid="inventory-date-filter" />
-          <ViewToggle view={view} onChange={setView} testid="inventory-view-toggle" />
-          {!isFrontDesk && (
-            <button
-              onClick={() => navigate("/marketing?tab=share")}
-              data-testid="share-stock-button"
-              className="flex items-center gap-2 border border-slate-200 text-slate-700 text-sm font-medium px-4 py-3 rounded-lg hover:bg-slate-50 transition-all active:scale-95"
-            >
-              <Share2 size={16} /> Share Stock
-            </button>
-          )}
-          {((!isFrontDesk && !isSocialMedia) || isAdmin) && (
-            <div className="relative" ref={stockMenuRef}>
-              <button
-                onClick={() => setStockMenuOpen(o => !o)}
-                data-testid="stock-data-menu-button"
-                className="flex items-center gap-2 border border-slate-200 text-slate-700 text-sm font-medium px-4 py-3 rounded-lg hover:bg-slate-50 transition-all active:scale-95"
-              >
-                <Download size={16} /> Import / Export <ChevronDown size={14} />
-              </button>
-              {stockMenuOpen && (
-                <div className="absolute right-0 mt-1 w-48 bg-white border border-slate-200 rounded-lg shadow-lg z-30 py-1">
-                  {isAdmin && (
-                    <button
-                      onClick={() => { setStockMenuOpen(false); navigate("/import-stock"); }}
-                      data-testid="import-stock-btn"
-                      className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 text-left"
-                    >
-                      <UploadCloud size={16} /> Import Stock
-                    </button>
-                  )}
-                  {!isFrontDesk && !isSocialMedia && (
-                    <button
-                      onClick={() => { setStockMenuOpen(false); exportStock(); }}
-                      disabled={exportingStock}
-                      data-testid="export-stock-button"
-                      className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 text-left disabled:opacity-60"
-                    >
-                      <Download size={16} /> {exportingStock ? "Exporting..." : "Export Stock"}
-                    </button>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
-          {canManageStock && !isFrontDesk && (
-            <button
-              onClick={() => navigate("/sales")}
-              data-testid="sold-stock-link"
-              className="flex items-center gap-2 border border-slate-200 text-slate-700 text-sm font-medium px-4 py-3 rounded-lg hover:bg-slate-50 transition-all active:scale-95"
-            >
-              <Archive size={16} /> Sold Stock
-            </button>
-          )}
-          {canManageStock && !isFrontDesk && unpricedVisible.length > 0 && (
-            <button
-              onClick={hideUnpriced}
-              disabled={hidingUnpriced}
-              data-testid="hide-unpriced-button"
-              className="flex items-center gap-2 border border-slate-200 text-slate-700 text-sm font-medium px-4 py-3 rounded-lg hover:bg-slate-50 transition-all active:scale-95 disabled:opacity-60"
-            >
-              <EyeOff size={16} /> {hidingUnpriced ? "Moving..." : `Move ${unpricedVisible.length} With No Price To Unlisted`}
-            </button>
-          )}
-          {canAddVehicle(user?.role) && (
-            <button
-              onClick={() => { setForm(EMPTY); setShowModal(true); }}
-              data-testid="add-vehicle-button"
-              className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-3 rounded-lg transition-all active:scale-95 shadow-sm"
-            >
-              <Plus size={16} /> Add Vehicle
-            </button>
-          )}
-        </div>
-      </div>
+    <div className="space-y-3 animate-fade-in">
+      {/* Date range and Cards / List: up in the top bar on wide screens, here on phones */}
+      {wideScreen && topbarSlot
+        ? createPortal(viewControls, topbarSlot)
+        : <div className="flex items-center justify-end gap-2 flex-wrap">{viewControls}</div>}
 
       {/* Sanaakhat pending past 30 days */}
       {canManageStock && sanakhatOverdue.length > 0 && (
@@ -642,8 +565,10 @@ export default function Inventory() {
         </div>
       )}
 
-      {/* Status Toggle */}
-      <div className="flex items-center gap-2 overflow-x-auto pb-1" data-testid="status-toggle-group">
+      {/* One line: the six status chips at the left, Purchase Vehicle at the right end (on phones it drops under the
+          chips, full width). Import Stock lives inside the Purchase Vehicle form. */}
+      <div className="flex flex-wrap lg:flex-nowrap items-center justify-between gap-2">
+      <div className="flex items-center gap-1.5 overflow-x-auto min-w-0" data-testid="status-toggle-group">
         {STATUSES.map(s => {
           const active = statusFilter === s;
           const Icon = STATUS_ICONS[s] || Filter;
@@ -652,13 +577,13 @@ export default function Inventory() {
               key={s}
               onClick={() => setStatusFilter(s)}
               data-testid={`status-toggle-${s}`}
-              className={`flex items-center gap-1.5 shrink-0 px-3.5 py-3 rounded-full text-sm font-medium border transition-colors whitespace-nowrap ${
+              className={`flex items-center gap-1 shrink-0 px-2.5 py-1 rounded-full text-xs font-medium border transition-colors whitespace-nowrap ${
                 active ? "bg-blue-600 border-blue-600 text-white" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
               }`}
             >
-              <Icon size={14} />
+              <Icon size={13} />
               {s === "all" ? "All Status" : getStatusStyle(s).label}
-              <span className={`text-xs px-1.5 py-0.5 rounded-full ${active ? "bg-white/20 text-white" : "bg-slate-100 text-slate-500"}`}>
+              <span className={`text-[11px] px-1.5 rounded-full ${active ? "bg-white/20 text-white" : "bg-slate-100 text-slate-500"}`}>
                 {statusCounts[s]}
               </span>
             </button>
@@ -669,17 +594,29 @@ export default function Inventory() {
           onClick={() => setPhotoMenuOpen(o => !o)}
           data-testid="photo-filter-toggle"
           title="Filter by photo coverage"
-          className={`flex items-center gap-1.5 shrink-0 px-3.5 py-3 rounded-full text-sm font-medium border transition-colors whitespace-nowrap ${
+          className={`flex items-center gap-1 shrink-0 px-2.5 py-1 rounded-full text-xs font-medium border transition-colors whitespace-nowrap ${
             photoFilter ? "bg-blue-600 border-blue-600 text-white" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
           }`}
         >
-          <ImageOff size={14} />
+          <ImageOff size={13} />
           Photo Filter
-          <span className={`text-xs px-1.5 py-0.5 rounded-full ${photoFilter ? "bg-white/20 text-white" : "bg-slate-100 text-slate-500"}`}>
+          <span className={`text-[11px] px-1.5 rounded-full ${photoFilter ? "bg-white/20 text-white" : "bg-slate-100 text-slate-500"}`}>
             {photoFilter === "none" ? noPhotoCount : lowPhotoCount}
           </span>
-          <ChevronDown size={14} className={photoMenuOpen ? "rotate-180 transition-transform" : "transition-transform"} />
+          <ChevronDown size={13} className={photoMenuOpen ? "rotate-180 transition-transform" : "transition-transform"} />
         </button>
+      </div>
+      <div className="flex items-center gap-1.5 w-full lg:w-auto shrink-0" data-testid="inventory-actions">
+          {canAddVehicle(user?.role) && (
+            <button
+              onClick={() => { setForm(EMPTY); setShowModal(true); }}
+              data-testid="add-vehicle-button"
+              className="flex-1 lg:flex-none flex items-center justify-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium px-2.5 h-8 rounded-lg transition-all active:scale-95 shadow-sm"
+            >
+              <Plus size={14} /> Purchase Vehicle
+            </button>
+          )}
+      </div>
       </div>
 
       {photoMenuOpen && photoMenuCoords && createPortal(
@@ -712,7 +649,7 @@ export default function Inventory() {
       )}
 
       {/* Filters — sticky so search/filters stay reachable while scrolling a long list */}
-      <div className="sm:sticky top-0 z-20 bg-white rounded-xl border border-slate-200 shadow-sm p-3 sm:p-4 flex flex-wrap gap-2 sm:gap-3 items-center">
+      <div className="sm:sticky top-0 z-20 bg-white rounded-xl border border-slate-200 shadow-sm p-2 flex flex-wrap gap-2 sm:gap-3 items-center">
         <div className="relative flex-1 min-w-48">
           <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
           <input
@@ -720,7 +657,7 @@ export default function Inventory() {
             value={search}
             onChange={e => setSearch(e.target.value)}
             placeholder="Search brand, model, reg#..."
-            className="w-full h-9 pl-9 pr-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="w-full h-8 pl-9 pr-3 text-[13px] border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
         </div>
         <div className="grid grid-cols-2 sm:flex items-center gap-2 w-full sm:w-auto">
@@ -728,7 +665,7 @@ export default function Inventory() {
           <select
             value={brandFilter}
             onChange={e => setBrandFilter(e.target.value)}
-            className="h-11 sm:h-9 px-3 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="h-11 sm:h-8 px-2.5 text-[13px] border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
           >
             <option value="all">All Brands</option>
             {BRANDS.map(b => <option key={b}>{b}</option>)}
@@ -742,7 +679,7 @@ export default function Inventory() {
               else setSearchParams({ aging: val });
             }}
             data-testid="aging-filter-select"
-            className="h-11 sm:h-9 px-3 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="h-11 sm:h-8 px-2.5 text-[13px] border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
           >
             {AGING_CATEGORIES.map(a => (
               <option key={a} value={a}>{a === "all" ? "All Stock Age" : `${getAgingStyle(a).label} (${AGING_RANGES[a]})`}</option>
@@ -751,37 +688,36 @@ export default function Inventory() {
         </div>
       </div>
 
-      {/* Summary */}
+      {/* Summary: one slim strip, so the vehicles start near the top of the page */}
       {!loading && !isFrontDesk && (
-        <div className="grid grid-cols-2 lg:grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-2 sm:gap-4">
+        <div className="grid grid-cols-2 lg:grid-flow-col lg:auto-cols-fr gap-px bg-slate-200 rounded-xl border border-slate-200 shadow-sm overflow-hidden">
           {[
-            { label: "Total Vehicles", value: filtered.length, icon: Package, color: "bg-blue-500", view: "all" },
-            !hideFinancials && { label: "Total Investment", value: formatNPR(totalInvestment), icon: Wallet, color: "bg-indigo-500", view: "investment" },
-            !hideFinancials && { label: "Locked Capital", value: formatNPR(lockedCapital), icon: Lock, color: "bg-purple-500", view: "locked" },
-            !hidePricing && { label: "Total Selling Price", value: formatNPR(totalSellingPrice), icon: DollarSign, color: "bg-green-500", view: "selling" },
+            { label: "Total Vehicles", value: filtered.length, icon: Package, color: "text-blue-600", view: "all" },
+            !hideFinancials && { label: "Total Investment", value: formatNPR(totalInvestment), icon: Wallet, color: "text-indigo-600", view: "investment" },
+            !hideFinancials && { label: "Locked Capital", value: formatNPR(lockedCapital), icon: Lock, color: "text-purple-600", view: "locked" },
+            !hidePricing && { label: "Total Selling Price", value: formatNPR(totalSellingPrice), icon: DollarSign, color: "text-green-600", view: "selling" },
           ].filter(Boolean).map(c => (
-            <div
+            <button
+              type="button"
               key={c.label}
               onClick={() => setSummaryModalView(c.view)}
               data-testid={`inventory-summary-tile-${c.view}`}
-              className="bg-white rounded-xl border border-slate-200 shadow-sm p-2.5 sm:p-4 flex items-center gap-3 min-w-0 cursor-pointer hover:shadow-md active:scale-[0.98] transition-all"
+              className="bg-white px-3 py-1.5 flex items-center gap-2 min-w-0 text-left hover:bg-slate-50 transition-colors"
             >
-              <div className={`hidden sm:flex w-9 h-9 rounded-lg ${c.color} items-center justify-center shrink-0`}>
-                <c.icon size={16} className="text-white" />
-              </div>
-              <div className="min-w-0">
-                <div className="text-xs text-slate-500 font-medium truncate">{c.label}</div>
-                <div className="text-sm sm:text-lg font-bold text-slate-900 leading-tight" style={{ fontFamily: "Manrope" }}>{c.value}</div>
-              </div>
-            </div>
+              <c.icon size={14} className={`${c.color} shrink-0`} />
+              <span className="min-w-0">
+                <span className="block text-[10px] text-slate-500 font-medium truncate">{c.label}</span>
+                <span className="block text-[13px] font-bold text-slate-900 leading-tight" style={{ fontFamily: "Manrope" }}>{c.value}</span>
+              </span>
+            </button>
           ))}
         </div>
       )}
 
       {/* Recently Added Highlight */}
       {!loading && !isFrontDesk && statusFilter === "all" && recentlyAdded.length > 0 && (
-        <div className="bg-amber-50 rounded-xl border border-amber-200 shadow-sm p-4" data-testid="recently-added-section">
-          <div className="flex items-center gap-2 mb-3">
+        <div className="bg-amber-50 rounded-xl border border-amber-200 shadow-sm p-3" data-testid="recently-added-section">
+          <div className="flex items-center gap-2 mb-2">
             <Sparkles size={16} className="text-amber-600" />
             <h2 className="text-sm font-bold text-amber-900">Recently Added</h2>
             <span className="text-xs font-medium text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">
@@ -796,7 +732,7 @@ export default function Inventory() {
                   key={v.id}
                   onClick={() => setSelectedVehicleId(v.id)}
                   data-testid="recently-added-card"
-                  className="shrink-0 w-56 bg-white rounded-lg border border-amber-100 shadow-sm p-3 hover:shadow-md transition-shadow cursor-pointer"
+                  className="shrink-0 w-48 bg-white rounded-lg border border-amber-100 shadow-sm p-2.5 hover:shadow-md transition-shadow cursor-pointer"
                 >
                   <div className="flex items-start justify-between gap-2 mb-1">
                     <div className="font-bold text-slate-900 text-sm truncate" style={{ fontFamily: "Manrope" }}>{v.brand} {v.model}</div>
@@ -867,57 +803,114 @@ export default function Inventory() {
           )}
         </div>
       ) : view === "list" ? (
-        <div className="space-y-2">
-          {filtered.map(v => {
-            const ag = getAgingStyle(v.aging?.category);
-            const st = getStatusStyle(v.status);
-            const photo = v.thumb_photos?.[0];
-            return (
-              <ListRow
-                key={v.id}
-                testid="vehicle-row"
-                dim={v.status === "scrap"}
-                onClick={() => setSelectedVehicleId(v.id)}
-                thumb={photo ? <LazyThumb src={photo.url} /> : <Package size={16} className="text-slate-300" />}
-                title={`${v.brand} ${v.model}`}
-                subtitle={`${v.year} · ${v.registration_number || "No reg."} · ${formatOwnership(v.ownership_number)}${v.status === "reserved" && v.booking?.customer_name ? ` · Booked by ${v.booking.customer_name}` : ""}${isAdmin && v.created_by ? ` · by ${v.created_by}` : ""}`}
-                meta={!hideFinancials && (
-                  <div className="flex items-baseline gap-x-3 flex-wrap md:block">
-                    <div className="font-semibold text-slate-800 text-sm md:text-xs">{formatNPR(v.total_investment)}</div>
-                    {!hidePricing && <div className="text-slate-500">{v.selling_price ? formatNPR(v.selling_price) : "—"} selling</div>}
-                  </div>
-                )}
-                pills={<>
-                  <span className={`px-2 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wide ${st.bg} ${st.text}`}>{st.label}</span>
-                  {(() => {
-                    const tm = getTerminationStyle(v.ownership_termination_status);
-                    const late = isSanakhatOverdue(v);
-                    const days = sanakhatPendingDays(v);
-                    return (
-                      <span
-                        className={`px-2 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wide ${late ? "bg-red-100 text-red-800" : `${tm.bg} ${tm.text}`}`}
-                        title={late ? `Sanaakhat pending for ${days} days` : undefined}
-                        data-testid="vehicle-row-termination"
-                      >
-                        {tm.label}{late && ` · ${days}d`}
-                      </span>
-                    );
-                  })()}
-                  <span className={`px-2 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wide ${ag.bg} ${ag.text}`}>{v.aging?.days}d</span>
-                </>}
-                actions={<>
-                  <button onClick={() => setSelectedVehicleId(v.id)} className="w-11 h-11 md:w- md:h- flex items-center justify-center hover:bg-slate-100 rounded-lg transition-colors" data-testid="view-vehicle-btn">
-                    <Eye size={14} className="text-slate-500" />
-                  </button>
-                  {isAdmin && (
-                    <button onClick={e => handleDelete(v.id, e)} className="w-11 h-11 md:w- md:h- flex items-center justify-center hover:bg-red-50 rounded-lg transition-colors" data-testid="delete-vehicle-btn">
-                      <Trash2 size={14} className="text-red-400" />
-                    </button>
-                  )}
-                </>}
-              />
-            );
-          })}
+        <div className={`${BOOK_CARD} compact`} data-testid="vehicle-table">
+          <BookTableStyle />
+          <div className="overflow-x-auto">
+            <table className="fixed-cols" style={{ minWidth: "56rem" }}>
+              <colgroup>
+                {tableCols.map(c => <col key={c.key} style={{ width: `${(c.w / tableColsTotal * 100).toFixed(2)}%` }} />)}
+              </colgroup>
+              <thead>
+                <tr data-testid="vehicle-list-header">
+                  <th>SN</th>
+                  <th>Vehicle</th>
+                  <th>Brand</th>
+                  <th>Bike No.</th>
+                  {!hideFinancials && <th className="text-right" title="Amount in Rs.">Purchase Price</th>}
+                  {!hideFinancials && <th className="text-right" title="In Rs.: expenses, job cards, accessories and Sanakhat cost added after buying">Repair Price</th>}
+                  {!hideFinancials && <th className="text-right" title="In Rs.: purchase + repair">Cost Price</th>}
+                  {!hidePricing && <th className="text-right" title="Amount in Rs.">Selling Price</th>}
+                  <th title={`Once done, the days left until it is due again (every ${SANAKHAT_CYCLE_DAYS} days)`}>Sanakhat</th>
+                  <th>Status</th>
+                  <th title="How long it has been in stock: days since it was bought, and its stock-age group">Stock Age</th>
+                  {isAdmin && <th />}
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((v, i) => {
+                  const ag = getAgingStyle(v.aging?.category);
+                  const st = getStatusStyle(v.status);
+                  const tm = getTerminationStyle(v.ownership_termination_status);
+                  const late = isSanakhatOverdue(v);
+                  const pendingDays = sanakhatPendingDays(v);
+                  const daysLeft = sanakhatDaysLeft(v);
+                  const photo = v.thumb_photos?.[0];
+                  const purchase = v.purchase_price || 0;
+                  const repair = Math.max(0, (v.total_investment || 0) - purchase);
+                  const pill = "inline-flex items-center px-1.5 py-0.5 rounded-full text-[10.5px] font-semibold uppercase whitespace-nowrap";
+                  const money = "text-right whitespace-nowrap";
+                  const doneNoDate = v.ownership_termination_status === "yes" && v.status !== "sold" && v.status !== "scrap" && !(v.sanakhat_date || "").slice(0, 10);
+                  return (
+                    <tr
+                      key={v.id}
+                      data-testid="vehicle-row"
+                      onClick={() => setSelectedVehicleId(v.id)}
+                      className={`cursor-pointer ${v.status === "scrap" ? "opacity-60 saturate-50" : ""}`}
+                    >
+                      <td className="text-gray-500">{i + 1}</td>
+                      <td>
+                        <div className="flex items-center gap-2">
+                          <div className="w-8 h-8 rounded-lg overflow-hidden border border-gray-200 shrink-0 bg-gray-50 flex items-center justify-center">
+                            {photo ? <LazyThumb src={photo.url} /> : <Package size={14} className="text-gray-300" />}
+                          </div>
+                          <div className="min-w-0">
+                            <div className="font-semibold text-gray-900 truncate" style={{ fontFamily: "Manrope" }}>{v.model}</div>
+                            <div className="text-[11px] text-gray-500 truncate">
+                              {v.year} · {formatOwnership(v.ownership_number)}{v.status === "reserved" && v.booking?.customer_name ? ` · Booked by ${v.booking.customer_name}` : ""}{isAdmin && v.created_by ? ` · by ${v.created_by}` : ""}
+                            </div>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="whitespace-nowrap font-medium text-gray-700">{v.brand || <span className="text-gray-300">—</span>}</td>
+                      <td className="font-mono text-xs whitespace-nowrap text-gray-700">{v.registration_number || <span className="font-sans text-xs text-gray-400">No reg.</span>}</td>
+                      {!hideFinancials && <td className={money}>{rs(purchase)}</td>}
+                      {!hideFinancials && <td className={money}>{repair > 0 ? rs(repair) : <span className="text-gray-300">—</span>}</td>}
+                      {!hideFinancials && <td className={`${money} font-bold`}>{rs(purchase + repair)}</td>}
+                      {!hidePricing && <td className={money}>{v.selling_price ? rs(v.selling_price) : <span className="text-gray-300">—</span>}</td>}
+                      {/* Sanakhat: Done shows the day it was done and the days left until it is due again, Pending the days it has waited */}
+                      <td data-testid="vehicle-row-sanakhat">
+                        <span
+                          className={`${pill} ${late ? "bg-red-100 text-red-800" : `${tm.bg} ${tm.text}`}`}
+                          title={late ? `Sanaakhat pending for ${pendingDays} days` : undefined}
+                          data-testid="vehicle-row-termination"
+                        >
+                          {tm.label.replace("Sanaakhat: ", "")}
+                        </span>
+                        {late && <div className="mt-0.5 text-[11px] leading-tight font-semibold text-red-600">{pendingDays}d waiting</div>}
+                        {daysLeft !== null && (
+                          <div
+                            className={`mt-0.5 text-[11px] leading-tight font-semibold ${daysLeft < 0 ? "text-red-600" : daysLeft <= 7 ? "text-amber-600" : "text-gray-500"}`}
+                            title={`Sanaakhat has to be done again every ${SANAKHAT_CYCLE_DAYS} days`}
+                            data-testid="vehicle-row-sanakhat-left"
+                          >
+                            <div>{formatBSDateNumeric(v.sanakhat_date.slice(0, 10))}</div>
+                            <div>{daysLeft < 0 ? `${-daysLeft}d overdue` : daysLeft === 0 ? "due today" : `${daysLeft}d left`}</div>
+                          </div>
+                        )}
+                        {doneNoDate && (
+                          <div className="mt-0.5 text-[11px] font-semibold text-amber-600" title="Marked Done but no date was saved. Set it on the Sanakhat page, or Edit the vehicle." data-testid="vehicle-row-sanakhat-nodate">
+                            no date saved
+                          </div>
+                        )}
+                      </td>
+                      <td><span className={`${pill} ${st.bg} ${st.text}`}>{st.label}</span></td>
+                      <td className="whitespace-nowrap">
+                        <span className={`${pill} ${ag.bg} ${ag.text}`} title={`${v.aging?.days} days in stock · ${ag.label}`}>{v.aging?.days}d</span>
+                        <div className="mt-0.5 text-[10px] leading-tight text-gray-500">{ag.label}</div>
+                      </td>
+                      {isAdmin && (
+                        <td onClick={e => e.stopPropagation()}>
+                          <button onClick={e => handleDelete(v.id, e)} className="w-8 h-8 flex items-center justify-center hover:bg-red-50 rounded-lg transition-colors" data-testid="delete-vehicle-btn">
+                            <Trash2 size={14} className="text-red-400" />
+                          </button>
+                        </td>
+                      )}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
@@ -1039,13 +1032,6 @@ export default function Inventory() {
                     })}
                   </div>
                   <div className="flex items-center gap-1 shrink-0">
-                    <button
-                      onClick={e => { e.stopPropagation(); setSelectedVehicleId(v.id); }}
-                      className="w-11 h-11 flex items-center justify-center hover:bg-slate-100 rounded-lg transition-colors"
-                      data-testid="view-vehicle-btn"
-                    >
-                      <Eye size={15} className="text-slate-500" />
-                    </button>
                     {isAdmin && (
                       <button
                         onClick={e => handleDelete(v.id, e)}
@@ -1073,7 +1059,11 @@ export default function Inventory() {
           saving={saving}
           photos={photos}
           setPhotos={setPhotos}
+          docPhotos={docPhotos}
+          setDocPhotos={setDocPhotos}
           basicOnly={isSocialMedia}
+          onImport={isAdmin ? importStock : undefined}
+          vehicles={vehicles}
         />
       )}
 

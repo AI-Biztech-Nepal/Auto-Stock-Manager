@@ -7,6 +7,7 @@ import {
   shortBS, timeOf, dateTimeTitle, waNumber,
 } from "../../utils/crm";
 import { FONT, Avatar, StatusBadge } from "./ui";
+import { BOOK_CARD, BookTableStyle } from "../BookTable";
 
 // The customer table: one row per customer, the way the mockup lays it out. Lead Source, Lead Status and Assigned To
 // are dropdowns that save the moment they change; the referrer's name is picked (or typed) right under Lead Source.
@@ -260,12 +261,12 @@ export default function CustomerTable({
   };
 
   const th = (key, label, cls = "", right = false) => (
-    <th scope="col" aria-sort={key && sort.key === key ? (sort.dir === "asc" ? "ascending" : "descending") : undefined} className={`px-2.5 py-3 font-semibold whitespace-nowrap ${right ? "text-right" : "text-left"} ${cls}`}>
+    <th scope="col" aria-sort={key && sort.key === key ? (sort.dir === "asc" ? "ascending" : "descending") : undefined} className={`${right ? "text-right" : "text-left"} ${cls}`}>
       {key ? (
-        <button onClick={() => onSort(key)} className={`inline-flex items-center gap-1 uppercase tracking-wider hover:text-slate-900 ${right ? "flex-row-reverse" : ""}`}>
+        <button onClick={() => onSort(key)} className={`inline-flex items-center gap-1 hover:text-slate-900 ${right ? "flex-row-reverse" : ""}`}>
           {label}{sort.key === key && (sort.dir === "asc" ? <ArrowUp size={11} /> : <ArrowDown size={11} />)}
         </button>
-      ) : <span className="uppercase tracking-wider">{label}</span>}
+      ) : <span>{label}</span>}
     </th>
   );
 
@@ -312,11 +313,13 @@ export default function CustomerTable({
   }
 
   return (
-    <div className="bg-white border border-slate-200/80 rounded-2xl shadow-[0_1px_3px_rgba(15,23,42,0.06)] overflow-x-auto" data-testid="crm-table-wrap">
-      <table className="w-full min-w-[1320px] text-[13px]" data-testid="crm-table">
-        <thead className="bg-slate-50 text-[11px] text-slate-500 border-b border-slate-200">
+    <div className={BOOK_CARD} data-testid="crm-table-wrap">
+      <BookTableStyle />
+      <div className="overflow-x-auto">
+      <table className="w-full min-w-[1320px]" data-testid="crm-table">
+        <thead>
           <tr>
-            <th scope="col" className="sticky left-0 z-20 bg-slate-50 w-10 min-w-[40px] px-2.5 py-3 text-left font-semibold uppercase tracking-wider">SN</th>
+            <th scope="col" className="sticky left-0 z-20 bg-slate-50 w-10 min-w-[40px] text-left">SN</th>
             {th("name", "Customer", "sticky left-10 z-20 bg-slate-50 min-w-[180px] shadow-[2px_0_4px_-2px_rgba(15,23,42,0.15)]")}
             {th(null, "Contact")}
             {th(null, "Address")}
@@ -330,13 +333,13 @@ export default function CustomerTable({
             {th(null, "Actions", "sticky right-0 z-20 bg-slate-50 shadow-[-2px_0_4px_-2px_rgba(15,23,42,0.15)]")}
           </tr>
         </thead>
-        <tbody className="divide-y divide-slate-100">
+        <tbody>
           {rows.map((c, i) => {
             const busy = savingId === c.id;
             return (
-              <tr key={c.id} className={`group h-[58px] transition-colors hover:bg-blue-50 ${c.source ? "bg-white" : "bg-amber-50"}`} data-testid="crm-row">
+              <tr key={c.id} className={`group h-[58px] ${c.source ? "bg-white" : "bg-amber-50"}`} data-testid="crm-row">
                 <td className={`sticky left-0 z-10 bg-inherit px-2.5 text-slate-400 tabular-nums ${c.source ? "" : "shadow-[inset_3px_0_0_0_#f59e0b]"}`}>{i + 1}</td>
-                <td onClick={() => onView(c)} data-testid="crm-customer-cell" className="group/name sticky left-10 z-10 bg-inherit px-2.5 cursor-pointer transition-colors group-hover:bg-blue-50 hover:!bg-blue-100 shadow-[2px_0_4px_-2px_rgba(15,23,42,0.15)]"><CustomerName c={c} onShowReferred={onShowReferred} /></td>
+                <td onClick={() => onView(c)} data-testid="crm-customer-cell" className="group/name sticky left-10 z-10 bg-inherit cursor-pointer shadow-[2px_0_4px_-2px_rgba(15,23,42,0.15)]"><CustomerName c={c} onShowReferred={onShowReferred} /></td>
                 <td className="px-2.5 whitespace-nowrap font-medium text-slate-700 tabular-nums">{c.contact_number || <span className="text-slate-300">—</span>}</td>
                 <td className="px-2.5 max-w-[110px] truncate text-slate-600" title={c.address}>{c.address || <span className="text-slate-300">—</span>}</td>
                 <td className="px-2.5"><VehicleCell c={c} /></td>
@@ -352,13 +355,14 @@ export default function CustomerTable({
           })}
         </tbody>
         <tfoot>
-          <tr className="bg-slate-50 border-t border-slate-200">
-            <td colSpan={10} className="px-3 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Total · {count.toLocaleString()} customer{count === 1 ? "" : "s"}</td>
-            <td className="px-2.5 py-3 text-right text-sm font-bold text-slate-900 whitespace-nowrap" style={FONT}>{formatNPR(total)}</td>
+          <tr>
+            <td colSpan={10} className="text-gray-600">Total · {count.toLocaleString()} customer{count === 1 ? "" : "s"}</td>
+            <td className="text-right text-slate-900 whitespace-nowrap" style={FONT}>{formatNPR(total)}</td>
             <td />
           </tr>
         </tfoot>
       </table>
+      </div>
     </div>
   );
 }

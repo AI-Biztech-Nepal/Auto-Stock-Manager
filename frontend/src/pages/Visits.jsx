@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
-import { Eye, Users, Smartphone, Monitor, Globe, FileText, ExternalLink, Search, Clock, TrendingUp, Layers } from "lucide-react";
+import { Eye, Users, Smartphone, Monitor, Globe, FileText, ExternalLink, Search, Clock, TrendingUp, Layers, Bike, Mail } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
 
@@ -190,20 +190,90 @@ const SearchTable = ({ title, icon, rows: allRows, empty, linkBase }) => {
   );
 };
 
-// One visit as a single full-width clickable line with every detail; click it to open the page-by-page timeline.
+// The bikes people opened most, with how many different customers (browsers) looked at each one.
+const TopBikes = ({ rows, linkBase }) => {
+  const [all, setAll] = useState(false);
+  const list = all ? rows : rows.slice(0, 8);
+  const max = Math.max(1, ...rows.map(r => r.views));
+  const hasCustomers = rows.some(r => r.customers != null);
+  return (
+    <Card>
+      <SectionTitle icon={Bike} title="Most viewed bikes" hint="Which bikes customers open most. Customers = different people who looked at that bike." />
+      {rows.length === 0 ? <p className="px-5 pb-6 text-sm text-slate-500 text-center">No bike pages were opened in this period.</p> : (
+        <div className="pb-2">
+          <table className="w-full text-sm">
+            <thead><tr className="text-xs text-slate-400 text-left">
+              <th className="pl-5 py-2 font-medium w-8">#</th>
+              <th className="py-2 font-medium">Bike</th>
+              <th className="py-2 font-medium text-right">Views</th>
+              {hasCustomers && <th className="px-5 py-2 font-medium text-right" title="Different people (browsers) who opened this bike's page">Customers</th>}
+            </tr></thead>
+            <tbody>{list.map((r, i) => (
+              <tr key={r.id} className="border-t border-slate-100 hover:bg-slate-50" data-testid="top-bike-row">
+                <td className="pl-5 py-2.5 text-slate-400 font-semibold">{i + 1}</td>
+                <td className="py-2.5 pr-3 max-w-[180px] sm:max-w-[320px]">
+                  <a href={linkBase + r.path} target="_blank" rel="noopener noreferrer" title="Open this bike on the website" className="block truncate text-slate-700 hover:text-blue-700 hover:underline">{r.name}</a>
+                  <div className="h-1 bg-slate-100 rounded-full mt-1.5"><div className="h-1 bg-gradient-to-r from-blue-500 to-indigo-500 rounded-full" style={{ width: `${(r.views / max) * 100}%` }} /></div>
+                </td>
+                <td className="py-2.5 text-right font-semibold text-slate-900">{r.views}</td>
+                {hasCustomers && <td className="px-5 py-2.5 text-right text-slate-600"><span className="inline-flex items-center gap-1"><Users size={12} className="text-slate-400" />{r.customers}</span></td>}
+              </tr>
+            ))}</tbody>
+          </table>
+        </div>
+      )}
+      {rows.length > 8 && <button onClick={() => setAll(!all)} className="w-full pb-4 text-xs font-medium text-blue-600 hover:underline">{all ? "Show less" : `Show all ${rows.length}`}</button>}
+    </Card>
+  );
+};
+
+// The "Every visit" table: one column per detail, so the emails of registered visitors line up in their own column.
+const VISIT_COLS = "md:grid md:grid-cols-[10.5rem_8rem_4.5rem_minmax(0,1fr)_9rem_5rem_15rem_4.5rem] md:gap-x-3";
+const VISIT_HEAD = ["Time", "Time on site", "Pages", "Pages visited", "Source", "Device", "Email", "Visitor"];
+
+const VisitHeader = () => (
+  <div className={`hidden ${VISIT_COLS} sticky top-0 z-10 items-center rounded-xl bg-slate-100 border border-slate-200 px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-slate-500`} role="row">
+    {VISIT_HEAD.map(h => <span key={h} role="columnheader">{h}</span>)}
+  </div>
+);
+
+// One visit as a row of the table (a compact card on a phone); click it to open the page-by-page timeline.
 const VisitTile = ({ v, onOpen }) => {
   const Dev = v.device === "mobile" ? Smartphone : Monitor;
   const quick = v.seconds === 0;
+  const route = v.paths.map(pageName).join("  ›  ");
+  const email = v.email
+    ? <span className="inline-flex items-center gap-1 min-w-0 text-xs font-semibold text-emerald-700" title={`Registered: ${v.email}`} data-testid="visit-email"><Mail size={12} className="shrink-0" /><span className="truncate">{v.email}</span></span>
+    : <span className="text-xs text-slate-300" title="Not signed in">Guest</span>;
   return (
-    <button type="button" onClick={onOpen}
-      className="w-full text-left bg-white border border-slate-200/80 rounded-xl px-4 py-3 flex flex-wrap md:flex-nowrap items-center gap-x-3 gap-y-1.5 min-w-0 transition shadow-[0_1px_3px_rgba(15,23,42,0.06)] hover:shadow-md hover:border-blue-300">
-      <span className="flex items-center gap-2 text-sm font-semibold text-slate-800 whitespace-nowrap md:w-44 shrink-0"><Dev size={15} className="text-slate-500" />{v.started}</span>
-      <span className={`flex items-center gap-1.5 text-sm font-bold whitespace-nowrap md:w-36 shrink-0 ${quick ? "text-slate-400" : "text-slate-900"}`} style={FONT}><Clock size={13} className="text-slate-400" />{fmtDuration(v.seconds)}</span>
-      <span className="text-xs text-slate-500 whitespace-nowrap md:w-16 shrink-0">{v.pages} {v.pages === 1 ? "page" : "pages"}</span>
-      <span className="text-xs text-slate-600 truncate flex-1 min-w-[140px] basis-full md:basis-0" title={v.paths.map(pageName).join(", ")}>{v.paths.map(pageName).join("  ›  ")}</span>
-      <span className="text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 whitespace-nowrap shrink-0 max-w-[140px] truncate">{v.source}</span>
-      <span className="text-xs text-slate-500 capitalize whitespace-nowrap shrink-0 md:w-16">{v.device}</span>
-      <span className="font-mono text-xs text-slate-400 shrink-0">{v.visitor}</span>
+    <button type="button" onClick={onOpen} role="row"
+      className="block w-full text-left bg-white border border-slate-200/80 rounded-xl px-4 py-3 min-w-0 transition shadow-[0_1px_3px_rgba(15,23,42,0.06)] hover:shadow-md hover:border-blue-300">
+      {/* Phone: time and duration on top, the pages opened, then source, pages and device, then who it was. */}
+      <div className="md:hidden space-y-2">
+        <div className="flex items-center justify-between gap-3">
+          <span className="flex items-center gap-2 text-sm font-semibold text-slate-800"><Dev size={15} className="text-slate-500 shrink-0" />{v.started}</span>
+          <span className={`flex items-center gap-1 text-sm font-bold whitespace-nowrap ${quick ? "text-slate-400" : "text-slate-900"}`} style={FONT}><Clock size={13} className="text-slate-400" />{fmtDuration(v.seconds)}</span>
+        </div>
+        <p className="text-xs text-slate-600 line-clamp-2 break-words" title={route}>{route}</p>
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500">
+          <span className="max-w-[60%] truncate px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">{v.source}</span>
+          <span>{v.pages} {v.pages === 1 ? "page" : "pages"}</span>
+          <span className="capitalize">{v.device}</span>
+          <span className="ml-auto font-mono text-slate-400">{v.visitor}</span>
+        </div>
+        <div className="flex items-center gap-1.5 border-t border-slate-100 pt-2">{email}</div>
+      </div>
+      {/* Laptop: one table row. */}
+      <div className={`hidden items-center ${VISIT_COLS}`}>
+        <span className="flex items-center gap-2 text-sm font-semibold text-slate-800 whitespace-nowrap"><Dev size={15} className="text-slate-500 shrink-0" />{v.started}</span>
+        <span className={`flex items-center gap-1.5 text-sm font-bold whitespace-nowrap ${quick ? "text-slate-400" : "text-slate-900"}`} style={FONT}><Clock size={13} className="text-slate-400 shrink-0" />{fmtDuration(v.seconds)}</span>
+        <span className="text-xs text-slate-500 whitespace-nowrap">{v.pages} {v.pages === 1 ? "page" : "pages"}</span>
+        <span className="text-xs text-slate-600 truncate" title={route}>{route}</span>
+        <span className="min-w-0"><span className="inline-block max-w-full truncate align-middle text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">{v.source}</span></span>
+        <span className="text-xs text-slate-500 capitalize whitespace-nowrap">{v.device}</span>
+        {email}
+        <span className="font-mono text-xs text-slate-400">{v.visitor}</span>
+      </div>
     </button>
   );
 };
@@ -221,6 +291,7 @@ const VisitModal = ({ v, onClose }) => {
         <div className="flex items-start justify-between gap-3">
           <div>
             <div className="text-xs text-slate-500 flex items-center gap-1.5"><Dev size={13} />{v.started} · from {v.source} · visitor <span className="font-mono">{v.visitor}</span></div>
+            {v.email && <div className="mt-1 inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700"><Mail size={11} />{v.email}</div>}
             <div className="text-2xl font-bold text-slate-900 mt-1" style={FONT}>{fmtDuration(v.seconds)}</div>
             <div className="text-xs text-slate-400">time on site · {v.pages} {v.pages === 1 ? "page" : "pages"}</div>
           </div>
@@ -336,6 +407,8 @@ export default function Visits({ embedded = false }) {
         </Card>
       </div>
 
+      <TopBikes rows={data.top_bikes || []} linkBase={base} />
+
       {searchErr && <p className="text-sm text-red-600">{searchErr}</p>}
       {search?.configured && (
         <div className="grid lg:grid-cols-2 gap-4">
@@ -349,11 +422,12 @@ export default function Visits({ embedded = false }) {
           <div className="flex flex-wrap items-end justify-between gap-2">
             <div>
               <h3 className="text-base font-bold text-slate-900 flex items-center gap-2" style={FONT}><Clock size={18} className="text-blue-600" />Every visit</h3>
-              <p className="text-xs text-slate-400 mt-1">Newest first, Nepal time. Tap a row for its page-by-page timeline. Time is first to last page opened, so a one-page visit shows as under a minute.</p>
+              <p className="text-xs text-slate-400 mt-1">Newest first, Nepal time. Registered visitors show their email, the rest show Guest. Tap a row for its page-by-page timeline. Time is first to last page opened, so a one-page visit shows as under a minute.</p>
             </div>
             {eng && <span className="text-xs text-slate-500">{eng.visits} visits · {eng.pages_per_visit} pages each · longest {eng.longest_minutes} min · {eng.quick_visit_pct}% left after one page</span>}
           </div>
-          <div className="space-y-2">
+          <div className="space-y-2" role="table" aria-label="Every visit">
+            <VisitHeader />
             {visitList.slice(0, shown).map((v, i) => <VisitTile key={`${v.visitor}-${v.started}-${i}`} v={v} onOpen={() => setOpen(i)} />)}
           </div>
           {shown < visitList.length && (

@@ -1,18 +1,18 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
-import { Plus, Trash2, Edit, CheckCircle, AlertCircle, Clock, QrCode, Undo2, Store, User, Download, FileText, Package, ChevronLeft, ChevronRight, GripVertical } from "lucide-react";
+import { Plus, Trash2, Edit, CheckCircle, AlertCircle, Clock, QrCode, Undo2, Download, FileText, Package, ChevronLeft, ChevronRight, GripVertical } from "lucide-react";
 import { toast } from "sonner";
 import api, { postWithRetry } from "../utils/api";
-import { formatNPR, getAgingStyle, getStatusStyle, getDocStyle, EXPENSE_CATEGORIES, VEHICLE_STATUS_OPTIONS, CONDITIONS, SOURCES, BRANDS, FUEL_TYPES, OWNERSHIP_OPTIONS, formatOwnership } from "../utils/helpers";
-import { ExpenseModal, QRLabelModal, ReturnModal, Field, inp, sel } from "./VehicleModals";
+import { formatNPR, getAgingStyle, getStatusStyle, getTerminationStyle, sanakhatDaysLeft, sanakhatPendingDays, sanakhatDueDate, sanakhatLeftText, SANAKHAT_CYCLE_DAYS, SANAKHAT_WARN_DAYS, getDocStyle, EXPENSE_CATEGORIES, VEHICLE_STATUS_OPTIONS } from "../utils/helpers";
+import { ExpenseModal, QRLabelModal, ReturnModal } from "./VehicleModals";
+import { VehicleFormBody, vehicleMissing } from "./AddVehicleModal";
 import HoverADDate from "../components/HoverADDate";
-import BSDatePicker from "../components/BSDatePicker";
-import CustomerVendorPicker from "../components/CustomerVendorPicker";
 import { useAuth } from "../context/AuthContext";
 import { hasFullVehicleAccess, canManageVehiclePhotos, hidesVehiclePricing, isBasicStockRole, PARTS_ALLOWED_VEHICLE_STATUSES } from "../utils/permissions";
 import { PhotoCropperModal } from "../components/PhotoCropperModal";
 import { usePhotoCropQueue } from "../hooks/usePhotoCropQueue";
 import { resizeImageFile } from "../utils/resizeImage";
+import { EMPTY_DOC_PHOTOS, flattenStagedDocs, revokeStagedDocs, uploadStagedDocs } from "../utils/stagedDocs";
 
 const DocCard = ({ label, status }) => {
   const s = getDocStyle(status);
@@ -41,13 +41,6 @@ const describeUploadError = (e) => {
   return `Upload failed (${e.response.status})`;
 };
 
-const Row = ({ label, children }) => (
-  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1.5 sm:gap-3 py-2 border-b border-slate-50">
-    <span className="text-sm text-slate-500 shrink-0">{label}</span>
-    {children}
-  </div>
-);
-
 // Rendered either as a routed page (/inventory/:id, via the default-exported VehicleDetail
 // wrapper below) or embedded directly by Inventory.jsx with local state — the latter keeps
 // the Inventory page mounted underneath instead of unmounting/refetching it on open/close.
@@ -72,6 +65,10 @@ export function VehicleDetailModal({ id, onClose }) {
   const [isEditing, setIsEditing] = useState(false);
   const [expForm, setExpForm] = useState({ category: "servicing", amount: "", description: "", date: "" });
   const [editForm, setEditForm] = useState({});
+  // Paperwork photos picked in the edit form, uploaded once the changes are saved.
+  const [docPhotos, setDocPhotos] = useState(EMPTY_DOC_PHOTOS);
+  const [showErrors, setShowErrors] = useState(false); // Save was pressed with something missing
+  const stagedDocs = flattenStagedDocs(docPhotos);
   const [saving, setSaving] = useState(false);
 
   const [showReturnModal, setShowReturnModal] = useState(false);
@@ -117,26 +114,6 @@ export function VehicleDetailModal({ id, onClose }) {
     } catch (err) { toast.error(err.response?.data?.detail || "Failed"); }
   };
 
-  // Ownership termination is handled entirely by the government office, so we never
-  // hold the paperwork — it's tracked as a Yes/No/Pending flag that stays editable
-  // straight from the overview, without entering the full edit mode.
-  const [savingTermination, setSavingTermination] = useState(false);
-  const updateOwnershipTermination = async (val) => {
-    const prev = vehicle?.ownership_termination_status;
-    if (val === prev) return;
-    setVehicle(v => ({ ...v, ownership_termination_status: val }));
-    setEditForm(f => ({ ...f, ownership_termination_status: val }));
-    setSavingTermination(true);
-    try {
-      await api.put(`/vehicles/${id}`, { ownership_termination_status: val });
-      toast.success("Ownership termination updated");
-    } catch {
-      setVehicle(v => ({ ...v, ownership_termination_status: prev }));
-      setEditForm(f => ({ ...f, ownership_termination_status: prev }));
-      toast.error("Failed to update ownership termination");
-    } finally { setSavingTermination(false); }
-  };
-
   const openReturnModal = async () => {
     try {
       const r = await api.get(`/vehicles/${id}/active-sale`);
@@ -169,15 +146,24 @@ export function VehicleDetailModal({ id, onClose }) {
 
   const saveEdit = async (e, confirmReusedRegistration = false) => {
     e.preventDefault();
-    if (!editForm.registration_number) { toast.error("Registration Number is required"); return; }
-    if (!isFrontDesk && !editForm.purchase_price) { toast.error("Purchase Price is required"); return; }
+    const missing = vehicleMissing(editForm, { editing: true });
+    if (missing.length) {
+      setShowErrors(true);
+      document.getElementById(`pv-${missing[0][0]}`)?.focus();
+      return;
+    }
     setSaving(true);
     try {
-      const payload = { ...editForm, selling_price: editForm.selling_price ? Number(editForm.selling_price) : null, sanakhat_cost: editForm.sanakhat_cost !== "" && editForm.sanakhat_cost != null ? Number(editForm.sanakhat_cost) : null, year: Number(editForm.year), engine_cc: Number(editForm.engine_cc), ownership_number: Number(editForm.ownership_number), confirm_reused_registration: confirmReusedRegistration };
+      const payload = { ...editForm, selling_price: editForm.selling_price ? Number(editForm.selling_price) : null, sanakhat_cost: editForm.sanakhat_cost !== "" && editForm.sanakhat_cost != null ? Number(editForm.sanakhat_cost) : null, year: Number(editForm.year), engine_cc: Number(editForm.engine_cc), ownership_number: editForm.ownership_number ? Number(editForm.ownership_number) : null, confirm_reused_registration: confirmReusedRegistration };
       if (isFrontDesk) { delete payload.purchase_price; delete payload.minimum_selling_price; delete payload.accessories_cost; }
       else { payload.purchase_price = Number(editForm.purchase_price); payload.minimum_selling_price = editForm.minimum_selling_price ? Number(editForm.minimum_selling_price) : null; }
       await api.put(`/vehicles/${id}`, payload);
-      toast.success("Vehicle updated"); setIsEditing(false); fetchVehicle();
+      if (stagedDocs.length > 0 && await uploadStagedDocs(id, stagedDocs)) {
+        toast.error("Saved, but some paperwork photos failed to upload. Add them under Legal Documents.");
+      }
+      toast.success("Vehicle updated");
+      revokeStagedDocs(stagedDocs); setDocPhotos(EMPTY_DOC_PHOTOS);
+      setShowErrors(false); setIsEditing(false); fetchVehicle(); loadDocs();
       setSaving(false);
     } catch (err) {
       setSaving(false);
@@ -192,7 +178,8 @@ export function VehicleDetailModal({ id, onClose }) {
     }
   };
 
-  const cancelEdit = () => { setEditForm(vehicle); setIsEditing(false); };
+  const openEdit = () => { setEditForm(vehicle); setShowErrors(false); setIsEditing(true); };
+  const cancelEdit = () => { setEditForm(vehicle); revokeStagedDocs(stagedDocs); setDocPhotos(EMPTY_DOC_PHOTOS); setShowErrors(false); setIsEditing(false); };
 
   const [showQR, setShowQR] = useState(false);
   const [qrData, setQrData] = useState(null);
@@ -339,6 +326,7 @@ export function VehicleDetailModal({ id, onClose }) {
   };
 
   useEffect(() => { if (id) { loadPhotos(); loadDocs(); } }, [id, loadPhotos, loadDocs]);
+  const docsOnFile = legalDocs.reduce((n, d) => ({ ...n, [d.doc_type]: (n[d.doc_type] || 0) + 1 }), {});
 
   const loadQR = async () => {
     try {
@@ -387,9 +375,29 @@ export function VehicleDetailModal({ id, onClose }) {
   const ag = getAgingStyle(vehicle.aging?.category);
   const st = getStatusStyle(vehicle.status);
 
+  // Sanaakhat at a glance (header pill + overview rows): Done counts down the SANAKHAT_CYCLE_DAYS to the next one,
+  // Pending counts the days it has waited. Either needs sanakhat_date; a Done one without it says so.
+  const skState = vehicle.ownership_termination_status || "pending";
+  const skDate = (vehicle.sanakhat_date || "").slice(0, 10);
+  const skLeft = sanakhatDaysLeft(vehicle);
+  const skWaiting = sanakhatPendingDays(vehicle);
+  const skDue = sanakhatDueDate(vehicle);
+  const skTone = skLeft !== null && skLeft < 0 ? "bg-red-100 text-red-800"
+    : skLeft !== null && skLeft <= 7 ? "bg-amber-100 text-amber-800"
+    : skWaiting !== null && skWaiting > SANAKHAT_WARN_DAYS ? "bg-red-100 text-red-800"
+    : `${getTerminationStyle(skState).bg} ${getTerminationStyle(skState).text}`;
+  const skPill = `${getTerminationStyle(skState).label}${skLeft !== null ? ` · ${sanakhatLeftText(skLeft)}` : skState === "yes" && !skDate ? " · no date" : skWaiting !== null ? ` · ${skWaiting}d` : ""}`;
+
+  // The line under the Sanaakhat date in the form: when the next one is due, or how long this one has waited.
+  const sanakhatNote = skDue
+    ? <span className={skLeft < 0 ? "text-red-600" : skLeft <= 7 ? "text-amber-600" : ""}>Next due <HoverADDate date={skDue} /> · {sanakhatLeftText(skLeft)}</span>
+    : skWaiting !== null
+      ? <span className={skWaiting > SANAKHAT_WARN_DAYS ? "text-red-600" : ""}>{skWaiting === 0 ? "Waiting since today" : `Waiting ${skWaiting} day${skWaiting > 1 ? "s" : ""}`}</span>
+      : skState === "yes" && !skDate ? <span className="text-amber-600">Done, but no date saved yet</span> : null;
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 sm:p-4">
-      <div className="bg-white sm:rounded-2xl shadow-2xl w-full h-full sm:h-auto sm:max-w-3xl sm:max-h-[90vh] overflow-y-auto">
+      <div className="bg-white sm:rounded-2xl shadow-2xl w-full h-full sm:h-auto sm:max-w-5xl sm:max-h-[90vh] overflow-y-auto">
         {/* Header + Status/Actions — sticky as one block so Cancel/Save Changes
            (and the other action buttons) stay reachable without scrolling back
            up, no matter how far down the form the fields go. */}
@@ -437,6 +445,7 @@ export function VehicleDetailModal({ id, onClose }) {
           {/* Status + Actions */}
           <div className="flex items-center gap-2 flex-wrap px-4 sm:px-5 pb-4 sm:pb-5">
             <span className={`px-2.5 py-1 rounded-full text-xs font-semibold uppercase tracking-wide ${ag.bg} ${ag.text}`}>{vehicle.aging?.days}d · {ag.label}</span>
+            <span className={`px-2.5 py-1 rounded-full text-xs font-semibold uppercase tracking-wide ${skTone}`} title={`Sanaakhat has to be done again every ${SANAKHAT_CYCLE_DAYS} days`} data-testid="vehicle-sanakhat-pill">{skPill}</span>
             {!isEditing && (
               <select
                 value={vehicle.status}
@@ -457,13 +466,13 @@ export function VehicleDetailModal({ id, onClose }) {
             <div className="flex-1" />
             {canManageStock && (isEditing ? (
               <>
-                <button type="button" onClick={cancelEdit} className="flex items-center gap-1.5 px-3 py-3 border border-slate-200 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors">Cancel</button>
+                <button type="button" onClick={cancelEdit} className="flex items-center gap-1.5 px-3 py-3 border border-slate-200 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors" data-testid="cancel-edit-btn">Cancel</button>
                 <button type="button" onClick={saveEdit} disabled={saving} className="flex items-center gap-1.5 px-3 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-semibold disabled:opacity-60 transition-colors" data-testid="save-vehicle-btn">
                   {saving ? "Saving..." : "Save Changes"}
                 </button>
               </>
             ) : (
-              <button onClick={() => { setIsEditing(true); setActiveTab("overview"); }} className="flex items-center gap-1.5 px-3 py-3 border border-slate-200 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors" data-testid="edit-vehicle-btn"><Edit size={14} /> Edit</button>
+              <button onClick={openEdit} className="flex items-center gap-1.5 px-3 py-3 border border-slate-200 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors" data-testid="edit-vehicle-btn"><Edit size={14} /> Edit</button>
             ))}
             {isAdmin && vehicle.status === "sold" && !isEditing && (
               <button onClick={openReturnModal} className="flex items-center gap-1.5 px-3 py-3 border border-amber-200 text-amber-700 rounded-lg text-sm font-medium hover:bg-amber-50 transition-colors" data-testid="record-return-btn"><Undo2 size={14} /> Record Return</button>
@@ -513,183 +522,23 @@ export function VehicleDetailModal({ id, onClose }) {
             </div>
 
             <div className="p-5">
-              {/* Overview Tab — stays mounted (hidden via CSS) instead of unmounting on tab
-                 switch, so in-progress edits survive, including uncommitted state inside
-                 child pickers like CustomerVendorPicker's "add new" form. */}
-              <div className={activeTab === "overview" ? "" : "hidden"}>
-              {isEditing ? (
-                /* Edit form — mirrors the Add Vehicle form field-for-field so nothing entered
-                   at creation time is missing from editing. */
-                <div className="space-y-4">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <Field label="Brand" required>
-                      <select data-testid="edit-brand-select" value={editForm.brand || ""} onChange={e => setEditForm({ ...editForm, brand: e.target.value })} className={sel}>
-                        <option value="">Select Brand</option>
-                        {BRANDS.map(b => <option key={b}>{b}</option>)}
-                      </select>
-                    </Field>
-                    <Field label="Model" required>
-                      <input data-testid="edit-model-input" value={editForm.model || ""} onChange={e => setEditForm({ ...editForm, model: e.target.value })} placeholder="e.g. CB Shine, FZ-S" className={inp} />
-                    </Field>
-                    <Field label="Year" required>
-                      <input data-testid="edit-year-input" type="text" inputMode="numeric" pattern="[0-9]*" value={editForm.year || ""} onChange={e => setEditForm({ ...editForm, year: e.target.value })} placeholder="e.g. 2020" className={inp} />
-                    </Field>
-                    <Field label="Engine CC">
-                      <input data-testid="edit-engine-cc-input" type="text" inputMode="numeric" pattern="[0-9]*" value={editForm.engine_cc || ""} onChange={e => setEditForm({ ...editForm, engine_cc: e.target.value })} placeholder="e.g. 125" className={inp} />
-                    </Field>
-                    <Field label="Fuel Type">
-                      <select data-testid="edit-fuel-type-select" value={editForm.fuel_type || ""} onChange={e => setEditForm({ ...editForm, fuel_type: e.target.value })} className={sel}>
-                        {FUEL_TYPES.map(f => <option key={f}>{f}</option>)}
-                      </select>
-                    </Field>
-                    <Field label="Type" required>
-                      <select data-testid="edit-vehicle-type-select" value={editForm.vehicle_type || "bike"} onChange={e => setEditForm({ ...editForm, vehicle_type: e.target.value })} className={sel}>
-                        <option value="bike">Bike</option>
-                        <option value="scooter">Scooter</option>
-                      </select>
-                    </Field>
-                    <Field label="Ownership Number">
-                      <select value={editForm.ownership_number || 1} onChange={e => setEditForm({ ...editForm, ownership_number: Number(e.target.value) })} className={sel}>
-                        {OWNERSHIP_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-                      </select>
-                    </Field>
-                    {!hideFinancials && (
-                      <Field label="Purchase Price (NPR)" required>
-                        <input data-testid="edit-purchase-price-input" type="text" inputMode="numeric" pattern="[0-9]*" value={editForm.purchase_price ?? ""} onChange={e => setEditForm({ ...editForm, purchase_price: e.target.value })} placeholder="e.g. 150000" className={inp} />
-                      </Field>
-                    )}
-                    {!hidePricing && (
-                      <Field label="Selling Price (NPR)">
-                        <input data-testid="edit-selling-price-input" type="text" inputMode="numeric" pattern="[0-9]*" value={editForm.selling_price ?? ""} onChange={e => setEditForm({ ...editForm, selling_price: e.target.value })} placeholder="e.g. 185000" className={inp} />
-                      </Field>
-                    )}
-                    {!hideFinancials && (
-                      <Field label="Minimum Selling Price (NPR)">
-                        <input data-testid="edit-minimum-selling-price-input" type="text" inputMode="numeric" pattern="[0-9]*" value={editForm.minimum_selling_price ?? ""} onChange={e => setEditForm({ ...editForm, minimum_selling_price: e.target.value })} placeholder="e.g. 170000" className={inp} />
-                      </Field>
-                    )}
-                    <Field label="Status">
-                      <select data-testid="edit-status-select" value={editForm.status || ""} onChange={e => setEditForm({ ...editForm, status: e.target.value })} className={sel}>
-                        {VEHICLE_STATUS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-                      </select>
-                    </Field>
-                    <Field label="Ownership Termination">
-                      <select value={editForm.ownership_termination_status || "pending"} onChange={e => setEditForm({ ...editForm, ownership_termination_status: e.target.value })} className={sel}>
-                        <option value="pending">Pending</option>
-                        <option value="yes">Yes</option>
-                        <option value="no">No</option>
-                      </select>
-                    </Field>
-                    <Field label="Sanaakhat Date (BS)">
-                      <BSDatePicker value={editForm.sanakhat_date || ""} onChange={val => setEditForm({ ...editForm, sanakhat_date: val })} />
-                    </Field>
-                    {!hideFinancials && (
-                      <Field label="Sanaakhat Cost (NPR)">
-                        <input data-testid="edit-sanakhat-cost-input" type="text" inputMode="numeric" pattern="[0-9]*" value={editForm.sanakhat_cost ?? ""} onChange={e => setEditForm({ ...editForm, sanakhat_cost: e.target.value })} placeholder="0" className={inp} />
-                      </Field>
-                    )}
-                    <Field label="Purchase Date (BS)" required full>
-                      <BSDatePicker value={editForm.purchase_date || ""} onChange={val => setEditForm({ ...editForm, purchase_date: val })} required />
-                    </Field>
-                    <Field label="Purchase Source" required>
-                      <select value={editForm.purchase_source || ""} onChange={e => setEditForm({ ...editForm, purchase_source: e.target.value })} className={sel}>
-                        <option value="">Select Source</option>
-                        {SOURCES.map(s => <option key={s}>{s}</option>)}
-                      </select>
-                    </Field>
-                    <Field label="Name of Source (Customer/Vendor)">
-                      <CustomerVendorPicker
-                        value={{ type: editForm.linked_contact_type || "vendor", id: editForm.linked_contact_id || null, name: editForm.linked_contact_name || "" }}
-                        onChange={next => setEditForm({ ...editForm, linked_contact_type: next.type, linked_contact_id: next.id, linked_contact_name: next.name })}
-                        vendorType="vehicles"
-                      />
-                    </Field>
-                    <Field label="Condition">
-                      <select value={editForm.condition || ""} onChange={e => setEditForm({ ...editForm, condition: e.target.value })} className={sel}>
-                        {CONDITIONS.map(c => <option key={c}>{c}</option>)}
-                      </select>
-                    </Field>
-                    <Field label="Registration Number" required>
-                      <input data-testid="edit-registration-number-input" value={editForm.registration_number || ""} onChange={e => setEditForm({ ...editForm, registration_number: e.target.value })} placeholder="e.g. Ba 1 Pa 1234" className={inp} />
-                    </Field>
-                    <Field label="Color">
-                      <input value={editForm.color || ""} onChange={e => setEditForm({ ...editForm, color: e.target.value })} placeholder="e.g. Red, Black" className={inp} />
-                    </Field>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-medium text-slate-600 mb-1">Notes</label>
-                    <textarea
-                      value={editForm.notes || ""}
-                      onChange={e => setEditForm({ ...editForm, notes: e.target.value })}
-                      placeholder="Additional notes..."
-                      rows={2}
-                      className="w-full px-3 py-2 text-base sm:text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
-                    />
-                  </div>
-
-                  <div className="border-t border-slate-100 pt-4">
-                    <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Document Status</p>
-                    <div className="grid grid-cols-2 gap-3">
-                      {[["bluebook_status", "Bluebook"], ["tax_clearance_status", "Tax Clearance"], ["transfer_status", "Transfer"]].map(([key, label]) => (
-                        <Field key={key} label={label}>
-                          <select value={editForm[key] || "pending"} onChange={e => setEditForm({ ...editForm, [key]: e.target.value })} className={sel}>
-                            <option value="pending">Pending</option>
-                            <option value="ok">OK</option>
-                            <option value="missing">Missing</option>
-                          </select>
-                        </Field>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-1">
-                  <Row label="Registration"><span className="text-sm font-medium text-slate-900 sm:text-right">{vehicle.registration_number || "Not entered"}</span></Row>
-                  <Row label="Color"><span className="text-sm font-medium text-slate-900 sm:text-right">{vehicle.color || "Not specified"}</span></Row>
-                  <Row label="Condition"><span className="text-sm font-medium text-slate-900 sm:text-right">{vehicle.condition}</span></Row>
-                  <Row label="Purchase Source"><span className="text-sm font-medium text-slate-900 sm:text-right">{vehicle.purchase_source}</span></Row>
-                  <Row label="Name of Source">
-                    {vehicle.linked_contact_name ? (
-                      <span className="text-sm font-medium text-slate-900 sm:text-right flex items-center gap-1.5 sm:justify-end">
-                        {vehicle.linked_contact_type === "customer" ? <User size={13} className="text-slate-400 shrink-0" /> : <Store size={13} className="text-slate-400 shrink-0" />}
-                        {vehicle.linked_contact_name}
-                      </span>
-                    ) : <span className="text-sm font-medium text-slate-900 sm:text-right">—</span>}
-                  </Row>
-                  <Row label="Ownership"><span className="text-sm font-medium text-slate-900 sm:text-right">{formatOwnership(vehicle.ownership_number)}</span></Row>
-                  <Row label="Ownership Termination">
-                    {canManageStock ? (
-                      <select
-                        data-testid="ownership-termination-select"
-                        value={vehicle.ownership_termination_status || "pending"}
-                        onChange={e => updateOwnershipTermination(e.target.value)}
-                        disabled={savingTermination}
-                        className="text-sm font-medium text-slate-900 sm:text-right border border-slate-200 rounded-lg px-2 py-1 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-60"
-                      >
-                        <option value="pending">Pending</option>
-                        <option value="yes">Yes</option>
-                        <option value="no">No</option>
-                      </select>
-                    ) : (
-                      <span className="text-sm font-medium text-slate-900 sm:text-right capitalize">{vehicle.ownership_termination_status || "pending"}</span>
-                    )}
-                  </Row>
-                  <Row label="Sanaakhat Date"><span className="text-sm font-medium text-slate-900 sm:text-right">{vehicle.sanakhat_date ? <HoverADDate date={vehicle.sanakhat_date} /> : "Not received yet"}</span></Row>
-                  {!hideFinancials && <Row label="Sanaakhat Cost"><span className="text-sm font-medium text-slate-900 sm:text-right">{vehicle.sanakhat_cost ? formatNPR(vehicle.sanakhat_cost) : "—"}</span></Row>}
-                  <Row label="Purchase Date"><span className="text-sm font-medium text-slate-900 sm:text-right"><HoverADDate date={vehicle.purchase_date} /></span></Row>
-                  {!hideFinancials && <Row label="Purchase Price"><span className="text-sm font-medium text-slate-900 sm:text-right">{formatNPR(vehicle.purchase_price)}</span></Row>}
-                  {!hidePricing && <Row label="Selling Price"><span className="text-sm font-medium text-slate-900 sm:text-right">{vehicle.selling_price ? formatNPR(vehicle.selling_price) : "Not set"}</span></Row>}
-                  {!hideFinancials && <Row label="Minimum Selling Price"><span className="text-sm font-medium text-slate-900 sm:text-right">{vehicle.minimum_selling_price ? formatNPR(vehicle.minimum_selling_price) : "Not set"}</span></Row>}
-                  <Row label="Sold Date"><span className="text-sm font-medium text-slate-900 sm:text-right">{vehicle.sold_date ? <HoverADDate date={vehicle.sold_date} /> : "—"}</span></Row>
-                  {vehicle.notes && (
-                    <div className="col-span-1 sm:col-span-2 mt-2">
-                      <div className="text-xs text-slate-500 mb-1">Notes</div>
-                      <div className="text-sm text-slate-700 bg-slate-50 rounded-lg p-3">{vehicle.notes}</div>
-                    </div>
-                  )}
-                </div>
-              )}
+              {/* Overview Tab — stays mounted (hidden via CSS) instead of unmounting on tab switch. It is the Purchase
+                 Vehicle form (VehicleFormBody) filled in: read-only until Edit, then the same fields can be changed.
+                 -m-5 lets its sections run edge to edge, as they do in that form. */}
+              <div className={activeTab === "overview" ? "-m-5" : "hidden"}>
+                <VehicleFormBody
+                  editing
+                  readOnly={!isEditing}
+                  attempted={showErrors}
+                  form={editForm}
+                  setForm={setEditForm}
+                  docPhotos={docPhotos}
+                  setDocPhotos={setDocPhotos}
+                  existingDocs={docsOnFile}
+                  hideCost={hideFinancials}
+                  hidePricing={hidePricing}
+                  sanakhatNote={sanakhatNote}
+                />
               </div>
 
               {/* Expenses Tab — also kept mounted, hidden via CSS when inactive. */}

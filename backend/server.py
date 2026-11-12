@@ -6,7 +6,7 @@ from starlette.middleware.cors import CORSMiddleware
 from starlette.middleware.gzip import GZipMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from passlib.context import CryptContext
-from typing import Optional, List, Literal
+from typing import Optional, List, Literal, Union
 from datetime import datetime, timezone, timedelta
 from urllib.parse import urlparse, quote
 from pathlib import Path
@@ -24,6 +24,7 @@ from google.genai import errors as genai_errors
 import httpx
 import media_storage
 import crm
+import assistant_api
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
@@ -86,11 +87,13 @@ TENANT_COLLECTIONS = {
     "sync_logs", "team_members", "vehicle_photos", "vehicles", "vendor_payments", "vendors",
     "audit_logs", "ai_chat_sessions", "settings", "facebook_pages", "bookings",
     "offer_prizes", "offer_codes", "page_views", "crm_followups", "crm_interactions",
-    # The Finance section was removed from the app, but its fin_* tables are still in the database and have foreign
-    # keys to companies, so they stay listed here: deleting a company must still clear whatever rows they hold.
+    # Finance books (see finance_books.py); tables are created by migration_add_finance_books.sql.
     "fin_parties", "fin_bank_accounts", "fin_account_transfers", "fin_expense_categories", "fin_items",
     "fin_transactions", "fin_customer_ledger", "fin_vendor_ledger", "fin_statement_imports",
+    # Rent and the Cash account's details; created by migration_add_finance_rent.sql.
     "fin_rentals", "fin_cash_account",
+    # Ledger types and quotations; created at start-up by finance_books.ensure_schema.
+    "fin_party_types", "fin_quotations",
 }
 
 def company_scope(cu: dict) -> dict:
@@ -360,6 +363,9 @@ ROLE_PERMISSIONS = {
         # Sold vehicle's name-transfer / sanakhat status only (PATCH /vehicles/{vid}/sale-statuses),
         # not general vehicle edits.
         "sale_statuses": {"edit"},
+    },
+    "sanakhat_officer": {  # Sanakhat desk -- sees every vehicle's Sanaakhat status and updates it, nothing else (no prices, no sales)
+        "sanakhat": {"view", "edit"},
     },
     "parts_supervisor": {  # Parts department
         "spare_parts": {"view", "create", "edit", "delete"},
@@ -1714,6 +1720,17 @@ class SaleUpdate(BaseModel):
     lead_note: Optional[str] = Field(None, max_length=255)
     referred_by_id: Optional[str] = None
     referred_by_name: Optional[str] = Field(None, max_length=255)
+    # The witness and the exchange, as on SaleCreate. Each group is only changed when the form sends any of it (an empty
+    # value clears it). Changing the exchange also changes the old vehicle's Inventory entry: see _plan_exchange_change.
+    witness_name: Optional[str] = None
+    witness_address: Optional[str] = None
+    witness_phone: Optional[str] = None
+    witness_id_number: Optional[str] = None
+    exchange_valuation: Optional[float] = None
+    exchange_brand: Optional[str] = None
+    exchange_model: Optional[str] = None
+    exchange_reg_no: Optional[str] = None
+    exchange_year: Optional[str] = None
 
 class CustomerCreate(BaseModel):
     name: str; contact_number: str
@@ -1916,10 +1933,9 @@ async def signup(request: Request, req: SignUpRequest):
     companies, which is exactly the UX that confused people before. Using email rather than
     a free-text username sidesteps the "everyone wants to type admin" collision on top of
     that, and is what a real password-reset-by-email flow needs -- see /auth/forgot-password
-    below. New signups must also verify their email before they can log in (see
-    /auth/verify-email) -- staff accounts an admin creates via /auth/register are exempt
-    (that admin is already vouching for the email); only anonymous self-signup is gated,
-    since that's the actual abuse case (throwaway/fake emails claiming a company)."""
+    below. Email verification is no longer required: a new account is signed in straight away
+    (the response carries the same token /auth/login returns). /auth/verify-email and
+    /auth/resend-verification still exist for links already sent."""
     email = req.email.lower()
     existing = await db.users.find_one({"username": email})
     if existing:
@@ -1929,20 +1945,15 @@ async def signup(request: Request, req: SignUpRequest):
     await db.companies.insert_one({"id": company_id, "name": req.company_name, "created_at": now})
     user = {"id": str(uuid.uuid4()), "username": email,
             "password_hash": await hash_pw_async(req.password), "name": req.name, "role": "admin",
-            "company_id": company_id, "email_verified_at": None, "created_at": now}
+            "company_id": company_id, "email_verified_at": now, "created_at": now}
     await db.users.insert_one(user)
     # A settings row is looked up purely by company_id (see get_settings/update_settings) --
     # "id" here is just an arbitrary row id, not a lookup key.
     await db.settings.insert_one({"id": str(uuid.uuid4()), "company_id": company_id,
                                    "business_name": req.company_name})
-    verify_token = await _create_auth_token(user["id"], "verify_email", ttl_minutes=24 * 60)
-    link = f"{FRONTEND_URL}/verify-email?token={verify_token}"
-    await _send_email(email, "Verify your email — Auto Stock Manager",
-                       f"<p>Hi {req.name},</p>"
-                       f"<p>Click below to verify your email and activate <b>{req.company_name}</b>'s workspace:</p>"
-                       f"<p><a href='{link}'>{link}</a></p>"
-                       f"<p>This link expires in 24 hours.</p>")
-    return {"message": "Account created — check your email to verify it before signing in.", "email": email}
+    token = create_token(user["id"], email, "admin", company_id)
+    return {"message": "Account created.", "email": email, "token": token, "username": email,
+            "name": req.name, "role": "admin", "company_name": req.company_name}
 
 @api_router.post("/auth/login")
 @limiter.limit("5/minute")
@@ -1950,8 +1961,6 @@ async def login(request: Request, req: LoginRequest):
     user = await db.users.find_one({"username": req.username})
     if not user or not await verify_pw_async(req.password, user["password_hash"]):
         raise HTTPException(401, "Invalid credentials")
-    if not user.get("email_verified_at"):
-        raise HTTPException(403, "Please verify your email before signing in — check your inbox, or request a new link.")
     token = create_token(user.get("id", ""), user["username"], user.get("role", "admin"), user.get("company_id"))
     company = await db.companies.find_one({"id": user.get("company_id")}, {"_id": 0, "name": 1}) if user.get("company_id") else None
     return {"token": token, "username": user["username"], "name": user.get("name", user["username"]),
@@ -2001,6 +2010,27 @@ async def reset_password(request: Request, req: ResetPasswordRequest):
         raise HTTPException(400, "This reset link is invalid or has expired — request a new one.")
     await db.users.update_one({"id": rec["user_id"]}, {"$set": {"password_hash": await hash_pw_async(req.new_password)}})
     return {"message": "Password reset — you can now sign in with your new password."}
+
+# The stock photo every fresh install used to get as its "logo". It is no longer seeded, and where it is
+# still stored it counts as no logo at all.
+_PLACEHOLDER_LOGO = "https://images.unsplash.com/photo-1777288411485-1eb05bd4a289"
+# The original company's own logo, shipped with the web app (frontend/public/brand/).
+DEFAULT_COMPANY_LOGO = "/brand/default-logo.png"
+
+@api_router.get("/brand")
+async def get_brand(cu: dict = Depends(get_current_user)):
+    """The signed-in company's name and logo for the side panel. Any role may read it (the full /settings
+    is admin-only) and it is read live, so a rename or a new logo shows without signing in again.
+    Logo: the company's own (Settings -> Logo Image URL) if it set a real one; otherwise the original company
+    gets the shipped default logo, and every other company gets none (the panel shows its initials tile)."""
+    if not cu.get("company_id"):
+        return {"company_name": None, "logo_url": None}
+    company = await db.companies.find_one({"id": cu["company_id"]}, {"_id": 0, "name": 1})
+    settings = await db.settings.find_one({}, {"_id": 0, "logo_url": 1})
+    logo = ((settings or {}).get("logo_url") or "").strip()
+    if not logo or logo.startswith(_PLACEHOLDER_LOGO):
+        logo = DEFAULT_COMPANY_LOGO if cu["company_id"] == await _default_company_id() else None
+    return {"company_name": company["name"] if company else None, "logo_url": logo}
 
 @api_router.get("/auth/me")
 async def me(cu: dict = Depends(get_current_user)):
@@ -2158,7 +2188,8 @@ async def platform_delete_company(company_id: str, cu: dict = Depends(platform_o
         try:
             await getattr(db, name).delete_many({"company_id": company_id})
         except Exception as e:
-            # The leftover finance tables may not exist on every database; then there is nothing of theirs to delete.
+            # The finance tables only exist once migration_add_finance_books.sql has been run by hand;
+            # until then there is nothing of theirs to delete.
             if name.startswith("fin_") and ("1146" in str(e) or "doesn't exist" in str(e)):
                 continue
             raise
@@ -2975,6 +3006,41 @@ async def update_sale_statuses(vid: str, body: SaleStatusesUpdate, cu: dict = De
         raise HTTPException(404, "Vehicle not found")
     return upd
 
+# ── SANAKHAT DESK ─────────────────────────────────────────────────────
+# One screen for whoever handles Sanaakhat (ownership termination) cases: every vehicle in the company, whatever its
+# stock status, with only the fields needed to find it and its Sanaakhat progress. No prices, purchase details or sales.
+SANAKHAT_DESK_FIELDS = {"_id": 0, "id": 1, "brand": 1, "model": 1, "year": 1, "type": 1, "registration_number": 1, "color": 1,
+                        "status": 1, "ownership_termination_status": 1, "sanakhat_date": 1, "created_at": 1}
+
+@api_router.get("/sanakhat/vehicles")
+async def sanakhat_vehicles(cu: dict = Depends(require("sanakhat", "view"))):
+    rows = await db.vehicles.find({}, SANAKHAT_DESK_FIELDS).to_list(5000)
+    for v in rows:
+        v["ownership_termination_status"] = v.get("ownership_termination_status") if v.get("ownership_termination_status") in ("yes", "no") else "pending"
+    rows.sort(key=lambda v: v.get("created_at") or "", reverse=True)
+    return rows
+
+class SanakhatUpdate(BaseModel):
+    ownership_termination_status: Optional[Literal["yes", "no", "pending"]] = None
+    sanakhat_date: Optional[str] = None  # YYYY-MM-DD; "" clears it
+
+@api_router.patch("/sanakhat/vehicles/{vid}")
+async def sanakhat_update(vid: str, body: SanakhatUpdate, cu: dict = Depends(require("sanakhat", "edit"))):
+    upd = {}
+    if body.ownership_termination_status is not None:
+        upd["ownership_termination_status"] = body.ownership_termination_status
+    if body.sanakhat_date is not None:
+        d = body.sanakhat_date.strip()
+        if d and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", d):
+            raise HTTPException(400, "Date must look like 2026-11-06")
+        upd["sanakhat_date"] = d or None
+    if not upd:
+        raise HTTPException(400, "Nothing to update")
+    res = await db.vehicles.update_one({"id": vid}, {"$set": {**upd, "updated_at": datetime.now(timezone.utc).isoformat()}})
+    if not res.matched_count:
+        raise HTTPException(404, "Vehicle not found")
+    return upd
+
 @api_router.put("/vehicles/{vid}")
 async def update_vehicle(vid: str, vehicle: VehicleUpdate, cu: dict = Depends(require("vehicles", "edit"))):
     existing = await db.vehicles.find_one({"id": vid}, {"_id": 0})
@@ -3774,7 +3840,7 @@ async def get_sales(start_date: Optional[str] = None, end_date: Optional[str] = 
             s["profit_margin"] = round((revenue - investment) / revenue * 100, 2) if revenue else None
     return sales
 
-async def _exchange_vehicle_for_sale(sale: SaleCreate, sold: dict, sale_date: str, exchange_valuation: float, cu: dict) -> Optional[dict]:
+async def _exchange_vehicle_for_sale(sale: Union[SaleCreate, SaleUpdate], sold: dict, sale_date: str, exchange_valuation: float, cu: dict) -> Optional[dict]:
     """The inventory record for the old vehicle a customer hands over in part payment, ready to insert, so it can
     be resold without anyone re-keying it into Inventory. It costs the shop its valuation and stays unlisted until
     it is priced. None when the sale has no exchange. Writes nothing: a plate already in stock raises here,
@@ -3813,6 +3879,56 @@ async def _exchange_vehicle_for_sale(sale: SaleCreate, sold: dict, sale_date: st
         "created_by": cu.get("username"),
     })
     return v
+
+SALE_WITNESS_FIELDS = {"witness_name", "witness_address", "witness_phone", "witness_id_number"}
+SALE_EXCHANGE_FIELDS = {"exchange_valuation", "exchange_brand", "exchange_model", "exchange_reg_no", "exchange_year"}
+
+async def _exchange_entry(sale_doc: dict):
+    """The Inventory entry made for a sale's exchange vehicle, and whether it is still just that: unlisted (so never
+    priced) with no expense or job card on it. Only an untouched entry may follow the sale when it is edited or deleted;
+    once it has been priced, sold or worked on it is real stock. Returns (entry or None, untouched)."""
+    vid = sale_doc.get("exchange_vehicle_id")
+    entry = await db.vehicles.find_one({"id": vid}, {"_id": 0}) if vid else None
+    if not entry:
+        return None, False
+    worked_on = await db.expenses.find_one({"vehicle_id": vid}, {"_id": 0, "id": 1}) or await db.job_cards.find_one({"vehicle_id": vid}, {"_id": 0, "id": 1})
+    return entry, entry.get("status") == "unlisted" and not worked_on
+
+async def _plan_exchange_change(existing: dict, sale: SaleUpdate, sold: dict, sale_date: str, valuation: float, cu: dict) -> dict:
+    """What editing the exchange on a recorded sale does to the old vehicle's Inventory entry, worked out before
+    anything is written (a plate already in stock raises here). Returns {"insert": a new entry, "update": (id, fields),
+    "delete": id, "link": the sale's exchange_vehicle_id afterwards, "note": a sentence for the user or None}.
+    - an untouched entry follows the edit: its details and cost are changed, or it is removed if the exchange is gone;
+    - one that has been priced or worked on is left as it is (the sale's own exchange record still changes);
+    - a sale that had no exchange gets an entry, as a new sale does."""
+    brand, model = (sale.exchange_brand or "").strip(), (sale.exchange_model or "").strip()
+    reg_no, year = (sale.exchange_reg_no or "").strip(), (sale.exchange_year or "").strip()
+    has_exchange = valuation > 0 or bool(brand or model or reg_no or year)
+    entry, untouched = await _exchange_entry(existing)
+    plan = {"insert": None, "update": None, "delete": None, "link": entry["id"] if entry else None, "note": None}
+    if not has_exchange:
+        if entry and untouched:
+            plan["delete"], plan["link"] = entry["id"], None
+        elif entry:
+            plan["note"] = "The exchange vehicle stays in Inventory: it has been priced or worked on."
+        return plan
+    if entry:
+        if not untouched:
+            plan["note"] = "The exchange vehicle in Inventory was left as it is: it has been priced or worked on."
+            return plan
+        if reg_no and reg_no.lower() != (entry.get("registration_number") or "").strip().lower():
+            holder = await _vehicle_holding_plate(reg_no)
+            if holder and holder.get("id") != entry["id"] and holder.get("status") not in ("sold", "scrap"):
+                raise HTTPException(400, f"Exchange vehicle '{reg_no}' is already in stock")
+        plan["update"] = (entry["id"], {
+            "brand": brand or "Unknown", "model": model or "Unknown", "year": int(year) if year.isdigit() else None,
+            "registration_number": reg_no, "purchase_price": valuation,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        })
+        return plan
+    plan["insert"] = await _exchange_vehicle_for_sale(sale, sold, sale_date, valuation, cu)
+    plan["link"] = plan["insert"]["id"]
+    return plan
 
 @api_router.post("/sales")
 async def create_sale(sale: SaleCreate, cu: dict = Depends(require("sales", "create"))):
@@ -4048,10 +4164,14 @@ async def update_sale(sid: str, sale: SaleUpdate, cu: dict = Depends(get_current
     if not v: raise HTTPException(404, "Vehicle not found")
     expenses_total = sum(float(e.get("amount", 0)) for e in sale.extra_expenses)
     total_amount = sale.sale_price + expenses_total
-    paid_total = (sale.paid_cash or 0) + (sale.paid_bank or 0) + (sale.advance_payment or 0) + (existing.get("exchange_valuation") or 0)
+    # The exchange counts as paid at the valuation the form sends, or at the saved one when it does not send it.
+    exchange_sent = bool(sale.model_fields_set & SALE_EXCHANGE_FIELDS)
+    exchange_valuation = max(sale.exchange_valuation or 0, 0) if exchange_sent else (existing.get("exchange_valuation") or 0)
+    paid_total = (sale.paid_cash or 0) + (sale.paid_bank or 0) + (sale.advance_payment or 0) + exchange_valuation
     due_amount = round(sale.due_amount, 2) if sale.due_amount is not None else max(round(total_amount - paid_total, 2), 0)
     payment_status = "Paid" if due_amount <= 0 else ("Partial" if paid_total > 0 else "Unpaid")
     sale_date = sale.sale_date or existing.get("sale_date")
+    exchange_plan = await _plan_exchange_change(existing, sale, v, sale_date, exchange_valuation, cu) if exchange_sent else None
     update_doc = {
         "vehicle_id": sale.vehicle_id,
         "customer_id": sale.customer_id,
@@ -4072,6 +4192,17 @@ async def update_sale(sid: str, sale: SaleUpdate, cu: dict = Depends(get_current
         "updated_by": cu.get("username"),
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
+    if sale.model_fields_set & SALE_WITNESS_FIELDS:
+        update_doc.update({k: (getattr(sale, k) or "").strip() or None for k in SALE_WITNESS_FIELDS})
+    if exchange_plan:
+        update_doc.update({
+            "exchange_valuation": exchange_valuation,
+            "exchange_brand": (sale.exchange_brand or "").strip() or None,
+            "exchange_model": (sale.exchange_model or "").strip() or None,
+            "exchange_reg_no": (sale.exchange_reg_no or "").strip() or None,
+            "exchange_year": (sale.exchange_year or "").strip() or None,
+            "exchange_vehicle_id": exchange_plan["link"],
+        })
     # A form that does not show the seller must not clear it; and nothing is written when there is no seller
     # before or after, so an ordinary edit leaves the sold_by columns alone.
     if "sold_by_id" in sale.model_fields_set and (sale.sold_by_id or existing.get("sold_by_id")):
@@ -4082,7 +4213,25 @@ async def update_sale(sid: str, sale: SaleUpdate, cu: dict = Depends(get_current
         lead = await crm.lead_for_sale(sale.model_dump(), replace=True)
         if any(lead.values()) or any(existing.get(k) for k in lead):
             update_doc.update(lead)
-    await db.sales.update_one({"id": sid}, {"$set": update_doc})
+    if exchange_plan and exchange_plan["insert"]:
+        await db.vehicles.insert_one(exchange_plan["insert"])
+    try:
+        await db.sales.update_one({"id": sid}, {"$set": update_doc})
+    except Exception:
+        # Otherwise a retry would trip over the half-made entry's own plate ("already in stock").
+        if exchange_plan and exchange_plan["insert"]:
+            await db.vehicles.delete_one({"id": exchange_plan["insert"]["id"]})
+        raise
+    if exchange_plan:
+        if exchange_plan["update"]:
+            await db.vehicles.update_one({"id": exchange_plan["update"][0]}, {"$set": exchange_plan["update"][1]})
+        if exchange_plan["delete"]:
+            await db.vehicles.delete_one({"id": exchange_plan["delete"]})
+        if exchange_plan["insert"]:
+            ins = exchange_plan["insert"]
+            await db.audit_logs.insert_one({"action": "vehicle_created", "vehicle_id": ins["id"],
+                "user": cu["username"], "timestamp": datetime.now(timezone.utc).isoformat(),
+                "details": f"Added {ins['brand']} {ins['model']} {ins['year'] or ''}".strip() + " (taken in exchange)"})
     # Keep vehicle record in sync (price/date/customer may have changed). Re-saving an active
     # sale also re-asserts status "sold", so a vehicle that drifted out of Sold Stock (e.g.
     # status edited from Inventory) is repaired by simply saving its sale again.
@@ -4098,6 +4247,8 @@ async def update_sale(sid: str, sale: SaleUpdate, cu: dict = Depends(get_current
     if sale.customer_id:
         await db.customers.update_one({"id": sale.customer_id}, {"$set": {"last_purchase_date": sale_date}})
     updated = await db.sales.find_one({"id": sid}, {"_id": 0})
+    if exchange_plan and exchange_plan["note"]:
+        updated["exchange_note"] = exchange_plan["note"]  # not saved: just tells the form what happened to the Inventory entry
     return updated
 
 @api_router.post("/sales/{sid}/resync-vehicle")
@@ -4130,14 +4281,12 @@ async def delete_sale(sid: str, cu: dict = Depends(get_current_user)):
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }})
     message = "Sale deleted, vehicle restored to available"
-    exchange_id = s.get("exchange_vehicle_id")
-    exchange = await db.vehicles.find_one({"id": exchange_id}, {"_id": 0, "status": 1}) if exchange_id else None
+    exchange, untouched = await _exchange_entry(s)
     if exchange:
         # The old vehicle was only taken in because of this sale. Still unlisted with no spend on it, it goes too; once
         # it has been priced, sold or worked on it is real stock and stays.
-        worked_on = await db.expenses.find_one({"vehicle_id": exchange_id}, {"_id": 0, "id": 1}) or await db.job_cards.find_one({"vehicle_id": exchange_id}, {"_id": 0, "id": 1})
-        if exchange.get("status") == "unlisted" and not worked_on:
-            await db.vehicles.delete_one({"id": exchange_id})
+        if untouched:
+            await db.vehicles.delete_one({"id": exchange["id"]})
             message += ", and the exchange vehicle removed from inventory"
         else:
             message += ". The exchange vehicle stays in inventory"
@@ -4171,7 +4320,7 @@ async def get_team(cu: dict = Depends(require("team", "view"))):
 # ── BOOKINGS ──────────────────────────────────────────────────────────
 # A booking is a customer's deposit on a vehicle before the sale. It is NOT a sale: nothing
 # here counts toward sales/revenue. The vehicle sits at "reserved" while the booking is active;
-# the booking then ends one of two ways — "Record Sale" (POST /sales with booking_id, which
+# the booking then ends one of two ways — "Sale Vehicle" (POST /sales with booking_id, which
 # marks it converted and the deposit rides along as the sale's advance payment) or a
 # withdrawal (cancel below, which frees the vehicle and records how much deposit was refunded).
 async def _enrich_bookings(bookings: list) -> list:
@@ -4603,6 +4752,74 @@ async def finance_summary(cu: dict = Depends(admin_only)):
         "vehicles_in_stock": len(avail),
         "vehicles_sold": len(sales_records),
     }
+
+# ── ASSISTANT (read-only; for the Hanuman voice assistant) ─────────────
+@api_router.get("/assistant/briefing")
+@limiter.limit("60/minute")
+async def assistant_briefing(request: Request):
+    """The owner's numbers (today's and this month's sales, dues, profit, stock) for the phone assistant.
+
+    Authenticated by a per-company key in the X-Assistant-Key header, not by a user login: either an
+    entry in the ASSISTANT_KEYS env or the key derived from JWT_SECRET (see assistant_api.py and
+    /assistant/key). It reads this one summary for that one company and nothing else; there is no
+    write route behind it."""
+    presented = request.headers.get("x-assistant-key", "")
+    cid = (assistant_api.company_for_key(presented, os.environ.get("ASSISTANT_KEYS", ""))
+           or assistant_api.company_for_derived_key(presented, JWT_SECRET))
+    if not cid:
+        raise HTTPException(401, "Invalid assistant key")
+    current_company_id.set(cid)          # every db.<collection> call below is now scoped to this company
+    finance = await finance_summary({"role": "admin"})
+    sales = await db.sales.find({}, {"_id": 0}).to_list(50000)
+    today, month = assistant_api.nepal_today()
+    # Customers, the CRM's lead stages, follow-ups due and the team, counted as the CRM page counts them.
+    customers = await db.customers.find({}, {"_id": 0, "id": 1, "created_at": 1, "lead_status": 1}).to_list(50000)
+    followups = await db.crm_followups.find({"status": "pending"}, {"_id": 0, "due_at": 1}).to_list(50000)
+    team = await db.team_members.find({}, {"_id": 0, "role": 1, "is_active": 1}).to_list(500)
+    people = assistant_api.people_briefing(
+        customers, sales, followups, team, datetime.fromisoformat(today).date(),
+        crm.effective_status, crm.npt_date)
+    return assistant_api.build_briefing(sales, finance, today, month, _sale_revenue, people=people)
+
+@api_router.get("/assistant/key")
+@limiter.limit("10/minute")
+async def assistant_key(request: Request, cu: dict = Depends(admin_only)):
+    """The assistant key for the signed-in admin's own company, to hand to the Hanuman voice assistant.
+
+    Admin-only. The key is derived from JWT_SECRET (nothing is stored) and can only read /assistant/briefing."""
+    cid = cu.get("company_id")
+    if not cid:
+        raise HTTPException(400, "This account has no company")
+    return {"company_id": cid, "key": assistant_api.derive_key(JWT_SECRET, cid)}
+
+class AssistantLookup(BaseModel):
+    name: str = Field(max_length=20)
+    args: dict = Field(default_factory=dict)
+
+@api_router.post("/assistant/lookup")
+@limiter.limit("60/minute")
+async def assistant_lookup(request: Request, body: AssistantLookup):
+    """One named, read-only lookup for the phone assistant (customer, dues, sales, vehicle): see assistant_api.run_lookup.
+
+    Same X-Assistant-Key as /assistant/briefing, so it only ever reads one company's data. It runs a fixed list
+    of lookups with a few options each, never free-form queries, and every result is small."""
+    presented = request.headers.get("x-assistant-key", "")
+    cid = (assistant_api.company_for_key(presented, os.environ.get("ASSISTANT_KEYS", ""))
+           or assistant_api.company_for_derived_key(presented, JWT_SECRET))
+    if not cid:
+        raise HTTPException(401, "Invalid assistant key")
+    current_company_id.set(cid)
+    data = {}
+    if body.name in ("customer", "dues", "sales"):
+        data["sales"] = await db.sales.find({}, {"_id": 0}).to_list(50000)
+    if body.name in ("customer", "dues"):
+        data["customers"] = await db.customers.find({}, {"_id": 0, "id": 1, "name": 1, "contact_number": 1}).to_list(50000)
+    if body.name in ("sales", "vehicle"):
+        data["vehicles"] = await db.vehicles.find({}, {"_id": 0, "id": 1, "brand": 1, "model": 1, "variant": 1, "year": 1, "color": 1,
+                                                       "registration_number": 1, "status": 1, "selling_price": 1, "purchase_price": 1,
+                                                       "kilometer_run": 1}).to_list(50000)
+    today = datetime.fromisoformat(assistant_api.nepal_today()[0]).date()
+    return assistant_api.run_lookup(body.name, body.args, data, today, _sale_revenue)
 
 # ── REPORTS ───────────────────────────────────────────────────────────
 @api_router.get("/reports/dashboard")
@@ -5608,12 +5825,18 @@ def _ga4_token() -> str:
     creds.refresh(GoogleRequest())
     return creds.token
 
+_BIKE_PATH = re.compile(r"/inventory/([0-9a-fA-F-]{36})/?")
+
 async def _name_vehicle_pages(summary: dict) -> dict:
     """Swap /inventory/<id> paths in top_pages for the vehicle (brand model year) so the admin
     sees which bike or car was viewed rather than a long id."""
     pat = re.compile(r"/inventory/([0-9a-fA-F-]{36})/?")
+    if "top_bikes" not in summary:  # Google Analytics only reports page views, not who the viewers were
+        summary["top_bikes"] = [{"id": m.group(1), "path": r["name"], "name": m.group(1), "views": r["views"], "customers": None}
+                                for r in summary.get("top_pages", []) if (m := pat.fullmatch(r["name"]))]
     for r in summary.get("top_pages", []): r["path"] = r["name"]
     ids = {m.group(1) for r in summary.get("top_pages", []) if (m := pat.fullmatch(r["name"]))}
+    ids |= {b["id"] for b in summary["top_bikes"]}
     for v in summary.get("visit_list", []):
         ids |= {m.group(1) for p in v["paths"] if (m := pat.fullmatch(p))}
         ids |= {m.group(1) for st in v.get("steps", []) if (m := pat.fullmatch(st["path"]))}
@@ -5624,6 +5847,7 @@ async def _name_vehicle_pages(summary: dict) -> dict:
             if label: labels[v["id"]] = label
         name = lambda p: labels.get(m.group(1), p) if (m := pat.fullmatch(p)) else p
         for r in summary.get("top_pages", []): r["name"] = name(r["name"])
+        for b in summary["top_bikes"]: b["name"] = labels.get(b["id"], b["name"])
         for v in summary.get("visit_list", []):
             v["paths"] = [name(p) for p in v["paths"]]
             for st in v.get("steps", []): st["label"] = name(st["path"])
@@ -5692,7 +5916,11 @@ async def visits_search(days: int = 30, skip: int = 0, cu: dict = Depends(admin_
     days = max(1, min(days, 365)); skip = max(0, min(skip, 30))
     if not GSC_CREDENTIALS_JSON:
         return {"configured": False}
-    token = await asyncio.to_thread(_gsc_token)
+    try:
+        token = await asyncio.to_thread(_gsc_token)
+    except Exception as ex:  # bad or missing key, wrong key format, Google refusing the sign-in
+        logger.exception("Search Console sign-in failed")
+        raise HTTPException(502, f"Could not sign in to Google Search Console ({type(ex).__name__}). Check GSC_CREDENTIALS_JSON on the backend.")
     end = datetime.now(timezone.utc).date() - timedelta(days=skip)
     start = end - timedelta(days=days - 1)
     url = f"https://searchconsole.googleapis.com/webmasters/v3/sites/{quote(GSC_SITE_URL, safe='')}/searchAnalytics/query"
@@ -5702,13 +5930,22 @@ async def visits_search(days: int = 30, skip: int = 0, cu: dict = Depends(admin_
                 "startDate": start.isoformat(), "endDate": end.isoformat(),
                 "dimensions": [dim], "rowLimit": limit})
         if resp.status_code != 200:
-            raise HTTPException(502, f"Google Search Console error: {resp.json().get('error', {}).get('message', resp.status_code)}")
+            try: why = resp.json().get("error", {}).get("message") or resp.status_code
+            except Exception: why = resp.status_code
+            raise HTTPException(502, f"Google Search Console error: {why}")
         return [{"name": r["keys"][0], "clicks": int(r["clicks"]), "impressions": int(r["impressions"]),
                  "position": round(r["position"], 1)} for r in resp.json().get("rows", [])]
-    queries, countries, pages, daily = await asyncio.gather(
-        query("query", 500), query("country", 100), query("page", 100), query("date", 400))
+    try:
+        queries, countries, pages, daily = await asyncio.gather(
+            query("query", 500), query("country", 100), query("page", 100), query("date", 400))
+    except HTTPException:
+        raise
+    except Exception as ex:  # timeout / network error reaching Google
+        logger.exception("Search Console request failed")
+        raise HTTPException(502, f"Could not reach Google Search Console ({type(ex).__name__}). Try again in a minute.")
     for p in pages:  # show the path, not the full address
         p["name"] = urlparse(p["name"]).path or "/"
+    for p in pages: p["views"] = p["clicks"]  # _name_vehicle_pages reads "views" on every page row (GA/beacon rows have it, Search Console rows don't)
     pages = (await _name_vehicle_pages({"top_pages": pages}))["top_pages"]
     daily = sorted(({"date": d["name"], "clicks": d["clicks"], "impressions": d["impressions"]} for d in daily), key=lambda d: d["date"])
     months = {}
@@ -5735,6 +5972,7 @@ async def visits_summary(days: int = 30, skip: int = 0, cu: dict = Depends(admin
     by_day, pages, refs, devices = {}, {}, {}, {"mobile": 0, "desktop": 0}
     visitors, today_views, today_visitors = set(), 0, set()
     stamps = {}  # visitor -> page-view times, to estimate how long each visit lasted
+    emails = {r["visitor_id"]: r["email"] for r in sorted(rows, key=lambda x: x["created_at"]) if r.get("email")}  # who each registered visitor is
     for r in rows:
         ts = datetime.fromisoformat(r["created_at"])
         stamps.setdefault(r["visitor_id"], []).append((ts, r))
@@ -5758,6 +5996,14 @@ async def visits_summary(days: int = 30, skip: int = 0, cu: dict = Depends(admin
     # A visit = one visitor's page views with no gap over 30 minutes. We only see when a page opens,
     # not when the person leaves, so time on site = first to last page of the visit; a one-page
     # visit has no measurable time and counts as a quick visit.
+    # Bikes ranked by how often their page was opened, and by how many different people (browsers) opened it.
+    bike_views = {}
+    for r in rows:
+        if m := _BIKE_PATH.fullmatch(r["path"]):
+            e = bike_views.setdefault(m.group(1), {"views": 0, "people": set()})
+            e["views"] += 1; e["people"].add(r["visitor_id"])
+    top_bikes = [{"id": k, "path": f"/inventory/{k}", "name": k, "views": e["views"], "customers": len(e["people"])}
+                 for k, e in sorted(bike_views.items(), key=lambda kv: (-kv[1]["views"], -len(kv[1]["people"])))[:20]]
     visits, spans, visit_list = 0, [], []
     def close_visit(vid, pv):
         nonlocal visits
@@ -5766,7 +6012,7 @@ async def visits_summary(days: int = 30, skip: int = 0, cu: dict = Depends(admin
         if len(pv) > 1: spans.append(secs)
         first = pv[0][1]
         visit_list.append({"started": pv[0][0].astimezone(npt).strftime("%Y-%m-%d %H:%M"), "seconds": int(secs),
-                           "pages": len(pv), "visitor": vid[:6], "device": first.get("device") or "desktop",
+                           "pages": len(pv), "visitor": vid[:6], "email": emails.get(vid), "device": first.get("device") or "desktop",
                            "source": first.get("referrer") or "Direct", "paths": [p[1]["path"] for p in pv][:8],
                            "steps": [{"path": p[1]["path"], "time": p[0].astimezone(npt).strftime("%H:%M:%S"),
                                       "after": int((p[0] - pv[i - 1][0]).total_seconds()) if i else 0}
@@ -5785,7 +6031,7 @@ async def visits_summary(days: int = 30, skip: int = 0, cu: dict = Depends(admin
                   "quick_visit_pct": round(100 * (visits - len(spans)) / visits) if visits else 0}
     return await _name_vehicle_pages({"days": days, "total_views": len(rows), "unique_visitors": len(visitors),
             "today_views": today_views, "today_visitors": len(today_visitors), "daily": daily,
-            "top_pages": top(pages), "sources": top(refs), "devices": devices,
+            "top_pages": top(pages), "top_bikes": top_bikes, "sources": top(refs), "devices": devices,
             "storefront_url": STOREFRONT_URL, "source": "beacon", "engagement": engagement, "visit_list": visit_list[:200]})
 
 # ── SETTINGS (storefront branding/contact info) ────────────────────────
@@ -5988,6 +6234,7 @@ async def _run_startup_tasks():
             ("customers", "assigned_to_id", "VARCHAR(36)"),
             ("customers", "assigned_to_name", "VARCHAR(255)"),
             # Website leads: who the visitor is, and what was decided about the lead (Accept / Reject, see LEADS below).
+            ("page_views", "email", "VARCHAR(255)"),  # a registered visitor's email, so the Visits page can say who they are
             ("leads", "email", "VARCHAR(255)"),
             ("leads", "address", "VARCHAR(500)"),
             ("leads", "remark", "TEXT"),
@@ -6027,6 +6274,10 @@ async def _run_startup_tasks():
                 await db.execute_raw(_ddl)
             except Exception:
                 logger.warning("Could not ensure offers tables", exc_info=True)
+        try:
+            await finance_books.ensure_schema(db)  # Finance's Rent tables and bill-service columns (never raises)
+        except Exception:
+            logger.warning("Could not ensure the Finance rent tables", exc_info=True)
     try:
         await _backfill_booking_receipt_numbers()
     except Exception:
@@ -6040,7 +6291,7 @@ async def _run_startup_tasks():
     if not await db.settings.find_one({"id": "general"}):
         await db.settings.insert_one({
             "id": "general", "company_id": default_company_id,
-            "logo_url": "https://images.unsplash.com/photo-1777288411485-1eb05bd4a289?q=80&w=880&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D",
+            "logo_url": "",
             "business_name": "My Auto Dealership",
             "contact_phone": "98XXXXXXXX",
             "contact_email": "info@example.com",
@@ -7150,8 +7401,11 @@ async def public_record_visit(request: Request):
     if not visitor: return {"ok": False}
     ref_host = (urlparse(str(body.get("referrer") or "")).hostname or "").lower().removeprefix("www.")[:100]
     if ref_host.endswith("hamroauto.com.np"): ref_host = ""  # internal navigation isn't a source
+    # A signed-in visitor's email rides along, but only one that really is a registered account is kept (the beacon is public).
+    email = _lead_email(body.get("email"))
+    if email and not await db.leads.find_one({"type": "signup", "email": email}, {"_id": 0, "id": 1}): email = None
     await db.page_views.insert_one({
-        "id": str(uuid.uuid4()), "visitor_id": visitor, "path": path, "referrer": ref_host,
+        "id": str(uuid.uuid4()), "visitor_id": visitor, "path": path, "referrer": ref_host, "email": email,
         "device": _visit_device(request.headers.get("user-agent", "")),
         "created_at": datetime.now(timezone.utc).isoformat()})
     return {"ok": True}
@@ -7292,6 +7546,8 @@ async def shutdown():
         await closing
     _compress_pool.shutdown(wait=False, cancel_futures=True)
 
+import finance_books
+finance_books.register(api_router, db, admin_only)
 crm.register(api_router, db, admin_only, _sale_revenue)
 
 app.include_router(api_router)

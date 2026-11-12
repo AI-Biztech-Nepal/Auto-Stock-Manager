@@ -62,7 +62,11 @@ const VIEWPORT_MARGIN = 8;
  * flipping above the trigger and clamping horizontally — instead of being
  * clipped by a modal's overflow or the edge of the browser window.
  */
-export default function BSDatePicker({ value, onChange, required, className = "", mode = "bs" }) {
+const TRIGGER_SIZE = "w-full h-10 sm:h-9 px-3 text-sm border border-slate-200 rounded-lg bg-white";
+
+// triggerClassName replaces the trigger's size, border and background (TRIGGER_SIZE) for a form whose other boxes are taller;
+// placeholder is what it says while no date is picked (default "Select date (BS)" / "Select date (AD)").
+export default function BSDatePicker({ value, onChange, required, className = "", mode = "bs", triggerClassName = TRIGGER_SIZE, placeholder }) {
   const isBS = mode !== "ad";
   const [open, setOpen] = useState(false);
   const [viewYear, setViewYear] = useState(null);
@@ -215,13 +219,13 @@ export default function BSDatePicker({ value, onChange, required, className = ""
         ref={triggerRef}
         type="button"
         onClick={() => setOpen(o => !o)}
-        className="w-full h-10 sm:h-9 px-3 text-sm border border-slate-200 rounded-lg bg-white flex items-center justify-between gap-2 hover:border-blue-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
+        className={`${triggerClassName} flex items-center justify-between gap-2 hover:border-blue-300 focus:outline-none focus:ring-2 focus:ring-blue-500`}
         data-testid="bs-date-trigger"
       >
         <span className={`truncate ${selected ? "text-slate-800" : "text-slate-400"}`}>
           {isBS
-            ? (selectedBS ? `${formatBSDate(value)} BS` : "Select date (BS)")
-            : (selectedAD ? formatADDate(value) : "Select date (AD)")}
+            ? (selectedBS ? `${formatBSDate(value)} BS` : (placeholder || "Select date (BS)"))
+            : (selectedAD ? formatADDate(value) : (placeholder || "Select date (AD)"))}
         </span>
         <Calendar size={15} className="text-slate-400 shrink-0" />
       </button>

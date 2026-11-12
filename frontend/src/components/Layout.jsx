@@ -4,10 +4,12 @@ import { toast } from "sonner";
 import api from "../utils/api";
 import { useAuth } from "../context/AuthContext";
 import { canAccessPath, marketingTabsFor } from "../utils/permissions";
+import FinanceNavGroup from "./FinanceNavGroup";
+import NavGroup from "./NavGroup";
 import { isSanakhatOverdue, sanakhatPendingDays } from "../utils/helpers";
 import {
-  LayoutDashboard, Bike, Wrench, BarChart3, Sparkles, Settings, LogOut, Menu, X, Bell,
-  BookOpen, Boxes, ShoppingBag, Building2, ImageOff, FileWarning, ShieldCheck, Megaphone, Inbox, ChevronDown, Share2, Gift, Eye, HeartHandshake
+  LayoutDashboard, Bike, Wrench, Sparkles, Settings, LogOut, Menu, X, Bell,
+  BookOpen, Wallet, Boxes, ShoppingBag, Building2, ImageOff, FileWarning, ShieldCheck, Megaphone, Inbox, ChevronDown, Share2, Gift, Eye, HeartHandshake, FileCheck2
 } from "lucide-react";
 
 // A vehicle needs at least this many photos before it's considered adequately
@@ -23,17 +25,23 @@ const MARKETING_NAV = {
   visits: { label: "Visits", icon: Eye },
 };
 
+// What sits under the Service item in the side panel (see the render below).
+const SERVICE_TABS = [
+  { key: "jobs", label: "Job Cards", icon: Wrench, to: "/jobs" },
+  { key: "warranty", label: "Warranty", icon: ShieldCheck, to: "/warranty" },
+];
+
 const navItems = [
   { path: "/",             label: "Dashboard",    icon: LayoutDashboard },
+  { path: "/sales",        label: "Sales",        icon: ShoppingBag },
   { path: "/platform",     label: "Companies",    icon: Building2 },
   { path: "/inventory",    label: "Inventory",    icon: Bike },
   { path: "/marketing",   label: "Marketing",    icon: Megaphone },
-  { path: "/sales",        label: "Sales",        icon: ShoppingBag },
-  { path: "/spare-parts",  label: "Spare Parts",  icon: Boxes },
   { path: "/ledger",       label: "Ledger",       icon: BookOpen },
   { path: "/jobs",         label: "Job Cards",    icon: Wrench },
   { path: "/warranty",     label: "Warranty",     icon: ShieldCheck },
-  { path: "/reports",      label: "Reports",      icon: BarChart3 },
+  { path: "/finance",      label: "Finance",      icon: Wallet },
+  { path: "/sanakhat",     label: "Sanakhat",     icon: FileCheck2 },  // the Sanakhat Desk account's only page; admin opens the same page
   { path: "/ai",           label: "AI Assistant", icon: Sparkles },
   { path: "/settings",     label: "Settings",     icon: Settings },
 ];
@@ -44,14 +52,31 @@ export default function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const { pathname, search } = useLocation();
   const [marketingOpen, setMarketingOpen] = useState(null); // null = follow the current page
+  const [inventoryOpen, setInventoryOpen] = useState(null); // same for the Inventory dropdown (Product / Spare Parts)...
+  const [serviceOpen, setServiceOpen] = useState(null);     // ...the Service dropdown (Job Cards / Warranty)...
+  const [financeOpen, setFinanceOpen] = useState(null);     // ...the Finance dropdown...
+  const [reportOpen, setReportOpen] = useState(null);       // ...and the family of reports under its Report item
+  const [topbarSlot, setTopbarSlot] = useState(null);     // the top bar's spot for a page's own controls
 
   const handleLogout = () => { logout(); navigate("/login"); };
-  const visibleNavItems = navItems.filter(({ path }) => canAccessPath(user?.role, path));
+  // Admin's people live in Finance's Ledger now, so the main Ledger item goes for admin; stock and parts supervisors
+  // (who can't open Finance) keep it as their way to Staff / Vendors. The /ledger page itself still works.
+  const visibleNavItems = navItems.filter(({ path }) => canAccessPath(user?.role, path) && (path !== "/sanakhat" || user?.role === "sanakhat_officer" || canAccessPath(user?.role, "/sales")) && (path !== "/ledger" || (user?.role && user.role !== "admin")));
 
   // Missing-data notifications: flags active-stock vehicles missing a photo or a
   // registration number so gaps get caught without staff having to go hunting for
   // them in Inventory. Only fetched for roles that can actually open Inventory.
   const canSeeInventory = canAccessPath(user?.role, "/inventory");
+  const [profileOpen, setProfileOpen] = useState(false);
+  const profileRef = useRef(null);
+  useEffect(() => {
+    if (!profileOpen) return;
+    const onDown = (e) => { if (!profileRef.current?.contains(e.target)) setProfileOpen(false); };
+    const onEsc = (e) => { if (e.key === "Escape") setProfileOpen(false); };
+    document.addEventListener("pointerdown", onDown);
+    document.addEventListener("keydown", onEsc);
+    return () => { document.removeEventListener("pointerdown", onDown); document.removeEventListener("keydown", onEsc); };
+  }, [profileOpen]);
   const [notifOpen, setNotifOpen] = useState(false);
   const [notifVehicles, setNotifVehicles] = useState([]);
   const notifRef = useRef(null);
@@ -105,10 +130,10 @@ export default function Layout() {
     if (!notifOpen) return;
     const onClickOutside = (e) => { if (!notifRef.current?.contains(e.target)) setNotifOpen(false); };
     const onEscape = (e) => { if (e.key === "Escape") setNotifOpen(false); };
-    document.addEventListener("mousedown", onClickOutside);
+    document.addEventListener("pointerdown", onClickOutside);
     document.addEventListener("keydown", onEscape);
     return () => {
-      document.removeEventListener("mousedown", onClickOutside);
+      document.removeEventListener("pointerdown", onClickOutside);
       document.removeEventListener("keydown", onEscape);
     };
   }, [notifOpen]);
@@ -133,16 +158,31 @@ export default function Layout() {
     return () => { clearInterval(id); document.removeEventListener("visibilitychange", onVisible); };
   }, [user]);
 
-  const Sidebar = ({ mobile = false }) => (
+  // The company's current name and logo for the side panel; a failed call just leaves the login-time name and the initials tile.
+  const [brand, setBrand] = useState(null);
+  useEffect(() => {
+    if (!user || user.role === "platform_owner") return;
+    api.get("/brand").then(r => setBrand(r.data)).catch(() => {});
+  }, [user]);
+
+  // A plain render function, not a component: declared inside Layout, a component would be a new type on every render
+  // and the whole sidebar would remount (losing taps on its buttons) whenever the polled data refreshed.
+  const renderSidebar = (mobile = false) => (
     <aside className={`${mobile ? "fixed inset-0 z-50 flex" : "hidden lg:flex"} flex-col bg-slate-900 text-white ${mobile ? "w-64" : "w-64"} h-app`}>
       {/* Logo */}
       <div className="flex items-center gap-3 px-6 py-5 border-b border-slate-700">
-        <div className="w-9 h-9 rounded-lg bg-blue-600 flex items-center justify-center font-bold text-white text-sm">AS</div>
-        <div>
-          {/* user.company_name comes back from login/signup (see AuthContext) -- this is
-              the signed-in tenant's own business, not the platform's own identity, which
-              only appears pre-login (see Login/SignUp's matching logo block). */}
-          <div className="font-bold text-sm leading-tight" style={{ fontFamily: "Manrope, sans-serif" }}>{user?.company_name || "Auto Stock Manager"}</div>
+        {/* The company's own logo when it has one (on a white tile: logos are drawn for light backgrounds), else the initials tile. */}
+        {brand?.logo_url ? (
+          <div className="h-11 w-[4.25rem] shrink-0 rounded-lg bg-white p-1 flex items-center justify-center">
+            <img src={brand.logo_url} alt="" className="max-h-full max-w-full object-contain" data-testid="sidebar-logo" />
+          </div>
+        ) : (
+          <div className="w-9 h-9 rounded-lg bg-blue-600 flex items-center justify-center font-bold text-white text-sm">AS</div>
+        )}
+        <div className="min-w-0">
+          {/* The signed-in tenant's own business, not the platform's own identity, which only appears pre-login (see
+              Login/SignUp's matching logo block). /brand is read live; user.company_name (stored at login) is the fallback. */}
+          <div className="font-bold text-sm leading-tight" style={{ fontFamily: "Manrope, sans-serif" }}>{brand?.company_name || user?.company_name || "Auto Stock Manager"}</div>
           <div className="text-xs text-slate-400">Inventory Manager</div>
         </div>
         {mobile && (
@@ -155,6 +195,70 @@ export default function Layout() {
       {/* Nav */}
       <nav className="flex-1 py-4 px-3 space-y-0.5 sidebar-nav overflow-y-auto">
         {visibleNavItems.map(({ path, label, icon: Icon }) => {
+          if (path === "/finance") {
+            return (
+              <FinanceNavGroup
+                key={path}
+                label={label}
+                Icon={Icon}
+                pathname={pathname}
+                search={search}
+                navigate={navigate}
+                open={financeOpen}
+                setOpen={setFinanceOpen}
+                reportOpen={reportOpen}
+                setReportOpen={setReportOpen}
+                onPick={() => mobile && setSidebarOpen(false)}
+              />
+            );
+          }
+          if (path === "/inventory") {
+            // Spare Parts lives under Inventory: a dropdown when the role gets both pages, the plain link otherwise.
+            const tabs = [
+              { key: "product", label: "Product", icon: Bike, to: "/inventory" },
+              canAccessPath(user?.role, "/spare-parts") && { key: "spare-parts", label: "Spare Parts", icon: Boxes, to: "/inventory?tab=spare-parts" },
+            ].filter(Boolean);
+            if (tabs.length > 1) {
+              const onInventory = pathname.startsWith("/inventory");
+              const parts = new URLSearchParams(search).get("tab") === "spare-parts";
+              return (
+                <NavGroup
+                  key={path}
+                  id="inventory"
+                  label={label}
+                  Icon={Icon}
+                  tabs={tabs}
+                  activeKey={onInventory ? (parts ? "spare-parts" : "product") : null}
+                  open={inventoryOpen}
+                  setOpen={setInventoryOpen}
+                  navigate={navigate}
+                  onPick={() => mobile && setSidebarOpen(false)}
+                />
+              );
+            }
+          }
+          if (path === "/jobs" || path === "/warranty") {
+            // Job Cards and Warranty share one Service item, drawn where the first of them the role can open sits.
+            const tabs = SERVICE_TABS.filter(t => canAccessPath(user?.role, t.to));
+            if (path !== tabs[0].to) return null;
+            if (tabs.length > 1) {
+              const active = tabs.find(t => pathname.startsWith(t.to));
+              return (
+                <NavGroup
+                  key="service"
+                  id="service"
+                  label="Service"
+                  Icon={Wrench}
+                  tabs={tabs}
+                  activeKey={active ? active.key : null}
+                  open={serviceOpen}
+                  setOpen={setServiceOpen}
+                  navigate={navigate}
+                  onPick={() => mobile && setSidebarOpen(false)}
+                />
+              );
+            }
+          }
           const subTabs = path === "/marketing" ? marketingTabsFor(user?.role) : [];
           const leadsBadge = (
             <span className="ml-auto min-w-[20px] h-5 px-1.5 rounded-full bg-red-500 text-white text-[11px] font-bold flex items-center justify-center" data-testid="nav-leads-badge">{newLeads > 99 ? "99+" : newLeads}</span>
@@ -224,35 +328,19 @@ export default function Layout() {
           );
         })}
       </nav>
-
-      {/* User */}
-      <div className="px-4 py-4 border-t border-slate-700">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center text-white text-xs font-bold">
-            {user?.name?.[0]?.toUpperCase() || "A"}
-          </div>
-          <div className="flex-1 min-w-0">
-            <div className="text-sm font-medium text-white truncate">{user?.name}</div>
-            <div className="text-xs text-slate-400 capitalize">{user?.role}</div>
-          </div>
-          <button onClick={handleLogout} className="text-slate-400 hover:text-white transition-colors" data-testid="logout-button">
-            <LogOut size={16} />
-          </button>
-        </div>
-      </div>
     </aside>
   );
 
   return (
     <div className="flex h-app overflow-hidden bg-slate-50 pl-safe pr-safe">
       {/* Desktop Sidebar */}
-      <Sidebar />
+      {renderSidebar()}
 
       {/* Mobile Overlay */}
       {sidebarOpen && (
         <div className="lg:hidden fixed inset-0 z-40 bg-black/50" onClick={() => setSidebarOpen(false)}>
           <div onClick={(e) => e.stopPropagation()}>
-            <Sidebar mobile />
+            {renderSidebar(true)}
           </div>
         </div>
       )}
@@ -269,7 +357,20 @@ export default function Layout() {
             <Menu size={20} />
           </button>
           {/* On every Marketing tab the page title sits here, level with the bell. */}
-          {pathname.startsWith("/marketing") ? (() => {
+          {pathname.startsWith("/sanakhat") ? (
+            <h1 className="flex-1 min-w-0 flex items-center gap-2 text-lg font-bold text-slate-900 truncate" data-testid="header-title">
+              <span className="size-8 shrink-0 rounded-lg bg-gradient-to-br from-blue-600 to-indigo-600 text-white flex items-center justify-center"><FileCheck2 size={17} /></span> Sanakhat
+            </h1>
+          ) : pathname === "/inventory" ? (() => {
+            // Product or Spare Parts, whichever is open (the detail page, /inventory/:id, has its own heading).
+            const parts = new URLSearchParams(search).get("tab") === "spare-parts" && canAccessPath(user?.role, "/spare-parts");
+            const TitleIcon = parts ? Boxes : Bike;
+            return (
+              <h1 className="flex-1 min-w-0 flex items-center gap-2 text-lg font-bold text-slate-900 truncate" data-testid="header-title">
+                <TitleIcon size={19} className="shrink-0 text-slate-400" /> {parts ? "Spare Parts" : "Inventory"}
+              </h1>
+            );
+          })() : pathname.startsWith("/marketing") ? (() => {
             // Named after the tab that is open (Leads, CRM, Share...), like any other page's title.
             const tabs = marketingTabsFor(user?.role);
             const requested = new URLSearchParams(search).get("tab");
@@ -280,11 +381,16 @@ export default function Layout() {
               </h1>
             );
           })() : <div className="flex-1" />}
+          {/* Pages put their date range / view switch here (wide screens only); see Inventory. */}
+          <div ref={setTopbarSlot} className="hidden sm:flex items-center gap-2" data-testid="topbar-slot" />
           {canSeeInventory && (
             <div className="relative" ref={notifRef}>
               <button
+                type="button"
                 onClick={() => setNotifOpen(o => !o)}
-                className="relative w-11 h-11 rounded-lg border border-slate-200 flex items-center justify-center text-slate-500 hover:bg-slate-50 transition-colors"
+                aria-label="Notifications"
+                aria-expanded={notifOpen}
+                className="touch-manipulation relative w-11 h-11 rounded-lg border border-slate-200 flex items-center justify-center text-slate-500 hover:bg-slate-50 transition-colors"
                 data-testid="notif-bell-btn"
                 title="Vehicles needing attention"
               >
@@ -298,7 +404,7 @@ export default function Layout() {
 
               {notifOpen && (
                 <div
-                  className="absolute right-0 top-full mt-2 w-80 max-w-[calc(100vw-2rem)] bg-white rounded-xl border border-slate-200 shadow-2xl overflow-hidden z-50"
+                  className="fixed inset-x-3 top-[calc(3.5rem+env(safe-area-inset-top)+0.5rem)] sm:absolute sm:inset-x-auto sm:right-0 sm:top-full sm:mt-2 sm:w-80 bg-white rounded-xl border border-slate-200 shadow-2xl overflow-hidden z-50"
                   data-testid="notif-panel"
                 >
                   <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
@@ -349,11 +455,25 @@ export default function Layout() {
               )}
             </div>
           )}
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center text-white text-xs font-bold">
-              {user?.name?.[0]?.toUpperCase() || "A"}
-            </div>
-            <span className="hidden sm:block text-sm font-medium text-slate-700">{user?.name}</span>
+          <div className="relative" ref={profileRef}>
+            <button type="button" onClick={() => setProfileOpen(o => !o)} aria-label="Account menu" aria-expanded={profileOpen} data-testid="profile-btn"
+              className="touch-manipulation flex items-center gap-2 h-11 pl-1 pr-1 sm:pr-2 rounded-full hover:bg-slate-50 transition-colors">
+              <span className="w-9 h-9 rounded-full bg-blue-600 flex items-center justify-center text-white text-sm font-bold">{user?.name?.[0]?.toUpperCase() || "A"}</span>
+              <span className="hidden sm:block text-sm font-medium text-slate-700">{user?.name}</span>
+              <ChevronDown size={14} className={`hidden sm:block text-slate-400 transition-transform ${profileOpen ? "rotate-180" : ""}`} />
+            </button>
+            {profileOpen && (
+              <div className="absolute right-0 top-full mt-2 w-64 bg-white rounded-xl border border-slate-200 shadow-2xl overflow-hidden z-50" data-testid="profile-menu">
+                <div className="px-4 py-3 border-b border-slate-100">
+                  <div className="text-sm font-semibold text-slate-900 truncate">{user?.name}</div>
+                  <div className="text-xs text-slate-500 truncate">{user?.username}</div>
+                  <div className="mt-1 inline-block text-[11px] font-semibold text-blue-700 bg-blue-50 rounded-full px-2 py-0.5 capitalize">{String(user?.role || "admin").replace(/_/g, " ")}</div>
+                </div>
+                <button type="button" onClick={handleLogout} className="w-full flex items-center gap-2.5 px-4 h-12 text-sm font-semibold text-red-600 hover:bg-red-50" data-testid="profile-logout">
+                  <LogOut size={16} /> Sign out
+                </button>
+              </div>
+            )}
           </div>
         </header>
 
@@ -362,7 +482,7 @@ export default function Layout() {
           {/* Boundary here (not only at the app root) so a lazy page loading keeps the
               sidebar/header on screen instead of swapping the whole layout for a spinner. */}
           <Suspense fallback={<div className="flex items-center justify-center h-64"><div className="animate-spin w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full" /></div>}>
-            <Outlet context={{ newLeads }} />
+            <Outlet context={{ newLeads, topbarSlot }} />
           </Suspense>
           <div className="pb-safe" aria-hidden="true" />
         </main>

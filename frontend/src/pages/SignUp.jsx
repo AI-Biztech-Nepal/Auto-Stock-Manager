@@ -1,11 +1,14 @@
 import { useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import api from "../utils/api";
+import { useAuth } from "../context/AuthContext";
 
 export default function SignUp() {
   const [form, setForm] = useState({ name: "", company_name: "", email: "", password: "", confirm: "" });
   const [loading, setLoading] = useState(false);
+  const { login } = useAuth();
+  const navigate = useNavigate();
   // Set after a successful signup -- account exists but needs email verification before
   // it can log in, so there's no token to log in with yet (see backend /auth/signup).
   const [createdEmail, setCreatedEmail] = useState(null);
@@ -30,6 +33,12 @@ export default function SignUp() {
         name: form.name, company_name: form.company_name,
         email: form.email, password: form.password,
       });
+      if (res.data.token) {  // no email verification: the new account is signed in straight away
+        login({ username: res.data.username, name: res.data.name, role: res.data.role, company_name: res.data.company_name }, res.data.token);
+        toast.success(`Welcome, ${res.data.name}!`);
+        navigate("/");
+        return;
+      }
       setCreatedEmail(res.data.email);
     } catch (err) {
       toast.error(err.response?.data?.detail || "Failed to create account");

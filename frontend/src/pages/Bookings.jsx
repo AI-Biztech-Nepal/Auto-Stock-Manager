@@ -7,6 +7,7 @@ import { formatNPR } from "../utils/helpers";
 import VehicleComboBox from "../components/VehicleComboBox";
 import BSDatePicker from "../components/BSDatePicker";
 import HoverADDate from "../components/HoverADDate";
+import { BOOK_CARD, BookTableStyle } from "../components/BookTable";
 import BookingReceipt from "../components/BookingReceipt";
 import SourceField from "../components/SourceField";
 import { EMPTY_SOURCE, isSourceComplete, sourcePayload } from "../utils/crm";
@@ -46,7 +47,7 @@ const EMPTY_BOOKING = {
 };
 
 // Bookings: deposits taken before a sale. Not sales — they only become one when the customer
-// pays the balance ("Record Sale" hands the booking to the Sales page, which opens the normal
+// pays the balance ("Sale Vehicle" hands the booking to the Sales page, which opens the normal
 // sale form pre-filled from it).
 export default function Bookings({ embedded = false, onRecordSale: onRecordSaleProp }) {
   const navigate = useNavigate();
@@ -170,7 +171,7 @@ export default function Bookings({ embedded = false, onRecordSale: onRecordSaleP
       {b.status === "active" && (
         <>
           <button onClick={() => onRecordSale(b)} data-testid="booking-record-sale-btn" className="flex items-center gap-1.5 h-9 px-3 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-medium active:scale-95 transition-all whitespace-nowrap">
-            Record Sale <ArrowRight size={14} />
+            Sale Vehicle <ArrowRight size={14} />
           </button>
           <button onClick={() => openForm(b)} title="Edit booking" data-testid="booking-edit-btn" className="w-11 h-11 md:w- md:h- flex items-center justify-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50"><Pencil size={14} /></button>
           {isAdmin && <button onClick={() => openWithdraw(b)} title="Customer withdraws" data-testid="booking-withdraw-btn" className="w-11 h-11 md:w- md:h- flex items-center justify-center rounded-lg border border-amber-200 text-amber-700 hover:bg-amber-50"><Undo2 size={14} /></button>}
@@ -227,7 +228,8 @@ export default function Bookings({ embedded = false, onRecordSale: onRecordSaleP
         ))}
       </div>
 
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+      <div className={BOOK_CARD}>
+        <BookTableStyle />
         {shown.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-40 text-slate-500">
             <BookmarkCheck size={32} className="mb-2 opacity-30" />
@@ -264,46 +266,52 @@ export default function Bookings({ embedded = false, onRecordSale: onRecordSaleP
 
             {/* Table — sm and up */}
             <div className="hidden sm:block overflow-x-auto">
-              <table className="w-full">
+              <table>
                 <thead>
-                  <tr className="border-b border-slate-100">
-                    {["Vehicle", "Customer", "Deposit", "Balance", "Booked", "Status", ""].map(h => (
-                      <th key={h} className="text-left text-xs font-semibold uppercase tracking-wider text-slate-500 px-4 py-3 whitespace-nowrap">{h}</th>
-                    ))}
+                  <tr>
+                    <th className="w-10">SN</th>
+                    <th>Vehicle</th>
+                    <th>Customer</th>
+                    <th className="text-right">Deposit</th>
+                    <th className="text-right">Balance</th>
+                    <th>Booked</th>
+                    <th>Status</th>
+                    <th />
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-50">
-                  {shown.map(b => {
+                <tbody>
+                  {shown.map((b, i) => {
                     const st = STATUS_STYLE[b.status] || STATUS_STYLE.active;
                     const agreed = b.agreed_price ?? b.vehicle_selling_price;
                     const balance = agreed != null ? Math.max(agreed - (b.booking_amount || 0), 0) : null;
                     return (
-                      <tr key={b.id} data-testid="booking-row" className="table-row-hover">
-                        <td className="px-4 py-3">
-                          <div className="font-semibold text-slate-900 text-sm">{b.vehicle_info || "—"}</div>
+                      <tr key={b.id} data-testid="booking-row">
+                        <td className="text-gray-500">{i + 1}</td>
+                        <td>
+                          <div className="font-semibold text-slate-900">{b.vehicle_info || "—"}</div>
                           {b.notes && <div className="text-xs text-slate-400 truncate max-w-[16rem]">{b.notes}</div>}
                         </td>
-                        <td className="px-4 py-3">
-                          <div className="text-sm text-slate-700">{b.customer_name}</div>
+                        <td>
+                          <div className="text-slate-700">{b.customer_name}</div>
                           {b.customer_contact && <div className="text-xs text-slate-400">{b.customer_contact}</div>}
                         </td>
-                        <td className="px-4 py-3 whitespace-nowrap">
-                          <div className="text-sm font-bold text-green-700">{formatNPR(b.booking_amount)}</div>
+                        <td className="text-right whitespace-nowrap">
+                          <div className="font-bold text-green-700">{formatNPR(b.booking_amount)}</div>
                           <div className="text-xs text-slate-400">{b.payment_method}</div>
                         </td>
-                        <td className="px-4 py-3 whitespace-nowrap">
-                          <div className="text-sm font-semibold text-slate-800">{balance != null ? formatNPR(balance) : "—"}</div>
+                        <td className="text-right whitespace-nowrap">
+                          <div className="font-semibold text-slate-800">{balance != null ? formatNPR(balance) : "—"}</div>
                           {agreed != null && <div className="text-xs text-slate-400">of {formatNPR(agreed)}</div>}
                         </td>
-                        <td className="px-4 py-3 text-sm text-slate-600 whitespace-nowrap">
+                        <td className="text-slate-600 whitespace-nowrap">
                           <HoverADDate date={b.booking_date} />
                           {b.expected_sale_date && <div className="text-xs text-slate-400">Sale by <HoverADDate date={b.expected_sale_date} /></div>}
                         </td>
-                        <td className="px-4 py-3">
+                        <td>
                           <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${st.cls}`}>{st.label}</span>
                           {b.status === "cancelled" && <div className="text-xs text-amber-700 mt-1 whitespace-nowrap">Refunded {formatNPR(b.refund_amount || 0)} · Kept {formatNPR(b.retained_amount || 0)}</div>}
                         </td>
-                        <td className="px-4 py-3"><div className="flex items-center gap-1.5 justify-end">{renderActions(b)}</div></td>
+                        <td><div className="flex items-center gap-1.5 justify-end">{renderActions(b)}</div></td>
                       </tr>
                     );
                   })}
