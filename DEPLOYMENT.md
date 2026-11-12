@@ -317,6 +317,7 @@ Everyone signs in once more on the new address, because the browser keeps the lo
 | `RESEND_FROM` | ❌ | Sender address, e.g. `Auto Stock Manager <no-reply@yourdomain.com>`. Defaults to Resend's sandbox address, which can only email your own Resend account — real users won't receive anything until you verify a domain and set this. |
 | `FRONTEND_URL` | ✅ if `RESEND_API_KEY` set | Your deployed frontend's URL (no trailing slash) — used to build the links inside verification/reset emails. Defaults to `http://localhost:3000`, which is wrong for production. |
 | `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` | ❌ | Keeps vehicle photos and legal documents in Supabase Storage instead of the database (see **Photos and documents in Supabase Storage**). Without them they stay in the database. |
+| `PHOTO_LINKS` | ❌ | `app` (default): photos kept in Supabase Storage are still addressed (and sent) through this app, which the public storefront already accepts. `cdn`: direct Supabase addresses (faster), only after the storefront's `next.config` `remotePatterns` includes the project's host (`<project>.supabase.co`) — otherwise every storefront photo breaks. |
 | `FB_APP_ID` / `FB_APP_SECRET` | ❌ | Turns on "Post to Facebook Page" on the Share tab (see **Facebook Page posting** below). Without them the button is hidden. Also needs `FRONTEND_URL`. |
 
 ### Vercel (Frontend)

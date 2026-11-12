@@ -113,6 +113,19 @@ Safety net: if the app starts with `DB_BACKEND=postgres` and cannot reach Supaba
 staying down (`/api/health` then says `"db_backend":"mysql"`). Anything saved after the switch is in Supabase only, so
 after a fallback, fix the connection and copy again before switching once more.
 
+## Photos and the public storefront
+
+The public storefront (hamroauto.com.np, a separate Next.js site) only loads photos from an approved list of addresses
+(`remotePatterns` in its `next.config`). Your app's address is on it; the new Supabase project's address
+(`<project>.supabase.co`) is **not** (checked: it answers `"url" parameter is not allowed`). So by default
+(`PHOTO_LINKS=app`) the app keeps every photo address on itself and sends the picture, reading it from Supabase Storage when
+that is where it is, and the storefront needs no change. To use the direct Supabase addresses instead (faster), first add
+the project's host to the storefront's `remotePatterns`, then set `PHOTO_LINKS=cdn` in the server's `.env`.
+
+A photo that has been copied to Storage still has its original in MariaDB until `purge`. Until the app has the Supabase
+settings (`SUPABASE_URL` and key) it ignores the Storage pointer and serves that original, so moving the files first cannot
+make photos disappear from the live site.
+
 ## What behaves differently on Postgres (already handled in `pgdb.py`)
 
 - **Capital letters.** MariaDB compared text without caring about case, Postgres does. The one place that

@@ -233,6 +233,11 @@ logger = logging.getLogger(__name__)
 # so it's safe to deploy before the storefront side is configured.
 # Public address of the storefront; vehicle pages live at <STOREFRONT_URL>/inventory/<vehicle id>.
 STOREFRONT_URL = os.environ.get("STOREFRONT_URL", "https://hamroauto.com.np").rstrip("/")
+# How photos kept in Supabase Storage are handed out. "app" (the default): every photo address stays on this app and the
+# app sends the picture itself - the public storefront only loads photos from an approved list of addresses
+# (next.config remotePatterns) and this app is on it. "cdn": the Supabase address directly (faster), which needs the
+# storefront's list to include the project's host first (e.g. <project>.supabase.co).
+PHOTO_LINKS = os.environ.get("PHOTO_LINKS", "app").lower()
 STOREFRONT_REVALIDATE_URL = os.environ.get("STOREFRONT_REVALIDATE_URL")
 STOREFRONT_REVALIDATE_SECRET = os.environ.get("STOREFRONT_REVALIDATE_SECRET")
 
@@ -6439,8 +6444,8 @@ async def _photo_redirect(filt: dict) -> Optional[RedirectResponse]:
     p = await db.vehicle_photos.find_one(filt, {"_id": 0, "id": 1, "storage_path": 1})
     if not p:
         raise HTTPException(404, "Photo not found")
-    if not (p.get("storage_path") and media_storage.enabled()):
-        return None
+    if not (p.get("storage_path") and media_storage.enabled() and PHOTO_LINKS == "cdn"):
+        return None  # app mode: _get_photo_bytes sends it (from Storage if that is where it is)
     return RedirectResponse(media_storage.public_url(media_storage.PHOTO_BUCKET, p["storage_path"]), status_code=302,
                             headers={"Cache-Control": "public, max-age=86400"})
 
@@ -7203,7 +7208,7 @@ async def break_kit(pid: str, req: BreakKitRequest, cu: dict = Depends(require("
 # ── WEBSITE SYNC (hamroauto.com.np) ───────────────────────────────────
 # ══════════════════════════════════════════════════════════════════════
 @api_router.get("/sync/export")
-async def export_for_website(cu: dict = Depends(admin_only)):
+async def export_for_website(request: Request, cu: dict = Depends(admin_only)):
     """Export available inventory in a listing format an external storefront can consume
     (originally built for hamroauto.com.np's site, but the shape/fields aren't specific to
     any one tenant -- "contact"/"source" below reflect whichever company is calling this,
@@ -7235,7 +7240,7 @@ async def export_for_website(cu: dict = Depends(admin_only)):
                 "bluebook": v.get("bluebook_status"), "insurance": v.get("insurance_status"),
                 "tax": v.get("tax_clearance_status"), "transfer": v.get("transfer_status"),
             },
-            "photos": [media_storage.public_url(media_storage.PHOTO_BUCKET, p["storage_path"]) if p.get("storage_path") and media_storage.enabled()
+            "photos": [_public_photo_url(request, v["id"], p["id"], p["storage_path"]) if p.get("storage_path") and media_storage.enabled()
                        else f"data:{p['content_type']};base64,{p['data']}" for p in photos],
             "contact": contact,
             "source": source,
@@ -7304,7 +7309,7 @@ def _public_photo_url(request: Request, vid: str, photo_id: str, storage_path: O
 
     A photo kept in Supabase Storage gets its CDN address instead, so the storefront loads it without
     touching this server at all."""
-    if storage_path and media_storage.enabled():
+    if storage_path and media_storage.enabled() and PHOTO_LINKS == "cdn":
         return media_storage.public_url(media_storage.PHOTO_BUCKET, storage_path)
     scheme = request.headers.get("x-forwarded-proto", request.url.scheme).split(",")[0].strip()
     host = (request.headers.get("x-forwarded-host") or request.headers.get("host") or request.url.netloc).split(",")[0].strip()
