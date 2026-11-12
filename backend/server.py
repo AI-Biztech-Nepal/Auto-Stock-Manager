@@ -4082,11 +4082,15 @@ async def reconcile_sales(cu: dict = Depends(admin_only)):
     that skips the auto-create-sale logic (e.g. bulk import, or a direct DB edit), and is checked
     separately below."""
     sales = await db.sales.find({}, {"_id": 0}).to_list(1000)
+    # One lookup for every vehicle these sales point at (and one for "which vehicles have an active sale"), instead of one
+    # database round trip per sale: with a database that is not on this machine that was ~700 trips and over a minute.
+    vehicle_ids = list({s.get("vehicle_id") for s in sales if not s.get("returned") and s.get("vehicle_id")})
+    vehicles_by_id = {v["id"]: v for v in await db.vehicles.find({"id": {"$in": vehicle_ids}}, {"_id": 0}).to_list(None)} if vehicle_ids else {}
     mismatches = []
     for s in sales:
         if s.get("returned"):
             continue
-        v = await db.vehicles.find_one({"id": s.get("vehicle_id")}, {"_id": 0})
+        v = vehicles_by_id.get(s.get("vehicle_id"))
         if not v:
             mismatches.append({
                 "sale_id": s["id"], "vehicle_id": s.get("vehicle_id"), "issue": "vehicle_deleted",
@@ -4102,9 +4106,9 @@ async def reconcile_sales(cu: dict = Depends(admin_only)):
             })
 
     sold_vehicles = await db.vehicles.find({"status": "sold"}, {"_id": 0}).to_list(1000)
+    has_active_sale = {x.get("vehicle_id") for x in await db.sales.find({"returned": {"$ne": True}}, {"_id": 0, "vehicle_id": 1}).to_list(None)}
     for v in sold_vehicles:
-        active_sale = await db.sales.find_one({"vehicle_id": v["id"], "returned": {"$ne": True}}, {"_id": 0, "id": 1})
-        if not active_sale:
+        if v["id"] not in has_active_sale:
             mismatches.append({
                 "sale_id": None, "vehicle_id": v["id"], "issue": "orphan_sold_vehicle",
                 "vehicle_info": f"{v.get('brand','')} {v.get('model','')} {v.get('year','')}".strip(),
