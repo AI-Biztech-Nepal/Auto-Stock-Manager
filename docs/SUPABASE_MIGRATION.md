@@ -113,6 +113,15 @@ Safety net: if the app starts with `DB_BACKEND=postgres` and cannot reach Supaba
 staying down (`/api/health` then says `"db_backend":"mysql"`). Anything saved after the switch is in Supabase only, so
 after a fallback, fix the connection and copy again before switching once more.
 
+## Moving to a different Supabase project (for example a nearer region)
+
+A Supabase project's region cannot be changed, so it means a new project: create it, replace the three `SUPABASE_` lines in
+`backend/.env` (keep the old ones as `#` comments), and run the move again (COPY, then SWITCH). The photo step looks at what is
+really in the new project's Storage and uploads again everything that is not there, from the originals that stay in MariaDB
+until `purge` - the database's "already moved" marks from the earlier project are not trusted. The old project is left
+untouched as a spare. Measured round trip from Nepal (TCP connect to the Supabase pooler): Seoul 160 ms, Singapore 89 ms,
+Mumbai 51 ms; the app asks the database ~30 questions per screen, so the region decides how fast screens feel.
+
 ## Photos and the public storefront
 
 The public storefront (hamroauto.com.np, a separate Next.js site) only loads photos from an approved list of addresses

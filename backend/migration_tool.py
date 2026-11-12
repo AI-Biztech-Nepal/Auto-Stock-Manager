@@ -291,4 +291,7 @@ def register(api_router, db, get_current_user, logger, get_backend):
                 "user": cu.get("username"),
                 # server.py serves a photo/document from the database whenever Storage is not switched on here, so moving
                 # files to Storage cannot break the live site. An older server does not say so, and copy/switch refuse to run.
-                "photo_fallback": True}
+                "photo_fallback": True,
+                # copy re-uploads files that the database calls "moved" but that are not in the Storage project being used
+                # (needed when the project changes, e.g. to a nearer region); an older server does not say so.
+                "media_reupload": True}

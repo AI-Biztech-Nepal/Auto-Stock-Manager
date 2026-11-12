@@ -34,13 +34,22 @@ async def rows(db, table, fields):
 
 
 async def copy(db):
+    # A file counts as moved only if it really is in THIS Storage project. The database rows may already say "moved" from an
+    # earlier project (for example before switching to a nearer region): those files go again, from the originals that are
+    # still in the database (they stay there until `purge`, which is never run automatically).
+    print("Looking at which files are already in this Storage project...")
+    _, not_there = await check(db)
+    missing = {(t, i) for t, i, *_ in not_there}
     for table, bucket in KINDS:
-        todo = [r for r in await rows(db, table, ("id", "storage_path")) if not r.get("storage_path")]
-        print(f"{table}: {len(todo)} to copy")
+        todo = [r for r in await rows(db, table, ("id", "storage_path")) if not r.get("storage_path") or (table, r["id"]) in missing]
+        again = sum(1 for r in todo if r.get("storage_path"))
+        print(f"{table}: {len(todo)} to copy" + (f" ({again} were marked as moved but are not in this Storage project)" if again else ""))
         done = failed = 0
         for r in todo:
             row = await getattr(db, table).find_one({"id": r["id"]})
             if not row or not row.get("data"):
+                failed += 1
+                print(f"  {r['id']}: no original left in the database to copy")
                 continue
             content = base64.b64decode(row["data"])
             content_type = row.get("content_type") or "application/octet-stream"

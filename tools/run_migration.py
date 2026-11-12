@@ -145,7 +145,7 @@ def main():
         for line in data.get("lines", []):
             print(line)
         return
-    if mode in ("copy", "switch") and not data.get("photo_fallback"):
+    if mode in ("copy", "switch") and not (data.get("photo_fallback") and data.get("media_reupload")):
         die("Stopped before doing anything: the server does not have the latest update yet (it must keep showing photos "
             "while they are being moved). Commit and push everything to GitHub, wait 2-3 minutes, then run this again.")
 
