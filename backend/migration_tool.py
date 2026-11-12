@@ -288,4 +288,7 @@ def register(api_router, db, get_current_user, logger, get_backend):
     async def migration_status(since: int = 0, cu: dict = Depends(owner_only)):
         return {"job": job["id"], "mode": job["mode"], "state": job["state"], "db_backend": get_backend(),
                 "flipped": job["flipped"], "lines": job["lines"][max(0, since):], "next": len(job["lines"]),
-                "user": cu.get("username")}
+                "user": cu.get("username"),
+                # server.py serves a photo/document from the database whenever Storage is not switched on here, so moving
+                # files to Storage cannot break the live site. An older server does not say so, and copy/switch refuse to run.
+                "photo_fallback": True}

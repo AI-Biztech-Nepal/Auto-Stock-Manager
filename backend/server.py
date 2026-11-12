@@ -6423,7 +6423,7 @@ async def _get_photo_bytes(filt: dict) -> tuple[bytes, str]:
     p = await db.vehicle_photos.find_one(filt, {"_id": 0})
     if not p:
         raise HTTPException(404, "Photo not found")
-    if p.get("storage_path"):
+    if p.get("storage_path") and media_storage.enabled():  # not enabled here: the original is still in the database
         raw = await media_storage.download(media_storage.PHOTO_BUCKET, p["storage_path"])
     else:
         raw = base64.b64decode(p["data"])
@@ -6439,7 +6439,7 @@ async def _photo_redirect(filt: dict) -> Optional[RedirectResponse]:
     p = await db.vehicle_photos.find_one(filt, {"_id": 0, "id": 1, "storage_path": 1})
     if not p:
         raise HTTPException(404, "Photo not found")
-    if not p.get("storage_path"):
+    if not (p.get("storage_path") and media_storage.enabled()):
         return None
     return RedirectResponse(media_storage.public_url(media_storage.PHOTO_BUCKET, p["storage_path"]), status_code=302,
                             headers={"Cache-Control": "public, max-age=86400"})
@@ -6608,7 +6608,7 @@ async def delete_vehicle_photo(vid: str, photo_id: str, cu: dict = Depends(requi
     p = await db.vehicle_photos.find_one({"id": photo_id, "vehicle_id": vid}, {"_id": 0, "storage_path": 1})
     r = await db.vehicle_photos.delete_one({"id": photo_id, "vehicle_id": vid})
     if r.deleted_count == 0: raise HTTPException(404, "Photo not found")
-    if p and p.get("storage_path"):
+    if p and p.get("storage_path") and media_storage.enabled():
         await media_storage.remove(media_storage.PHOTO_BUCKET, p["storage_path"])
     _evict_photo_cache(photo_id)
     asyncio.create_task(_notify_storefront())
@@ -6641,7 +6641,7 @@ async def _get_doc_bytes(filt: dict) -> tuple[bytes, str]:
     d = await db.legal_documents.find_one(filt, {"_id": 0})
     if not d:
         raise HTTPException(404, "Document not found")
-    if d.get("storage_path"):
+    if d.get("storage_path") and media_storage.enabled():
         raw = await media_storage.download(media_storage.DOC_BUCKET, d["storage_path"])
     else:
         raw = base64.b64decode(d["data"])
@@ -6749,7 +6749,7 @@ async def get_legal_document_file(doc_id: str):
     d = await db.legal_documents.find_one({"id": doc_id}, {"_id": 0, "id": 1, "storage_path": 1})
     if not d:
         raise HTTPException(404, "Document not found")
-    if d.get("storage_path"):
+    if d.get("storage_path") and media_storage.enabled():
         url = await media_storage.signed_url(media_storage.DOC_BUCKET, d["storage_path"])
         return RedirectResponse(url, status_code=302, headers={"Cache-Control": "no-store"})
     content, content_type = await _get_doc_bytes({"id": doc_id})
@@ -6847,7 +6847,7 @@ async def delete_legal_document(vid: str, doc_id: str, cu: dict = Depends(requir
     d = await db.legal_documents.find_one({"id": doc_id, "vehicle_id": vid}, {"_id": 0, "storage_path": 1})
     r = await db.legal_documents.delete_one({"id": doc_id, "vehicle_id": vid})
     if r.deleted_count == 0: raise HTTPException(404, "Document not found")
-    if d and d.get("storage_path"):
+    if d and d.get("storage_path") and media_storage.enabled():
         await media_storage.remove(media_storage.DOC_BUCKET, d["storage_path"])
     _evict_doc_cache(doc_id)
     return {"message": "Document deleted"}
@@ -7235,7 +7235,7 @@ async def export_for_website(cu: dict = Depends(admin_only)):
                 "bluebook": v.get("bluebook_status"), "insurance": v.get("insurance_status"),
                 "tax": v.get("tax_clearance_status"), "transfer": v.get("transfer_status"),
             },
-            "photos": [media_storage.public_url(media_storage.PHOTO_BUCKET, p["storage_path"]) if p.get("storage_path")
+            "photos": [media_storage.public_url(media_storage.PHOTO_BUCKET, p["storage_path"]) if p.get("storage_path") and media_storage.enabled()
                        else f"data:{p['content_type']};base64,{p['data']}" for p in photos],
             "contact": contact,
             "source": source,
@@ -7291,7 +7291,7 @@ def _public_vehicle_fields(v: dict) -> dict:
         "created_at": v.get("created_at"),
     }
 
-def _public_photo_url(request: Request, vid: str, photo_id: str, storage_path: Optional[str] = None) -> str:
+def _public_photo_url(request: Request, vid: str, photo_id: str, storage_path: Optional[str] = None) -> str:  # storage_path counts only when Storage is switched on here
     """Builds an absolute URL from the client-facing scheme/host, not request.base_url —
     that reflects whatever uvicorn itself saw, which is plain http behind an
     nginx/Caddy TLS-terminating reverse proxy (the typical VPS setup) unless
@@ -7304,7 +7304,7 @@ def _public_photo_url(request: Request, vid: str, photo_id: str, storage_path: O
 
     A photo kept in Supabase Storage gets its CDN address instead, so the storefront loads it without
     touching this server at all."""
-    if storage_path:
+    if storage_path and media_storage.enabled():
         return media_storage.public_url(media_storage.PHOTO_BUCKET, storage_path)
     scheme = request.headers.get("x-forwarded-proto", request.url.scheme).split(",")[0].strip()
     host = (request.headers.get("x-forwarded-host") or request.headers.get("host") or request.url.netloc).split(",")[0].strip()

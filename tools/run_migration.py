@@ -112,6 +112,9 @@ def main():
     if status != 200:
         die(f"Unexpected answer from the server (HTTP {status}): {detail(data)}")
     print(f"Signed in as {data.get('user')}. The app is currently using: {data.get('db_backend')}.\n")
+    if mode in ("copy", "switch") and not data.get("photo_fallback"):
+        die("Stopped before doing anything: the server does not have the latest update yet (it must keep showing photos "
+            "while they are being moved). Commit and push everything to GitHub, wait 2-3 minutes, then run this again.")
 
     if mode == "switch":
         print("This will make your live app use Supabase when the comparison passes.")
