@@ -8,7 +8,8 @@ and talks to Supabase's Postgres instead of MariaDB. It is one setting, `DB_BACK
 | `mysql` | MariaDB on the VPS (today) | `backend/sqldb.py` |
 | `postgres` | Supabase | `backend/pgdb.py`, tables in `backend/supabase/schema.sql` |
 
-Nothing is deleted from MariaDB at any point. Until you are happy, MariaDB stays exactly as it is, and going back is
+Nothing is deleted from MariaDB at any point. Until you are happy, MariaDB stays as it is (the one change: the photo
+step adds a pointer to each photo/document row, and the original file data stays in the row), and going back is
 changing `DB_BACKEND` back to `mysql` and restarting.
 
 Pushing this code to `main` is safe: the VPS auto-deploys it, but the backend keeps using MariaDB until
@@ -25,6 +26,18 @@ Pushing this code to `main` is safe: the VPS auto-deploys it, but the backend ke
 - These three go in the backend's `.env` on the VPS. Never commit or paste them.
 
 ## Steps
+
+**Quick way for steps 3–5, in one command.** On the server, after steps 1 and 2:
+
+```bash
+cd ~/auto-stock-manager && git pull && bash deploy/migrate_to_supabase.sh
+```
+
+It asks for the three Supabase settings (what you type is hidden) and saves them in `backend/.env`, installs the
+packages, checks the Supabase connection, moves the photos and documents, copies every table and runs `check`. It
+never switches the app over and never deletes anything, and it can be run again. Everything it prints is also saved in
+`~/supabase-migration-<date>.log` (table names and numbers, no passwords). The manual steps below do the same thing
+one at a time.
 
 **1. Back up MariaDB.** `deploy/backup-db.sh` (or your usual dump). Keep it until the move is finished.
 
