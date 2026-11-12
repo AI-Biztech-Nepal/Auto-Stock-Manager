@@ -148,6 +148,10 @@ def main():
     if mode in ("copy", "switch") and not (data.get("photo_fallback") and data.get("media_reupload")):
         die("Stopped before doing anything: the server does not have the latest update yet (it must keep showing photos "
             "while they are being moved). Commit and push everything to GitHub, wait 2-3 minutes, then run this again.")
+    if mode in ("copy", "switch") and data.get("db_backend") == "postgres":
+        die("Stopped before doing anything: the app is ALREADY using Supabase, so its newest data is there.\n"
+            "COPY and SWITCH copy the OLD MariaDB data INTO Supabase, which could overwrite newer data. They are for BEFORE the switch only.\n"
+            "To go back to MariaDB use option 4 (ROLLBACK). To save your data use backup-supabase.bat.")
 
     if mode == "switch":
         print("This will make your live app use Supabase when the comparison passes.")

@@ -283,6 +283,8 @@ def register(api_router, db, get_current_user, logger, get_backend):
         settings = None if body.mode == "rollback" else clean_settings(body)
         if body.mode == "rollback" and get_backend() != "postgres":
             raise HTTPException(400, "The app is not using Supabase, so there is nothing to roll back.")
+        if body.mode == "copy" and get_backend() == "postgres":
+            raise HTTPException(400, "The app already uses Supabase, so its newest data is there. Copying the old MariaDB data into it could overwrite newer data. Use rollback to go back to MariaDB, or take a backup.")
         if body.mode == "switch" and get_backend() == "postgres":
             raise HTTPException(400, "The app is already using Supabase.")
         if body.mode == "switch" and not os.environ.get("MYSQL_USER"):

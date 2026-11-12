@@ -6,10 +6,12 @@ echo.
 echo  Move Auto Stock Manager's data to Supabase
 echo  ------------------------------------------
 echo   1  TEST      checks the connections only; copies and changes nothing
-echo   2  COPY      copies photos and data and compares them; the app keeps using the old database
-echo   3  SWITCH    copies, compares, and ONLY IF everything matches makes the app use Supabase
+echo   2  COPY      BEFORE the switch only: copies photos and data and compares them (the app keeps using the old database)
+echo   3  SWITCH    BEFORE the switch only: copies, compares, and ONLY IF everything matches makes the app use Supabase
 echo   4  ROLLBACK  makes the app use the old database again
 echo   5  SHOW LAST RESULT   shows what the server says happened in the last run; changes nothing
+echo.
+echo  NOTE: the app is now on Supabase. Do NOT use 2 or 3 again (they refuse). To save your data use backup-supabase.bat.
 echo.
 echo  Nothing is ever deleted from the old database.
 echo.
