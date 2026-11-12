@@ -147,19 +147,11 @@ by its CDN; documents in the private `asm-documents` bucket, opened through hour
 
 Without the two settings nothing changes: uploads keep going into MySQL, as before.
 
-## Copying the database to Supabase (MySQL stays as it is)
+## Moving the database from MySQL/MariaDB to Supabase
 
-`backend/copy_mysql_to_supabase.py` copies every MySQL table into Auto Stock Manager's own Supabase project as
-`asm_<table>` (Row Level Security on, no policies: only the service role key can reach them). It only reads
-MySQL; the app keeps running on it. Re-run any time to bring Supabase up to date. Uses the same two Supabase
-settings as above. From `~/auto-stock-manager/backend/`:
-
-```bash
-venv/bin/python copy_mysql_to_supabase.py schema   # writes supabase_schema.sql
-cat supabase_schema.sql                            # paste into Supabase SQL Editor -> Run
-venv/bin/python copy_mysql_to_supabase.py copy
-venv/bin/python copy_mysql_to_supabase.py check    # row counts side by side
-```
+The backend can run on Supabase's Postgres instead of MySQL (`DB_BACKEND=postgres`, code in `backend/pgdb.py`). It is
+a switch in the backend's `.env`, so pushing this code changes nothing until you flip it. The step-by-step guide,
+including how to go back, is in [docs/SUPABASE_MIGRATION.md](docs/SUPABASE_MIGRATION.md).
 
 ## Auto-deploy on push to main
 
@@ -313,7 +305,8 @@ Everyone signs in once more on the new address, because the browser keeps the lo
 ### Backend (VPS)
 | Variable | Required | Description |
 |---|---|---|
-| `DB_BACKEND` | ❌ | `mongo` (default) or `mysql` |
+| `DB_BACKEND` | ❌ | `mongo` (default), `mysql` or `postgres` (Supabase, see [docs/SUPABASE_MIGRATION.md](docs/SUPABASE_MIGRATION.md)) |
+| `SUPABASE_DB_URL` | ✅ if `DB_BACKEND=postgres` | Supabase → Connect → connection string (Session pooler URI), with your database password filled in |
 | `MONGO_URL` | ✅ if `DB_BACKEND=mongo` | MongoDB Atlas connection string |
 | `DB_NAME` | ✅ | `hamro_gng_auto` |
 | `MYSQL_HOST` / `MYSQL_PORT` / `MYSQL_USER` / `MYSQL_PASSWORD` / `MYSQL_DB` | ✅ if `DB_BACKEND=mysql` | MySQL connection details |
@@ -323,7 +316,7 @@ Everyone signs in once more on the new address, because the browser keeps the lo
 | `RESEND_API_KEY` | ❌ (but see below) | Sends email-verification and password-reset emails. Without it, signup/reset still work but no email is ever sent — accounts get stuck unverified. |
 | `RESEND_FROM` | ❌ | Sender address, e.g. `Auto Stock Manager <no-reply@yourdomain.com>`. Defaults to Resend's sandbox address, which can only email your own Resend account — real users won't receive anything until you verify a domain and set this. |
 | `FRONTEND_URL` | ✅ if `RESEND_API_KEY` set | Your deployed frontend's URL (no trailing slash) — used to build the links inside verification/reset emails. Defaults to `http://localhost:3000`, which is wrong for production. |
-| `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` | ❌ | Keeps vehicle photos and legal documents in Supabase Storage instead of MySQL (see **Photos and documents in Supabase Storage**). Without them they stay in MySQL. |
+| `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` | ❌ | Keeps vehicle photos and legal documents in Supabase Storage instead of the database (see **Photos and documents in Supabase Storage**). Without them they stay in the database. |
 | `FB_APP_ID` / `FB_APP_SECRET` | ❌ | Turns on "Post to Facebook Page" on the Share tab (see **Facebook Page posting** below). Without them the button is hidden. Also needs `FRONTEND_URL`. |
 
 ### Vercel (Frontend)

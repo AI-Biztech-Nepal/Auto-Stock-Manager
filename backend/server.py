@@ -47,6 +47,12 @@ if DB_BACKEND == 'mysql':
     from sqldb import MySQLDatabase
     db = MySQLDatabase()
     client = db  # shutdown() below calls client.close(); same object serves both roles
+elif DB_BACKEND == 'postgres':
+    # Supabase Postgres (backend/pgdb.py, same interface as sqldb.py). Needs SUPABASE_DB_URL; the tables come from
+    # backend/supabase/schema.sql, so none of the MariaDB startup DDL below runs.
+    from pgdb import PostgresDatabase
+    db = PostgresDatabase()
+    client = db
 else:
     mongo_url = os.environ['MONGO_URL']
     _is_atlas = "mongodb+srv" in mongo_url or "mongodb.net" in mongo_url
@@ -7281,7 +7287,9 @@ async def public_dashain_spin(request: Request, req: OfferSpin):
 
 @app.on_event("shutdown")
 async def shutdown():
-    client.close()
+    closing = client.close()  # the Postgres pool closes asynchronously
+    if asyncio.iscoroutine(closing):
+        await closing
     _compress_pool.shutdown(wait=False, cancel_futures=True)
 
 crm.register(api_router, db, admin_only, _sale_revenue)
