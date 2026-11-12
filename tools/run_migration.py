@@ -8,6 +8,7 @@ work on the server. Passwords are typed hidden and are never printed. Nothing is
     python tools/run_migration.py copy        # moves photos + data and compares them; the app keeps using MariaDB
     python tools/run_migration.py switch      # the same, then (only if everything matches) makes the app use Supabase
     python tools/run_migration.py rollback    # makes the app use MariaDB again
+    python tools/run_migration.py log         # shows what the server says happened in the last run; changes nothing
 
 Optional:  --api https://api.hamroauto.com.np   --env path/to/.env
 """
@@ -22,7 +23,9 @@ from pathlib import Path
 
 DEFAULT_API = "https://api.hamroauto.com.np"
 DEFAULT_ENV = Path(__file__).resolve().parent.parent / "backend" / ".env"
-MODES = ("test", "copy", "switch", "rollback")
+LOG_FILE = Path(__file__).resolve().parent.parent / "migration-last-run.txt"   # everything a run prints is also kept here
+NL = chr(10)
+MODES = ("test", "copy", "switch", "rollback", "log")
 
 
 def die(msg, code=1):
@@ -66,18 +69,39 @@ def detail(data):
     return d if isinstance(d, str) else json.dumps(d) if d else ""
 
 
+class _Tee:
+    """Prints to the window and keeps a copy in migration-last-run.txt, so a closed window never loses the result."""
+    def __init__(self, *streams):
+        self.streams = streams
+
+    def write(self, text):
+        for st in self.streams:
+            st.write(text)
+            st.flush()
+
+    def flush(self):
+        for st in self.streams:
+            st.flush()
+
+
 def main():
     args = sys.argv[1:]
     mode = args[0] if args and args[0] in MODES else ""
     if not mode:
         die(__doc__)
+    try:
+        _log = open(LOG_FILE, "a", encoding="utf-8")
+        _log.write(NL + "===== " + time.strftime("%Y-%m-%d %H:%M:%S") + "  mode: " + mode + " =====" + NL)
+        sys.stdout, sys.stderr = _Tee(sys.__stdout__, _log), _Tee(sys.__stderr__, _log)
+    except OSError:
+        pass  # cannot keep a copy; carry on
     api = (args[args.index("--api") + 1] if "--api" in args else DEFAULT_API).rstrip("/")
     env_path = args[args.index("--env") + 1] if "--env" in args else DEFAULT_ENV
     if not api.startswith("https://") and not api.startswith("http://127.0.0.1") and not api.startswith("http://localhost"):
         die("The address must start with https:// so your login and settings travel encrypted.")
 
     body = {"mode": mode}
-    if mode != "rollback":
+    if mode not in ("rollback", "log"):
         env = read_env(env_path)
         body.update(supabase_url=env.get("SUPABASE_URL", ""), service_role_key=env.get("SUPABASE_SERVICE_ROLE_KEY", ""),
                     db_url=env.get("SUPABASE_DB_URL", ""))
@@ -90,7 +114,8 @@ def main():
     print({"test": "Only checks the connections. Nothing is copied or changed.",
            "copy": "Copies photos and data to Supabase and compares them. The app keeps using MariaDB.",
            "switch": "Copies, compares, and ONLY IF everything matches makes the app use Supabase (it restarts briefly).",
-           "rollback": "Makes the app use MariaDB again (it restarts briefly)."}[mode])
+           "rollback": "Makes the app use MariaDB again (it restarts briefly).",
+           "log": "Shows what the server says happened in the last run. Changes nothing."}[mode])
     print("Nothing is deleted from MariaDB in any mode.\n")
 
     print("Sign in with your normal login for the app (the owner, or an admin of the original business).")
@@ -112,6 +137,14 @@ def main():
     if status != 200:
         die(f"Unexpected answer from the server (HTTP {status}): {detail(data)}")
     print(f"Signed in as {data.get('user')}. The app is currently using: {data.get('db_backend')}.\n")
+    if mode == "log":
+        status, data = call("GET", api + "/api/admin/migration/status?since=0", token, timeout=60)
+        print(f"Last run on the server: mode={data.get('mode')}   state={data.get('state')}")
+        if not data.get("lines"):
+            print("The server has no record of a run (it may have restarted since).")
+        for line in data.get("lines", []):
+            print(line)
+        return
     if mode in ("copy", "switch") and not data.get("photo_fallback"):
         die("Stopped before doing anything: the server does not have the latest update yet (it must keep showing photos "
             "while they are being moved). Commit and push everything to GitHub, wait 2-3 minutes, then run this again.")

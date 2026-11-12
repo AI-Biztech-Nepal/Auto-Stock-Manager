@@ -105,3 +105,4 @@ frontend/node_modules/.cache/default-development/5.pack
 
 # copy_mysql_to_supabase.py output (generated on the VPS)
 backend/supabase_schema.sql
+migration-last-run.txt

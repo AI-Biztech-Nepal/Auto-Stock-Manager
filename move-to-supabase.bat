@@ -9,19 +9,21 @@ echo   1  TEST      checks the connections only; copies and changes nothing
 echo   2  COPY      copies photos and data and compares them; the app keeps using the old database
 echo   3  SWITCH    copies, compares, and ONLY IF everything matches makes the app use Supabase
 echo   4  ROLLBACK  makes the app use the old database again
+echo   5  SHOW LAST RESULT   shows what the server says happened in the last run; changes nothing
 echo.
 echo  Nothing is ever deleted from the old database.
 echo.
 set choice=
-set /p choice=Type 1, 2, 3 or 4 and press Enter: 
+set /p choice=Type 1, 2, 3, 4 or 5 and press Enter: 
 echo.
 if "%choice%"=="1" python tools/run_migration.py test & goto done
 if "%choice%"=="2" python tools/run_migration.py copy & goto done
 if "%choice%"=="3" python tools/run_migration.py switch & goto done
 if "%choice%"=="4" python tools/run_migration.py rollback & goto done
-echo That is not 1, 2, 3 or 4 - nothing was done.
+if "%choice%"=="5" python tools/run_migration.py log & goto done
+echo That is not 1, 2, 3, 4 or 5 - nothing was done.
 :done
 echo.
-echo  When it has finished, copy everything shown above and paste it to Claude. It contains no passwords.
+echo  When it has finished, copy everything shown above and paste it to Claude (a copy is also saved in migration-last-run.txt). It contains no passwords.
 echo.
 pause
