@@ -105,7 +105,7 @@ function VehiclePicker({ onPick, onClose }) {
           <div className="divide-y divide-slate-100 border border-slate-200 rounded-lg max-h-[55vh] overflow-y-auto">
             {shown.map((v) => (
               <button key={v.id} type="button" onClick={() => onPick(v)} className="w-full text-left px-3 py-2.5 hover:bg-slate-50 flex items-center gap-3">
-                {v.thumb_photos?.[0] ? <img src={v.thumb_photos[0].url} alt="" className="w-12 h-12 rounded object-cover shrink-0" /> : <div className="w-12 h-12 rounded bg-slate-100 flex items-center justify-center shrink-0"><Bike size={18} className="text-slate-400" /></div>}
+                {v.thumb_photos?.[0] ? <img src={v.thumb_photos[0].thumb || v.thumb_photos[0].url} alt="" className="w-12 h-12 rounded object-cover shrink-0" /> : <div className="w-12 h-12 rounded bg-slate-100 flex items-center justify-center shrink-0"><Bike size={18} className="text-slate-400" /></div>}
                 <div className="flex-1 min-w-0">
                   <div className="text-sm font-semibold text-slate-900 truncate">{[v.brand, v.model, v.variant].filter(Boolean).join(" ")} {v.year || ""}</div>
                   <div className="text-xs text-slate-400 truncate">{[v.registration_number, v.color, v.kilometer_run ? `${num(v.kilometer_run)} km` : null].filter(Boolean).join(" · ")}</div>

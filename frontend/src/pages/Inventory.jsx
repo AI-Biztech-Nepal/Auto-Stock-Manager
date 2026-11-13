@@ -851,7 +851,7 @@ export default function Inventory() {
                       <td>
                         <div className="flex items-center gap-2">
                           <div className="w-8 h-8 rounded-lg overflow-hidden border border-gray-200 shrink-0 bg-gray-50 flex items-center justify-center">
-                            {photo ? <LazyThumb src={photo.url} /> : <Package size={14} className="text-gray-300" />}
+                            {photo ? <LazyThumb src={photo.thumb || photo.url} /> : <Package size={14} className="text-gray-300" />}
                           </div>
                           <div className="min-w-0">
                             <div className="font-semibold text-gray-900 truncate" style={{ fontFamily: "Manrope" }}>{v.model}</div>
@@ -1024,7 +1024,7 @@ export default function Inventory() {
                           className="w-11 h-11 rounded-lg overflow-hidden border border-slate-200 shrink-0"
                           data-testid="vehicle-card-photo"
                         >
-                          <LazyThumb src={photo.url} />
+                          <LazyThumb src={photo.thumb || photo.url} />
                         </button>
                       ) : (
                         <div key={i} className="w-11 h-11 rounded-lg border border-dashed border-slate-200 shrink-0" />

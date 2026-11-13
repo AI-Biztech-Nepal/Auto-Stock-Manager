@@ -10,6 +10,8 @@ from typing import Optional, List, Literal, Union
 from datetime import datetime, timezone, timedelta
 from urllib.parse import urlparse, quote
 from pathlib import Path
+from collections import OrderedDict
+import tempfile
 import os, logging, jwt, uuid, hmac, html, json, base64, io, asyncio, re, copy, contextvars, secrets, hashlib
 from concurrent.futures import ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
@@ -2278,7 +2280,8 @@ async def get_vehicles(status: Optional[str] = None, brand: Optional[str] = None
         # latter is scoped to one storefront company via _scope_to_default_company and
         # would 404 every thumbnail here for any tenant other than that one company.
         v["thumb_photos"] = [
-            {"id": p["id"], "url": f"/api/vehicle-photos/{p['id']}/file"}
+            {"id": p["id"], "url": f"/api/vehicle-photos/{p['id']}/file",
+             "thumb": f"/api/vehicle-photos/{p['id']}/file?w=240"}
             for p in vehicle_photos[:3]
         ]
         return v
@@ -6458,6 +6461,80 @@ def _evict_photo_cache(photo_id: str):
     cached = _PHOTO_BYTES_CACHE.pop(photo_id, None)
     if cached is not None:
         _PHOTO_BYTES_CACHE_SIZE -= len(cached[0])
+    _evict_thumbs(photo_id)
+
+# ── Small photo versions ────────────────────────────────────────────────────
+# The inventory cards and table rows show a photo about 44 pixels wide, but used to download the whole ~380 KB picture for it.
+# `/vehicle-photos/{id}/file?w=240` returns a ~10-20 KB version instead, made once (from the stored original) and kept both in
+# memory and in a folder on this server, so it survives restarts. Only the widths listed are served; any other `w` gets the
+# normal full-size photo, and if a small version cannot be made the full photo is sent. The full-size URL is unchanged.
+THUMB_WIDTHS = (240, 480)
+THUMB_DIR = Path(os.environ.get("THUMB_CACHE_DIR") or (Path(tempfile.gettempdir()) / "asm-thumbs"))
+THUMB_MEM_MAX = 60 * 1024 * 1024
+_THUMBS: "OrderedDict[tuple, bytes]" = OrderedDict()
+_THUMBS_SIZE = 0
+
+def _make_thumb(content: bytes, width: int) -> bytes:
+    """Runs in a worker process (see _run_isolated), like _compress_photo."""
+    img = Image.open(io.BytesIO(content))
+    img = ImageOps.exif_transpose(img)
+    if img.mode not in ("RGB", "L"):
+        img = img.convert("RGB")
+    img.thumbnail((width, width), Image.LANCZOS)
+    out = io.BytesIO()
+    img.save(out, format="JPEG", quality=72, optimize=True)
+    return out.getvalue()
+
+def _remember_thumb(key: tuple, data: bytes):
+    global _THUMBS_SIZE
+    if key in _THUMBS:
+        _THUMBS_SIZE -= len(_THUMBS.pop(key))
+    _THUMBS[key] = data
+    _THUMBS_SIZE += len(data)
+    while _THUMBS_SIZE > THUMB_MEM_MAX and _THUMBS:
+        _, old = _THUMBS.popitem(last=False)
+        _THUMBS_SIZE -= len(old)
+
+async def _get_thumb_bytes(photo_id: str, width: int) -> Optional[bytes]:
+    """The small version, or None if one cannot be made (the caller then sends the full photo)."""
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", photo_id):
+        return None  # not a photo id we ever made (it is also used in a file name below)
+    key = (photo_id, width)
+    hit = _THUMBS.get(key)
+    if hit is not None:
+        _THUMBS.move_to_end(key)
+        return hit
+    path = THUMB_DIR / f"{photo_id}-{width}.jpg"
+    try:
+        data = await asyncio.to_thread(path.read_bytes)
+    except OSError:
+        raw, _ctype = await _get_photo_bytes({"id": photo_id})  # 404s for a photo that does not exist
+        try:
+            data = await _run_isolated(_make_thumb, raw, width)
+        except Exception:  # noqa: BLE001 - an unreadable or unusual image: just send the original
+            logger.warning("Could not make a small version of photo %s", photo_id, exc_info=True)
+            return None
+        try:
+            THUMB_DIR.mkdir(parents=True, exist_ok=True)
+            tmp = path.with_suffix(".tmp")
+            await asyncio.to_thread(tmp.write_bytes, data)
+            os.replace(tmp, path)
+        except OSError:
+            pass  # a read-only disk only means it is made again next time
+    _remember_thumb(key, data)
+    return data
+
+def _evict_thumbs(photo_id: str):
+    global _THUMBS_SIZE
+    for w in THUMB_WIDTHS:
+        old = _THUMBS.pop((photo_id, w), None)
+        if old is not None:
+            _THUMBS_SIZE -= len(old)
+        try:
+            (THUMB_DIR / f"{photo_id}-{w}.jpg").unlink()
+        except OSError:
+            pass
+
 
 def _compress_photo(content: bytes) -> tuple[bytes, str]:
     """Downscales and re-encodes an uploaded photo as JPEG. Raw phone-camera
@@ -6560,12 +6637,17 @@ async def get_vehicle_photos(vid: str, cu: dict = Depends(require("vehicle_photo
     return [_photo_out(p) for p in photos]
 
 @api_router.get("/vehicle-photos/{photo_id}/file")
-async def get_vehicle_photo_file(photo_id: str):
+async def get_vehicle_photo_file(photo_id: str, w: Optional[int] = None):
     """Serves one vehicle photo as a real image response (see _photo_out for why). Deliberately
     unauthenticated with no company scoping: photo_id is an unguessable UUID, so this is safe
     for every tenant, unlike /public/vehicles/*/photos/* below, which is intentionally locked
     to one storefront company via _scope_to_default_company and would 404 for anyone else's
     vehicles -- this route exists precisely so the in-app photo tab isn't limited to that."""
+    if w in THUMB_WIDTHS:  # a small version for thumbnails (see _get_thumb_bytes); never a redirect to the full photo
+        small = await _get_thumb_bytes(photo_id, w)
+        if small is not None:
+            return Response(content=small, media_type="image/jpeg",
+                            headers={"Cache-Control": "public, max-age=31536000, immutable"})
     redirect = await _photo_redirect({"id": photo_id})
     if redirect:
         return redirect
