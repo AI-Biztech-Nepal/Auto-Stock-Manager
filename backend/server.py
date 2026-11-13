@@ -554,10 +554,18 @@ def _since(items: list, lower: str = "", upper: str = "") -> list:
             and (not upper or (i.get("created_at") or "") <= upper)]
 
 async def enrich_vehicle(v: dict) -> dict:
+    cutoffs, exps, jobs = await asyncio.gather(  # independent reads, asked at the same time
+        _cycle_cutoffs([v["id"]]),
+        db.expenses.find({"vehicle_id": v["id"]}, {"_id": 0}).to_list(200),
+        db.job_cards.find({"vehicle_id": v["id"]}, {"_id": 0}).to_list(200),
+    )
+    cutoff = cutoffs.get(v["id"], "")
+    return _apply_vehicle_costs(v, _since(exps, cutoff), _since(jobs, cutoff))
+
+def _apply_vehicle_costs(v: dict, exps: list, jobs: list) -> dict:
+    """The arithmetic half of enrich_vehicle: aging, total expenses, investment and margin from the vehicle's already-loaded
+    expenses and job cards (of its current cycle)."""
     v["aging"] = stock_aging(v.get("purchase_date", ""))
-    cutoff = (await _cycle_cutoffs([v["id"]])).get(v["id"], "")
-    exps = _since(await db.expenses.find({"vehicle_id": v["id"]}, {"_id": 0}).to_list(200), cutoff)
-    jobs = _since(await db.job_cards.find({"vehicle_id": v["id"]}, {"_id": 0}).to_list(200), cutoff)
     total_exp = sum(e["amount"] for e in exps) + sum(_job_card_cost(j) for j in jobs) + _vehicle_sanakhat(v)
     v["total_expenses"] = total_exp
     v["total_investment"] = v.get("purchase_price", 0) + total_exp + v.get("accessories_cost", 0)
@@ -653,13 +661,28 @@ async def _vehicle_investment(vehicle_id: str, vehicle: dict, sale: Optional[dic
     cycle for a vehicle (or, given a sale, of that sale's own cycle)."""
     if sale and sale.get("returned") and sale.get("cost_at_return") is not None:
         return sale["cost_at_return"]
-    lower, upper = (await _cycle_cutoffs([vehicle_id])).get(vehicle_id, ""), ""
+    return _investment_from(vehicle, sale, await _investment_inputs(vehicle_id))
+
+async def _investment_inputs(vehicle_id: str):
+    """The three reads behind _vehicle_investment (the vehicle's returned sales, expenses and job cards), asked together."""
+    return await asyncio.gather(
+        db.sales.find({"vehicle_id": vehicle_id, "returned": True}, {"_id": 0, "returned_at": 1}).to_list(20000),
+        db.expenses.find({"vehicle_id": vehicle_id}, {"_id": 0}).to_list(200),
+        db.job_cards.find({"vehicle_id": vehicle_id}, {"_id": 0}).to_list(200),
+    )
+
+def _investment_from(vehicle: dict, sale: Optional[dict], inputs) -> float:
+    """The arithmetic half of _vehicle_investment, from what _investment_inputs read."""
+    returned_rows, all_exps, all_jobs = inputs
+    if sale and sale.get("returned") and sale.get("cost_at_return") is not None:
+        return sale["cost_at_return"]
     if sale:
-        prior = await db.sales.find({"vehicle_id": vehicle_id, "returned": True}, {"_id": 0, "returned_at": 1}).to_list(200)
-        lower = max((r["returned_at"] for r in prior if r.get("returned_at") and r["returned_at"] <= (sale.get("created_at") or "")), default="")
+        lower = max((r["returned_at"] for r in returned_rows if r.get("returned_at") and r["returned_at"] <= (sale.get("created_at") or "")), default="")
         upper = (sale.get("returned_at") or "") if sale.get("returned") else ""
-    exps = _since(await db.expenses.find({"vehicle_id": vehicle_id}, {"_id": 0}).to_list(200), lower, upper)
-    jobs = _since(await db.job_cards.find({"vehicle_id": vehicle_id}, {"_id": 0}).to_list(200), lower, upper)
+    else:
+        lower, upper = max((r.get("returned_at") or "" for r in returned_rows), default=""), ""
+    exps = _since(all_exps, lower, upper)
+    jobs = _since(all_jobs, lower, upper)
     return (vehicle.get("purchase_price", 0) + vehicle.get("accessories_cost", 0) + _vehicle_sanakhat(vehicle)
             + sum(e["amount"] for e in exps) + sum(_job_card_cost(j) for j in jobs))
 
@@ -670,10 +693,13 @@ async def _vehicle_investment(vehicle_id: str, vehicle: dict, sale: Optional[dic
 # never changes what the customer is billed; it only tells the shop what to expect the
 # vehicle's job cards to cost against margin.
 async def _job_card_cost_total(vehicle_id: str, sale: Optional[dict] = None) -> float:
-    jobs = await db.job_cards.find({"vehicle_id": vehicle_id, "is_warranty": {"$ne": True}}, {"_id": 0}).to_list(200)
     if sale:
-        returns = await db.sales.find({"vehicle_id": vehicle_id, "returned": True}, {"_id": 0, "returned_at": 1}).to_list(200)
+        jobs, returns = await asyncio.gather(
+            db.job_cards.find({"vehicle_id": vehicle_id, "is_warranty": {"$ne": True}}, {"_id": 0}).to_list(200),
+            db.sales.find({"vehicle_id": vehicle_id, "returned": True}, {"_id": 0, "returned_at": 1}).to_list(200),
+        )
         return _sale_job_card_cost(sale, jobs, [r.get("returned_at") for r in returns])
+    jobs = await db.job_cards.find({"vehicle_id": vehicle_id, "is_warranty": {"$ne": True}}, {"_id": 0}).to_list(200)
     return sum(_job_card_cost(j) for j in jobs)
 
 # A vehicle that was returned and put back on sale starts a fresh cycle: job cards opened
@@ -803,11 +829,20 @@ async def _batch_vehicle_investment(vehicles: list) -> dict:
     vehicle_ids = [v["id"] for v in vehicles]
     if not vehicle_ids:
         return {}
-    cutoffs, all_exps, all_jobs = await asyncio.gather(
+    return _batch_investment_from(vehicles, await _batch_investment_inputs(vehicle_ids))
+
+async def _batch_investment_inputs(vehicle_ids: list):
+    """The three reads behind _batch_vehicle_investment, asked together. They need only the vehicle ids, so a caller that
+    is also reading the vehicles themselves can ask for these at the same moment."""
+    return await asyncio.gather(
         _cycle_cutoffs(vehicle_ids),
-        db.expenses.find({"vehicle_id": {"$in": vehicle_ids}}, {"_id": 0}).to_list(20000),
-        db.job_cards.find({"vehicle_id": {"$in": vehicle_ids}}, {"_id": 0}).to_list(20000),
+        db.expenses.find({"vehicle_id": {"$in": vehicle_ids}}, {"_id": 0, "vehicle_id": 1, "amount": 1, "created_at": 1}).to_list(20000),
+        db.job_cards.find({"vehicle_id": {"$in": vehicle_ids}}, {"_id": 0, "vehicle_id": 1, "created_at": 1, "after_sale": 1, "is_warranty": 1, "parts": 1,
+                                                                   "actual_cost": 1, "estimated_cost": 1, "sanakhat_cost": 1, "resanakhat_cost": 1}).to_list(20000),
     )
+
+def _batch_investment_from(vehicles: list, inputs) -> dict:
+    cutoffs, all_exps, all_jobs = inputs
     exps_by_vehicle: dict = {}
     for e in all_exps:
         if _since([e], cutoffs.get(e["vehicle_id"], "")):
@@ -865,6 +900,10 @@ async def _batch_emi_remaining(emis: list) -> dict:
     return {e["id"]: max(0.0, e.get("loan_amount", 0) - paid_by_emi.get(e["id"], 0)) for e in emis}
 
 # ── Helper: classify aging counts for a list of available vehicles ────
+# The only vehicle columns the investment arithmetic reads (see _batch_investment_from); reports that need nothing else
+# from a vehicle ask for just these instead of whole rows.
+_INVESTMENT_FIELDS = {"_id": 0, "id": 1, "purchase_price": 1, "accessories_cost": 1, "sanakhat_cost": 1}
+
 def _aging_counts(vehicles: list) -> dict:
     counts = {"fresh": 0, "normal": 0, "slow": 0, "dead": 0}
     for v in vehicles:
@@ -3037,13 +3076,21 @@ async def import_sales(file: UploadFile = File(...), confirm: bool = False, cu: 
 async def get_vehicle(vid: str, cu: dict = Depends(require("vehicles", "view"))):
     v = await db.vehicles.find_one({"id": vid}, {"_id": 0})
     if not v: raise HTTPException(404, "Vehicle not found")
-    v = await enrich_vehicle(v)
-    cutoff = (await _cycle_cutoffs([vid])).get(vid, "")
-    v["expenses"] = _since(await db.expenses.find({"vehicle_id": vid}, {"_id": 0}).to_list(200), cutoff)
-    v["job_cards"] = _since(await db.job_cards.find({"vehicle_id": vid}, {"_id": 0}).to_list(100), cutoff)
-    if v.get("status") == "sold":
-        _attach_service_history(v, v["job_cards"], await _default_warranty_days())
-    await _attach_active_bookings([v], cu.get("role", "admin"))
+    # Everything else needs only the vehicle, not each other, so it is read in one go (this screen used to wait for nine
+    # reads in a row, three of them the same ones twice).
+    cutoffs, exps, jobs, default_days, _ = await asyncio.gather(
+        _cycle_cutoffs([vid]),
+        db.expenses.find({"vehicle_id": vid}, {"_id": 0}).to_list(200),
+        db.job_cards.find({"vehicle_id": vid}, {"_id": 0}).to_list(200),
+        _default_warranty_days() if v.get("status") == "sold" else _nothing(),
+        _attach_active_bookings([v], cu.get("role", "admin")),
+    )
+    cutoff = cutoffs.get(vid, "")
+    _apply_vehicle_costs(v, _since(exps, cutoff), _since(jobs, cutoff))
+    v["expenses"] = _since(exps, cutoff)
+    v["job_cards"] = _since(jobs[:100], cutoff)
+    if default_days is not None:
+        _attach_service_history(v, v["job_cards"], default_days)
     return _hide_financials_for_role(v, cu.get("role", "admin"))
 
 class SaleStatusesUpdate(BaseModel):
@@ -3448,16 +3495,19 @@ async def get_jobs(status: Optional[str] = None, vehicle_id: Optional[str] = Non
     status_by_vehicle: dict = {}
     service_no: dict = {}
     if ids:
-        vs = await db.vehicles.find({"id": {"$in": ids}}, {"_id": 0, "id": 1, "status": 1, "sold_date": 1}).to_list(10000)
+        # The vehicles and their job cards are read at the same time (only the sold vehicles' cards are used, picked out below).
+        vs, all_cards = await asyncio.gather(
+            db.vehicles.find({"id": {"$in": ids}}, {"_id": 0, "id": 1, "status": 1, "sold_date": 1}).to_list(10000),
+            db.job_cards.find({"vehicle_id": {"$in": ids}},
+                              {"_id": 0, "id": 1, "vehicle_id": 1, "job_date": 1, "created_at": 1, "is_warranty": 1, "after_sale": 1}).to_list(20000),
+        )
         status_by_vehicle = {v["id"]: v.get("status") for v in vs}
         # 1st / 2nd / ... service after the sale, numbered over all of the vehicle's job cards
         # (not just this filtered page) so the number doesn't shift with the filter.
         sold = [v for v in vs if v.get("status") == "sold"]
         if sold:
             sold_jobs: dict = {}
-            for j in await db.job_cards.find(
-                    {"vehicle_id": {"$in": [v["id"] for v in sold]}},
-                    {"_id": 0, "id": 1, "vehicle_id": 1, "job_date": 1, "created_at": 1, "is_warranty": 1, "after_sale": 1}).to_list(20000):
+            for j in all_cards:
                 sold_jobs.setdefault(j["vehicle_id"], []).append(j)
             for v in sold:
                 service_no.update(_service_numbers(v, sold_jobs.get(v["id"], [])))
@@ -3849,12 +3899,13 @@ async def get_sales(start_date: Optional[str] = None, end_date: Optional[str] = 
     # entirely for roles that would never see the result anyway.
     with_profit = cu.get("role", "admin") == "admin" and bool(vehicle_ids)
     # None of these needs another's answer, so they are asked at the same time (the database is in another city).
-    vs, cs, all_jobs, rets, full_vehicles = await asyncio.gather(
+    vs, cs, all_jobs, rets, full_vehicles, batch_inputs = await asyncio.gather(
         db.vehicles.find({"id": {"$in": vehicle_ids}}, {"_id": 0, "id": 1, "brand": 1, "model": 1, "year": 1, "registration_number": 1}).to_list(len(vehicle_ids)) if vehicle_ids else _no_rows(),
         db.customers.find({"id": {"$in": customer_ids}}, {"_id": 0, "id": 1, "name": 1, "contact_number": 1}).to_list(len(customer_ids)) if customer_ids else _no_rows(),
         db.job_cards.find({"vehicle_id": {"$in": vehicle_ids}, "is_warranty": {"$ne": True}}, {"_id": 0}).to_list(20000) if vehicle_ids else _no_rows(),
         db.sales.find({"vehicle_id": {"$in": vehicle_ids}, "returned": True}, {"_id": 0, "vehicle_id": 1, "returned_at": 1}).to_list(20000) if vehicle_ids else _no_rows(),
         db.vehicles.find({"id": {"$in": vehicle_ids}}, {"_id": 0, "id": 1, "purchase_price": 1, "accessories_cost": 1, "sanakhat_cost": 1}).to_list(len(vehicle_ids)) if with_profit else _no_rows(),
+        _batch_investment_inputs(vehicle_ids) if with_profit else _nothing(),
     )
     vehicles_by_id = {v["id"]: v for v in vs}
     customers_by_id = {c["id"]: c for c in cs}
@@ -3867,7 +3918,7 @@ async def get_sales(start_date: Optional[str] = None, end_date: Optional[str] = 
     investment_by_vehicle: dict = {}
     purchase_price_by_vehicle: dict = {}
     if with_profit:
-        investment_by_vehicle = await _batch_vehicle_investment(full_vehicles)
+        investment_by_vehicle = _batch_investment_from(full_vehicles, batch_inputs) if full_vehicles else {}
         purchase_price_by_vehicle = {v["id"]: v.get("purchase_price", 0) for v in full_vehicles}
 
     for s in sales:
@@ -4190,23 +4241,33 @@ async def get_sale(sid: str, cu: dict = Depends(require("sales", "view"))):
     # Self-heal: strip out any job-card item a now-removed code path already billed onto
     # this sale — see _strip_job_card_extra_expenses.
     await _strip_job_card_extra_expenses(s)
-    v = await db.vehicles.find_one({"id": s.get("vehicle_id")}, {"_id": 0})
+    is_admin = cu.get("role", "admin") == "admin"
+    # The vehicle, the customer, the job-card cost and the investment inputs only need the sale, not each other, so they
+    # are read at the same time (this used to be nine reads in a row, the same returned-sales read three times).
+    v, job_card_cost, c, investment_inputs = await asyncio.gather(
+        db.vehicles.find_one({"id": s.get("vehicle_id")}, {"_id": 0}),
+        _job_card_cost_total(s["vehicle_id"], s) if s.get("vehicle_id") else _nothing(),
+        db.customers.find_one({"id": s.get("customer_id")}, {"_id": 0}) if s.get("customer_id") else _nothing(),
+        _investment_inputs(s["vehicle_id"]) if (is_admin and s.get("vehicle_id") and not (s.get("returned") and s.get("cost_at_return") is not None)) else _nothing(),
+    )
     if v:
         s["vehicle_info"] = f"{v.get('brand','')} {v.get('model','')} {v.get('year','')}".strip()
         s["vehicle_brand"] = v.get("brand"); s["vehicle_model"] = v.get("model")
         s["vehicle_year"] = v.get("year"); s["registration_number"] = v.get("registration_number")
         s["engine_cc"] = v.get("engine_cc"); s["fuel_type"] = v.get("fuel_type")
         s["vehicle_status"] = v.get("status")
-    s["job_card_cost"] = await _job_card_cost_total(s["vehicle_id"], s) if s.get("vehicle_id") else 0
-    c = await db.customers.find_one({"id": s.get("customer_id")}, {"_id": 0}) if s.get("customer_id") else None
+    s["job_card_cost"] = job_card_cost if s.get("vehicle_id") else 0
     s["customer_name"] = c["name"] if c else "Walk-in Customer"
     s["customer_contact"] = c.get("contact_number") if c else None
     s["customer_address"] = c.get("address") if c else None
     s["customer_id_number"] = c.get("id_number") if c else None
     # Margin/profit reveal what the shop paid for the vehicle — restricted to Admin
     # to keep that number away from front desk, same as the vehicle-level fields.
-    if cu.get("role", "admin") == "admin" and v:
-        investment = await _vehicle_investment(s["vehicle_id"], v, s)
+    if is_admin and v:
+        if s.get("returned") and s.get("cost_at_return") is not None:
+            investment = s["cost_at_return"]
+        else:
+            investment = _investment_from(v, s, investment_inputs if investment_inputs is not None else await _investment_inputs(s["vehicle_id"]))
         total = _sale_revenue(s)
         s["total_investment"] = investment
         s["profit"] = total - investment
@@ -4785,7 +4846,7 @@ async def finance_summary(cu: dict = Depends(admin_only)):
     # Five pieces of work that do not depend on each other, run at the same time (the database is in another city, so
     # one after another this waited for every step in turn).
     async def stock_value():  # inventory value (available vehicles)
-        avail = await db.vehicles.find({"status": "available"}, {"_id": 0}).to_list(1000)
+        avail = await db.vehicles.find({"status": "available"}, _INVESTMENT_FIELDS).to_list(1000)
         return avail, sum((await _batch_vehicle_investment(avail)).values())
 
     async def sales_and_cogs():  # revenue & COGS from the Sales table (single source of truth)
@@ -4794,7 +4855,7 @@ async def finance_summary(cu: dict = Depends(admin_only)):
         # investment (purchase price + expenses) should only count once toward COGS.
         sold_vehicle_ids = list({s["vehicle_id"] for s in sales_records})
         sold_vehicles = (
-            await db.vehicles.find({"id": {"$in": sold_vehicle_ids}}, {"_id": 0}).to_list(5000)
+            await db.vehicles.find({"id": {"$in": sold_vehicle_ids}}, _INVESTMENT_FIELDS).to_list(5000)
             if sold_vehicle_ids else []
         )
         return sales_records, sum((await _batch_vehicle_investment(sold_vehicles)).values())
@@ -4916,7 +4977,7 @@ async def dashboard_stats(cu: dict = Depends(admin_only)):
         )
 
     async def stock_for_sale():
-        avail_v = await db.vehicles.find({"status": "available"}, {"_id": 0}).to_list(1000)
+        avail_v = await db.vehicles.find({"status": "available"}, {**_INVESTMENT_FIELDS, "purchase_date": 1}).to_list(1000)
         return avail_v, await _batch_vehicle_investment(avail_v)
 
     async def sales_and_their_vehicles():
@@ -4926,7 +4987,7 @@ async def dashboard_stats(cu: dict = Depends(admin_only)):
         # fetch + batch-compute once instead of once per sale/vehicle.
         sold_vehicle_ids = list({s["vehicle_id"] for s in sales_records})
         sold_vehicles = (
-            await db.vehicles.find({"id": {"$in": sold_vehicle_ids}}, {"_id": 0}).to_list(5000)
+            await db.vehicles.find({"id": {"$in": sold_vehicle_ids}}, _INVESTMENT_FIELDS).to_list(5000)
             if sold_vehicle_ids else []
         )
         return sales_records, sold_vehicles, await _batch_vehicle_investment(sold_vehicles)
@@ -5006,7 +5067,7 @@ async def inventory_report(cu: dict = Depends(admin_only)):
 
 @api_router.get("/reports/financial")
 async def financial_report(cu: dict = Depends(admin_only)):
-    sold = await db.vehicles.find({"status": "sold"}, {"_id": 0}).to_list(1000)
+    sold = await db.vehicles.find({"status": "sold"}, {**_INVESTMENT_FIELDS, "sold_date": 1, "updated_at": 1, "selling_price": 1}).to_list(1000)
     investment_by_vehicle, partners = await asyncio.gather(  # independent, asked at the same time
         _batch_vehicle_investment(sold), db.partners.find({}, {"_id": 0}).to_list(100))
     monthly = {}
@@ -5037,29 +5098,33 @@ async def _enriched_sales_for_closing(start_date: Optional[str] = None, end_date
     query = {}
     if start_date and end_date:
         query["sale_date"] = {"$gte": start_date, "$lte": end_date}
-    sales = await db.sales.find(query, {"_id": 0}).sort("sale_date", 1).to_list(5000)
+    # Only the columns this report reads are fetched (whole sale and vehicle rows are mostly text it never looks at), and
+    # everything that needs only the sales' ids is read at the same time (the database is in another city).
+    sales = await db.sales.find(query, {"_id": 0, "id": 1, "sale_date": 1, "sale_price": 1, "due_amount": 1, "returned": 1, "retained_amount": 1,
+                                        "vehicle_id": 1, "customer_id": 1, "created_at": 1, "returned_at": 1, "cost_at_return": 1}).sort("sale_date", 1).to_list(5000)
     vehicle_ids = list({s["vehicle_id"] for s in sales if s.get("vehicle_id")})
     customer_ids = list({s["customer_id"] for s in sales if s.get("customer_id")})
-    vehicles_by_id, customers_by_id = {}, {}
-    if vehicle_ids:
-        vs = await db.vehicles.find({"id": {"$in": vehicle_ids}}, {"_id": 0}).to_list(len(vehicle_ids))
-        vehicles_by_id = {v["id"]: v for v in vs}
-    if customer_ids:
-        cs = await db.customers.find({"id": {"$in": customer_ids}}, {"_id": 0, "id": 1, "name": 1, "contact_number": 1}).to_list(len(customer_ids))
-        customers_by_id = {c["id"]: c for c in cs}
+    vs, cs, returned_rows, all_exps, all_jobs = await asyncio.gather(
+        db.vehicles.find({"id": {"$in": vehicle_ids}}, {"_id": 0, "id": 1, "brand": 1, "model": 1, "year": 1, "registration_number": 1,
+                                                         "purchase_price": 1, "accessories_cost": 1, "sanakhat_cost": 1}).to_list(len(vehicle_ids)) if vehicle_ids else _no_rows(),
+        db.customers.find({"id": {"$in": customer_ids}}, {"_id": 0, "id": 1, "name": 1, "contact_number": 1}).to_list(len(customer_ids)) if customer_ids else _no_rows(),
+        db.sales.find({"vehicle_id": {"$in": vehicle_ids}, "returned": True}, {"_id": 0, "vehicle_id": 1, "returned_at": 1}).to_list(20000) if vehicle_ids else _no_rows(),
+        db.expenses.find({"vehicle_id": {"$in": vehicle_ids}}, {"_id": 0, "vehicle_id": 1, "amount": 1, "created_at": 1}).to_list(20000) if vehicle_ids else _no_rows(),
+        db.job_cards.find({"vehicle_id": {"$in": vehicle_ids}, "is_warranty": {"$ne": True}}, {"_id": 0, "vehicle_id": 1, "created_at": 1, "after_sale": 1, "is_warranty": 1,
+                                                                                               "parts": 1, "actual_cost": 1, "estimated_cost": 1, "sanakhat_cost": 1, "resanakhat_cost": 1}).to_list(20000) if vehicle_ids else _no_rows(),
+    )
+    vehicles_by_id = {v["id"]: v for v in vs}
+    customers_by_id = {c["id"]: c for c in cs}
     exps_by_vehicle: dict = {}
     jobs_by_vehicle: dict = {}
     returned_by_vehicle: dict = {}
-    if vehicle_ids:
-        for r in await db.sales.find({"vehicle_id": {"$in": vehicle_ids}, "returned": True}, {"_id": 0, "vehicle_id": 1, "returned_at": 1}).to_list(20000):
-            if r.get("returned_at"):
-                returned_by_vehicle.setdefault(r["vehicle_id"], []).append(r["returned_at"])
-        all_exps = await db.expenses.find({"vehicle_id": {"$in": vehicle_ids}}, {"_id": 0}).to_list(20000)
-        for e in all_exps:
-            exps_by_vehicle.setdefault(e["vehicle_id"], []).append(e)
-        all_jobs = await db.job_cards.find({"vehicle_id": {"$in": vehicle_ids}, "is_warranty": {"$ne": True}}, {"_id": 0}).to_list(20000)
-        for j in all_jobs:
-            jobs_by_vehicle.setdefault(j["vehicle_id"], []).append(j)
+    for r in returned_rows:
+        if r.get("returned_at"):
+            returned_by_vehicle.setdefault(r["vehicle_id"], []).append(r["returned_at"])
+    for e in all_exps:
+        exps_by_vehicle.setdefault(e["vehicle_id"], []).append(e)
+    for j in all_jobs:
+        jobs_by_vehicle.setdefault(j["vehicle_id"], []).append(j)
 
     out = []
     for s in sales:
@@ -5623,7 +5688,7 @@ async def accounting_summary(start_date: str, end_date: str, cu: dict = Depends(
     async def purchases_in_period():
         # Vehicles purchased in period (total cost = purchase + expenses)
         purchased = await db.vehicles.find(
-            {"purchase_date": {"$gte": start_date, "$lte": end_date}}, {"_id": 0}
+            {"purchase_date": {"$gte": start_date, "$lte": end_date}}, _INVESTMENT_FIELDS
         ).to_list(5000)
         return purchased, sum((await _batch_vehicle_investment(purchased)).values())
 
@@ -5640,7 +5705,7 @@ async def accounting_summary(start_date: str, end_date: str, cu: dict = Depends(
         non_returned = [s for s in sales_in_period if not s.get("returned")]
         sold_vehicle_ids = list({s["vehicle_id"] for s in non_returned})
         sold_vehicles = (
-            await db.vehicles.find({"id": {"$in": sold_vehicle_ids}}, {"_id": 0}).to_list(5000)
+            await db.vehicles.find({"id": {"$in": sold_vehicle_ids}}, _INVESTMENT_FIELDS).to_list(5000)
             if sold_vehicle_ids else []
         )
         return sales_in_period, non_returned, await _batch_vehicle_investment(sold_vehicles)
@@ -5677,7 +5742,8 @@ async def report_purchases(start_date: str, end_date: str, cu: dict = Depends(ad
     Dashboard's Total Cost popup with a line-item list that reconciles with that tile,
     the same way /sales already powers the Total Sales / Net Profit popups."""
     purchased = await db.vehicles.find(
-        {"purchase_date": {"$gte": start_date, "$lte": end_date}}, {"_id": 0}
+        {"purchase_date": {"$gte": start_date, "$lte": end_date}},
+        {**_INVESTMENT_FIELDS, "brand": 1, "model": 1, "year": 1, "registration_number": 1, "purchase_source": 1, "purchase_date": 1, "status": 1},
     ).to_list(5000)
     if not purchased:
         return []
