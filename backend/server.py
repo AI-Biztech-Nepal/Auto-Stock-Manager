@@ -2093,8 +2093,10 @@ async def get_brand(cu: dict = Depends(get_current_user)):
     gets the shipped default logo, and every other company gets none (the panel shows its initials tile)."""
     if not cu.get("company_id"):
         return {"company_name": None, "logo_url": None}
-    company = await db.companies.find_one({"id": cu["company_id"]}, {"_id": 0, "name": 1})
-    settings = await db.settings.find_one({}, {"_id": 0, "logo_url": 1})
+    company, settings = await asyncio.gather(  # independent, asked at the same time (every page load asks for this)
+        db.companies.find_one({"id": cu["company_id"]}, {"_id": 0, "name": 1}),
+        db.settings.find_one({}, {"_id": 0, "logo_url": 1}),
+    )
     logo = ((settings or {}).get("logo_url") or "").strip()
     if not logo or logo.startswith(_PLACEHOLDER_LOGO):
         logo = DEFAULT_COMPANY_LOGO if cu["company_id"] == await _default_company_id() else None

@@ -122,7 +122,7 @@ class PostgresDatabase:
                     pool = AsyncConnectionPool(
                         # Opening a connection to a database in another city costs about a second, so keep several open and warm
                         # (a page asks for many things at once) and never let them idle away: a cold start is a second per connection.
-                        self.dsn, min_size=int(os.environ.get("PG_POOL_MIN", "4")), max_size=int(os.environ.get("PG_POOL_MAX", "8")), kwargs=kwargs,
+                        self.dsn, min_size=int(os.environ.get("PG_POOL_MIN", "8")), max_size=int(os.environ.get("PG_POOL_MAX", "10")), kwargs=kwargs,
                         configure=_configure, open=False,
                         check=AsyncConnectionPool.check_connection,  # drop a connection the server closed while idle
                         max_lifetime=int(os.environ.get("PG_POOL_RECYCLE", "3600")),
