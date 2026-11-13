@@ -98,8 +98,9 @@ export default function Layout() {
   useEffect(() => {
     if (!user || !isAdmin) return;
     const load = () => {
-      api.get("/leads").then(r => {
-        const n = r.data.filter(l => l.status === "new" && !l.seen_at).length;
+      // Just the number: the full leads list (with the photos some leads carry) is megabytes, and this runs every minute.
+      api.get("/leads/new-count").then(r => {
+        const n = r.data.count;
         if (lastNewLeads.current !== null && n > lastNewLeads.current) {
           toast.info(`${n - lastNewLeads.current} new website lead${n - lastNewLeads.current > 1 ? "s" : ""}`, { action: { label: "View", onClick: () => navigate("/marketing?tab=leads") } });
         }

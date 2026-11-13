@@ -21,7 +21,29 @@ const getDeviceId = () => {
   return id;
 };
 
+// Two parts of a page often ask for the same list at the same moment (the sidebar and the page itself both load
+// /vehicles). A plain GET that is already on its way is shared instead of being sent again, so the server and the
+// connection do the work once. Only while a request is in flight - nothing is kept afterwards - and every caller still
+// gets its own copy of the data to do with as it likes. Any save/delete (before it is sent and after it finishes) forgets
+// the requests in flight, so a list fetched right after a change is never answered by one that started before it.
+const inFlightGets = new Map();
+const sendGet = api.get.bind(api);
+api.get = (url, config) => {
+  if (config && Object.keys(config).some(k => k !== "params")) return sendGet(url, config);
+  const key = `${url}?${JSON.stringify(config?.params ?? null)}|${localStorage.getItem("gng_token") || ""}`;
+  let entry = inFlightGets.get(key);
+  if (entry) entry.shared = true;
+  else {
+    entry = { shared: false };
+    entry.promise = sendGet(url, config).finally(() => { if (inFlightGets.get(key) === entry) inFlightGets.delete(key); });
+    inFlightGets.set(key, entry);
+  }
+  const mine = entry;
+  return mine.promise.then(res => (mine.shared && typeof structuredClone === "function" ? { ...res, data: structuredClone(res.data) } : res));
+};
+
 api.interceptors.request.use((config) => {
+  if (config.method && config.method.toLowerCase() !== "get") inFlightGets.clear();
   // localStorage persists across tabs/browser restarts, matching AuthContext
   const token = localStorage.getItem("gng_token");
   if (token) config.headers.Authorization = `Bearer ${token}`;
@@ -30,8 +52,9 @@ api.interceptors.request.use((config) => {
 });
 
 api.interceptors.response.use(
-  (res) => res,
+  (res) => { if (res.config?.method && res.config.method.toLowerCase() !== "get") inFlightGets.clear(); return res; },
   (err) => {
+    if (err.config?.method && err.config.method.toLowerCase() !== "get") inFlightGets.clear();
     if (err.response?.status === 401) {
       localStorage.removeItem("gng_token");
       localStorage.removeItem("gng_user");

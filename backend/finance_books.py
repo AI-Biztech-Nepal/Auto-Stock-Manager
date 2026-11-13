@@ -660,11 +660,15 @@ def register(api_router, db, admin_only):
     async def fin_books(cu: dict = Depends(admin_only)):
         """All of the company's books at once. The screens compute balances from this one payload
         with a single shared money module, so two screens can never disagree."""
-        rentals = await _optional(db.fin_rentals, "start_date")
-        cash_rows = await _optional(db.fin_cash_account, "updated_at")
+        # Independent reads are asked at the same time (the database is in another city, so each one in turn cost a
+        # full round trip). The rent catch-up below does not touch party types, so reading them here is the same.
+        rentals, cash_rows, party_types = await asyncio.gather(
+            _optional(db.fin_rentals, "start_date"),
+            _optional(db.fin_cash_account, "updated_at"),
+            _optional(db.fin_party_types, "name"),
+        )
         if rentals:
             await _sync_rental_rent()  # catches up the days since the books were last read
-        party_types = await _optional(db.fin_party_types, "name")
         if party_types == []:
             # The three starter types, the first time the books are opened (as Finance Nepal does).
             now = _now()
@@ -675,17 +679,27 @@ def register(api_router, db, admin_only):
                     pass
             party_types = await _all(db.fin_party_types, "name")
         await _sync_main_ledger(party_types or [])
+        parties, accounts, transfers, categories, items, transactions, customer_ledger, vendor_ledger = await asyncio.gather(
+            _all(db.fin_parties, "name"),
+            _all(db.fin_bank_accounts, "name"),
+            _all(db.fin_account_transfers),
+            _all(db.fin_expense_categories, "name"),
+            _all(db.fin_items, "name"),
+            _all(db.fin_transactions),
+            _all(db.fin_customer_ledger),
+            _all(db.fin_vendor_ledger),
+        )
         return {
             "party_types": party_types or [],
             "types_ready": _types_ready and party_types is not None,
-            "parties": await _all(db.fin_parties, "name"),
-            "accounts": await _all(db.fin_bank_accounts, "name"),
-            "transfers": await _all(db.fin_account_transfers),
-            "categories": await _all(db.fin_expense_categories, "name"),
-            "items": await _all(db.fin_items, "name"),
-            "transactions": await _all(db.fin_transactions),
-            "customer_ledger": await _all(db.fin_customer_ledger),
-            "vendor_ledger": await _all(db.fin_vendor_ledger),
+            "parties": parties,
+            "accounts": accounts,
+            "transfers": transfers,
+            "categories": categories,
+            "items": items,
+            "transactions": transactions,
+            "customer_ledger": customer_ledger,
+            "vendor_ledger": vendor_ledger,
             "rentals": rentals or [],
             "cash_account": (cash_rows or [None])[0],
             # False while the Rent tables / service columns are not in the database: the screens say so.
