@@ -25,6 +25,7 @@ from google.genai import types as genai_types
 from google.genai import errors as genai_errors
 import httpx
 import media_storage
+import perf_stats
 import crm
 import assistant_api
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -6213,6 +6214,37 @@ async def update_settings(settings: SettingsUpdate, cu: dict = Depends(admin_onl
     asyncio.create_task(_notify_storefront())
     return await db.settings.find_one({}, {"_id": 0})
 
+# ── REAL TIMINGS (see perf_stats.py) ─────────────────────────────────────
+class PerfSample(BaseModel):
+    p: str = Field(max_length=200)           # the request's path, e.g. /vehicles/<id>
+    ms: float                                 # how long it took in the browser, including the trip and the download
+    m: Optional[str] = Field(default="GET", max_length=7)
+    kb: Optional[float] = None                # size of the answer, if the browser said
+    st: Optional[int] = None                  # HTTP status
+
+class PerfBoot(BaseModel):                    # how long the app itself took to open on this device
+    ttfb: Optional[float] = None
+    dcl: Optional[float] = None
+    load: Optional[float] = None
+    js_kb: Optional[float] = None
+    cached: Optional[bool] = None
+
+class PerfReport(BaseModel):
+    samples: List[PerfSample] = Field(default_factory=list, max_length=100)
+    boot: Optional[PerfBoot] = None
+
+@api_router.post("/perf/report")
+async def perf_report(body: PerfReport, cu: dict = Depends(get_current_user)):
+    """Timings as seen from a staff device, sent in small batches by the web app. Nothing about the data itself, only
+    which screen and how long it took. Kept in memory only."""
+    perf_stats.add_client(body.samples, body.boot)
+    return {"ok": True}
+
+@api_router.get("/admin/performance")
+async def admin_performance(cu: dict = Depends(admin_only)):
+    """Per screen: how long the app took and how many database questions it asked, next to how long staff devices waited."""
+    return perf_stats.snapshot()
+
 # ── STARTUP ───────────────────────────────────────────────────────────
 @app.on_event("startup")
 async def startup():
@@ -6490,6 +6522,8 @@ app.add_middleware(CORSMiddleware, allow_credentials=True,
 # Compresses JSON responses over 1KB (list endpoints especially) before they hit the
 # network — no API/behavior change, just a smaller wire payload.
 app.add_middleware(GZipMiddleware, minimum_size=1000)
+# Outermost (added last): times every /api request, counts its database questions and adds a Server-Timing header (perf_stats.py).
+app.add_middleware(perf_stats.PerfMiddleware)
 
 
 # ══════════════════════════════════════════════════════════════════════

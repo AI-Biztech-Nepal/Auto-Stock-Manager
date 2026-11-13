@@ -42,7 +42,50 @@ api.get = (url, config) => {
   return mine.promise.then(res => (mine.shared && typeof structuredClone === "function" ? { ...res, data: structuredClone(res.data) } : res));
 };
 
+// ── Real timings from this device ────────────────────────────────────────────────────────────────────────────────
+// Each request's duration as the browser saw it (so the trip over the internet and the download are included) is sent to
+// the app in small batches, together with how long the app took to open. Admin > Settings > Speed Report shows them next to
+// what the server took (backend/perf_stats.py). Only the screen and the time are sent, never any data. Best effort: a
+// failure here is ignored and never affects a request.
+const timings = [];
+const recordTiming = (config, status, res) => {
+  try {
+    if (!config || config.__t0 == null) return;
+    const url = (config.url || "").split("?")[0];
+    if (url.startsWith("/perf/report") || url.startsWith("/presence/heartbeat")) return;
+    const bytes = Number(res?.headers?.["content-length"]);
+    timings.push({ p: url, m: (config.method || "get").toUpperCase(), ms: Math.round(performance.now() - config.__t0), st: status, ...(bytes > 0 ? { kb: Math.round(bytes / 1024) } : {}) });
+    if (timings.length > 200) timings.splice(0, timings.length - 200);
+  } catch { /* timing is best effort */ }
+};
+const sendTimings = (boot) => {
+  try {
+    const token = localStorage.getItem("gng_token");
+    if (!token || (!timings.length && !boot)) return;
+    fetch(`${API_URL}/api/perf/report`, {
+      method: "POST", keepalive: true,
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ samples: timings.splice(0, 100), ...(boot ? { boot } : {}) }),
+    }).catch(() => {});
+  } catch { /* timing is best effort */ }
+};
+const reportOpenTime = () => {
+  try {
+    const nav = performance.getEntriesByType("navigation")[0];
+    if (!nav) return;
+    const bytes = performance.getEntriesByType("resource").filter(r => r.initiatorType === "script").reduce((sum, r) => sum + (r.transferSize || 0), 0);
+    sendTimings({ ttfb: Math.round(nav.responseStart), dcl: Math.round(nav.domContentLoadedEventEnd), load: Math.round(nav.loadEventEnd), js_kb: Math.round(bytes / 1024), cached: bytes === 0 });
+  } catch { /* timing is best effort */ }
+};
+if (typeof window !== "undefined") {
+  setInterval(() => sendTimings(), 60 * 1000);
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") sendTimings(); });
+  if (document.readyState === "complete") setTimeout(reportOpenTime, 3000);
+  else window.addEventListener("load", () => setTimeout(reportOpenTime, 3000), { once: true });
+}
+
 api.interceptors.request.use((config) => {
+  config.__t0 = performance.now();
   if (config.method && config.method.toLowerCase() !== "get") inFlightGets.clear();
   // localStorage persists across tabs/browser restarts, matching AuthContext
   const token = localStorage.getItem("gng_token");
@@ -52,8 +95,9 @@ api.interceptors.request.use((config) => {
 });
 
 api.interceptors.response.use(
-  (res) => { if (res.config?.method && res.config.method.toLowerCase() !== "get") inFlightGets.clear(); return res; },
+  (res) => { recordTiming(res.config, res.status, res); if (res.config?.method && res.config.method.toLowerCase() !== "get") inFlightGets.clear(); return res; },
   (err) => {
+    recordTiming(err.config, err.response?.status ?? 0, err.response);
     if (err.config?.method && err.config.method.toLowerCase() !== "get") inFlightGets.clear();
     if (err.response?.status === 401) {
       localStorage.removeItem("gng_token");

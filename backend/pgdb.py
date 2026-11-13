@@ -18,6 +18,7 @@ Tables are in schema.sql under backend/supabase/. PG_SCHEMA (optional) sets the 
 import asyncio
 import json
 import os
+import time
 from types import SimpleNamespace
 from typing import Optional
 
@@ -26,6 +27,7 @@ from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
 
 from sqldb import TABLES, ReturnDocument, _Cursor, _unescape_anchored_literal
+import perf_stats
 
 __all__ = ["PostgresDatabase", "ReturnDocument"]
 
@@ -191,12 +193,16 @@ class PostgresCollection:
     # ── plumbing ──────────────────────────────────────────────────────────
     async def _run(self, sql: str, params=(), fetch: str = "none"):
         """One statement on one pooled connection. fetch: 'all' | 'one' | 'none'. Returns (rows, rowcount)."""
-        pool = await self._db.get_pool()
-        async with pool.connection() as conn:
-            async with conn.cursor(row_factory=dict_row) as cur:
-                await cur.execute(sql, params)
-                rows = await cur.fetchall() if fetch == "all" else await cur.fetchone() if fetch == "one" else None
-                return rows, cur.rowcount
+        started = time.perf_counter()
+        try:
+            pool = await self._db.get_pool()
+            async with pool.connection() as conn:
+                async with conn.cursor(row_factory=dict_row) as cur:
+                    await cur.execute(sql, params)
+                    rows = await cur.fetchall() if fetch == "all" else await cur.fetchone() if fetch == "one" else None
+                    return rows, cur.rowcount
+        finally:
+            perf_stats.note_query((time.perf_counter() - started) * 1000)  # counts toward the request being timed, if any
 
     def _where(self, filt):
         return build_where(filt or {}, self._bool_cols)
