@@ -6528,6 +6528,7 @@ async def _run_startup_tasks():
     # _compress_oversized_photos / _compress_oversized_documents.
     asyncio.create_task(_compress_oversized_photos())
     _spawn(_warm_thumbnails())
+    _spawn(_move_all_lead_images())
     asyncio.create_task(_compress_oversized_documents())
 
 _cors_origins_raw = os.environ.get('CORS_ORIGINS')
@@ -7823,7 +7824,72 @@ async def _insert_lead(l: dict) -> dict:
     l["created_at"] = datetime.now(timezone.utc).isoformat()
     await db.leads.insert_one(l)
     l.pop("_id", None)
+    if media_storage.enabled() and any(isinstance(x, str) and x.startswith("data:image") for x in (l.get("images") or [])):
+        _spawn(_move_lead_images_to_storage(l["id"]))   # the lead is saved first; its photos follow into Storage a moment later
     return l
+
+# Photos a customer attaches to a Sell / Exchange form arrive as text (data:image/jpeg;base64,...) and used to stay inside the leads
+# table, which made every read of the Leads list (the sidebar used to ask for it every minute) carry megabytes. They are moved to
+# Storage, byte for byte, and the lead keeps the address instead. The move is checked (the copy in Storage is read back and compared
+# with the original) before the text is replaced, so a photo is never lost; if anything fails the lead keeps the text, and the
+# next start tries again.
+_DATA_IMAGE = re.compile(r"^data:(image/[A-Za-z0-9.+-]+);base64,(.*)$", re.S)
+_lead_images_lock = asyncio.Lock()
+
+async def _move_lead_images_to_storage(lead_id: str) -> int:
+    """Moves one lead's attached photos to Storage. Returns how many were moved."""
+    if not media_storage.enabled():
+        return 0
+    async with _lead_images_lock:
+        lead = await db.leads.find_one({"id": lead_id}, {"_id": 0, "id": 1, "company_id": 1, "images": 1})
+        images = list((lead or {}).get("images") or [])
+        moved = 0
+        for i, img in enumerate(images):
+            m = _DATA_IMAGE.match(img) if isinstance(img, str) else None
+            if not m:
+                continue   # already an address, or something else: left exactly as it is
+            try:
+                encoded = m.group(2).strip()
+                raw = base64.b64decode(encoded + "=" * (-len(encoded) % 4))
+                if not raw:
+                    continue
+                ctype = m.group(1).lower()
+                path = media_storage.object_path(lead.get("company_id"), f"leads-{lead_id}", str(uuid.uuid4()), ctype)
+                await media_storage.upload(media_storage.PHOTO_BUCKET, path, raw, ctype)
+                if hashlib.sha256(await media_storage.download(media_storage.PHOTO_BUCKET, path)).digest() != hashlib.sha256(raw).digest():
+                    raise RuntimeError("the copy in Storage does not match the original")
+                images[i] = media_storage.public_url(media_storage.PHOTO_BUCKET, path)
+                moved += 1
+            except Exception:  # noqa: BLE001 - the text stays in the lead; tried again at the next start
+                logger.warning("Could not move photo %d of lead %s to Storage; it stays in the database", i + 1, lead_id, exc_info=True)
+        if moved:
+            await db.leads.update_one({"id": lead_id}, {"$set": {"images": images}})
+            logger.info("Moved %d photo(s) of lead %s to Storage", moved, lead_id)
+        return moved
+
+_lead_sweep_started = False
+
+async def _move_all_lead_images():
+    """Start-up sweep for the leads that still hold photos as text. LEAD_IMAGES_SWEEP=off turns it off; it stays off for a test schema."""
+    global _lead_sweep_started
+    mode = os.environ.get("LEAD_IMAGES_SWEEP", "auto").lower()
+    if _lead_sweep_started or mode == "off" or (mode == "auto" and os.environ.get("PG_SCHEMA")) or not media_storage.enabled():
+        return
+    _lead_sweep_started = True
+    await asyncio.sleep(float(os.environ.get("LEAD_IMAGES_SWEEP_DELAY", "120")))   # let the app settle after a start
+    try:
+        leads = await db.leads.find({"images": {"$exists": True}}, {"_id": 0, "id": 1, "images": 1}).to_list(100000)
+        todo = [l["id"] for l in leads if any(isinstance(x, str) and x.startswith("data:image") for x in (l.get("images") or []))]
+        if not todo:
+            return
+        logger.info("Moving the photos of %d website lead(s) to Storage...", len(todo))
+        moved = 0
+        for lead_id in todo:
+            moved += await _move_lead_images_to_storage(lead_id)
+            await asyncio.sleep(0.2)
+        logger.info("Lead photos moved to Storage: %d.", moved)
+    except Exception:  # noqa: BLE001
+        logger.warning("Moving lead photos to Storage stopped early", exc_info=True)
 
 @api_router.post("/public/leads/click", dependencies=[Depends(_scope_to_default_company)])
 @limiter.limit("30/minute")
