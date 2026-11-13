@@ -161,7 +161,7 @@ function PostCard({ vehicle, text, link, onChange, aiBadge, fbPage, showPrice })
       <div className="flex items-center gap-3">
         <div className="flex gap-1">
           {thumbs.length ? thumbs.map(t => (
-            <img key={t.id} src={absoluteUrl(api, t.url)} alt="" className="w-14 h-14 rounded-lg object-cover" />
+            <img key={t.id} src={absoluteUrl(api, t.thumb || t.url)} alt="" className="w-14 h-14 rounded-lg object-cover" />
           )) : <div className="w-14 h-14 rounded-lg bg-slate-100 flex items-center justify-center"><Package size={18} className="text-slate-300" /></div>}
         </div>
         <div className="min-w-0 flex-1">
@@ -386,7 +386,7 @@ export default function Share({ embedded = false }) {
                 <button key={v.id} onClick={() => toggle(v.id)} data-testid="share-vehicle-row"
                   className={`w-full flex items-center gap-3 p-2 rounded-lg border text-left transition-colors ${on ? "border-blue-500 bg-blue-50" : "border-slate-100 hover:bg-slate-50"}`}>
                   <div className="w-14 h-11 rounded bg-slate-100 overflow-hidden shrink-0 flex items-center justify-center">
-                    {v.thumb_photos?.[0] ? <img src={absoluteUrl(api, v.thumb_photos[0].url)} alt="" className="w-full h-full object-cover" /> : <Package size={16} className="text-slate-300" />}
+                    {v.thumb_photos?.[0] ? <img src={absoluteUrl(api, v.thumb_photos[0].thumb || v.thumb_photos[0].url)} alt="" className="w-full h-full object-cover" /> : <Package size={16} className="text-slate-300" />}
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="text-sm font-medium text-slate-800 truncate">{v.brand} {v.model} {v.year}</div>

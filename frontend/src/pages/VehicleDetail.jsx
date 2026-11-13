@@ -662,7 +662,7 @@ export function VehicleDetailModal({ id, onClose }) {
                     data-testid="vehicle-photo"
                   >
                     <button type="button" onClick={() => !photo.pending && !suppressPhotoClick.current && setPreviewPhoto(photo.url)} className="block w-full h-full">
-                      <img src={photo.url} alt="Vehicle" draggable={false} className={`w-full h-full object-cover transition-opacity ${photo.pending ? "opacity-50" : ""}`} />
+                      <img src={photo.thumb || photo.url} alt="Vehicle" draggable={false} className={`w-full h-full object-cover transition-opacity ${photo.pending ? "opacity-50" : ""}`} />
                     </button>
                     {photo.pending && (
                       <div className="absolute inset-0 flex items-center justify-center bg-black/10 pointer-events-none">

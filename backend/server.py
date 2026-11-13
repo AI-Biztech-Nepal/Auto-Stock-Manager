@@ -6711,8 +6711,10 @@ def _photo_out(p: dict) -> dict:
     # base64 inline here -- that was ~33% larger than the raw bytes and could never be cached
     # by the browser, so reopening the same vehicle re-sent every photo's full bytes every
     # time, on a single-worker server, blocking every other request for the duration.
+    # `thumb` is a ~25 KB version for grid tiles (see _get_thumb_bytes); `url` stays the full-size original for the big preview.
     return {"id": p["id"], "filename": p["filename"], "uploaded_at": p["uploaded_at"],
-            "size": p["size"], "content_type": p["content_type"], "url": f"/api/vehicle-photos/{p['id']}/file"}
+            "size": p["size"], "content_type": p["content_type"], "url": f"/api/vehicle-photos/{p['id']}/file",
+            "thumb": f"/api/vehicle-photos/{p['id']}/file?w=480"}
 
 async def _compress_oversized_photos():
     """Same idea as _compress_oversized_documents (below), for vehicle_photos —
