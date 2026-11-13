@@ -1,5 +1,6 @@
 import axios from "axios";
 import { toast } from "sonner";
+import { forgetAll } from "./listCache";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL || "";
 
@@ -27,6 +28,9 @@ const getDeviceId = () => {
 // gets its own copy of the data to do with as it likes. Any save/delete (before it is sent and after it finishes) forgets
 // the requests in flight, so a list fetched right after a change is never answered by one that started before it.
 const inFlightGets = new Map();
+// A save or delete (not the online ping): forget requests in flight and the lists remembered for going back to a page.
+const isChange = (config) => !!config?.method && config.method.toLowerCase() !== "get" && !(config.url || "").startsWith("/presence/");
+const forgetEverything = (config) => { if (isChange(config)) { inFlightGets.clear(); forgetAll(); } };
 const sendGet = api.get.bind(api);
 api.get = (url, config) => {
   if (config && Object.keys(config).some(k => k !== "params")) return sendGet(url, config);
@@ -86,7 +90,7 @@ if (typeof window !== "undefined") {
 
 api.interceptors.request.use((config) => {
   config.__t0 = performance.now();
-  if (config.method && config.method.toLowerCase() !== "get") inFlightGets.clear();
+  forgetEverything(config);
   // localStorage persists across tabs/browser restarts, matching AuthContext
   const token = localStorage.getItem("gng_token");
   if (token) config.headers.Authorization = `Bearer ${token}`;
@@ -95,10 +99,10 @@ api.interceptors.request.use((config) => {
 });
 
 api.interceptors.response.use(
-  (res) => { recordTiming(res.config, res.status, res); if (res.config?.method && res.config.method.toLowerCase() !== "get") inFlightGets.clear(); return res; },
+  (res) => { recordTiming(res.config, res.status, res); forgetEverything(res.config); return res; },
   (err) => {
     recordTiming(err.config, err.response?.status ?? 0, err.response);
-    if (err.config?.method && err.config.method.toLowerCase() !== "get") inFlightGets.clear();
+    forgetEverything(err.config);
     if (err.response?.status === 401) {
       localStorage.removeItem("gng_token");
       localStorage.removeItem("gng_user");

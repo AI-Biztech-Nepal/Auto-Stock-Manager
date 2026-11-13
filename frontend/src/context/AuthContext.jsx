@@ -1,4 +1,5 @@
 import { createContext, useContext, useState } from "react";
+import { forgetAll } from "../utils/listCache";
 
 const AuthContext = createContext(null);
 
@@ -29,6 +30,7 @@ export const AuthProvider = ({ children }) => {
   const [token, setToken] = useState(initial.token);
 
   const login = (userData, authToken) => {
+    forgetAll();
     setUser(userData);
     setToken(authToken);
     storage.set("gng_user", userData);
@@ -36,6 +38,7 @@ export const AuthProvider = ({ children }) => {
   };
 
   const logout = () => {
+    forgetAll();
     setUser(null);
     setToken(null);
     localStorage.removeItem("gng_user");

@@ -3,6 +3,7 @@ import { useNavigate, useLocation } from "react-router-dom";
 import { Plus, Search, Trash2, Eye, TrendingUp, DollarSign, Calendar, ShoppingBag, AlertTriangle, UploadCloud, FileSpreadsheet, CheckCircle2, Undo2, BookmarkCheck, ArrowRight, Tags } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
+import { peek, remember, cacheTicket } from "../utils/listCache";
 import { formatNPR, splitSanakhatExpenses, deleteSaleConfirm, TRANSFER_STATUS_OPTIONS, getTransferStatusStyle } from "../utils/helpers";
 import { getCurrentBSMonthRange } from "../utils/nepali-date";
 import { useAuth } from "../context/AuthContext";
@@ -89,15 +90,16 @@ export default function Sales() {
   const location = useLocation();
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
-  const [sales, setSales] = useState([]);
+  // Coming back to this page shows the last lists at once (see utils/listCache.js); fetchAll below refreshes them as always.
+  const [sales, setSales] = useState(() => peek("sales:list") ?? []);
   // Sold vehicles, keyed by id below — adds the old Sold Stock details (transfer, warranty,
   // margin, sanakhat) onto each sale row.
-  const [soldVehicles, setSoldVehicles] = useState([]);
-  const [summary, setSummary] = useState(null);
+  const [soldVehicles, setSoldVehicles] = useState(() => peek("vehicles:sold") ?? []);
+  const [summary, setSummary] = useState(() => peek("sales:summary") ?? null);
   // Bookings are fetched here so open ones can be converted from this page and converted ones
   // can be tagged on their sale row.
   const [bookings, setBookings] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => peek("sales:list") === undefined);
   const [search, setSearch] = useState("");
   // Set via the Today/This Week/This Month toggle in the header — "all" (default) shows
   // every sale; otherwise restricts the list below to sale_date falling in that range.
@@ -126,8 +128,10 @@ export default function Sales() {
   const [mismatches, setMismatches] = useState([]);
 
   const fetchAll = useCallback(async () => {
+    const ticket = cacheTicket();
     try {
       const [s, sm, v] = await Promise.all([api.get("/sales"), api.get("/sales/summary"), api.get("/vehicles?status=sold")]);
+      remember("sales:list", s.data, ticket); remember("sales:summary", sm.data, ticket); remember("vehicles:sold", v.data, ticket);
       setSales(s.data); setSummary(sm.data); setSoldVehicles(v.data);
       api.get("/bookings").then(r => setBookings(r.data)).catch(() => {});
     } catch { toast.error("Failed to load sales"); }

@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback, useRef } from "react";
 import { Plus, Search, Wrench, X, Package, Pencil, ShoppingBag } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
+import { peek, remember, cacheTicket } from "../utils/listCache";
 import { formatNPR, getJobStyle, getStatusStyle, VEHICLE_STATUS_OPTIONS } from "../utils/helpers";
 import { formatBSDate } from "../utils/nepali-date";
 import VehicleComboBox from "../components/VehicleComboBox";
@@ -48,9 +49,10 @@ export default function JobCards() {
   const { user } = useAuth();
   const canEdit = canEditJobs(user?.role);
   const canDelete = canDeleteJobs(user?.role);
-  const [jobs, setJobs] = useState([]);
+  // Coming back to this page shows the last list at once (see utils/listCache.js); fetchJobs below refreshes it as always.
+  const [jobs, setJobs] = useState(() => peek("jobs") ?? []);
   const [filtered, setFiltered] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => peek("jobs") === undefined);
   const [statusFilter, setStatusFilter] = useState("all");
   const [vehicleStatusFilter, setVehicleStatusFilter] = useState("all");
   // "all" (default) | "daily" | "weekly" | "monthly" — scopes to created_at, the same
@@ -87,9 +89,11 @@ export default function JobCards() {
   const fetchJobsSeq = useRef(0);
   const fetchJobs = useCallback(async () => {
     const seq = ++fetchJobsSeq.current;
+    const ticket = cacheTicket();
     try {
       const r = await api.get("/jobs");
       if (seq !== fetchJobsSeq.current) return;
+      remember("jobs", r.data, ticket);
       setJobs(r.data);
     } catch { if (seq === fetchJobsSeq.current) toast.error("Failed to load jobs"); }
     finally { if (seq === fetchJobsSeq.current) setLoading(false); }

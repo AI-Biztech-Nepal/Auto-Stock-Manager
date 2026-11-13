@@ -5,6 +5,7 @@ import useMediaQuery from "../hooks/useMediaQuery";
 import { Plus, Search, Trash2, Filter, X, EyeOff, Package, Wallet, DollarSign, Lock, Moon, Sparkles, Store, User, Wrench, Clock, CheckCircle2, AlertTriangle, ImageOff, ChevronDown } from "lucide-react";
 import { toast } from "sonner";
 import api, { postWithRetry } from "../utils/api";
+import { peek, remember, cacheTicket } from "../utils/listCache";
 import { EMPTY_DOC_PHOTOS, flattenStagedDocs, revokeStagedDocs, uploadStagedDocs } from "../utils/stagedDocs";
 import { formatNPR, getAgingStyle, getStatusStyle, getTerminationStyle, isSanakhatOverdue, sanakhatPendingDays, sanakhatDaysLeft, SANAKHAT_CYCLE_DAYS, SANAKHAT_WARN_DAYS, BRANDS, VEHICLE_STATUS_OPTIONS, formatOwnership } from "../utils/helpers";
 import { AddVehicleModal } from "./AddVehicleModal";
@@ -69,9 +70,10 @@ export default function Inventory() {
   const hideFinancials = isFrontDesk || hidePricing;
   const canManageStock = hasFullVehicleAccess(user?.role);
   const [searchParams, setSearchParams] = useSearchParams();
-  const [vehicles, setVehicles] = useState([]);
+  // Coming back to this page shows the last list at once (see utils/listCache.js); fetchVehicles below refreshes it as always.
+  const [vehicles, setVehicles] = useState(() => newestFirst([...(peek("vehicles:unsold") ?? []), ...(peek("vehicles:sold") ?? [])]));
   const [filtered, setFiltered] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => peek("vehicles:unsold") === undefined);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState(searchParams.get("aging") ? "available" : "all");
   const [brandFilter, setBrandFilter] = useState("all");
@@ -308,22 +310,26 @@ export default function Inventory() {
     // The grid only shows unsold vehicles, so those load first and the page appears as soon as they arrive. Sold vehicles
     // (about half the list, and the slower half) only feed the duplicate-plate banner and the "this one was sold" hint
     // when searching, so they follow in the background and are merged in when they land. Both requests start together.
+    const ticket = cacheTicket();
     const soldRequest = api.get("/vehicles", { params: { status: "sold" } });
     soldRequest.catch(() => {});  // handled below; this only keeps a failure from being reported twice
     try {
       const r = await api.get("/vehicles", { params: { exclude_status: "sold" } });
+      remember("vehicles:unsold", r.data, ticket);
       setVehicles(prev => newestFirst([...r.data, ...prev.filter(v => v.status === "sold")]));  // keeps the sold ones already loaded
       // One-time migration: "hidden" was renamed to "unlisted" — silently carry over any leftover legacy records.
       const legacyHidden = r.data.filter(v => v.status === "hidden");
       if (legacyHidden.length > 0) {
         await Promise.allSettled(legacyHidden.map(v => api.put(`/vehicles/${v.id}`, { status: "unlisted" })));
         const r2 = await api.get("/vehicles", { params: { exclude_status: "sold" } });
+        remember("vehicles:unsold", r2.data);
         setVehicles(prev => newestFirst([...r2.data, ...prev.filter(v => v.status === "sold")]));
       }
     } catch { toast.error("Failed to load vehicles"); }
     finally { setLoading(false); }
     try {
       const rs = await soldRequest;
+      remember("vehicles:sold", rs.data, ticket);
       setVehicles(prev => newestFirst([...prev.filter(v => v.status !== "sold"), ...rs.data]));
     } catch { /* the sold half only adds the duplicate warning and search hint; the page works without it */ }
   }, []);

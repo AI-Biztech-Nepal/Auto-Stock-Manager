@@ -12,6 +12,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ShieldCheck, ShieldOff, Search, Phone, ChevronDown, ChevronRight, X, Clock, RotateCcw, CalendarClock } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
+import { peek, remember, cacheTicket } from "../utils/listCache";
 import { formatWarrantyLength } from "../utils/helpers";
 import HoverADDate from "../components/HoverADDate";
 import { serviceLabel } from "../components/WarrantyBadge";
@@ -48,9 +49,10 @@ export default function Warranty() {
   const { user } = useAuth();
   const canVoid = canVoidWarranty(user?.role);
   const canManage = canManageWarranty(user?.role);
-  const [rows, setRows] = useState([]);
-  const [defaultDays, setDefaultDays] = useState(182);
-  const [loading, setLoading] = useState(true);
+  // Coming back to this page shows the last list at once (see utils/listCache.js); load below refreshes it as always.
+  const [rows, setRows] = useState(() => peek("warranties")?.warranties ?? []);
+  const [defaultDays, setDefaultDays] = useState(() => peek("warranties")?.default_days ?? 182);
+  const [loading, setLoading] = useState(() => peek("warranties") === undefined);
   const [filter, setFilter] = useState("active");
   const [search, setSearch] = useState("");
   const [expanded, setExpanded] = useState(() => new Set());
@@ -60,10 +62,10 @@ export default function Warranty() {
   const [lengthDays, setLengthDays] = useState(null);
   const [busy, setBusy] = useState(false);
 
-  const load = () => api.get("/warranties")
-    .then(r => { setRows(r.data.warranties); setDefaultDays(r.data.default_days); })
+  const load = () => { const ticket = cacheTicket(); return api.get("/warranties")
+    .then(r => { remember("warranties", r.data, ticket); setRows(r.data.warranties); setDefaultDays(r.data.default_days); })
     .catch(err => toast.error(getErrMsg(err)))
-    .finally(() => setLoading(false));
+    .finally(() => setLoading(false)); };
 
   useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps -- load once on mount
 

@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { Plus, Phone, MapPin, Star, Trash2, Edit, ChevronDown, Undo2, Users, CalendarDays } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
+import { peek, remember, cacheTicket } from "../utils/listCache";
 import { formatNPR } from "../utils/helpers";
 import { getTodayAD } from "../utils/nepali-date";
 import HoverADDate from "../components/HoverADDate";
@@ -105,8 +106,9 @@ function CustomerPurchases({ customer, onOpenSale }) {
 
 export default function Customers() {
   const navigate = useNavigate();
-  const [customers, setCustomers] = useState([]);
-  const [loading, setLoading] = useState(true);
+  // Coming back to this page shows the last list at once (see utils/listCache.js); fetchCustomers below refreshes it as always.
+  const [customers, setCustomers] = useState(() => peek("customers") ?? []);
+  const [loading, setLoading] = useState(() => peek("customers") === undefined);
   const [search, setSearch] = useState("");
   const [openId, setOpenId] = useState(null);
   const [showModal, setShowModal] = useState(false);
@@ -116,7 +118,8 @@ export default function Customers() {
   const [saving, setSaving] = useState(false);
 
   const fetchCustomers = useCallback(async () => {
-    try { const r = await api.get("/customers"); setCustomers(r.data); }
+    const ticket = cacheTicket();
+    try { const r = await api.get("/customers"); remember("customers", r.data, ticket); setCustomers(r.data); }
     catch { toast.error("Failed to load customers"); } finally { setLoading(false); }
   }, []);
 

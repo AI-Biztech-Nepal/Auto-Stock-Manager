@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
 import { AlertTriangle, TrendingUp, Package, Users, Wrench, DollarSign, ShoppingCart, CalendarDays, TrendingDown, Banknote, Sparkles } from "lucide-react";
 import api from "../utils/api";
+import { peek, remember, cacheTicket } from "../utils/listCache";
 import { formatNPR } from "../utils/helpers";
 import HoverADDate from "../components/HoverADDate";
 import DateRangeFilter, { resolveDateFilter } from "../components/DateRangeFilter";
@@ -524,8 +525,9 @@ const PERIOD_STORAGE_KEY = "dashboard_date_filter";
 
 export default function Dashboard() {
   const { user } = useAuth();
-  const [stats, setStats] = useState(null);
-  const [loading, setLoading] = useState(true);
+  // Coming back to the Dashboard shows the last figures at once (see utils/listCache.js); they are refreshed below as always.
+  const [stats, setStats] = useState(() => peek("dashboard:stats") ?? null);
+  const [loading, setLoading] = useState(() => peek("dashboard:stats") === undefined);
   // Global date filter for every period-scoped figure on the page. Persisted so the
   // choice survives navigation and reloads; defaults to "Today". `custom` holds the
   // {start, end} AD range when key === "custom".
@@ -550,8 +552,9 @@ export default function Dashboard() {
   };
 
   useEffect(() => {
+    const ticket = cacheTicket();
     api.get("/reports/dashboard")
-      .then(r => setStats(r.data))
+      .then(r => { remember("dashboard:stats", r.data, ticket); setStats(r.data); })
       .catch(console.error)
       .finally(() => setLoading(false));
   }, []);

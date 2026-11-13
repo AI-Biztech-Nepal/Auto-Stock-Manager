@@ -6527,6 +6527,7 @@ async def _run_startup_tasks():
     # those caps existed, or from a run that got interrupted last time. See
     # _compress_oversized_photos / _compress_oversized_documents.
     asyncio.create_task(_compress_oversized_photos())
+    _spawn(_warm_thumbnails())
     asyncio.create_task(_compress_oversized_documents())
 
 _cors_origins_raw = os.environ.get('CORS_ORIGINS')
@@ -6663,7 +6664,13 @@ def _evict_photo_cache(photo_id: str):
 # memory and in a folder on this server, so it survives restarts. Only the widths listed are served; any other `w` gets the
 # normal full-size photo, and if a small version cannot be made the full photo is sent. The full-size URL is unchanged.
 THUMB_WIDTHS = (240, 480)
-THUMB_DIR = Path(os.environ.get("THUMB_CACHE_DIR") or (Path(tempfile.gettempdir()) / "asm-thumbs"))
+def _default_thumb_dir() -> Path:
+    try:
+        return Path.home() / ".asm-thumbs"   # kept across restarts and reboots (the system temp folder is cleared now and then)
+    except RuntimeError:                      # no home folder for the user the app runs as
+        return Path(tempfile.gettempdir()) / "asm-thumbs"
+
+THUMB_DIR = Path(os.environ.get("THUMB_CACHE_DIR") or _default_thumb_dir())
 THUMB_MEM_MAX = 60 * 1024 * 1024
 _THUMBS: "OrderedDict[tuple, bytes]" = OrderedDict()
 _THUMBS_SIZE = 0
@@ -6689,6 +6696,82 @@ def _remember_thumb(key: tuple, data: bytes):
         _, old = _THUMBS.popitem(last=False)
         _THUMBS_SIZE -= len(old)
 
+async def _store_thumb(photo_id: str, width: int, data: bytes, keep_in_memory: bool = True) -> None:
+    """Saves a small version in THUMB_DIR (and, for ones likely to be asked for soon, in memory). Never raises."""
+    try:
+        THUMB_DIR.mkdir(parents=True, exist_ok=True)
+        path = THUMB_DIR / f"{photo_id}-{width}.jpg"
+        tmp = path.with_suffix(".tmp")
+        await asyncio.to_thread(tmp.write_bytes, data)
+        os.replace(tmp, path)
+    except OSError:
+        pass  # a read-only disk only means it is made again next time
+    if keep_in_memory:
+        _remember_thumb((photo_id, width), data)
+
+async def _make_and_store_thumbs(photo_id: str, raw: bytes, keep_in_memory: bool = True) -> bool:
+    """Makes and saves every small version of a photo that is not saved yet. False if the image could not be read."""
+    for width in THUMB_WIDTHS:
+        if (THUMB_DIR / f"{photo_id}-{width}.jpg").exists():
+            continue
+        try:
+            data = await _run_isolated(_make_thumb, raw, width)
+        except Exception:  # noqa: BLE001 - an unreadable or unusual image: it is sent as the original when asked for
+            logger.warning("Could not make a small version of photo %s", photo_id, exc_info=True)
+            return False
+        await _store_thumb(photo_id, width, data, keep_in_memory)
+    return True
+
+_bg_tasks: set = set()
+
+def _spawn(coro) -> None:
+    """Runs a coroutine in the background, keeping a reference so it is not dropped half-way."""
+    task = asyncio.get_running_loop().create_task(coro)
+    _bg_tasks.add(task)
+    task.add_done_callback(_bg_tasks.discard)
+
+_thumb_warmup_started = False
+
+async def _warm_thumbnails():
+    """Makes the small versions of every photo that does not have them yet, one photo at a time in the background, newest photos
+    first (the vehicles staff look at most), so no one waits for them the first time a vehicle is opened. Skips what is already
+    saved, so after the first time it only finds new photos. THUMB_WARMUP=off turns it off; it stays off for a test schema."""
+    global _thumb_warmup_started
+    mode = os.environ.get("THUMB_WARMUP", "auto").lower()
+    if _thumb_warmup_started or mode == "off" or (mode == "auto" and os.environ.get("PG_SCHEMA")):
+        return
+    _thumb_warmup_started = True
+    await asyncio.sleep(float(os.environ.get("THUMB_WARMUP_DELAY", "300")))   # let the app settle after a start
+    try:
+        THUMB_DIR.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        logger.info("Small photo versions are not pre-made: %s cannot be written to", THUMB_DIR)
+        return
+    try:
+        photos = await db.vehicle_photos.find({}, {"_id": 0, "id": 1, "storage_path": 1}).sort("uploaded_at", -1).to_list(100000)
+        todo = [p for p in photos if not all((THUMB_DIR / f"{p['id']}-{w}.jpg").exists() for w in THUMB_WIDTHS)]
+        if not todo:
+            return
+        logger.info("Making small versions of %d photo(s) in the background...", len(todo))
+        made = 0
+        for p in todo:
+            try:
+                if p.get("storage_path") and media_storage.enabled():
+                    raw = await media_storage.download(media_storage.PHOTO_BUCKET, p["storage_path"])
+                else:
+                    row = await db.vehicle_photos.find_one({"id": p["id"]}, {"_id": 0, "data": 1})
+                    if not row or not row.get("data"):
+                        continue
+                    raw = base64.b64decode(row["data"])
+                if await _make_and_store_thumbs(p["id"], raw, keep_in_memory=False):
+                    made += 1
+            except Exception:  # noqa: BLE001 - one bad photo must not stop the rest
+                logger.warning("Skipped photo %s while making small versions", p["id"], exc_info=True)
+            await asyncio.sleep(0.05)   # a breather, so this never competes with people using the app
+        logger.info("Small photo versions ready (%d made).", made)
+    except Exception:  # noqa: BLE001
+        logger.warning("Making small photo versions stopped early", exc_info=True)
+
 async def _get_thumb_bytes(photo_id: str, width: int) -> Optional[bytes]:
     """The small version, or None if one cannot be made (the caller then sends the full photo)."""
     if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", photo_id):
@@ -6708,13 +6791,7 @@ async def _get_thumb_bytes(photo_id: str, width: int) -> Optional[bytes]:
         except Exception:  # noqa: BLE001 - an unreadable or unusual image: just send the original
             logger.warning("Could not make a small version of photo %s", photo_id, exc_info=True)
             return None
-        try:
-            THUMB_DIR.mkdir(parents=True, exist_ok=True)
-            tmp = path.with_suffix(".tmp")
-            await asyncio.to_thread(tmp.write_bytes, data)
-            os.replace(tmp, path)
-        except OSError:
-            pass  # a read-only disk only means it is made again next time
+        await _store_thumb(photo_id, width, data, keep_in_memory=False)
     _remember_thumb(key, data)
     return data
 
@@ -6887,6 +6964,7 @@ async def upload_vehicle_photo(vid: str, file: UploadFile = File(...), cu: dict 
         except Exception:
             logger.warning(f"Supabase upload failed for a photo of vehicle {vid}, keeping it in the database", exc_info=True)
     await db.vehicle_photos.insert_one(photo)
+    _spawn(_make_and_store_thumbs(photo_id, content))   # the small versions, ready before anyone opens the vehicle
     asyncio.create_task(_notify_storefront())
     return _photo_out(photo)
 
