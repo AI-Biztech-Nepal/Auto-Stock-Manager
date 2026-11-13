@@ -3716,24 +3716,31 @@ async def delete_job(jid: str, cu: dict = Depends(require("jobs", "delete"))):
 async def get_warranties(cu: dict = Depends(require("warranty", "view"))):
     """Every sold vehicle with its warranty window, the buyer's contact, and its in-shop
     warranty service history (warranty job cards), so front desk can follow up."""
-    default_days = await _default_warranty_days()
-    vehicles = await db.vehicles.find(
-        {"status": "sold"},
-        {"_id": 0, "id": 1, "brand": 1, "model": 1, "variant": 1, "year": 1, "registration_number": 1,
-         "status": 1, "sold_date": 1, "customer_id": 1, "warranty_days": 1, "warranty_void": 1,
-         "warranty_void_reason": 1, "warranty_voided_at": 1, "warranty_voided_by": 1},
-    ).to_list(5000)
+    # Independent reads are asked at the same time (the database is in another city): the company's warranty length with the
+    # sold vehicles, then the buyers with the job cards.
+    default_days, vehicles = await asyncio.gather(
+        _default_warranty_days(),
+        db.vehicles.find(
+            {"status": "sold"},
+            {"_id": 0, "id": 1, "brand": 1, "model": 1, "variant": 1, "year": 1, "registration_number": 1,
+             "status": 1, "sold_date": 1, "customer_id": 1, "warranty_days": 1, "warranty_void": 1,
+             "warranty_void_reason": 1, "warranty_voided_at": 1, "warranty_voided_by": 1},
+        ).to_list(5000),
+    )
     if not vehicles:
         return {"default_days": default_days, "warranties": []}
     ids = [v["id"] for v in vehicles]
     cust_ids = list({v["customer_id"] for v in vehicles if v.get("customer_id")})
-    customers = {c["id"]: c for c in (await db.customers.find(
-        {"id": {"$in": cust_ids}}, {"_id": 0, "id": 1, "name": 1, "contact_number": 1}).to_list(5000) if cust_ids else [])}
-    jobs_by_vehicle: dict = {}
-    for j in await db.job_cards.find(
+    customer_rows, job_rows = await asyncio.gather(
+        db.customers.find({"id": {"$in": cust_ids}}, {"_id": 0, "id": 1, "name": 1, "contact_number": 1}).to_list(5000) if cust_ids else _no_rows(),
+        db.job_cards.find(
             {"vehicle_id": {"$in": ids}},
             {"_id": 0, "id": 1, "vehicle_id": 1, "job_number": 1, "job_date": 1, "created_at": 1, "status": 1,
-             "work_description": 1, "is_warranty": 1, "after_sale": 1}).to_list(20000):
+             "work_description": 1, "is_warranty": 1, "after_sale": 1}).to_list(20000),
+    )
+    customers = {c["id"]: c for c in customer_rows}
+    jobs_by_vehicle: dict = {}
+    for j in job_rows:
         jobs_by_vehicle.setdefault(j["vehicle_id"], []).append(j)
     out = []
     for v in vehicles:
@@ -4663,29 +4670,32 @@ async def delete_partner(pid: str, cu: dict = Depends(admin_only)):
 # ── VENDORS ───────────────────────────────────────────────────────────
 @api_router.get("/vendors")
 async def get_vendors(cu: dict = Depends(require("vendors", "view"))):
-    vendors = await db.vendors.find({}, {"_id": 0}).to_list(200)
+    # The vendors, their vehicles, parts and payments are all read at the same time (the database is in another city). The
+    # others are read for every vendor and sorted out below by vendor id, which gives the same totals as asking for the listed
+    # vendors only; and only the columns the totals use are read, not whole rows.
+    vendors, all_vehicles, all_parts, all_payments = await asyncio.gather(
+        db.vendors.find({}, {"_id": 0}).to_list(200),
+        db.vehicles.find({"$or": [{"vendor_id": {"$exists": True}}, {"linked_contact_type": "vendor"}]},
+                         {"_id": 0, "vendor_id": 1, "linked_contact_type": 1, "linked_contact_id": 1, "purchase_price": 1}).to_list(20000),
+        db.spare_parts.find({"vendor_id": {"$exists": True}}, {"_id": 0, "id": 1, "vendor_id": 1, "quantity": 1, "unit_cost": 1}).to_list(20000),
+        db.vendor_payments.find({}, {"_id": 0, "vendor_id": 1, "amount": 1}).to_list(20000),
+    )
     vendor_ids = [v["id"] for v in vendors]
+    listed = set(vendor_ids)
 
     vehicles_by_vendor, parts_by_vendor, payments_by_vendor = {}, {}, {}
     if vendor_ids:
-        all_vehicles, all_parts, all_payments = await asyncio.gather(  # independent reads, asked at the same time
-            db.vehicles.find(
-                {"$or": [{"vendor_id": {"$in": vendor_ids}}, {"linked_contact_type": "vendor", "linked_contact_id": {"$in": vendor_ids}}]},
-                {"_id": 0},
-            ).to_list(20000),
-            db.spare_parts.find({"vendor_id": {"$in": vendor_ids}}, {"_id": 0}).to_list(20000),
-            db.vendor_payments.find({"vendor_id": {"$in": vendor_ids}}, {"_id": 0}).to_list(20000),
-        )
         for vh in all_vehicles:
             vid = vh.get("vendor_id") or (vh.get("linked_contact_id") if vh.get("linked_contact_type") == "vendor" else None)
-            if vid: vehicles_by_vendor.setdefault(vid, []).append(vh)
+            if vid in listed: vehicles_by_vendor.setdefault(vid, []).append(vh)
 
+        all_parts = [p for p in all_parts if p["vendor_id"] in listed]
         await _attach_bought_qty(all_parts)
         for p in all_parts:
             parts_by_vendor.setdefault(p["vendor_id"], []).append(p)
 
         for p in all_payments:
-            payments_by_vendor.setdefault(p["vendor_id"], []).append(p)
+            if p["vendor_id"] in listed: payments_by_vendor.setdefault(p["vendor_id"], []).append(p)
 
     for v in vendors:
         vehicles = vehicles_by_vendor.get(v["id"], [])
@@ -7224,8 +7234,10 @@ async def storage_usage(cu: dict = Depends(admin_only)):
     the only two collections holding binary file data (base64 in Mongo, not disk).
     `bytes` here is the decoded file size recorded at upload time; the base64 text
     actually stored is ~33% larger than that on top."""
-    photos = await db.vehicle_photos.find({}, {"_id": 0, "vehicle_id": 1, "size": 1}).to_list(100000)
-    docs = await db.legal_documents.find({}, {"_id": 0, "vehicle_id": 1, "size": 1}).to_list(100000)
+    photos, docs = await asyncio.gather(  # independent reads, asked at the same time
+        db.vehicle_photos.find({}, {"_id": 0, "vehicle_id": 1, "size": 1}).to_list(100000),
+        db.legal_documents.find({}, {"_id": 0, "vehicle_id": 1, "size": 1}).to_list(100000),
+    )
     photos_bytes = sum(p.get("size", 0) or 0 for p in photos)
     docs_bytes = sum(d.get("size", 0) or 0 for d in docs)
 
@@ -7236,8 +7248,11 @@ async def storage_usage(cu: dict = Depends(admin_only)):
 
     top = sorted(by_vehicle.items(), key=lambda kv: kv[1], reverse=True)[:10]
     top_vehicles = []
+    # the ten vehicles' names in one read (one read for each of them, one after another, before)
+    named = {v["id"]: v for v in await db.vehicles.find({"id": {"$in": [vid for vid, _ in top if vid]}},
+                                                         {"_id": 0, "id": 1, "brand": 1, "model": 1, "registration_number": 1}).to_list(50)}
     for vid, size in top:
-        v = await db.vehicles.find_one({"id": vid}, {"_id": 0, "brand": 1, "model": 1, "registration_number": 1})
+        v = named.get(vid)
         label = f"{v['brand']} {v['model']}" if v else "Unknown vehicle"
         if v and v.get("registration_number"): label += f" ({v['registration_number']})"
         top_vehicles.append({"vehicle_id": vid, "label": label, "bytes": size})

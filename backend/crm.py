@@ -15,6 +15,7 @@ notes) and crm_followups (what to do next, and when).
 The analysis is plain functions over lists of rows, so it can be checked without a database; the endpoints only
 fetch rows and call them (see register() at the bottom).
 """
+import asyncio
 import csv
 import io
 import re
@@ -711,15 +712,18 @@ def register(api_router, database, admin_only, sale_revenue):
         summary cards and the follow-up panel."""
         now = datetime.now(timezone.utc)
         today = now.astimezone(NPT).date()
-        customers = await db.customers.find({}, {"_id": 0, "id": 1, "name": 1, "contact_number": 1, "address": 1, "source": 1, "source_note": 1, "referred_by_id": 1,
-                                                 "created_at": 1, "lead_status": 1, "interested_vehicle": 1, "assigned_to_id": 1, "assigned_to_name": 1, "notes": 1}).sort("created_at", -1).to_list(50000)
-        sales = await db.sales.find({}, {"_id": 0, "customer_id": 1, "vehicle_id": 1, "returned": 1, "retained_amount": 1, "sale_price": 1,
-                                         "sale_date": 1, "created_at": 1, "sold_by_id": 1, "sold_by_name": 1}).to_list(50000)
-        bookings = await db.bookings.find({"status": "active"}, {"_id": 0, "customer_id": 1, "booking_amount": 1, "status": 1}).to_list(50000)
-        interactions = await db.crm_interactions.find({}, {"_id": 0, "customer_id": 1, "occurred_at": 1}).to_list(200000)
-        open_followups = await db.crm_followups.find({"status": "pending"}, {"_id": 0}).to_list(50000)
         lo, _ = day_bounds(today)
-        done_today = await db.crm_followups.find({"status": "done", "completed_at": {"$gte": lo.isoformat()}}, {"_id": 0}).to_list(5000)
+        # Six independent reads, asked at the same time (the database is in another city; one after another this waited for each).
+        customers, sales, bookings, interactions, open_followups, done_today = await asyncio.gather(
+            db.customers.find({}, {"_id": 0, "id": 1, "name": 1, "contact_number": 1, "address": 1, "source": 1, "source_note": 1, "referred_by_id": 1,
+                                   "created_at": 1, "lead_status": 1, "interested_vehicle": 1, "assigned_to_id": 1, "assigned_to_name": 1, "notes": 1}).sort("created_at", -1).to_list(50000),
+            db.sales.find({}, {"_id": 0, "customer_id": 1, "vehicle_id": 1, "returned": 1, "retained_amount": 1, "sale_price": 1,
+                               "sale_date": 1, "created_at": 1, "sold_by_id": 1, "sold_by_name": 1}).to_list(50000),
+            db.bookings.find({"status": "active"}, {"_id": 0, "customer_id": 1, "booking_amount": 1, "status": 1}).to_list(50000),
+            db.crm_interactions.find({}, {"_id": 0, "customer_id": 1, "occurred_at": 1}).to_list(200000),
+            db.crm_followups.find({"status": "pending"}, {"_id": 0}).to_list(50000),
+            db.crm_followups.find({"status": "done", "completed_at": {"$gte": lo.isoformat()}}, {"_id": 0}).to_list(5000),
+        )
         latest_ids = {}
         for s in sales:
             cur = latest_ids.get(s.get("customer_id"))
