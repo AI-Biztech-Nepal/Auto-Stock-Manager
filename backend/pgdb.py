@@ -120,10 +120,13 @@ class PostgresDatabase:
                     if self.schema:
                         kwargs["options"] = f"-c search_path={self.schema},public"
                     pool = AsyncConnectionPool(
-                        self.dsn, min_size=1, max_size=int(os.environ.get("PG_POOL_MAX", "5")), kwargs=kwargs,
+                        # Opening a connection to a database in another city costs about a second, so keep several open and warm
+                        # (a page asks for many things at once) and never let them idle away: a cold start is a second per connection.
+                        self.dsn, min_size=int(os.environ.get("PG_POOL_MIN", "4")), max_size=int(os.environ.get("PG_POOL_MAX", "8")), kwargs=kwargs,
                         configure=_configure, open=False,
                         check=AsyncConnectionPool.check_connection,  # drop a connection the server closed while idle
-                        max_lifetime=int(os.environ.get("PG_POOL_RECYCLE", "600")),
+                        max_lifetime=int(os.environ.get("PG_POOL_RECYCLE", "3600")),
+                        max_idle=int(os.environ.get("PG_POOL_IDLE", "3600")),
                     )
                     try:
                         await pool.open(wait=True, timeout=15)
@@ -131,7 +134,21 @@ class PostgresDatabase:
                         await pool.close()  # don't leave a half-open pool retrying in the background
                         raise
                     self._pool = pool
+                    self._keepalive_task = asyncio.create_task(self._keepalive(pool))
         return self._pool
+
+    async def _keepalive(self, pool):
+        """A cheap question on every warm connection every few minutes, so none is closed for being idle."""
+        every = int(os.environ.get("PG_KEEPALIVE", "240"))
+        async def ping():
+            async with pool.connection() as conn:
+                await conn.execute("select 1")
+        while True:
+            await asyncio.sleep(every)
+            try:
+                await asyncio.gather(*[ping() for _ in range(pool.min_size)], return_exceptions=True)
+            except Exception:  # never let a failed ping stop the loop
+                pass
 
     async def execute_raw(self, sql: str):
         """One literal SQL statement (schema changes only, no user data)."""
@@ -154,6 +171,9 @@ class PostgresDatabase:
 
     def close(self):
         """Returns a coroutine (server.py's shutdown awaits it)."""
+        task = getattr(self, "_keepalive_task", None)
+        if task is not None:
+            task.cancel()
         if self._pool is not None:
             return self._pool.close()
 

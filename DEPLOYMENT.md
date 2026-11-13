@@ -307,6 +307,7 @@ Everyone signs in once more on the new address, because the browser keeps the lo
 |---|---|---|
 | `DB_BACKEND` | ❌ | `mongo` (default), `mysql` or `postgres` (Supabase, see [docs/SUPABASE_MIGRATION.md](docs/SUPABASE_MIGRATION.md)) |
 | `SUPABASE_DB_URL` | ✅ if `DB_BACKEND=postgres` | Supabase → Connect → connection string (Session pooler URI), with your database password filled in |
+| `PG_POOL_MIN` / `PG_POOL_MAX` | ❌ | Supabase connections kept open and warm (default 4) and the most allowed (default 8). A connection to a database in another city takes about a second to open, so a few are kept ready. `PG_POOL_IDLE`, `PG_POOL_RECYCLE` (seconds, default 3600) and `PG_KEEPALIVE` (seconds between pings, default 240) tune how long they stay. |
 | `MONGO_URL` | ✅ if `DB_BACKEND=mongo` | MongoDB Atlas connection string |
 | `DB_NAME` | ✅ | `hamro_gng_auto` |
 | `MYSQL_HOST` / `MYSQL_PORT` / `MYSQL_USER` / `MYSQL_PASSWORD` / `MYSQL_DB` | ✅ if `DB_BACKEND=mysql` | MySQL connection details |
