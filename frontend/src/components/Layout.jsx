@@ -83,7 +83,8 @@ export default function Layout() {
 
   useEffect(() => {
     if (!user || !canSeeInventory) return;
-    const load = () => { api.get("/vehicles").then(r => setNotifVehicles(r.data)).catch(() => {}); };
+    // Not the whole vehicle list (about 1 MB of prices and costs): the bell only needs name, plate and photo count.
+    const load = () => { api.get("/vehicles/attention").then(r => setNotifVehicles(r.data)).catch(() => {}); };
     load();
     const id = setInterval(load, 5 * 60 * 1000); // refresh every 5 min — this isn't chat, no need to poll faster
     return () => clearInterval(id);

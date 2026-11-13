@@ -2305,6 +2305,27 @@ async def get_vehicles(status: Optional[str] = None, brand: Optional[str] = None
                 _attach_service_history(v, jobs_by_vehicle.get(v["id"], []), default_days)
     return [_hide_financials_for_role(enrich_with_expenses(v, exps_by_vehicle.get(v["id"], []), jobs_by_vehicle.get(v["id"], [])), role) for v in vehicles]
 
+@api_router.get("/vehicles/attention")
+async def get_vehicles_attention(cu: dict = Depends(require("vehicles", "view"))):
+    """What the sidebar bell needs from the vehicle list: each unsold vehicle's name, plate and how many photos it has, so the
+    app can flag a missing plate number or too few photos. The bell asks on every page load and every few minutes, and the
+    full list (/vehicles) is about 1 MB of prices, expenses and job cards that the bell never shows. Same vehicles, order and
+    cap as /vehicles; the app decides what counts as "missing"."""
+    vehicles, photo_rows = await asyncio.gather(  # independent, asked at the same time
+        db.vehicles.find({}, {"_id": 0, "id": 1, "brand": 1, "model": 1, "status": 1, "registration_number": 1}).sort("created_at", -1).to_list(1000),
+        db.vehicle_photos.find({}, {"_id": 0, "vehicle_id": 1}).to_list(100000),
+    )
+    photos_per_vehicle: dict = {}
+    for p in photo_rows:
+        photos_per_vehicle[p["vehicle_id"]] = photos_per_vehicle.get(p["vehicle_id"], 0) + 1
+    out = []
+    for v in vehicles:
+        if v.get("status") in ("sold", "scrap"):
+            continue
+        n = photos_per_vehicle.get(v["id"], 0)
+        out.append({**v, "photo_count": n, "has_photo": n > 0})
+    return out
+
 # A vehicle sold more than 30 days ago that comes back is entered as brand-new stock under
 # its same plate — its old sold record no longer counts as a duplicate anywhere.
 def _sold_over_30_days(v: dict) -> bool:
