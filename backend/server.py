@@ -2228,11 +2228,15 @@ async def platform_delete_company(company_id: str, cu: dict = Depends(platform_o
 
 # ── VEHICLES ──────────────────────────────────────────────────────────
 @api_router.get("/vehicles")
-async def get_vehicles(status: Optional[str] = None, brand: Optional[str] = None, cu: dict = Depends(require("vehicles", "view"))):
+async def get_vehicles(status: Optional[str] = None, brand: Optional[str] = None, exclude_status: Optional[str] = None, cu: dict = Depends(require("vehicles", "view"))):
     q = {}
     if status and status != "all":
         statuses = [s.strip() for s in status.split(",") if s.strip()]
         q["status"] = {"$in": statuses} if len(statuses) > 1 else statuses[0]
+    elif exclude_status:
+        # Everything except one status (a vehicle with no status counts too). With `status=<that one>` it splits the
+        # list into two exact halves, so a screen can load the half it shows first and the rest afterwards.
+        q["status"] = {"$ne": exclude_status.strip()}
     if brand and brand != "all": q["brand"] = brand
     vehicles = await db.vehicles.find(q, {"_id": 0}).sort("created_at", -1).to_list(1000)
     if not vehicles:

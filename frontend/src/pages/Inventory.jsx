@@ -43,6 +43,12 @@ const sortStock = (a, b) => {
   return (a.aging?.days ?? 0) - (b.aging?.days ?? 0);
 };
 
+// The vehicle list arrives in two halves (see fetchVehicles); put them back together newest first, as the server sends one list.
+const newestFirst = (list) => list.sort((a, b) => {
+  const ca = a.created_at || "", cb = b.created_at || "";
+  return ca < cb ? 1 : ca > cb ? -1 : 0;
+});
+
 const EMPTY = {
   brand: "", model: "", year: new Date().getFullYear(), engine_cc: 125, fuel_type: "Petrol", vehicle_type: "bike",
   ownership_number: "", purchase_price: "", purchase_date: "", purchase_source: "", purchase_from: "",
@@ -299,18 +305,27 @@ export default function Inventory() {
   };
 
   const fetchVehicles = useCallback(async () => {
+    // The grid only shows unsold vehicles, so those load first and the page appears as soon as they arrive. Sold vehicles
+    // (about half the list, and the slower half) only feed the duplicate-plate banner and the "this one was sold" hint
+    // when searching, so they follow in the background and are merged in when they land. Both requests start together.
+    const soldRequest = api.get("/vehicles", { params: { status: "sold" } });
+    soldRequest.catch(() => {});  // handled below; this only keeps a failure from being reported twice
     try {
-      const r = await api.get("/vehicles");
-      setVehicles(r.data);
+      const r = await api.get("/vehicles", { params: { exclude_status: "sold" } });
+      setVehicles(prev => newestFirst([...r.data, ...prev.filter(v => v.status === "sold")]));  // keeps the sold ones already loaded
       // One-time migration: "hidden" was renamed to "unlisted" — silently carry over any leftover legacy records.
       const legacyHidden = r.data.filter(v => v.status === "hidden");
       if (legacyHidden.length > 0) {
         await Promise.allSettled(legacyHidden.map(v => api.put(`/vehicles/${v.id}`, { status: "unlisted" })));
-        const r2 = await api.get("/vehicles");
-        setVehicles(r2.data);
+        const r2 = await api.get("/vehicles", { params: { exclude_status: "sold" } });
+        setVehicles(prev => newestFirst([...r2.data, ...prev.filter(v => v.status === "sold")]));
       }
     } catch { toast.error("Failed to load vehicles"); }
     finally { setLoading(false); }
+    try {
+      const rs = await soldRequest;
+      setVehicles(prev => newestFirst([...prev.filter(v => v.status !== "sold"), ...rs.data]));
+    } catch { /* the sold half only adds the duplicate warning and search hint; the page works without it */ }
   }, []);
 
   useEffect(() => { fetchVehicles(); }, [fetchVehicles]);
