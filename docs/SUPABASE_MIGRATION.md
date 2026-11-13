@@ -133,8 +133,28 @@ dated folder (one consistent snapshot, with a manifest of row counts and checksu
 only ever gains files. It reads from Supabase only and deletes nothing, in Supabase or in the backup folder. `verify` checks a backup
 is complete and undamaged. `restore <dated folder>` loads a backup into an EMPTY project (and `restore-files` uploads the saved photos);
 tested: a restore is identical to the original in every row and column. The data folder contains customers' details and password
-hashes: keep it private, not in a synced or shared folder. Run it weekly (or after busy days); a scheduled run is possible with
-Windows Task Scheduler pointing at `backup-supabase.bat`.
+hashes: keep it private, not in a synced or shared folder.
+
+### Automatic backups (nothing to remember)
+
+The app does this by itself (`backend/auto_backup.py`), so `backup-supabase.bat` is only needed for an extra copy on your own PC.
+Every night at 02:30 Nepal time it runs the same tool on the server: all the data as one dated folder (checked afterwards), plus any
+photos and documents not saved yet (the first night downloads them all, about 1 GB, later nights only the new ones). It keeps the
+newest 14 nights and one per week for 8 weeks, and only ever removes old dated data folders, and only after the new backup has been
+checked and found complete. It never deletes anything in Supabase or in the photo folder.
+
+* **Where:** `BACKUP_DIR` (default `~/AutoStockBackups` of the user the app runs as). Photos and documents are copied only while the
+  disk has at least 3 GB free; otherwise the data is still saved and Settings says the photos were skipped.
+* **Nothing to do after a restart:** if the server was off at 02:30, or a try failed, it catches up (a backup older than 26 hours is
+  made soon after the app starts; a failed try is repeated every 30 minutes, up to 4 times).
+* **Check it:** Settings > Automatic Backups (the main company's Admin only) shows the last good backup, the copies kept, the next
+  run and the free disk, and has a **Back up now** button. If no backup has worked for 36 hours, or two tries in a row failed, the
+  sidebar bell shows a red warning.
+* **Switch it off:** `AUTO_BACKUP=off` in `backend/.env`, then restart. `BACKUP_AT=03:15` changes the time.
+* **Restore:** the same as for a manual backup: `python tools/backup_supabase.py restore <the dated folder>` (into an empty project),
+  then `restore-files`. Run it where `backend/.env` points at the new project.
+* **Not covered:** a backup on the same server protects against deleted or damaged data, not against losing the server and Supabase
+  together. For that, copy the backup folder somewhere else now and then (or run `backup-supabase.bat` on your PC occasionally).
 
 ## Photos and the public storefront
 

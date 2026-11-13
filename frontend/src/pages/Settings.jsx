@@ -3,6 +3,7 @@ import { toast } from "sonner";
 import { Fingerprint, UserPlus, Shield, ShieldCheck, Edit, Trash2 } from "lucide-react";
 import WarrantyLengthInput from "../components/WarrantyLengthInput";
 import SpeedReport from "../components/SpeedReport";
+import BackupCard from "../components/BackupCard";
 import { useAuth } from "../context/AuthContext";
 import api from "../utils/api";
 import { isNative, isBiometricAvailable, hasSavedCredentials, saveCredentials, deleteCredentials, verifyIdentity } from "../utils/biometric";
@@ -408,6 +409,9 @@ export default function Settings() {
           )}
         </div>
       )}
+
+      {/* Automatic backups (main company's Admin only; hides itself for anyone else) */}
+      {isAdmin && <BackupCard />}
 
       {/* How fast each screen really is (Admin only) */}
       {isAdmin && <SpeedReport />}

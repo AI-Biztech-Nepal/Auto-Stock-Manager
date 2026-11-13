@@ -26,6 +26,7 @@ from google.genai import errors as genai_errors
 import httpx
 import media_storage
 import perf_stats
+import auto_backup
 import crm
 import assistant_api
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -6245,6 +6246,23 @@ async def admin_performance(cu: dict = Depends(admin_only)):
     """Per screen: how long the app took and how many database questions it asked, next to how long staff devices waited."""
     return perf_stats.snapshot()
 
+# ── AUTOMATIC BACKUPS (see auto_backup.py) ───────────────────────────────
+async def _backup_admin(cu: dict = Depends(admin_only)):
+    """The backup covers the whole database (every company), so only an admin of the main company may see or start it."""
+    if cu.get("company_id") != await _default_company_id():
+        raise HTTPException(403, "Backups are managed by the main company's admin")
+    return cu
+
+@api_router.get("/admin/backups")
+async def backups_status(cu: dict = Depends(_backup_admin)):
+    return {**auto_backup.snapshot(), "available": DB_BACKEND == "postgres"}
+
+@api_router.post("/admin/backups/run")
+async def backups_run_now(cu: dict = Depends(_backup_admin)):
+    if DB_BACKEND != "postgres":
+        raise HTTPException(409, "Backups need the Supabase database, which the app is not using right now")
+    return {"started": auto_backup.start_manual()}   # False: one is already running
+
 # ── STARTUP ───────────────────────────────────────────────────────────
 @app.on_event("startup")
 async def startup():
@@ -6262,6 +6280,8 @@ async def _startup_with_retry():
         try:
             await _run_startup_tasks()
             logger.info("Startup tasks completed")
+            if DB_BACKEND == "postgres":
+                auto_backup.start_scheduler()   # nightly backup of the Supabase data (auto_backup.py); never raises
             return
         except Exception:
             logger.error("Startup tasks failed (database not ready?) — retrying in %ss", delay, exc_info=True)

@@ -1,7 +1,9 @@
 """Backs up Auto Stock Manager's Supabase project to a folder on this PC: all the data, and the photos and documents.
 
 It only READS from Supabase. It never changes or deletes anything there, and it never deletes anything in the backup folder
-(every backup is a new dated folder; the photo folder only ever gains files).
+(every backup is a new dated folder; the photo folder only ever gains files) - except with --prune, which the automatic nightly
+backup uses: after a new backup has been checked and found complete, it removes OLD dated data folders beyond the newest 14 and
+one per week for 8 weeks (--keep-daily / --keep-weekly change that). The photo folder is never pruned.
 
     python tools/backup_supabase.py                  # data (one dated folder) + any photos/documents not yet saved
     python tools/backup_supabase.py --no-files       # data only (fast)
@@ -20,6 +22,8 @@ import gzip
 import hashlib
 import io
 import json
+import re
+import shutil
 import sys
 import time
 import urllib.error
@@ -182,6 +186,36 @@ def backup_files(env, dest, schema=None, max_files=None, workers=8):
     return failed == 0
 
 
+# -- prune ------------------------------------------------------------------
+DATED = re.compile(r"^\d{4}-\d{2}-\d{2}_\d{6}$")
+
+
+def prune(dest, keep_daily=14, keep_weekly=8, now=None):
+    """Removes old dated DATA folders (never the photo folder, never anything Supabase-side). Keeps the newest `keep_daily` complete
+    backups, plus the newest of each older week for `keep_weekly` weeks, and always at least the newest one. A folder that never
+    finished (no manifest) is removed once it is more than 2 hours old. Only folders named like 2026-11-13_023000 are ever touched."""
+    root = Path(dest) / "data"
+    if not root.is_dir():
+        return []
+    now = now or time.time()
+    dated = sorted((p for p in root.iterdir() if p.is_dir() and DATED.match(p.name)), key=lambda p: p.name, reverse=True)   # newest first
+    good = [p for p in dated if (p / "manifest.json").exists()]
+    keep = set(good[:max(keep_daily, 1)])
+    weeks = []
+    for p in good[max(keep_daily, 1):]:
+        wk = datetime.strptime(p.name[:10], "%Y-%m-%d").isocalendar()[:2]
+        if wk not in weeks and len(weeks) < keep_weekly:
+            weeks.append(wk)
+            keep.add(p)
+    removed = []
+    for p in dated:
+        unfinished = p not in good and now - p.stat().st_mtime > 2 * 3600
+        if (p in good and p not in keep) or unfinished:
+            shutil.rmtree(p, ignore_errors=True)
+            removed.append(p.name)
+    return removed
+
+
 # ── verify ──────────────────────────────────────────────────────────────────
 def newest_snapshot(dest):
     snaps = sorted(p for p in (Path(dest) / "data").glob("*") if (p / "manifest.json").exists())
@@ -294,6 +328,9 @@ def main(argv=None):
     ap.add_argument("--to", default=str(DEFAULT_DEST), help="backup folder (default: %(default)s)")
     ap.add_argument("--env", default=str(DEFAULT_ENV))
     ap.add_argument("--no-files", action="store_true")
+    ap.add_argument("--prune", action="store_true", help="after a good backup, remove old dated data folders (see above)")
+    ap.add_argument("--keep-daily", type=int, default=14)
+    ap.add_argument("--keep-weekly", type=int, default=8)
     ap.add_argument("--allow-nonempty", action="store_true")
     ap.add_argument("--schema", help=argparse.SUPPRESS)
     ap.add_argument("--schema-sql", help=argparse.SUPPRESS)
@@ -311,6 +348,9 @@ def main(argv=None):
         print(f"Backing up project {urllib.parse.urlsplit(env['SUPABASE_URL']).hostname.split('.')[0]} to {dest}")
         snap = backup_data(env, dest, a.schema)
         ok = verify(snap)
+        if ok and a.prune:   # only after the new backup is known to be complete, so a failing backup never removes an older good one
+            gone = prune(dest, a.keep_daily, a.keep_weekly)
+            print(f"Old backups removed: {len(gone)}" + (f" ({', '.join(gone[:5])}{' ...' if len(gone) > 5 else ''})" if gone else ""))
         if not a.no_files:
             ok = backup_files(env, dest, a.schema, a.max_files) and ok
         print("\nDONE." if ok else "\nFinished WITH PROBLEMS - see above.")

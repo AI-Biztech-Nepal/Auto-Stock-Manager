@@ -115,6 +115,17 @@ export default function Layout() {
     return () => { clearInterval(id); window.removeEventListener("leads-changed", load); };
   }, [user, isAdmin, navigate]);
 
+  // The nightly backup (backend/auto_backup.py): warns in the bell if none has worked for a day and a half. Only the main company's
+  // Admin gets an answer; for anyone else the request is refused and nothing shows.
+  const [backupProblem, setBackupProblem] = useState(false);
+  useEffect(() => {
+    if (!user || !isAdmin) return;
+    const load = () => { api.get("/admin/backups").then(r => setBackupProblem(!!r.data?.problem)).catch(() => {}); };
+    load();
+    const id = setInterval(load, 10 * 60 * 1000);
+    return () => clearInterval(id);
+  }, [user, isAdmin]);
+
   const missingDataVehicles = useMemo(() => {
     return notifVehicles
       .filter(v => v.status !== "sold" && v.status !== "scrap")
@@ -397,9 +408,9 @@ export default function Layout() {
                 title="Vehicles needing attention"
               >
                 <Bell size={17} />
-                {missingDataVehicles.length + newLeads > 0 && (
+                {missingDataVehicles.length + newLeads + (backupProblem ? 1 : 0) > 0 && (
                   <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center leading-none" data-testid="notif-bell-badge">
-                    {missingDataVehicles.length + newLeads > 99 ? "99+" : missingDataVehicles.length + newLeads}
+                    {missingDataVehicles.length + newLeads + (backupProblem ? 1 : 0) > 99 ? "99+" : missingDataVehicles.length + newLeads + (backupProblem ? 1 : 0)}
                   </span>
                 )}
               </button>
@@ -416,13 +427,18 @@ export default function Layout() {
                     )}
                   </div>
                   <div className="max-h-80 overflow-y-auto divide-y divide-slate-50">
+                    {backupProblem && (
+                      <button onClick={() => { setNotifOpen(false); navigate("/settings"); }} data-testid="notif-backup-problem" className="w-full text-left px-4 py-2.5 hover:bg-red-50 bg-red-50/60 flex items-center gap-2 text-sm font-medium text-red-700">
+                        <ShieldCheck size={14} /> Automatic backup hasn't worked for a while — open Settings
+                      </button>
+                    )}
                     {newLeads > 0 && (
                       <button onClick={() => { setNotifOpen(false); navigate("/marketing?tab=leads"); }} className="w-full text-left px-4 py-2.5 hover:bg-blue-50 bg-blue-50/50 flex items-center gap-2 text-sm font-medium text-blue-700">
                         <Inbox size={14} /> {newLeads} new website lead{newLeads > 1 ? "s" : ""}
                       </button>
                     )}
                     {missingDataVehicles.length === 0 ? (
-                      <div className="px-4 py-6 text-center text-sm text-slate-400">Nothing needs attention ✅</div>
+                      !backupProblem && newLeads === 0 && <div className="px-4 py-6 text-center text-sm text-slate-400">Nothing needs attention ✅</div>
                     ) : (
                       missingDataVehicles.map(v => (
                         <button
