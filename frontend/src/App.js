@@ -6,6 +6,7 @@ import { AuthProvider, useAuth } from "./context/AuthContext";
 import { canAccessPath, ROLE_DEFAULT_PATH } from "./utils/permissions";
 import { startUpdateChecker } from "./utils/updateChecker";
 import Layout from "./components/Layout";
+import FeatureOff from "./components/FeatureOff";
 import ImportStock from "./pages/ImportStock";
 
 // Route-level code splitting: previously every page was imported eagerly here,
@@ -62,10 +63,12 @@ const PublicRoute = ({ children }) => {
 // Blocks direct URL navigation into a tab the user's role doesn't grant
 // (nav already hides the link, but that's not a security boundary on its own).
 const RoleRoute = ({ path, children }) => {
-  const { user } = useAuth();
+  const { user, features } = useAuth();
   if (!canAccessPath(user?.role, path)) {
     return <Navigate to={ROLE_DEFAULT_PATH[user?.role] || "/"} replace />;
   }
+  // Allowed for the role, but the organization has the feature switched off: say so instead of an empty or broken page.
+  if (!canAccessPath(user?.role, path, features)) return <FeatureOff />;
   return children;
 };
 

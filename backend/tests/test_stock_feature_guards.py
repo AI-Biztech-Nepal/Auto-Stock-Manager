@@ -196,3 +196,34 @@ def test_every_gated_route_has_a_guard():
     allowed = {"/api/vehicles/{vid}/qr-data", "/api/legal-documents/{doc_id}/file", "/api/public/share/{vid}",
                "/api/assistant/briefing", "/api/assistant/lookup", "/api/facebook/callback"}
     assert set(unguarded) <= allowed, sorted(set(unguarded) - allowed)
+
+
+# ── GET /api/features: what the screens use to hide things ─────────────────
+def test_features_endpoint_for_portal_login(fake, client):
+    fake.features[(ORG, "stock.vehicles")] = True
+    fake.features[(ORG, "stock.crm")] = False
+    r = send(client, "GET", "/features", "portal")
+    f = r.json()["features"]
+    assert r.status_code == 200 and f["stock.vehicles"] is True and f["stock.crm"] is False and f["stock.warranty"] is True
+
+
+def test_features_endpoint_for_stock_token_uses_company_map(fake, client):
+    fake.features[(ORG, "stock.job_cards")] = True
+    assert send(client, "GET", "/features", "old").json()["features"]["stock.job_cards"] is True
+
+
+def test_features_endpoint_null_when_company_not_linked(fake, client):
+    fake.map = {}
+    assert send(client, "GET", "/features", "old").json() == {"features": None}
+
+
+def test_features_endpoint_null_when_portal_not_configured(fake, client, monkeypatch):
+    monkeypatch.setattr(portal_bridge, "portal_configured", lambda: False)
+    assert send(client, "GET", "/features", "old").json() == {"features": None}
+
+
+def test_features_endpoint_null_when_lookup_fails(fake, client, monkeypatch):
+    def down(*a, **k):
+        raise ConnectionError("portal db down")
+    monkeypatch.setattr(fake, "fetch_value", down)
+    assert send(client, "GET", "/features", "old").json() == {"features": None}

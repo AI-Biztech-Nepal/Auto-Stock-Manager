@@ -373,6 +373,12 @@ async def get_current_user(request: Request, creds: HTTPAuthorizationCredentials
     current_company_id.set(payload.get("company_id"))
     return payload
 
+@api_router.get("/features")
+async def my_features(cu: dict = Depends(get_current_user)):
+    """Which stock.* features are on for the caller's organization, so screens can hide the rest. features is null when
+    the portal cannot say (not connected, company not linked): show everything, the server still refuses what is off."""
+    return {"features": await portal_bridge.features_for(cu)}
+
 # require_feature('stock.x') for Prompt 2: portal logins are checked against core.feature_on, old tokens pass.
 require_feature = portal_bridge.make_feature_guard(get_current_user)
 

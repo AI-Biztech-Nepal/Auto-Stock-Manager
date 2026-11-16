@@ -8,6 +8,7 @@ import { formatNPR } from "../utils/helpers";
 import HoverADDate from "../components/HoverADDate";
 import DateRangeFilter, { resolveDateFilter } from "../components/DateRangeFilter";
 import { useAuth } from "../context/AuthContext";
+import { featureOn } from "../utils/permissions";
 import { getCurrentBSDate, BS_MONTHS } from "../utils/nepali-date";
 
 // ── Sub-components defined OUTSIDE to prevent remount ──────────────────
@@ -120,6 +121,8 @@ function AccountingSummary({ range }) {
   const rl = range.key === "daily" ? "today" : range.key === "all" ? "" : range.label.toLowerCase();
   const rangePhrase = range.key === "daily" ? "for today" : range.key === "all" ? "yet" : `for ${range.label.toLowerCase()}`;
   const navigate = useNavigate();
+  const { features } = useAuth();
+  const bookingsOn = featureOn(features, "stock.bookings");
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [recentSales, setRecentSales] = useState([]);
@@ -148,13 +151,13 @@ function AccountingSummary({ range }) {
     // Bookings are deposits, not sales — kept out of the sales figures and listed in
     // their own section of the popup. The endpoint has no date filter, so narrow to
     // the period here by booking_date.
-    api.get("/bookings")
+    if (bookingsOn) api.get("/bookings")
       .then(r => setBookings(r.data.filter(b => {
         const d = (b.booking_date || b.created_at || "").slice(0, 10);
         return d >= start && d <= end;
       })))
       .catch(() => {});
-  }, [range]);
+  }, [range, bookingsOn]);
 
   const fetchSummary = useCallback(async () => {
     setLoading(true); setData(null);
@@ -400,7 +403,7 @@ function AccountingSummary({ range }) {
 
               {/* Bookings made in the period — separate from sales; a booking is only a
                   deposit until it's converted into a sale. */}
-              {salesModalView === "sales" && (
+              {salesModalView === "sales" && bookingsOn && (
                 <div data-testid="period-bookings-section">
                   <div className="flex items-center justify-between gap-3 px-4 sm:px-5 py-2.5 bg-amber-50 border-y border-amber-100">
                     <h3 className="text-sm font-bold text-amber-900">
@@ -524,7 +527,8 @@ function AccountingSummary({ range }) {
 const PERIOD_STORAGE_KEY = "dashboard_date_filter";
 
 export default function Dashboard() {
-  const { user } = useAuth();
+  const { user, features } = useAuth();
+  const jobsOn = featureOn(features, "stock.job_cards");
   // Coming back to the Dashboard shows the last figures at once (see utils/listCache.js); they are refreshed below as always.
   const [stats, setStats] = useState(() => peek("dashboard:stats") ?? null);
   const [loading, setLoading] = useState(() => peek("dashboard:stats") === undefined);
@@ -609,7 +613,9 @@ export default function Dashboard() {
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-4">
         <KPICard title="Available Vehicles" value={stats.available} icon={Package} color="bg-blue-500" testid="kpi-available" onClick={() => navigate("/inventory")} />
         <KPICard title="Locked Capital" value={formatNPR(stats.locked_capital)} icon={DollarSign} color="bg-indigo-500" testid="kpi-capital" subtitle="In available stock" onClick={() => navigate("/inventory")} />
-        <KPICard title="Pending Jobs" value={stats.pending_jobs} icon={Wrench} color="bg-orange-500" testid="kpi-pending-jobs" onClick={() => navigate("/jobs")} />
+        {jobsOn && (
+          <KPICard title="Pending Jobs" value={stats.pending_jobs} icon={Wrench} color="bg-orange-500" testid="kpi-pending-jobs" onClick={() => navigate("/jobs")} />
+        )}
       </div>
 
       {/* Charts + Alerts */}
@@ -635,9 +641,13 @@ export default function Dashboard() {
           <div className="space-y-3">
             <AlertCard title="Dead Stock" count={stats.dead_stock_count} description="60+ days. Immediate action needed." color="bg-red-100 text-red-800" onClick={() => navigate("/inventory?aging=dead")} />
             <AlertCard title="Slow Moving" count={stats.slow_moving_count} description="46–60 days. Consider price reduction." color="bg-orange-100 text-orange-800" onClick={() => navigate("/inventory?aging=slow")} />
+            {jobsOn && (
+              <>
             <AlertCard title="Pending Jobs" count={stats.pending_jobs} description="Job cards awaiting attention." color="bg-yellow-100 text-yellow-800" onClick={() => navigate("/jobs?status=pending")} />
             {stats.in_progress_jobs > 0 && (
               <AlertCard title="In Progress" count={stats.in_progress_jobs} description="Active repair/prep work." color="bg-blue-100 text-blue-800" onClick={() => navigate("/jobs?status=in_progress")} />
+            )}
+              </>
             )}
           </div>
         </div>

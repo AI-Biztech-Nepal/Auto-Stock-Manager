@@ -7,6 +7,8 @@ import { peek, remember, cacheTicket } from "../utils/listCache";
 import { formatNPR, splitSanakhatExpenses, deleteSaleConfirm, TRANSFER_STATUS_OPTIONS, getTransferStatusStyle } from "../utils/helpers";
 import { getCurrentBSMonthRange } from "../utils/nepali-date";
 import { useAuth } from "../context/AuthContext";
+import { featureOn } from "../utils/permissions";
+import FeatureOff from "../components/FeatureOff";
 import HoverADDate from "../components/HoverADDate";
 import { BOOK_CARD, BookTableStyle } from "../components/BookTable";
 import WarrantyBadge from "../components/WarrantyBadge";
@@ -88,7 +90,8 @@ function marginOf(sale, vehicle) {
 export default function Sales() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { user } = useAuth();
+  const { user, features } = useAuth();
+  const bookingsOn = featureOn(features, "stock.bookings");
   const isAdmin = user?.role === "admin";
   // Coming back to this page shows the last lists at once (see utils/listCache.js); fetchAll below refreshes them as always.
   const [sales, setSales] = useState(() => peek("sales:list") ?? []);
@@ -263,10 +266,11 @@ export default function Sales() {
 
   if (loading) return <div className="flex items-center justify-center h-64"><div className="animate-spin w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full" /></div>;
 
+  if (tab === "bookings" && !bookingsOn) return <FeatureOff />;
   return (
     <div className="space-y-5 animate-fade-in">
       <div className="flex items-center gap-1 border-b border-slate-200" data-testid="sales-tabs">
-        {[{ key: "sales", label: "Sales" }, { key: "bookings", label: `Bookings${openBookings.length ? ` (${openBookings.length})` : ""}` }].map(t => (
+        {[{ key: "sales", label: "Sales" }, bookingsOn && { key: "bookings", label: `Bookings${openBookings.length ? ` (${openBookings.length})` : ""}` }].filter(Boolean).map(t => (
           <button key={t.key} onClick={() => setTab(t.key)} data-testid={`sales-tab-${t.key}`}
             className={`px-4 h-10 text-sm font-semibold border-b-2 -mb-px transition-colors ${tab === t.key ? "border-blue-600 text-blue-600" : "border-transparent text-slate-500 hover:text-slate-700"}`}>
             {t.label}

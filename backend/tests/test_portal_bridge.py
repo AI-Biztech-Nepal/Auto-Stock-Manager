@@ -40,6 +40,11 @@ class FakeJWKS:
 DEFAULT_ON = {"stock.warranty": True, "stock.bookings": True, "stock.crm": True, "stock.ai_assistant": True}
 
 
+ALL_KEYS = {k: DEFAULT_ON.get(k, False) for k in (
+    "stock.vehicles", "stock.sanakhat", "stock.job_cards", "stock.spare_parts", "stock.warranty", "stock.bookings",
+    "stock.crm", "stock.ai_assistant", "stock.leads", "stock.public_site", "stock.share", "stock.visits", "stock.offers")}
+
+
 class FakePortalDB:
     """members: {(org,user): role|None}; services: {org: 'active'|'trial'|'trial_expired'|'none'}."""
 
@@ -60,6 +65,8 @@ class FakePortalDB:
         if "legacy_tenant_map" in sql:
             ids = self.map.get(params[0], [])
             return ids[0] if len(ids) == 1 else None
+        if "jsonb_object_agg" in sql:  # every stock.* flag for one org, missing rows at their default
+            return {k: self.features.get((params[0], k), d) for k, d in ALL_KEYS.items()}
         if "core.feature_on" in sql:
             return self.features.get(tuple(params), DEFAULT_ON.get(params[1], False))  # missing row = catalogue default
         raise AssertionError(sql)

@@ -8,6 +8,7 @@ what each Stock role may do; the portal only decides who may enter and which rol
 Reads core.* from the portal database through PORTAL_DB_URL: use a read-only role, never the Stock database.
 """
 import asyncio
+import json
 import logging
 import os
 import re
@@ -244,6 +245,37 @@ async def enforce_feature(path: str, company_id=None, org_id=None):
         raise HTTPException(503, "Portal login is temporarily unavailable")
 
 
+_all_cache: dict = {}
+
+
+def _features_sync(company_id, org_id):
+    """{key: bool} for every stock.* feature, in one query, or None when the portal cannot answer (not set up, no map
+    row, lookup failed): the screen then shows everything and the server's own 403s stay the real boundary."""
+    if not (company_id or org_id) or (not org_id and not portal_configured()):
+        return None
+    try:
+        db = get_portal_db()
+        org = org_id or _org_for_company(db, company_id)
+        if not org:
+            return None
+        hit = _all_cache.get(org)
+        if hit and time.monotonic() - hit[0] < _TTL:
+            return hit[1]
+        raw = db.fetch_value(
+            "select coalesce(jsonb_object_agg(f.key, core.feature_on(%s, f.key)), '{}'::jsonb) "
+            "from core.features f where f.service_key = 'stock'", (org,))
+        feats = json.loads(raw) if isinstance(raw, (str, bytes)) else dict(raw or {})
+        _all_cache[org] = (time.monotonic(), feats)
+        return feats
+    except Exception:
+        logging.getLogger(__name__).exception("feature list lookup failed")
+        return None
+
+
+async def features_for(cu: dict):
+    return await asyncio.to_thread(_features_sync, cu.get("company_id"), cu.get("org_id"))
+
+
 def make_feature_guard(get_user):
     """require_feature('stock.x'), built on the app's own get_current_user so there is one login path.
     Not attached to any route yet (that is Prompt 2).
@@ -263,6 +295,7 @@ def make_feature_guard(get_user):
 def clear_caches():
     _ctx_cache.clear()
     _company_cache.clear()
+    _all_cache.clear()
     _feat_cache.clear()
     _org_cache.clear()
     _known_kids.clear()

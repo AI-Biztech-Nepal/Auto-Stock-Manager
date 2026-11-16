@@ -9,6 +9,8 @@
 import { useMemo, useRef, useState } from "react";
 import { Plus, Trash2, UploadCloud, Check, X, ImagePlus, AlertCircle, FileText } from "lucide-react";
 import BSDatePicker from "../components/BSDatePicker";
+import { useAuth } from "../context/AuthContext";
+import { featureOn } from "../utils/permissions";
 import CustomerVendorPicker from "../components/CustomerVendorPicker";
 import { BRANDS, SOURCES, CONDITIONS, FUEL_TYPES, OWNERSHIP_OPTIONS, VEHICLE_STATUS_OPTIONS, formatNPR } from "../utils/helpers";
 import { EMPTY_DOC_PHOTOS } from "../utils/stagedDocs";
@@ -86,6 +88,9 @@ export function VehicleFormBody({
   basicOnly = false, vehicles = [], editing = false, readOnly = false, attempted = false, existingDocs = {},
   hideCost = false, hidePricing = false, sanakhatNote = null,
 }) {
+  const { features } = useAuth();
+  const vehiclePack = featureOn(features, "stock.vehicles");
+  const sanakhatPack = vehiclePack && featureOn(features, "stock.sanakhat");
   const [selected, setSelected] = useState(() => new Set());
   const [previewPhoto, setPreviewPhoto] = useState(null);
   const [showSanakhat, setShowSanakhat] = useState(() => !!(form.sanakhat_date || form.sanakhat_cost));
@@ -236,10 +241,12 @@ export function VehicleFormBody({
               <label htmlFor="pv-year" className={LBL}>Year</label>
               <input id="pv-year" type="text" inputMode="numeric" pattern="[0-9]*" value={form.year ?? ""} onChange={e => set({ year: e.target.value })} placeholder={ph("e.g. 2020")} className={`${BOX} ${OK}`} />
             </div>
+            {vehiclePack && (
             <div>
               <label htmlFor="pv-cc" className={LBL}>Engine CC</label>
               <input id="pv-cc" type="text" inputMode="numeric" pattern="[0-9]*" value={form.engine_cc ?? ""} onChange={e => set({ engine_cc: e.target.value })} placeholder={ph("e.g. 125")} className={`${BOX} ${OK}`} />
             </div>
+            )}
 
             <div>
               <label htmlFor="pv-type" className={LBL}>Type <span className="text-red-600">*</span></label>
@@ -247,12 +254,15 @@ export function VehicleFormBody({
                 {VEHICLE_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
               </select>
             </div>
+            {vehiclePack && (
             <div>
               <label htmlFor="pv-fuel" className={LBL}>Fuel</label>
               <select id="pv-fuel" value={form.fuel_type ?? ""} onChange={e => set({ fuel_type: e.target.value })} className={`${BOX} ${OK}`}>
                 {FUEL_TYPES.map(f => <option key={f}>{f}</option>)}
               </select>
             </div>
+            )}
+            {vehiclePack && (
             <div>
               <label htmlFor="pv-owner" className={LBL}>Ownership</label>
               <select id="pv-owner" data-testid="ownership-select" value={form.ownership_number ?? ""} onChange={e => set({ ownership_number: e.target.value })} className={`${BOX} ${OK}`}>
@@ -260,6 +270,7 @@ export function VehicleFormBody({
                 {OWNERSHIP_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
               </select>
             </div>
+            )}
             <div>
               <label htmlFor="pv-cond" className={LBL}>Condition</label>
               <select id="pv-cond" value={form.condition ?? ""} onChange={e => set({ condition: e.target.value })} className={`${BOX} ${OK}`}>
@@ -296,7 +307,7 @@ export function VehicleFormBody({
         </section>
 
         {/* 3 Paperwork */}
-        {!basicOnly && (
+        {!basicOnly && vehiclePack && (
           <section id="pv-section-paperwork" className={SECTION}>
             <h3 className={H2} style={{ fontFamily: "Manrope, sans-serif" }}>Paperwork {!readOnly && <span className="ml-1 text-xs font-medium text-slate-500" style={{ fontFamily: "Inter, sans-serif" }}>optional, can be filled in later</span>}</h3>
             <div className={GRID}>
@@ -334,6 +345,7 @@ export function VehicleFormBody({
                   </div>
                 );
               })}
+              {sanakhatPack && (<>
               <div>
                 {editing ? (
                   <>
@@ -369,6 +381,7 @@ export function VehicleFormBody({
                   )}
                 </>
               )}
+              </>)}
             </div>
           </section>
         )}
