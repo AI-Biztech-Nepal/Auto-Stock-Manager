@@ -7,6 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import portal_bridge
+import terms
 from test_portal_bridge import COMPANY, DEFAULT_ON, ORG, FakeJWKS, FakePortalDB, portal_token, server, stock_token
 
 # One real route per feature (METHOD, path under /api). test_representative_routes_exist keeps this honest.
@@ -214,16 +215,16 @@ def test_features_endpoint_for_stock_token_uses_company_map(fake, client):
 
 def test_features_endpoint_null_when_company_not_linked(fake, client):
     fake.map = {}
-    assert send(client, "GET", "/features", "old").json() == {"features": None}
+    assert send(client, "GET", "/features", "old").json() == {"features": None, "terms": terms.VEHICLE}
 
 
 def test_features_endpoint_null_when_portal_not_configured(fake, client, monkeypatch):
     monkeypatch.setattr(portal_bridge, "portal_configured", lambda: False)
-    assert send(client, "GET", "/features", "old").json() == {"features": None}
+    assert send(client, "GET", "/features", "old").json() == {"features": None, "terms": terms.VEHICLE}
 
 
 def test_features_endpoint_null_when_lookup_fails(fake, client, monkeypatch):
     def down(*a, **k):
         raise ConnectionError("portal db down")
     monkeypatch.setattr(fake, "fetch_value", down)
-    assert send(client, "GET", "/features", "old").json() == {"features": None}
+    assert send(client, "GET", "/features", "old").json() == {"features": None, "terms": terms.VEHICLE}

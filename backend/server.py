@@ -29,6 +29,7 @@ import perf_stats
 import auto_backup
 import crm
 import portal_bridge
+import terms
 import assistant_api
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
@@ -103,7 +104,7 @@ TENANT_COLLECTIONS = {
     "leads", "legal_documents", "part_transactions", "partners", "sales", "spare_parts",
     "sync_logs", "team_members", "vehicle_photos", "vehicles", "vendor_payments", "vendors",
     "audit_logs", "ai_chat_sessions", "settings", "facebook_pages", "bookings",
-    "offer_prizes", "offer_codes", "page_views", "crm_followups", "crm_interactions",
+    "offer_prizes", "offer_codes", "page_views", "crm_followups", "crm_interactions", "items",
     # Finance books (see finance_books.py); tables are created by migration_add_finance_books.sql.
     "fin_parties", "fin_bank_accounts", "fin_account_transfers", "fin_expense_categories", "fin_items",
     "fin_transactions", "fin_customer_ledger", "fin_vendor_ledger", "fin_statement_imports",
@@ -377,7 +378,8 @@ async def get_current_user(request: Request, creds: HTTPAuthorizationCredentials
 async def my_features(cu: dict = Depends(get_current_user)):
     """Which stock.* features are on for the caller's organization, so screens can hide the rest. features is null when
     the portal cannot say (not connected, company not linked): show everything, the server still refuses what is off."""
-    return {"features": await portal_bridge.features_for(cu)}
+    features = await portal_bridge.features_for(cu)
+    return {"features": features, "terms": terms.terms_for(features)}
 
 # require_feature('stock.x') for Prompt 2: portal logins are checked against core.feature_on, old tokens pass.
 require_feature = portal_bridge.make_feature_guard(get_current_user)
@@ -391,6 +393,7 @@ ROLE_PERMISSIONS = {
         # require_any("vehicles", {"edit", "edit_status"}) on update_vehicle_status), and no
         # jobs/customers/sales at all -- those pages were pulled from their nav to match.
         "vehicles": {"view"},
+        "items": {"view"},  # same view-only floor access on generic stock items
         "vehicle_media": {"view"},  # read-only, so opening a vehicle's detail page doesn't 403 loading photos/documents
         "vehicle_photos": {"view"},
         "expenses": {"view"},
@@ -420,6 +423,7 @@ ROLE_PERMISSIONS = {
         # "create_basic", not "create": create_vehicle strips everything but SOCIAL_MEDIA_VEHICLE_FIELDS
         # and parks the vehicle as Unlisted until an admin fills in purchase/pricing details.
         "vehicles": {"view", "create_basic"},
+        "items": {"view", "create", "edit"},  # lists new stock and its photos; cost stays hidden, deleting stays admin-only
         "vehicle_photos": {"view", "create", "delete"},
         # Legal documents stay admin-only -- view only so the vehicle detail page loads cleanly.
         "vehicle_media": {"view"},
@@ -1729,6 +1733,31 @@ class BookingUpdate(BaseModel):
 class BookingCancel(BaseModel):
     refund_amount: float  # handed back to the customer; the rest of the deposit is retained
     notes: Optional[str] = None
+
+# Generic stock items for shops that sell things, not vehicles (Prompt 4). One row per product with a count in `quantity`;
+# an item with a serial_number is a single unit. Vehicles keep their own table untouched.
+ITEMS_DDL = """CREATE TABLE IF NOT EXISTS items (
+  id VARCHAR(36) NOT NULL PRIMARY KEY,
+  company_id VARCHAR(36) NOT NULL,
+  INDEX idx_items_company_id (company_id),
+  name VARCHAR(255),
+  sku VARCHAR(100),
+  category VARCHAR(100),
+  serial_number VARCHAR(100),
+  cost DOUBLE,
+  price DOUBLE,
+  quantity INT,
+  status VARCHAR(20) DEFAULT 'available',
+  notes TEXT,
+  vendor_id VARCHAR(36),
+  created_by VARCHAR(100),
+  created_at VARCHAR(40),
+  updated_at VARCHAR(40),
+  INDEX idx_items_status (status),
+  INDEX idx_items_sku (sku),
+  CONSTRAINT fk_items_vendor FOREIGN KEY (vendor_id) REFERENCES vendors(id) ON DELETE SET NULL,
+  CONSTRAINT fk_items_company FOREIGN KEY (company_id) REFERENCES companies(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"""
 
 BOOKINGS_DDL = """CREATE TABLE IF NOT EXISTS bookings (
   id VARCHAR(36) NOT NULL PRIMARY KEY,
@@ -3956,8 +3985,20 @@ async def get_sales(start_date: Optional[str] = None, end_date: Optional[str] = 
         investment_by_vehicle = _batch_investment_from(full_vehicles, batch_inputs) if full_vehicles else {}
         purchase_price_by_vehicle = {v["id"]: v.get("purchase_price", 0) for v in full_vehicles}
 
+    item_ids = list({s["item_id"] for s in sales if s.get("item_id")})
+    items_by_id = {i["id"]: i for i in await db.items.find({"id": {"$in": item_ids}}, {"_id": 0, "id": 1, "name": 1, "sku": 1}).to_list(len(item_ids))} if item_ids else {}
     for s in sales:
         v = vehicles_by_id.get(s.get("vehicle_id"))
+        it = items_by_id.get(s.get("item_id")) if s.get("item_id") else None
+        if it:  # an item sale: name it like a vehicle sale is named, and give it profit from the cost kept on the sale
+            s["item_info"] = it.get("name") or ""
+            s["vehicle_info"] = f"{it.get('name') or ''}" + (f" ×{s.get('quantity')}" if (s.get("quantity") or 1) > 1 else "")
+            s["sku"] = it.get("sku")
+            if cu.get("role", "admin") == "admin":
+                revenue = _sale_revenue(s)
+                s["total_investment"] = s.get("cost_at_sale") or 0
+                s["profit"] = revenue - s["total_investment"]
+                s["profit_margin"] = round(s["profit"] / revenue * 100, 2) if revenue else None
         if v:
             s["vehicle_info"] = f"{v['brand']} {v['model']} {v.get('year','')}" + (f" ({v['registration_number']})" if v.get("registration_number") else "")
             s["vehicle_brand"] = v.get("brand"); s["vehicle_model"] = v.get("model")
@@ -4212,8 +4253,8 @@ async def reconcile_sales(cu: dict = Depends(admin_only)):
     vehicles_by_id = {v["id"]: v for v in await db.vehicles.find({"id": {"$in": vehicle_ids}}, {"_id": 0}).to_list(None)} if vehicle_ids else {}
     mismatches = []
     for s in sales:
-        if s.get("returned"):
-            continue
+        if s.get("returned") or (s.get("item_id") and not s.get("vehicle_id")):
+            continue  # an item sale has no vehicle to drift away from
         v = vehicles_by_id.get(s.get("vehicle_id"))
         if not v:
             mismatches.append({
@@ -4292,6 +4333,16 @@ async def get_sale(sid: str, cu: dict = Depends(require("sales", "view"))):
         s["engine_cc"] = v.get("engine_cc"); s["fuel_type"] = v.get("fuel_type")
         s["vehicle_status"] = v.get("status")
     s["job_card_cost"] = job_card_cost if s.get("vehicle_id") else 0
+    if s.get("item_id") and not s.get("vehicle_id"):
+        it = await db.items.find_one({"id": s["item_id"]}, {"_id": 0, "name": 1, "sku": 1, "serial_number": 1})
+        s["item_info"] = (it or {}).get("name") or "Deleted item"
+        s["vehicle_info"] = s["item_info"]
+        s["sku"], s["serial_number"] = (it or {}).get("sku"), (it or {}).get("serial_number")
+        if is_admin:
+            revenue = _sale_revenue(s)
+            s["total_investment"] = s.get("cost_at_sale") or 0
+            s["profit"] = revenue - s["total_investment"]
+            s["profit_margin"] = round(s["profit"] / revenue * 100, 2) if revenue else None
     s["customer_name"] = c["name"] if c else "Walk-in Customer"
     s["customer_contact"] = c.get("contact_number") if c else None
     s["customer_address"] = c.get("address") if c else None
@@ -4430,6 +4481,11 @@ async def delete_sale(sid: str, cu: dict = Depends(get_current_user)):
     s = await db.sales.find_one({"id": sid}, {"_id": 0})
     if not s: raise HTTPException(404, "Not found")
     await db.sales.delete_one({"id": sid})
+    if s.get("item_id") and not s.get("vehicle_id"):
+        # An item sale: the units go back on the shelf.
+        await db.items.update_one({"id": s["item_id"]}, {"$inc": {"quantity": s.get("quantity") or 1},
+                                  "$set": {"status": "available", "updated_at": datetime.now(timezone.utc).isoformat()}})
+        return {"message": "Sale deleted, the items are back in stock"}
     # Restore vehicle to available
     await db.vehicles.update_one({"id": s["vehicle_id"]}, {"$set": {
         "status": "available", "sold_date": None, "customer_id": None,
@@ -4878,25 +4934,35 @@ async def add_emi_payment(payment: EMIPaymentCreate, cu: dict = Depends(admin_on
     p.pop("_id", None)
     return p
 
+async def _items_in_stock() -> tuple:
+    """(how many item lines are on the shelf, what they cost the shop): listed items with units left, at cost x quantity."""
+    rows = await db.items.find({"status": "available"}, {"_id": 0, "cost": 1, "quantity": 1}).to_list(50000)
+    return len(rows), round(sum((r.get("cost") or 0) * (r.get("quantity") or 0) for r in rows), 2)
+
+def _item_cogs(sales: list) -> float:
+    """What the items sold in these (not returned) sales cost, from the cost kept on each sale."""
+    return round(sum(s.get("cost_at_sale") or 0 for s in sales if s.get("item_id") and not s.get("vehicle_id") and not s.get("returned")), 2)
+
 # ── FINANCE ───────────────────────────────────────────────────────────
 @api_router.get("/finance/summary")
 async def finance_summary(cu: dict = Depends(admin_only)):
     # Five pieces of work that do not depend on each other, run at the same time (the database is in another city, so
     # one after another this waited for every step in turn).
-    async def stock_value():  # inventory value (available vehicles)
+    async def stock_value():  # inventory value (available vehicles, plus stock items at cost)
         avail = await db.vehicles.find({"status": "available"}, _INVESTMENT_FIELDS).to_list(1000)
-        return avail, sum((await _batch_vehicle_investment(avail)).values())
+        _, item_value = await _items_in_stock()
+        return avail, sum((await _batch_vehicle_investment(avail)).values()) + item_value
 
     async def sales_and_cogs():  # revenue & COGS from the Sales table (single source of truth)
         sales_records = await db.sales.find({}, {"_id": 0}).to_list(1000)
         # Dedupe: a vehicle sold, returned, then resold appears in two sales rows but its
         # investment (purchase price + expenses) should only count once toward COGS.
-        sold_vehicle_ids = list({s["vehicle_id"] for s in sales_records})
+        sold_vehicle_ids = list({s["vehicle_id"] for s in sales_records if s.get("vehicle_id")})
         sold_vehicles = (
             await db.vehicles.find({"id": {"$in": sold_vehicle_ids}}, _INVESTMENT_FIELDS).to_list(5000)
             if sold_vehicle_ids else []
         )
-        return sales_records, sum((await _batch_vehicle_investment(sold_vehicles)).values())
+        return sales_records, sum((await _batch_vehicle_investment(sold_vehicles)).values()) + _item_cogs(sales_records)
 
     async def vendor_payables_total():
         vendors = await db.vendors.find({}, {"_id": 0}).to_list(100)
@@ -5025,7 +5091,7 @@ async def dashboard_stats(cu: dict = Depends(admin_only)):
         sales_records = await db.sales.find({}, {"_id": 0}).to_list(1000)
         # Sold vehicles' investment feeds both the profit loop below and total_cogs —
         # fetch + batch-compute once instead of once per sale/vehicle.
-        sold_vehicle_ids = list({s["vehicle_id"] for s in sales_records})
+        sold_vehicle_ids = list({s["vehicle_id"] for s in sales_records if s.get("vehicle_id")})
         sold_vehicles = (
             await db.vehicles.find({"id": {"$in": sold_vehicle_ids}}, _INVESTMENT_FIELDS).to_list(5000)
             if sold_vehicle_ids else []
@@ -5041,7 +5107,8 @@ async def dashboard_stats(cu: dict = Depends(admin_only)):
      (sales_records, sold_vehicles, sold_investment_by_vehicle),
      payable_by_vendor) = await asyncio.gather(counts(), stock_for_sale(), sales_and_their_vehicles(), vendor_dues())
 
-    locked_capital = sum(investment_by_vehicle.values())
+    item_lines, item_value = await _items_in_stock()  # stock items count toward what is on the shelf, at cost
+    locked_capital = sum(investment_by_vehicle.values()) + item_value
     aging = _aging_counts(avail_v)
     sold = len(sales_records)
     sold_vehicle_ids_existing = {v["id"] for v in sold_vehicles}
@@ -5054,13 +5121,15 @@ async def dashboard_stats(cu: dict = Depends(admin_only)):
             # that snapshot existed have none and count only the retained fee, as before.
             total_profit += _sale_revenue(s) - (s.get("cost_at_return") or 0)
             continue
-        if s["vehicle_id"] in sold_vehicle_ids_existing:
+        if s.get("vehicle_id") in sold_vehicle_ids_existing:
             total_profit += _sale_revenue(s) - sold_investment_by_vehicle.get(s["vehicle_id"], 0)
+        elif s.get("item_id") and not s.get("vehicle_id"):
+            total_profit += _sale_revenue(s) - (s.get("cost_at_sale") or 0)  # an item sale: cost kept on the sale
 
     total_revenue = sum(_sale_revenue(s) for s in sales_records)
     # Dedupe: a vehicle sold, returned, then resold appears in two sales rows but its
     # investment (purchase price + expenses) should only count once toward COGS.
-    total_cogs = sum(sold_investment_by_vehicle.values())
+    total_cogs = sum(sold_investment_by_vehicle.values()) + _item_cogs(sales_records)
 
     total_vendor_due = sum(payable_by_vendor.values())
 
@@ -5077,6 +5146,7 @@ async def dashboard_stats(cu: dict = Depends(admin_only)):
         "total_vendors": total_vendors,
         "total_revenue": total_revenue, "inventory_value": locked_capital,
         "total_cogs": total_cogs,
+        "item_lines_in_stock": item_lines, "items_value": item_value,
     }
 
 @api_router.get("/reports/inventory")
@@ -5141,7 +5211,10 @@ async def _enriched_sales_for_closing(start_date: Optional[str] = None, end_date
     # Only the columns this report reads are fetched (whole sale and vehicle rows are mostly text it never looks at), and
     # everything that needs only the sales' ids is read at the same time (the database is in another city).
     sales = await db.sales.find(query, {"_id": 0, "id": 1, "sale_date": 1, "sale_price": 1, "due_amount": 1, "returned": 1, "retained_amount": 1,
-                                        "vehicle_id": 1, "customer_id": 1, "created_at": 1, "returned_at": 1, "cost_at_return": 1}).sort("sale_date", 1).to_list(5000)
+                                        "vehicle_id": 1, "customer_id": 1, "created_at": 1, "returned_at": 1, "cost_at_return": 1,
+                                        "item_id": 1, "quantity": 1, "cost_at_sale": 1}).sort("sale_date", 1).to_list(5000)
+    item_ids = list({s["item_id"] for s in sales if s.get("item_id")})
+    item_names = {i["id"]: i.get("name") for i in await db.items.find({"id": {"$in": item_ids}}, {"_id": 0, "id": 1, "name": 1}).to_list(len(item_ids))} if item_ids else {}
     vehicle_ids = list({s["vehicle_id"] for s in sales if s.get("vehicle_id")})
     customer_ids = list({s["customer_id"] for s in sales if s.get("customer_id")})
     vs, cs, returned_rows, all_exps, all_jobs = await asyncio.gather(
@@ -5178,6 +5251,9 @@ async def _enriched_sales_for_closing(start_date: Optional[str] = None, end_date
         if s.get("returned") and s.get("cost_at_return") is not None:
             investment = s["cost_at_return"]
         vehicle_label = "Vehicle removed"
+        if s.get("item_id") and not s.get("vehicle_id"):  # an item sale: its cost was kept on the sale
+            vehicle_label = (item_names.get(s["item_id"]) or "Item removed") + (f" ×{s['quantity']}" if (s.get("quantity") or 1) > 1 else "")
+            investment = s.get("cost_at_sale") or 0
         if v:
             parts = [v["brand"], v["model"]]
             if v.get("year"): parts.append(str(v["year"]))
@@ -5743,7 +5819,7 @@ async def accounting_summary(start_date: str, end_date: str, cu: dict = Depends(
         # and resold (all non-returned sales) within the period, its investment is meant to
         # count once per sale here — this mirrors the original per-sale-record calculation.
         non_returned = [s for s in sales_in_period if not s.get("returned")]
-        sold_vehicle_ids = list({s["vehicle_id"] for s in non_returned})
+        sold_vehicle_ids = list({s["vehicle_id"] for s in non_returned if s.get("vehicle_id")})
         sold_vehicles = (
             await db.vehicles.find({"id": {"$in": sold_vehicle_ids}}, _INVESTMENT_FIELDS).to_list(5000)
             if sold_vehicle_ids else []
@@ -5760,8 +5836,8 @@ async def accounting_summary(start_date: str, end_date: str, cu: dict = Depends(
     sold_count = len(sales_in_period)
     total_sales = sum(_sale_revenue(s) for s in sales_in_period)
     total_investment_sold = sum(
-        investment_by_vehicle[s["vehicle_id"]] for s in non_returned if s["vehicle_id"] in investment_by_vehicle
-    )
+        investment_by_vehicle[s["vehicle_id"]] for s in non_returned if s.get("vehicle_id") in investment_by_vehicle
+    ) + _item_cogs(non_returned)
 
     net_profit = total_sales - total_investment_sold
     return {
@@ -6510,6 +6586,11 @@ async def _run_startup_tasks():
             ("sales", "exchange_reg_no", "VARCHAR(50)"),
             ("sales", "exchange_year", "VARCHAR(10)"),
             ("sales", "exchange_vehicle_id", "VARCHAR(36)"),  # the inventory entry made for that old vehicle
+            # Prompt 4: a sale of a stock item instead of a vehicle (nullable; vehicle sales never set them), and item photos.
+            ("sales", "item_id", "VARCHAR(36)"),
+            ("sales", "quantity", "INT"),
+            ("sales", "cost_at_sale", "DOUBLE"),  # what the items cost the shop when sold, so a later cost edit cannot change past profit
+            ("vehicle_photos", "item_id", "VARCHAR(36)"),
         ]
         for _tbl, _col, _type in _post_schema_cols:
             try:
@@ -6521,6 +6602,10 @@ async def _run_startup_tasks():
             await db.execute_raw(BOOKINGS_DDL)
         except Exception:
             logger.warning("Could not ensure bookings table", exc_info=True)
+        try:
+            await db.execute_raw(ITEMS_DDL)
+        except Exception:
+            logger.warning("Could not ensure items table", exc_info=True)
         for _ddl in [*OFFERS_DDL, PAGE_VIEWS_DDL, *CRM_DDL]:
             try:
                 await db.execute_raw(_ddl)
@@ -7014,6 +7099,213 @@ async def delete_vehicle_photo(vid: str, photo_id: str, cu: dict = Depends(requi
         await media_storage.remove(media_storage.PHOTO_BUCKET, p["storage_path"])
     _evict_photo_cache(photo_id)
     asyncio.create_task(_notify_storefront())
+    return {"message": "Photo deleted"}
+
+# ══════════════════════════════════════════════════════════════════════
+# ── STOCK ITEMS (Prompt 4) ────────────────────────────────────────────
+# What a shop that is not a vehicle dealer keeps in stock: name, SKU, category, cost, price, a count, optional serial
+# number, photos. One table for everyone (see ITEMS_DDL); vehicles stay in their own table and are untouched. An item's
+# photos live in vehicle_photos (item_id set, vehicle_id empty), so /vehicle-photos/{id}/file serves them too.
+# ══════════════════════════════════════════════════════════════════════
+class ItemIn(BaseModel):
+    name: str = Field(..., min_length=1, max_length=255)
+    sku: Optional[str] = Field(None, max_length=100)
+    category: Optional[str] = Field(None, max_length=100)
+    serial_number: Optional[str] = Field(None, max_length=100)  # set = a single unit, so quantity is 1
+    cost: float = Field(0, ge=0)
+    price: float = Field(0, ge=0)
+    quantity: int = Field(1, ge=0, le=1_000_000)
+    notes: Optional[str] = Field(None, max_length=5000)
+    vendor_id: Optional[str] = None
+    unlisted: bool = False  # kept in the books but not for sale yet
+
+class ItemSale(BaseModel):
+    customer_id: Optional[str] = None
+    unit_price: float = Field(..., ge=0)
+    quantity: int = Field(1, ge=1, le=1_000_000)
+    extra_expenses: List[dict] = []
+    payment_method: str = "Cash"
+    paid_cash: float = 0
+    paid_bank: float = 0
+    advance_payment: float = 0
+    due_amount: Optional[float] = None
+    due_date: Optional[str] = None
+    sale_date: Optional[str] = None
+    notes: Optional[str] = None
+    sold_by_id: Optional[str] = None
+    lead_source: Optional[str] = None
+    lead_note: Optional[str] = Field(None, max_length=255)
+    referred_by_id: Optional[str] = None
+    referred_by_name: Optional[str] = Field(None, max_length=255)
+
+def _item_status(quantity: int, unlisted: bool) -> str:
+    return "unlisted" if unlisted else ("available" if quantity > 0 else "sold")
+
+def _item_doc(body: ItemIn) -> dict:
+    qty = 1 if (body.serial_number or "").strip() else body.quantity
+    return {"name": body.name.strip(), "sku": (body.sku or "").strip() or None, "category": (body.category or "").strip() or None,
+            "serial_number": (body.serial_number or "").strip() or None, "cost": body.cost, "price": body.price, "quantity": qty,
+            "status": _item_status(qty, body.unlisted), "notes": body.notes, "vendor_id": body.vendor_id or None}
+
+async def _check_sku_free(sku: Optional[str], except_id: Optional[str] = None):
+    if sku and await db.items.find_one({"sku": sku, **({"id": {"$ne": except_id}} if except_id else {})}, {"_id": 0, "id": 1}):
+        raise HTTPException(400, f"SKU '{sku}' is already used by another item")
+
+def _item_out(it: dict, role: str, photos: Optional[list] = None) -> dict:
+    out = dict(it)
+    if role != "admin":
+        out.pop("cost", None)  # what the shop paid stays admin-only, as on vehicles
+    photos = photos or []
+    out["photo_count"] = len(photos)
+    out["thumb_photos"] = [{"id": p["id"], "url": f"/api/vehicle-photos/{p['id']}/file", "thumb": f"/api/vehicle-photos/{p['id']}/file?w=240"} for p in photos[:3]]
+    return out
+
+@api_router.get("/items")
+async def list_items(status: Optional[str] = None, q: Optional[str] = None, cu: dict = Depends(require("items", "view"))):
+    query = {}
+    if status and status != "all":
+        query["status"] = status
+    items = await db.items.find(query, {"_id": 0}).sort("created_at", -1).to_list(5000)
+    if q:
+        needle = q.strip().lower()
+        items = [i for i in items if needle in " ".join(str(i.get(k) or "") for k in ("name", "sku", "category", "serial_number")).lower()]
+    ids = [i["id"] for i in items]
+    photos = await db.vehicle_photos.find({"item_id": {"$in": ids}}, {"_id": 0, "id": 1, "item_id": 1, "uploaded_at": 1}).sort(PHOTO_ORDER).to_list(20000) if ids else []
+    by_item: dict = {}
+    for p in photos:
+        by_item.setdefault(p["item_id"], []).append(p)
+    return [_item_out(i, cu.get("role", "admin"), by_item.get(i["id"])) for i in items]
+
+@api_router.post("/items")
+async def create_item(body: ItemIn, cu: dict = Depends(require("items", "create"))):
+    doc = _item_doc(body)
+    await _check_sku_free(doc["sku"])
+    now = datetime.now(timezone.utc).isoformat()
+    doc.update({"id": str(uuid.uuid4()), "created_by": cu.get("username"), "created_at": now, "updated_at": now})
+    await db.items.insert_one(doc)
+    doc.pop("_id", None)
+    return _item_out(doc, cu.get("role", "admin"))
+
+@api_router.get("/items/{iid}")
+async def get_item(iid: str, cu: dict = Depends(require("items", "view"))):
+    it = await db.items.find_one({"id": iid}, {"_id": 0})
+    if not it: raise HTTPException(404, "Item not found")
+    photos = await db.vehicle_photos.find({"item_id": iid}, {"_id": 0, "id": 1, "uploaded_at": 1}).sort(PHOTO_ORDER).to_list(200)
+    return _item_out(it, cu.get("role", "admin"), photos)
+
+@api_router.put("/items/{iid}")
+async def update_item(iid: str, body: ItemIn, cu: dict = Depends(require("items", "edit"))):
+    if not await db.items.find_one({"id": iid}, {"_id": 0, "id": 1}): raise HTTPException(404, "Item not found")
+    doc = _item_doc(body)
+    await _check_sku_free(doc["sku"], iid)
+    doc["updated_at"] = datetime.now(timezone.utc).isoformat()
+    await db.items.update_one({"id": iid}, {"$set": doc})
+    return await get_item(iid, cu)
+
+@api_router.delete("/items/{iid}")
+async def delete_item(iid: str, cu: dict = Depends(require("items", "delete"))):
+    if await db.sales.find_one({"item_id": iid}, {"_id": 0, "id": 1}):
+        # The books keep referring to it; unlist it instead so history stays whole.
+        raise HTTPException(400, "This item has sales on record and cannot be deleted. Mark it unlisted instead.")
+    photos = await db.vehicle_photos.find({"item_id": iid}, {"_id": 0, "id": 1, "storage_path": 1}).to_list(500)
+    r = await db.items.delete_one({"id": iid})
+    if r.deleted_count == 0: raise HTTPException(404, "Item not found")
+    for p in photos:
+        await db.vehicle_photos.delete_one({"id": p["id"]})
+        if p.get("storage_path") and media_storage.enabled():
+            await media_storage.remove(media_storage.PHOTO_BUCKET, p["storage_path"])
+        _evict_photo_cache(p["id"])
+    return {"message": "Item deleted"}
+
+@api_router.post("/items/{iid}/sell")
+async def sell_item(iid: str, sale: ItemSale, cu: dict = Depends(require("sales", "create"))):
+    it = await db.items.find_one({"id": iid}, {"_id": 0})
+    if not it: raise HTTPException(404, "Item not found")
+    if it.get("status") == "unlisted": raise HTTPException(400, "This item is unlisted, so it cannot be sold yet")
+    # Atomic conditional decrement (same as stock_out_part), so two sales cannot both take the last unit.
+    updated = await db.items.find_one_and_update(
+        {"id": iid, "quantity": {"$gte": sale.quantity}}, {"$inc": {"quantity": -sale.quantity}}, return_document=ReturnDocument.AFTER)
+    if not updated:
+        raise HTTPException(400, f"Not enough in stock. Available: {it.get('quantity') or 0}")
+    now = datetime.now(timezone.utc).isoformat()
+    if updated["quantity"] <= 0:
+        await db.items.update_one({"id": iid}, {"$set": {"status": "sold", "updated_at": now}})
+    sale_price = round(sale.unit_price * sale.quantity, 2)
+    expenses_total = sum(float(e.get("amount", 0)) for e in sale.extra_expenses)
+    total_amount = sale_price + expenses_total
+    paid_total = (sale.paid_cash or 0) + (sale.paid_bank or 0) + (sale.advance_payment or 0)
+    due_amount = round(sale.due_amount, 2) if sale.due_amount is not None else max(round(total_amount - paid_total, 2), 0)
+    sale_date = sale.sale_date or datetime.now(timezone.utc).date().isoformat()
+    try:
+        doc = {
+            "id": str(uuid.uuid4()), "vehicle_id": None, "item_id": iid, "quantity": sale.quantity,
+            "cost_at_sale": round((it.get("cost") or 0) * sale.quantity, 2),
+            "customer_id": sale.customer_id, "sale_price": sale_price, "extra_expenses": sale.extra_expenses,
+            "expenses_total": expenses_total, "total_amount": total_amount, "payment_method": sale.payment_method,
+            "paid_cash": sale.paid_cash or 0, "paid_bank": sale.paid_bank or 0, "advance_payment": sale.advance_payment or 0,
+            "due_amount": due_amount, "due_date": sale.due_date,
+            "payment_status": "Paid" if due_amount <= 0 else ("Partial" if paid_total > 0 else "Unpaid"),
+            "sale_date": sale_date, "notes": sale.notes,
+            **await crm.seller_for_sale(sale.sold_by_id, sale.customer_id),
+            **await crm.lead_for_sale(sale.model_dump()),
+            "created_by": cu.get("username"), "created_at": now,
+        }
+        await db.sales.insert_one(doc)
+    except Exception:
+        # Put the count back: no sale was recorded.
+        await db.items.update_one({"id": iid}, {"$inc": {"quantity": sale.quantity}, "$set": {"status": _item_status(1, False)}})
+        raise
+    if sale.customer_id:
+        await db.customers.update_one({"id": sale.customer_id}, {"$set": {"last_purchase_date": sale_date}})
+    doc.pop("_id", None)
+    return doc
+
+@api_router.get("/items/{iid}/photos")
+async def get_item_photos(iid: str, cu: dict = Depends(require("items", "view"))):
+    if not await db.items.find_one({"id": iid}, {"_id": 0, "id": 1}): raise HTTPException(404, "Item not found")
+    photos = await db.vehicle_photos.find({"item_id": iid}, {"_id": 0, "data": 0}).sort(PHOTO_ORDER).to_list(200)
+    return [_photo_out(p) for p in photos]
+
+@api_router.post("/items/{iid}/photos")
+async def upload_item_photo(iid: str, file: UploadFile = File(...), cu: dict = Depends(require("items", "edit"))):
+    it = await db.items.find_one({"id": iid})
+    if not it: raise HTTPException(404, "Item not found")
+    if not _upload_type_ok(file, ALLOWED_IMAGE_TYPES, IMAGE_EXTENSIONS):
+        raise HTTPException(400, f"File type {file.content_type} not allowed. Use JPEG/PNG/WebP/HEIC.")
+    content = await file.read()
+    if len(content) > RAW_UPLOAD_MAX:
+        raise HTTPException(400, "File too large. Max 25MB.")
+    content_type = _resolved_content_type(file)
+    try:
+        content, content_type = await _run_isolated(_compress_photo, content)
+    except Exception:
+        logger.warning(f"Photo compression failed for upload to item {iid}, storing original", exc_info=True)
+    if len(content) > PHOTO_MAX_BYTES:
+        raise HTTPException(400, "File too large and could not be compressed. Try a smaller photo.")
+    photo_id = str(uuid.uuid4())
+    photo = {"id": photo_id, "vehicle_id": None, "item_id": iid, "filename": file.filename or f"{photo_id}.jpg",
+             "content_type": content_type, "data": base64.b64encode(content).decode("ascii"),
+             "uploaded_at": datetime.now(timezone.utc).isoformat(), "size": len(content),
+             "sort_order": await db.vehicle_photos.count_documents({"item_id": iid})}
+    if media_storage.enabled():
+        path = media_storage.object_path(it.get("company_id"), iid, photo_id, content_type)
+        try:
+            await media_storage.upload(media_storage.PHOTO_BUCKET, path, content, content_type)
+            photo.update(storage_path=path, data=None)
+        except Exception:
+            logger.warning(f"Supabase upload failed for a photo of item {iid}, keeping it in the database", exc_info=True)
+    await db.vehicle_photos.insert_one(photo)
+    _spawn(_make_and_store_thumbs(photo_id, content))
+    return _photo_out(photo)
+
+@api_router.delete("/items/{iid}/photos/{photo_id}")
+async def delete_item_photo(iid: str, photo_id: str, cu: dict = Depends(require("items", "edit"))):
+    p = await db.vehicle_photos.find_one({"id": photo_id, "item_id": iid}, {"_id": 0, "storage_path": 1})
+    r = await db.vehicle_photos.delete_one({"id": photo_id, "item_id": iid})
+    if r.deleted_count == 0: raise HTTPException(404, "Photo not found")
+    if p and p.get("storage_path") and media_storage.enabled():
+        await media_storage.remove(media_storage.PHOTO_BUCKET, p["storage_path"])
+    _evict_photo_cache(photo_id)
     return {"message": "Photo deleted"}
 
 # ══════════════════════════════════════════════════════════════════════
