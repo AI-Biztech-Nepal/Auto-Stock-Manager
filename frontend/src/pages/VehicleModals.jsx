@@ -4,6 +4,8 @@
  */
 import { QRCodeSVG } from "qrcode.react";
 import { formatNPR, EXPENSE_CATEGORIES } from "../utils/helpers";
+import { useAuth } from "../context/AuthContext";
+import { featureOn } from "../utils/permissions";
 
 // text-base (16px) on mobile stops iOS Safari auto-zooming the page on focus; h-10 gives a comfortable touch target
 export const inp = "w-full h-10 sm:h-9 px-3 text-base sm:text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500";
@@ -65,6 +67,7 @@ export function ExpenseModal({ onClose, onSubmit, form, setForm, saving }) {
 // GET /vehicles/{vid}/active-sale — used only to preview the refund/retained split
 // before submitting; the actual split is computed server-side from that same sale.
 export function ReturnModal({ onClose, onSubmit, form, setForm, saving, activeSale }) {
+  const { features } = useAuth();
   const amt = Number(form.refund_amount);
   const hasValidAmt = form.refund_amount !== "" && !Number.isNaN(amt);
   return (
@@ -101,8 +104,8 @@ export function ReturnModal({ onClose, onSubmit, form, setForm, saving, activeSa
               <option value="available">Available</option>
               <option value="unlisted">Unlisted</option>
               <option value="reserved">Reserved</option>
-              <option value="in_repair">In Repair</option>
-              <option value="scrap">Scrap</option>
+              {featureOn(features, "stock.job_cards") && <option value="in_repair">In Repair</option>}
+              {featureOn(features, "stock.job_cards") && <option value="scrap">Scrap</option>}
             </select>
           </div>
           <div>

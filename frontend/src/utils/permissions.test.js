@@ -1,4 +1,4 @@
-import { canAccessPath, marketingTabsFor, featureOn, featureForPath, ALL_FEATURES_ON } from "./permissions";
+import { canAccessPath, marketingTabsFor, featureOn, featureForPath, ALL_FEATURES_ON, itemsMode, STATUS_FEATURE, ROLE_FEATURE, GENERIC_TERMS } from "./permissions";
 
 const all = ALL_FEATURES_ON;
 const off = (...keys) => ({ ...all, ...Object.fromEntries(keys.map((k) => [k, false])) });
@@ -53,4 +53,29 @@ test("paths map to their feature", () => {
   expect(featureForPath("/jobs/12")).toBe("stock.job_cards");
   expect(featureForPath("/jobsx")).toBe(null);
   expect(featureForPath("/sales")).toBe(null);
+});
+
+describe("items mode and feature-owned statuses/roles", () => {
+  test("only an organization that says vehicles are off is in items mode", () => {
+    expect(itemsMode(null)).toBe(false);
+    expect(itemsMode({ "stock.vehicles": true })).toBe(false);
+    expect(itemsMode({ "stock.vehicles": false })).toBe(true);
+    expect(itemsMode({ "stock.crm": true })).toBe(true); // a loaded map without the key reads as the catalogue default: off
+  });
+  test("In Repair and Scrap follow Job Cards, parts and sanakhat roles follow their features", () => {
+    expect(STATUS_FEATURE.in_repair).toBe("stock.job_cards");
+    expect(STATUS_FEATURE.scrap).toBe("stock.job_cards");
+    expect(ROLE_FEATURE.parts_supervisor).toBe("stock.spare_parts");
+    expect(featureOn({ "stock.job_cards": false }, STATUS_FEATURE.in_repair)).toBe(false);
+    expect(featureOn(null, STATUS_FEATURE.in_repair)).toBe(true);
+  });
+  test("front desk and social media can open Items, parts staff cannot", () => {
+    expect(canAccessPath("stock_supervisor", "/items")).toBe(true);
+    expect(canAccessPath("social_media", "/items")).toBe(true);
+    expect(canAccessPath("parts_supervisor", "/items")).toBe(false);
+    expect(canAccessPath("admin", "/items", { "stock.vehicles": false })).toBe(true);
+  });
+  test("the generic words never say vehicle", () => {
+    expect(Object.values(GENERIC_TERMS).some((v) => /vehicle/i.test(v))).toBe(false);
+  });
 });

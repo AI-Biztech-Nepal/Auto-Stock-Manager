@@ -3,12 +3,12 @@ import { Outlet, NavLink, useNavigate, useLocation } from "react-router-dom";
 import { toast } from "sonner";
 import api from "../utils/api";
 import { useAuth } from "../context/AuthContext";
-import { canAccessPath, marketingTabsFor } from "../utils/permissions";
+import { canAccessPath, marketingTabsFor, itemsMode } from "../utils/permissions";
 import FinanceNavGroup from "./FinanceNavGroup";
 import NavGroup from "./NavGroup";
 import { isSanakhatOverdue, sanakhatPendingDays } from "../utils/helpers";
 import {
-  LayoutDashboard, Bike, Wrench, Sparkles, Settings, LogOut, Menu, X, Bell,
+  LayoutDashboard, Bike, Package, Wrench, Sparkles, Settings, LogOut, Menu, X, Bell,
   BookOpen, Wallet, Boxes, ShoppingBag, Building2, ImageOff, FileWarning, ShieldCheck, Megaphone, Inbox, ChevronDown, Share2, Gift, Eye, HeartHandshake, FileCheck2
 } from "lucide-react";
 
@@ -47,7 +47,7 @@ const navItems = [
 ];
 
 export default function Layout() {
-  const { user, logout, features } = useAuth();
+  const { user, logout, features, terms } = useAuth();
   const navigate = useNavigate();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const { pathname, search } = useLocation();
@@ -225,6 +225,28 @@ export default function Layout() {
               />
             );
           }
+          if (path === "/inventory" && itemsMode(features)) {
+            // No vehicles for this organization: generic Items take Inventory's place, and Spare Parts (if on) gets its own link.
+            const links = [
+              canAccessPath(user?.role, "/items") && { to: "/items", label: terms.items, icon: Package },
+              canAccessPath(user?.role, "/spare-parts", features) && { to: "/inventory?tab=spare-parts", label: "Spare Parts", icon: Boxes },
+            ].filter(Boolean);
+            return links.map((l) => (
+              <NavLink
+                key={l.to}
+                to={l.to}
+                onClick={() => mobile && setSidebarOpen(false)}
+                className={() => {
+                  const here = l.to === "/items" ? pathname.startsWith("/items") : pathname.startsWith("/inventory");
+                  return `flex items-center gap-3 px-3 py-3 rounded-lg text-sm font-medium transition-all duration-150 ${here ? "bg-blue-600 text-white" : "text-slate-400 hover:text-white hover:bg-slate-800"}`;
+                }}
+                data-testid={`nav-${l.label.toLowerCase().replace(" ", "-")}`}
+              >
+                <l.icon size={17} />
+                {l.label}
+              </NavLink>
+            ));
+          }
           if (path === "/inventory") {
             // Spare Parts lives under Inventory: a dropdown when the role gets both pages, the plain link otherwise.
             const tabs = [
@@ -383,7 +405,11 @@ export default function Layout() {
                 <TitleIcon size={19} className="shrink-0 text-slate-400" /> {parts ? "Spare Parts" : "Inventory"}
               </h1>
             );
-          })() : pathname.startsWith("/marketing") ? (() => {
+          })() : pathname.startsWith("/items") ? (
+            <h1 className="flex-1 min-w-0 flex items-center gap-2 text-lg font-bold text-slate-900 truncate" data-testid="header-title">
+              <Package size={19} className="shrink-0 text-slate-400" /> {terms.items}
+            </h1>
+          ) : pathname.startsWith("/marketing") ? (() => {
             // Named after the tab that is open (Leads, CRM, Share...), like any other page's title.
             const tabs = marketingTabsFor(user?.role, features);
             const requested = new URLSearchParams(search).get("tab");

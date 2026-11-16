@@ -8,7 +8,7 @@ export const ROLE_NAV_PATHS = {
   // Ledger: Staff tab only (see LEDGER_TABS below).
   // /sales/vehicle: the sold-vehicle page, so they can keep Transfer / Sanakhat status current
   // (the Sales list itself stays admin-only -- it carries prices and margins).
-  stock_supervisor: ["/inventory", "/warranty", "/ledger", "/sales/vehicle", "/settings"],
+  stock_supervisor: ["/inventory", "/items", "/warranty", "/ledger", "/sales/vehicle", "/settings"],
   // Sanakhat desk: one page, /sanakhat, and nothing else (no sales, stock, settings or team).
   sanakhat_officer: ["/sanakhat"],
   // Parts department gets read-only inventory browsing plus the ability to flip a vehicle's
@@ -16,7 +16,7 @@ export const ROLE_NAV_PATHS = {
   // Ledger: Vendors + Staff tabs (see LEDGER_TABS below).
   parts_supervisor: ["/spare-parts", "/ledger", "/jobs", "/inventory", "/settings"],
   // Social Media adds new stock (basic details only) and manages vehicle photos -- nothing else.
-  social_media: ["/inventory", "/marketing", "/settings"],
+  social_media: ["/inventory", "/items", "/marketing", "/settings"],
   // Cross-company visibility only -- no company_id of its own, so it must never reach any
   // of the regular per-company pages (they'd have nothing scoped to show it anyway).
   platform_owner: ["/platform"],
@@ -51,6 +51,21 @@ export const FEATURE_DEFAULTS = {
   "stock.warranty": true, "stock.bookings": true, "stock.crm": true, "stock.ai_assistant": true,
   "stock.leads": false, "stock.public_site": false, "stock.share": false, "stock.visits": false, "stock.offers": false,
 };
+// An organization that does not keep vehicles (stock.vehicles off) works with generic Items instead. Unknown features
+// (null) and every dealership keep the vehicle screens exactly as before.
+export function itemsMode(features) {
+  return !!features && !featureOn(features, "stock.vehicles");
+}
+
+// The words screens use for what is in stock. The server sends them with /features (see terms.py); these are the
+// fallback before that arrives and for an old server.
+export const VEHICLE_TERMS = { kind: "vehicle", item: "Vehicle", items: "Vehicles", inventory: "Inventory", sold: "Sold", sold_stock: "Sold Stock", add: "Add Vehicle", sell: "Sell Vehicle" };
+export const GENERIC_TERMS = { kind: "item", item: "Item", items: "Items", inventory: "Inventory", sold: "Sold", sold_stock: "Sold Items", add: "Add Item", sell: "Sell Item" };
+
+// In Repair and Scrap belong to Job Cards; a role belongs to its feature. Hidden when the feature is off, never deleted.
+export const STATUS_FEATURE = { in_repair: "stock.job_cards", scrap: "stock.job_cards" };
+export const ROLE_FEATURE = { parts_supervisor: "stock.spare_parts", sanakhat_officer: "stock.sanakhat" };
+
 export const ALL_FEATURES_ON = Object.fromEntries(Object.keys(FEATURE_DEFAULTS).map((k) => [k, true]));
 
 export function featureOn(features, key) {

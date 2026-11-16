@@ -10,9 +10,9 @@ import { useMemo, useRef, useState } from "react";
 import { Plus, Trash2, UploadCloud, Check, X, ImagePlus, AlertCircle, FileText } from "lucide-react";
 import BSDatePicker from "../components/BSDatePicker";
 import { useAuth } from "../context/AuthContext";
-import { featureOn } from "../utils/permissions";
+import { featureOn, STATUS_FEATURE } from "../utils/permissions";
 import CustomerVendorPicker from "../components/CustomerVendorPicker";
-import { BRANDS, SOURCES, CONDITIONS, FUEL_TYPES, OWNERSHIP_OPTIONS, VEHICLE_STATUS_OPTIONS, formatNPR } from "../utils/helpers";
+import { BRANDS, SOURCES, CONDITIONS, FUEL_TYPES, OWNERSHIP_OPTIONS, statusOptionsFor, formatNPR } from "../utils/helpers";
 import { EMPTY_DOC_PHOTOS } from "../utils/stagedDocs";
 import { LBL, RO, BOX, OK, BAD, SECTION, H2, DATE_BOX, GRID, Money, digits } from "../components/formKit";
 import { PhotoCropperModal } from "../components/PhotoCropperModal";
@@ -151,7 +151,7 @@ export function VehicleFormBody({
   const plateClosed = plateHit && (plateHit.status === "sold" || plateHit.status === "scrap");
   const plateBlocked = plateHit && !plateClosed;
 
-  const statusOptions = editing ? VEHICLE_STATUS_OPTIONS : LISTING; // an existing vehicle can be in any status, sold included
+  const statusOptions = editing ? statusOptionsFor(features, form.status) : LISTING.filter(o => featureOn(features, STATUS_FEATURE[o.value])); // an existing vehicle can be in any status, sold included
   const sanakhatOpen = editing || showSanakhat;
 
   return (

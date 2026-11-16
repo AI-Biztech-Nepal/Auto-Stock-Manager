@@ -21,6 +21,7 @@ const VerifyEmail = lazy(() => import("./pages/VerifyEmail"));
 const Dashboard = lazy(() => import("./pages/Dashboard"));
 const InventoryHub = lazy(() => import("./pages/InventoryHub"));
 const VehicleDetail = lazy(() => import("./pages/VehicleDetail"));
+const Items = lazy(() => import("./pages/Items"));
 const JobCards = lazy(() => import("./pages/JobCards"));
 const Warranty = lazy(() => import("./pages/Warranty"));
 const SanakhatPortal = lazy(() => import("./pages/SanakhatPortal"));
@@ -99,6 +100,7 @@ function AppRoutes() {
           <Route index element={<HomeRoute />} />
           <Route path="inventory" element={<RoleRoute path="/inventory"><InventoryHub /></RoleRoute>} />
           <Route path="inventory/:id" element={<RoleRoute path="/inventory/detail"><VehicleDetail /></RoleRoute>} />
+          <Route path="items" element={<RoleRoute path="/items"><Items /></RoleRoute>} />
           <Route path="import-stock" element={<RoleRoute path="/import-stock"><ImportStock /></RoleRoute>} />
           <Route path="jobs" element={<RoleRoute path="/jobs"><JobCards /></RoleRoute>} />
           <Route path="warranty" element={<RoleRoute path="/warranty"><Warranty /></RoleRoute>} />

@@ -8,7 +8,7 @@ import { formatNPR } from "../utils/helpers";
 import HoverADDate from "../components/HoverADDate";
 import DateRangeFilter, { resolveDateFilter } from "../components/DateRangeFilter";
 import { useAuth } from "../context/AuthContext";
-import { featureOn } from "../utils/permissions";
+import { featureOn, itemsMode } from "../utils/permissions";
 import { getCurrentBSDate, BS_MONTHS } from "../utils/nepali-date";
 
 // ── Sub-components defined OUTSIDE to prevent remount ──────────────────
@@ -121,7 +121,7 @@ function AccountingSummary({ range }) {
   const rl = range.key === "daily" ? "today" : range.key === "all" ? "" : range.label.toLowerCase();
   const rangePhrase = range.key === "daily" ? "for today" : range.key === "all" ? "yet" : `for ${range.label.toLowerCase()}`;
   const navigate = useNavigate();
-  const { features } = useAuth();
+  const { features, terms } = useAuth();
   const bookingsOn = featureOn(features, "stock.bookings");
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -202,18 +202,18 @@ function AccountingSummary({ range }) {
       ) : data ? (
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-3">
           <AccountingKPI
-            label="Vehicle Purchase Cost"
+            label={`${terms.item} Purchase Cost`}
             value={formatNPR(vehiclePurchaseCost)}
-            sub={`${data.purchase_count} vehicle${data.purchase_count !== 1 ? "s" : ""} purchased`}
+            sub={`${data.purchase_count} ${data.purchase_count !== 1 ? terms.items.toLowerCase() : terms.item.toLowerCase()} purchased`}
             color="bg-blue-500"
             icon={ShoppingCart}
             testid="kpi-total-cost"
             onClick={() => setShowPurchasesModal(true)}
           />
           <AccountingKPI
-            label="Total Vehicle Sale"
+            label={`Total ${terms.item} Sale`}
             value={formatNPR(data.total_sales)}
-            sub={`${data.sold_count} vehicle${data.sold_count !== 1 ? "s" : ""} sold`}
+            sub={`${data.sold_count} ${data.sold_count !== 1 ? terms.items.toLowerCase() : terms.item.toLowerCase()} sold`}
             color="bg-green-500"
             icon={Banknote}
             testid="kpi-total-sales"
@@ -261,7 +261,7 @@ function AccountingSummary({ range }) {
                   className="shrink-0 w-56 bg-white rounded-lg border border-green-100 shadow-sm p-3 cursor-pointer hover:shadow-md hover:border-green-300 transition-all"
                 >
                   <div className="font-bold text-slate-900 text-sm truncate mb-1" style={{ fontFamily: "Manrope" }}>
-                    {s.vehicle_info || "Vehicle"}
+                    {s.vehicle_info || terms.item}
                   </div>
                   <div className="text-xs text-slate-500 mb-1 truncate">{s.customer_name}</div>
                   <div className="text-sm font-semibold text-green-700 mb-1">{formatNPR(s.sale_price)}</div>
@@ -311,7 +311,7 @@ function AccountingSummary({ range }) {
                     </div>
                   )}
                   <div className="text-xs text-slate-500 font-medium" data-testid="sales-modal-total-sale">
-                    Total Vehicle Sale: {formatNPR(data?.total_sales)}
+                    Total {terms.item} Sale: {formatNPR(data?.total_sales)}
                   </div>
                 </div>
                 <button
@@ -350,7 +350,7 @@ function AccountingSummary({ range }) {
                       <div className={showBill ? "" : "flex items-center justify-between gap-3"}>
                         <div className="min-w-0">
                           <div className="font-semibold text-slate-900 text-sm truncate" style={{ fontFamily: "Manrope" }}>
-                            {s.vehicle_info || "Vehicle"}
+                            {s.vehicle_info || terms.item}
                           </div>
                           <div className="text-xs text-slate-500 truncate">
                             {s.customer_name} · Sold: <HoverADDate date={s.sale_date} />
@@ -426,7 +426,7 @@ function AccountingSummary({ range }) {
                         >
                           <div className="min-w-0">
                             <div className="font-semibold text-slate-900 text-sm truncate" style={{ fontFamily: "Manrope" }}>
-                              {b.vehicle_info || "Vehicle"}
+                              {b.vehicle_info || terms.item}
                             </div>
                             <div className="text-xs text-slate-500 truncate">
                               {b.customer_name} · Booked: <HoverADDate date={b.booking_date} />
@@ -474,7 +474,7 @@ function AccountingSummary({ range }) {
               <div className="flex items-center gap-4 shrink-0">
                 <div className="text-right">
                   <div className="text-sm font-bold text-blue-700" data-testid="purchases-modal-total-cost">
-                    Vehicle Purchase Cost: {formatNPR(vehiclePurchaseCost)}
+                    {terms.item} Purchase Cost: {formatNPR(vehiclePurchaseCost)}
                   </div>
                 </div>
                 <button
@@ -502,7 +502,7 @@ function AccountingSummary({ range }) {
                   >
                     <div className="min-w-0">
                       <div className="font-semibold text-slate-900 text-sm truncate" style={{ fontFamily: "Manrope" }}>
-                        {v.vehicle_info || "Vehicle"}
+                        {v.vehicle_info || terms.item}
                       </div>
                       <div className="text-xs text-slate-500 truncate">
                         {v.registration_number || v.purchase_source || "—"} · Purchased: <HoverADDate date={v.purchase_date} />
@@ -527,7 +527,8 @@ function AccountingSummary({ range }) {
 const PERIOD_STORAGE_KEY = "dashboard_date_filter";
 
 export default function Dashboard() {
-  const { user, features } = useAuth();
+  const { user, features, terms } = useAuth();
+  const itemsOnly = itemsMode(features);
   const jobsOn = featureOn(features, "stock.job_cards");
   // Coming back to the Dashboard shows the last figures at once (see utils/listCache.js); they are refreshed below as always.
   const [stats, setStats] = useState(() => peek("dashboard:stats") ?? null);
@@ -611,8 +612,8 @@ export default function Dashboard() {
 
       {/* Current stock & workload — a live "right now" snapshot, not affected by the period toggle */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-4">
-        <KPICard title="Available Vehicles" value={stats.available} icon={Package} color="bg-blue-500" testid="kpi-available" onClick={() => navigate("/inventory")} />
-        <KPICard title="Locked Capital" value={formatNPR(stats.locked_capital)} icon={DollarSign} color="bg-indigo-500" testid="kpi-capital" subtitle="In available stock" onClick={() => navigate("/inventory")} />
+        <KPICard title={`Available ${terms.items}`} value={itemsOnly ? stats.item_lines_in_stock ?? 0 : stats.available} icon={Package} color="bg-blue-500" testid="kpi-available" onClick={() => navigate(itemsOnly ? "/items" : "/inventory")} />
+        <KPICard title="Locked Capital" value={formatNPR(stats.locked_capital)} icon={DollarSign} color="bg-indigo-500" testid="kpi-capital" subtitle="In available stock" onClick={() => navigate(itemsOnly ? "/items" : "/inventory")} />
         {jobsOn && (
           <KPICard title="Pending Jobs" value={stats.pending_jobs} icon={Wrench} color="bg-orange-500" testid="kpi-pending-jobs" onClick={() => navigate("/jobs")} />
         )}

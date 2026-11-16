@@ -3,7 +3,7 @@ import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { Plus, Trash2, Edit, CheckCircle, AlertCircle, Clock, QrCode, Undo2, Download, FileText, Package, ChevronLeft, ChevronRight, GripVertical } from "lucide-react";
 import { toast } from "sonner";
 import api, { postWithRetry } from "../utils/api";
-import { formatNPR, getAgingStyle, getStatusStyle, getTerminationStyle, sanakhatDaysLeft, sanakhatPendingDays, sanakhatDueDate, sanakhatLeftText, SANAKHAT_CYCLE_DAYS, SANAKHAT_WARN_DAYS, getDocStyle, EXPENSE_CATEGORIES, VEHICLE_STATUS_OPTIONS } from "../utils/helpers";
+import { formatNPR, getAgingStyle, getStatusStyle, getTerminationStyle, sanakhatDaysLeft, sanakhatPendingDays, sanakhatDueDate, sanakhatLeftText, SANAKHAT_CYCLE_DAYS, SANAKHAT_WARN_DAYS, getDocStyle, EXPENSE_CATEGORIES, statusOptionsFor } from "../utils/helpers";
 import { ExpenseModal, QRLabelModal, ReturnModal } from "./VehicleModals";
 import { VehicleFormBody, vehicleMissing } from "./AddVehicleModal";
 import HoverADDate from "../components/HoverADDate";
@@ -463,7 +463,7 @@ export function VehicleDetailModal({ id, onClose }) {
                    outside what this role can pick — otherwise a filtered <select> with no matching
                    <option> silently mis-renders (browsers show a blank/wrong label). The select is
                    disabled in that case anyway, so this can't be used to bypass the restriction. */}
-                {(canManageStock ? VEHICLE_STATUS_OPTIONS : VEHICLE_STATUS_OPTIONS.filter(o => (isPartsOnly && PARTS_ALLOWED_VEHICLE_STATUSES.includes(o.value)) || o.value === vehicle.status)).map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                {(canManageStock ? statusOptionsFor(features, vehicle.status) : statusOptionsFor(features, vehicle.status).filter(o => (isPartsOnly && PARTS_ALLOWED_VEHICLE_STATUSES.includes(o.value)) || o.value === vehicle.status)).map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
               </select>
             )}
             <div className="flex-1" />

@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState } from "react";
 import api from "../utils/api";
-import { ALL_FEATURES_ON } from "../utils/permissions";
+import { ALL_FEATURES_ON, GENERIC_TERMS, VEHICLE_TERMS, itemsMode } from "../utils/permissions";
 import { forgetAll } from "../utils/listCache";
 
 const AuthContext = createContext(null);
@@ -34,6 +34,9 @@ export const AuthProvider = ({ children }) => {
   // Remembered from the last visit so a reload does not flash hidden items before the answer arrives.
   const [features, setFeatures] = useState(() => (initial.token ? storage.get("gng_features") : null));
 
+  // The words for what is in stock (Vehicle / Item ...), from the same answer. Vehicle wording until told otherwise.
+  const [terms, setTerms] = useState(() => (initial.token && storage.get("gng_terms")) || VEHICLE_TERMS);
+
   useEffect(() => {
     if (!user || !token) return undefined;
     let live = true;
@@ -41,7 +44,8 @@ export const AuthProvider = ({ children }) => {
       if (!live) return;
       const f = r.data?.features ?? null;
       setFeatures(f);
-      try { storage.set("gng_features", f); } catch { /* storage full or blocked: the answer still applies this session */ }
+      setTerms(r.data?.terms || (itemsMode(f) ? GENERIC_TERMS : VEHICLE_TERMS));
+      try { storage.set("gng_features", f); storage.set("gng_terms", r.data?.terms || null); } catch { /* storage full or blocked: the answer still applies this session */ }
     }).catch(() => {}); // old server without the endpoint, or offline: keep what we had; the server's 403s still apply
     return () => { live = false; };
   }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -60,7 +64,9 @@ export const AuthProvider = ({ children }) => {
     forgetAll();
     setUser(userData);
     setFeatures(null);
+    setTerms(VEHICLE_TERMS);
     storage.remove("gng_features");
+    storage.remove("gng_terms");
     setToken(authToken);
     storage.set("gng_user", userData);
     localStorage.setItem("gng_token", authToken);
@@ -71,13 +77,15 @@ export const AuthProvider = ({ children }) => {
     setUser(null);
     setToken(null);
     setFeatures(null);
+    setTerms(VEHICLE_TERMS);
     storage.remove("gng_features");
+    storage.remove("gng_terms");
     localStorage.removeItem("gng_user");
     localStorage.removeItem("gng_token");
   };
 
   return (
-    <AuthContext.Provider value={{ user, token, features, login, logout }}>
+    <AuthContext.Provider value={{ user, token, features, terms, login, logout }}>
       {children}
     </AuthContext.Provider>
   );
