@@ -354,6 +354,7 @@ async def get_current_user(request: Request, creds: HTTPAuthorizationCredentials
         if not org_id:
             raise HTTPException(401, "Invalid token")
         payload = await portal_bridge.resolve(creds.credentials, org_id)
+        await portal_bridge.enforce_feature(request.url.path, payload["company_id"], payload["org_id"])
         current_company_id.set(payload["company_id"])
         return payload
     # platform_owner is the one role that legitimately has no company_id -- its endpoints
@@ -368,6 +369,7 @@ async def get_current_user(request: Request, creds: HTTPAuthorizationCredentials
         raise HTTPException(401, "Your session is missing company info -- please log out and log back in.")
     # Every tenant-scoped db.<collection> call for the rest of this request now
     # automatically filters/stamps by this company_id -- see _ScopedCollection above.
+    await portal_bridge.enforce_feature(request.url.path, payload.get("company_id"))  # 403 {"feature"} if this route's feature is off
     current_company_id.set(payload.get("company_id"))
     return payload
 
@@ -1255,6 +1257,7 @@ async def public_share_page(vid: str, request: Request, p: str = "0", s: str = "
         raise HTTPException(404, "Not found")
     v = await db.vehicles.find_one({"id": vid, "status": "available"}, {"_id": 0})
     if not v: raise HTTPException(404, "This vehicle is no longer available")
+    await portal_bridge.enforce_feature(request.url.path, v.get("company_id"))
     st = await db.settings.find_one({"company_id": v.get("company_id")}, {"_id": 0}) or {}
     photos = await db.vehicle_photos.find({"vehicle_id": vid}, {"_id": 0, "id": 1, "uploaded_at": 1}).sort(PHOTO_ORDER).to_list(20)
     base = _client_base(request)
@@ -1417,6 +1420,10 @@ async def facebook_callback(state: str = "", code: str = "", error: str = ""):
     if error or not code:
         return back("cancelled")
     current_company_id.set(st["company_id"])
+    try:
+        await portal_bridge.enforce_feature("/facebook/callback", st["company_id"])
+    except HTTPException:
+        return back("disabled")
     try:
         async with httpx.AsyncClient(timeout=20) as http:
             r = await http.get(f"{FB_GRAPH}/oauth/access_token", params={
@@ -3449,7 +3456,7 @@ async def delete_vehicle(vid: str, cu: dict = Depends(admin_only)):
     return {"message": "Deleted"}
 
 @api_router.get("/vehicles/{vid}/qr-data")
-async def get_vehicle_qr(vid: str):
+async def get_vehicle_qr(vid: str, request: Request):
     # Unauthenticated -- current_company_id is never set here, so db.vehicles.find_one runs
     # unscoped (see _ScopedCollection._scoped: it only adds a company_id filter when one is
     # set). The "contact" field below must therefore look up THIS vehicle's own company
@@ -3457,6 +3464,7 @@ async def get_vehicle_qr(vid: str):
     # would show whichever company happened to be scoped in some other unrelated request.
     v = await db.vehicles.find_one({"id": vid}, {"_id": 0})
     if not v: raise HTTPException(404, "Not found")
+    await portal_bridge.enforce_feature(request.url.path, v.get("company_id"))
     settings = await db.settings.find_one({"company_id": v.get("company_id")}, {"_id": 0}) or {}
     contact = settings.get("business_name") or "Auto Stock Manager"
     if settings.get("contact_phone"):
@@ -4930,6 +4938,7 @@ async def assistant_briefing(request: Request):
     if not cid:
         raise HTTPException(401, "Invalid assistant key")
     current_company_id.set(cid)          # every db.<collection> call below is now scoped to this company
+    await portal_bridge.enforce_feature(request.url.path, cid)
     finance = await finance_summary({"role": "admin"})
     sales = await db.sales.find({}, {"_id": 0}).to_list(50000)
     today, month = assistant_api.nepal_today()
@@ -4970,6 +4979,7 @@ async def assistant_lookup(request: Request, body: AssistantLookup):
     if not cid:
         raise HTTPException(401, "Invalid assistant key")
     current_company_id.set(cid)
+    await portal_bridge.enforce_feature(request.url.path, cid)
     data = {}
     if body.name in ("customer", "dues", "sales"):
         data["sales"] = await db.sales.find({}, {"_id": 0}).to_list(50000)
@@ -7123,7 +7133,7 @@ async def get_legal_documents(vid: str, cu: dict = Depends(require("vehicle_medi
     return [_doc_out(d) for d in docs]
 
 @api_router.get("/legal-documents/{doc_id}/file")
-async def get_legal_document_file(doc_id: str):
+async def get_legal_document_file(doc_id: str, request: Request):
     """Same fix as get_vehicle_photo_file, for legal documents (bluebook/insurance/tax/transfer
     scans and PDFs). Deliberately unauthenticated with no company scoping: doc_id is an
     unguessable UUID (122 bits of randomness), the same trust model this app already uses for
@@ -7132,9 +7142,10 @@ async def get_legal_document_file(doc_id: str):
 
     A document kept in Supabase Storage sits in a private bucket: the answer is a redirect to a signed link
     that stops working after an hour, never cached."""
-    d = await db.legal_documents.find_one({"id": doc_id}, {"_id": 0, "id": 1, "storage_path": 1})
+    d = await db.legal_documents.find_one({"id": doc_id}, {"_id": 0, "id": 1, "storage_path": 1, "company_id": 1})
     if not d:
         raise HTTPException(404, "Document not found")
+    await portal_bridge.enforce_feature(request.url.path, d.get("company_id"))
     if d.get("storage_path") and media_storage.enabled():
         url = await media_storage.signed_url(media_storage.DOC_BUCKET, d["storage_path"])
         return RedirectResponse(url, status_code=302, headers={"Cache-Control": "no-store"})
@@ -7710,7 +7721,7 @@ async def _default_company_id() -> Optional[str]:
         _default_company_id_cache = c["id"] if c else None
     return _default_company_id_cache
 
-async def _scope_to_default_company():
+async def _scope_to_default_company(request: Request):
     """FastAPI dependency for the /public/* routes below. They're unauthenticated (no
     get_current_user, so current_company_id never gets set by a JWT) but the storefront
     (hamroauto.com.np) is one specific business's public site -- without this, every
@@ -7719,6 +7730,7 @@ async def _scope_to_default_company():
     pre-multi-tenant business) rather than building a whole public-storefront-per-company
     routing scheme, which nothing has asked for yet."""
     current_company_id.set(await _default_company_id())
+    await portal_bridge.enforce_feature(request.url.path, current_company_id.get())
 
 @api_router.get("/public/vehicles", dependencies=[Depends(_scope_to_default_company)])
 async def public_list_vehicles(request: Request):

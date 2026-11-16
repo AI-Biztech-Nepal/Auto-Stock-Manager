@@ -36,6 +36,10 @@ class FakeJWKS:
         return type("K", (), {"key": KEY.public_key()})()
 
 
+# core.features.default_on in the portal's 20261102000000_stock_features.sql (its own tests check the SQL)
+DEFAULT_ON = {"stock.warranty": True, "stock.bookings": True, "stock.crm": True, "stock.ai_assistant": True}
+
+
 class FakePortalDB:
     """members: {(org,user): role|None}; services: {org: 'active'|'trial'|'trial_expired'|'none'}."""
 
@@ -50,11 +54,14 @@ class FakePortalDB:
             org, user, service = params
             ok = self.services.get(org) in ("active", "trial") and service == "stock"
             return self.members.get((org, user)) if ok else None
+        if "legacy_tenant_map" in sql and "legacy_id = %s" in sql:  # company -> org
+            orgs = [o for o, cs in self.map.items() if params[0] in cs]
+            return orgs[0] if len(orgs) == 1 else None
         if "legacy_tenant_map" in sql:
             ids = self.map.get(params[0], [])
             return ids[0] if len(ids) == 1 else None
         if "core.feature_on" in sql:
-            return self.features.get(tuple(params), False)
+            return self.features.get(tuple(params), DEFAULT_ON.get(params[1], False))  # missing row = catalogue default
         raise AssertionError(sql)
 
 

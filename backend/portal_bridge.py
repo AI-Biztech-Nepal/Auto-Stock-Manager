@@ -10,6 +10,7 @@ Reads core.* from the portal database through PORTAL_DB_URL: use a read-only rol
 import asyncio
 import logging
 import os
+import re
 import time
 import uuid
 
@@ -148,6 +149,101 @@ async def resolve(token: str, org_id: str) -> dict:
         raise HTTPException(503, "Portal login is temporarily unavailable")
 
 
+# ── which feature owns which route (Prompt 2) ──────────────────────────────
+# First match wins; paths are without the /api prefix. A path that matches nothing is core and is never gated.
+# Core on purpose: /vehicles CRUD (the inventory until the generic items core, Prompt 4), customers, sales, vendors,
+# reports, settings, team, expenses, photos, presence, audit, backups. Not gated here: /fin, /emi*, /partners*,
+# /finance/summary (go to Finance, Prompt 3c), /auth, /admin, /platform, /perf, /sync (infrastructure).
+PATH_FEATURES = [(re.compile(rx), key) for rx, key in [
+    (r"^/vehicles/[^/]+/(qr-data|legal-documents)(/|$)", "stock.vehicles"),
+    (r"^/legal-documents(/|$)", "stock.vehicles"),
+    (r"^/(sanakhat(/|$)|vehicles/[^/]+/sale-statuses$)", "stock.sanakhat"),
+    (r"^/jobs(/|$)", "stock.job_cards"),
+    (r"^/spare-parts(/|$)", "stock.spare_parts"),
+    (r"^/warranties(/|$)", "stock.warranty"),
+    (r"^/bookings(/|$)", "stock.bookings"),
+    (r"^/crm(/|$)", "stock.crm"),
+    (r"^/(ai|assistant)(/|$)", "stock.ai_assistant"),
+    (r"^/(leads|public/leads)(/|$)", "stock.leads"),
+    (r"^/(offers|public/offers)(/|$)", "stock.offers"),
+    (r"^/(share|facebook|public/share)(/|$)", "stock.share"),
+    (r"^/(visits|public/visits?)(/|$)", "stock.visits"),
+    (r"^/public(/|$)", "stock.public_site"),
+]]
+
+
+def feature_for_path(path: str):
+    path = path[4:] if path.startswith("/api/") else path
+    for rx, key in PATH_FEATURES:
+        if rx.search(path):
+            return key
+    return None
+
+
+def portal_configured() -> bool:  # seam: without PORTAL_DB_URL feature gating is off and Stock behaves as before
+    return bool(os.environ.get("PORTAL_DB_URL"))
+
+
+_feat_cache: dict = {}
+_org_cache: dict = {}
+
+
+def _feature_cached(db, org_id: str, key: str) -> bool:
+    hit = _feat_cache.get((org_id, key))
+    if hit and time.monotonic() - hit[0] < _TTL:
+        return hit[1]
+    on = feature_on(db, org_id, key)
+    _feat_cache[(org_id, key)] = (time.monotonic(), on)
+    return on
+
+
+def _org_for_company(db, company_id: str):
+    hit = _org_cache.get(company_id)
+    if hit and time.monotonic() - hit[0] < _TTL:
+        return hit[1]
+    org = db.fetch_value("select case when count(*) = 1 then min(org_id::text) end from core.legacy_tenant_map "
+                         "where service_key = 'stock' and legacy_id = %s", (company_id,))
+    _org_cache[company_id] = (time.monotonic(), org)
+    return org
+
+
+def _enforce_sync(path: str, company_id, org_id):
+    key = feature_for_path(path)
+    if not key or not (company_id or org_id):
+        return
+    if org_id:  # a portal login: the org is certain, so a lookup failure refuses (503) like the rest of the bridge
+        if not _feature_cached(get_portal_db(), org_id, key):
+            raise HTTPException(403, {"feature": key})
+        return
+    # Stock's own token, a public page or the assistant key: only a company id. Not set up, or no map row for this
+    # company, means the catalogue default (allowed). A failed lookup also allows: a portal outage must not take
+    # a live shop down. shortcut: fail-open, switch to fail-closed once every company is on the portal.
+    if not portal_configured():
+        return
+    try:
+        db = get_portal_db()
+        org = _org_for_company(db, company_id)
+        on = True if not org else _feature_cached(db, org, key)
+    except Exception:
+        logging.getLogger(__name__).exception("feature lookup failed; allowing %s", key)
+        return
+    if not on:
+        raise HTTPException(403, {"feature": key})
+
+
+async def enforce_feature(path: str, company_id=None, org_id=None):
+    """403 {"feature": key} when the route's feature is off for this company/org. Cheap no-op for core routes."""
+    if not feature_for_path(path):
+        return
+    try:
+        await asyncio.to_thread(_enforce_sync, path, company_id, org_id)
+    except HTTPException:
+        raise
+    except Exception:  # only reachable for a portal login (the other path fails open inside _enforce_sync)
+        logging.getLogger(__name__).exception("portal feature lookup failed")
+        raise HTTPException(503, "Portal login is temporarily unavailable")
+
+
 def make_feature_guard(get_user):
     """require_feature('stock.x'), built on the app's own get_current_user so there is one login path.
     Not attached to any route yet (that is Prompt 2).
@@ -167,5 +263,7 @@ def make_feature_guard(get_user):
 def clear_caches():
     _ctx_cache.clear()
     _company_cache.clear()
+    _feat_cache.clear()
+    _org_cache.clear()
     _known_kids.clear()
     _last_miss[0] = 0.0
