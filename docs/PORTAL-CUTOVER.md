@@ -24,14 +24,9 @@ as it does for its own tokens. Nothing about what a role can do moves to the por
    targets Stock's own Supabase project, not the portal's).
 3. Roles: every user needs a `core.service_roles` row (service `stock`) with their current Stock role, so nobody
    loses a role.
-4. `sanakhat_officer` in the portal (draft, NOT applied; portal repo decides):
-```sql
-update core.services set roles = array_append(roles, 'sanakhat_officer')
- where key = 'stock' and not 'sanakhat_officer' = any (roles);
--- and in core.check_service_role(): when new.role = 'sanakhat_officer', also require
--- core.feature_on(new.org_id, 'stock.sanakhat'), so only orgs with the vehicle paperwork pack can assign it.
-```
-   The portal's role picker should also hide it for orgs without `stock.sanakhat` (portal UI, later).
+4. `sanakhat_officer` in the portal: done in the portal repo, migration `20261102000200_stock_sanakhat_officer.sql`
+   (role added; assignable only where `stock.sanakhat` is on). Confirm it is applied to the live portal before moving
+   any sanakhat_officer user. The role picker in the portal UI should still hide it without the feature (later).
 
 ## Removed at cut-over, not before
 `/auth/signup`, `/auth/login`, `/auth/forgot-password`, `/auth/reset-password`, the verify-email routes, the staff
