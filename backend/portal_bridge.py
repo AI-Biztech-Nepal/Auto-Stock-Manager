@@ -13,6 +13,7 @@ import os
 import time
 import uuid
 
+import jwt
 from fastapi import Depends, HTTPException, Request
 
 
@@ -82,12 +83,39 @@ def _company_for_org(db, org_id: str):
     return cid
 
 
+_known_kids: set = set()
+_last_miss = [0.0]
+
+
+def _verify(token: str) -> dict:
+    """decode_token fetches the portal's signing keys over the network when it meets a key id it has not cached.
+    Anyone can send garbage with X-Org-Id, so: no kid / wrong algorithm = refused with no network call, and an
+    unseen kid is looked up at most once per _TTL per worker."""
+    try:
+        h = jwt.get_unverified_header(token)
+    except jwt.PyJWTError:
+        raise HTTPException(401, "Invalid session")
+    kid = h.get("kid")
+    if not kid or h.get("alg") not in ("ES256", "RS256"):
+        raise HTTPException(401, "Invalid session")
+    if kid not in _known_kids and time.monotonic() - _last_miss[0] < _TTL:
+        raise HTTPException(401, "Invalid session")
+    try:
+        claims = decode_token(token)
+    except HTTPException:
+        if kid not in _known_kids:
+            _last_miss[0] = time.monotonic()
+        raise
+    _known_kids.add(kid)
+    return claims
+
+
 def _resolve_sync(token: str, org_id: str) -> dict:
     try:
         uuid.UUID(org_id)
     except (ValueError, AttributeError):
         raise HTTPException(401, "Invalid X-Org-Id")
-    claims = decode_token(token)
+    claims = _verify(token)
     key = (claims["sub"], org_id)
     hit = _ctx_cache.get(key)
     if hit and time.monotonic() - hit[0] < _TTL:
@@ -139,3 +167,5 @@ def make_feature_guard(get_user):
 def clear_caches():
     _ctx_cache.clear()
     _company_cache.clear()
+    _known_kids.clear()
+    _last_miss[0] = 0.0

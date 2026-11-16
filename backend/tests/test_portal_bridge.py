@@ -60,7 +60,8 @@ class FakePortalDB:
 
 def portal_token(sub=USER, exp_minutes=5, aud="authenticated"):
     return jwt.encode({"sub": sub, "aud": aud, "email": "u@example.com",
-                       "exp": datetime.now(timezone.utc) + timedelta(minutes=exp_minutes)}, KEY, algorithm="RS256")
+                       "exp": datetime.now(timezone.utc) + timedelta(minutes=exp_minutes)}, KEY, algorithm="RS256",
+                      headers={"kid": "k1"})
 
 
 def stock_token(role="admin", company_id=COMPANY):
@@ -170,7 +171,7 @@ def test_expired_portal_token_refused(fake, client):
 
 def test_token_signed_by_someone_else_refused(fake, client):
     other = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    t = jwt.encode({"sub": USER, "aud": "authenticated", "exp": time.time() + 300}, other, algorithm="RS256")
+    t = jwt.encode({"sub": USER, "aud": "authenticated", "exp": time.time() + 300}, other, algorithm="RS256", headers={"kid": "k1"})
     assert call(client, t).status_code == 401
 
 
@@ -233,3 +234,30 @@ def test_portal_db_down_is_503_not_500(fake, client, monkeypatch):
         raise ConnectionError("db down")
     monkeypatch.setattr(fake, "fetch_value", down)
     assert call(client, portal_token()).status_code == 503
+
+
+# ── garbage tokens must not cause key lookups ─────────────────────────────
+def test_token_without_kid_refused_without_lookup(fake, client, monkeypatch):
+    calls = []
+    monkeypatch.setattr(portal_bridge, "decode_token", lambda t: calls.append(t))
+    t = jwt.encode({"sub": USER, "aud": "authenticated", "exp": time.time() + 300}, KEY, algorithm="RS256")
+    assert call(client, t).status_code == 401 and calls == []
+
+
+def test_unknown_kid_looked_up_once_per_minute(fake, client, monkeypatch):
+    calls = []
+
+    def bad(t):
+        calls.append(t)
+        raise server.HTTPException(401, "Invalid session")
+    monkeypatch.setattr(portal_bridge, "decode_token", bad)
+    t = jwt.encode({"sub": USER, "aud": "authenticated", "exp": time.time() + 300}, KEY, algorithm="RS256", headers={"kid": "zzz"})
+    for _ in range(5):
+        assert call(client, t).status_code == 401
+    assert len(calls) == 1
+
+
+def test_known_kid_unaffected_by_earlier_miss(fake, client):
+    t = jwt.encode({"sub": USER, "aud": "authenticated", "exp": time.time() + 300}, KEY, algorithm="RS256", headers={"kid": "zzz"})
+    call(client, t)  # unknown kid, real decode succeeds with the fake JWKS, so it becomes known
+    assert call(client, portal_token()).status_code == 200
