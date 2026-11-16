@@ -66,7 +66,7 @@ class FakePortalDB:
             ids = self.map.get(params[0], [])
             return ids[0] if len(ids) == 1 else None
         if "jsonb_object_agg" in sql:  # every stock.* flag for one org, missing rows at their default
-            return {k: self.features.get((params[0], k), d) for k, d in ALL_KEYS.items()}
+            return {k: self.features.get((params[0], k), DEFAULT_ON.get(k, False)) for k in params[1]}
         if "core.feature_on" in sql:
             return self.features.get(tuple(params), DEFAULT_ON.get(params[1], False))  # missing row = catalogue default
         raise AssertionError(sql)

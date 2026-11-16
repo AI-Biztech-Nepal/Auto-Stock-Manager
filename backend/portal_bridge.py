@@ -155,7 +155,7 @@ async def resolve(token: str, org_id: str) -> dict:
 # Core on purpose: /vehicles CRUD (the inventory until the generic items core, Prompt 4), customers, sales, vendors,
 # reports, settings, team, expenses, photos, presence, audit, backups. Not gated here: /fin, /emi*, /partners*,
 # /finance/summary (go to Finance, Prompt 3c), /auth, /admin, /platform, /perf, /sync (infrastructure).
-PATH_FEATURES = [(re.compile(rx), key) for rx, key in [
+PATH_FEATURES_RAW = [
     (r"^/vehicles/[^/]+/(qr-data|legal-documents)(/|$)", "stock.vehicles"),
     (r"^/legal-documents(/|$)", "stock.vehicles"),
     (r"^/(sanakhat(/|$)|vehicles/[^/]+/sale-statuses$)", "stock.sanakhat"),
@@ -170,7 +170,8 @@ PATH_FEATURES = [(re.compile(rx), key) for rx, key in [
     (r"^/(share|facebook|public/share)(/|$)", "stock.share"),
     (r"^/(visits|public/visits?)(/|$)", "stock.visits"),
     (r"^/public(/|$)", "stock.public_site"),
-]]
+]
+PATH_FEATURES = [(re.compile(rx), key) for rx, key in PATH_FEATURES_RAW]
 
 
 def feature_for_path(path: str):
@@ -261,9 +262,10 @@ def _features_sync(company_id, org_id):
         hit = _all_cache.get(org)
         if hit and time.monotonic() - hit[0] < _TTL:
             return hit[1]
+        # asks feature_on for the keys this code knows: the read-only role needs no grant on core.features
         raw = db.fetch_value(
-            "select coalesce(jsonb_object_agg(f.key, core.feature_on(%s, f.key)), '{}'::jsonb) "
-            "from core.features f where f.service_key = 'stock'", (org,))
+            "select coalesce(jsonb_object_agg(k, core.feature_on(%s, k)), '{}'::jsonb) from unnest(%s::text[]) as k",
+            (org, sorted({key for _, key in PATH_FEATURES_RAW})))
         feats = json.loads(raw) if isinstance(raw, (str, bytes)) else dict(raw or {})
         _all_cache[org] = (time.monotonic(), feats)
         return feats
