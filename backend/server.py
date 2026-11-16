@@ -28,6 +28,7 @@ import media_storage
 import perf_stats
 import auto_backup
 import crm
+import portal_bridge
 import assistant_api
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
@@ -342,13 +343,19 @@ def create_token(user_id: str, username: str, role: str = "admin", company_id: O
         JWT_SECRET, algorithm="HS256"
     )
 
-async def get_current_user(creds: HTTPAuthorizationCredentials = Depends(security)):
+async def get_current_user(request: Request, creds: HTTPAuthorizationCredentials = Depends(security)):
     try:
         payload = jwt.decode(creds.credentials, JWT_SECRET, algorithms=["HS256"])
     except jwt.ExpiredSignatureError:
         raise HTTPException(401, "Token expired")
     except jwt.InvalidTokenError:
-        raise HTTPException(401, "Invalid token")
+        # Not a Stock token. A portal login always sends X-Org-Id; without it this is just a bad token, as before.
+        org_id = request.headers.get("x-org-id")
+        if not org_id:
+            raise HTTPException(401, "Invalid token")
+        payload = await portal_bridge.resolve(creds.credentials, org_id)
+        current_company_id.set(payload["company_id"])
+        return payload
     # platform_owner is the one role that legitimately has no company_id -- its endpoints
     # pass explicit company_id filters per call instead of relying on auto-scoping. Any
     # other role showing up here with no company_id means its token was minted while the
@@ -363,6 +370,9 @@ async def get_current_user(creds: HTTPAuthorizationCredentials = Depends(securit
     # automatically filters/stamps by this company_id -- see _ScopedCollection above.
     current_company_id.set(payload.get("company_id"))
     return payload
+
+# require_feature('stock.x') for Prompt 2: portal logins are checked against core.feature_on, old tokens pass.
+require_feature = portal_bridge.make_feature_guard(get_current_user)
 
 # ── Role-based access control ─────────────────────────────────────────
 # "admin" (Admin) always has full access. Other roles only get what's
