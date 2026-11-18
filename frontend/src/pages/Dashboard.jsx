@@ -6,6 +6,7 @@ import api from "../utils/api";
 import { peek, remember, cacheTicket } from "../utils/listCache";
 import { formatNPR } from "../utils/helpers";
 import HoverADDate from "../components/HoverADDate";
+import BookingDetailsHost from "../components/BookingDetailsHost";
 import DateRangeFilter, { resolveDateFilter } from "../components/DateRangeFilter";
 import { useAuth } from "../context/AuthContext";
 import { getCurrentBSDate, BS_MONTHS } from "../utils/nepali-date";
@@ -120,12 +121,15 @@ function AccountingSummary({ range }) {
   const rl = range.key === "daily" ? "today" : range.key === "all" ? "" : range.label.toLowerCase();
   const rangePhrase = range.key === "daily" ? "for today" : range.key === "all" ? "yet" : `for ${range.label.toLowerCase()}`;
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [recentSales, setRecentSales] = useState([]);
   const [purchases, setPurchases] = useState([]);
   const [bookings, setBookings] = useState([]);
   const bookedNow = bookings.filter(b => b.status === "active"); // vehicles booked in the period and still booked
+  const [viewingBooking, setViewingBooking] = useState(null);   // the booking whose details are open (its card was clicked)
+  const [reloadTick, setReloadTick] = useState(0);              // bumped after a change made from those details, to reload the lists
   // null | "sales" | "profit" — which tile opened the sales-list popup, and so which
   // summary (Total Sale only, or Total Sale + Total Profit) it shows top-right.
   const [salesModalView, setSalesModalView] = useState(null);
@@ -155,7 +159,7 @@ function AccountingSummary({ range }) {
         return d >= start && d <= end;
       })))
       .catch(() => {});
-  }, [range]);
+  }, [range, reloadTick]);
 
   const fetchSummary = useCallback(async () => {
     setLoading(true); setData(null);
@@ -170,6 +174,8 @@ function AccountingSummary({ range }) {
   }, [range]);
 
   useEffect(() => { fetchSummary(); }, [fetchSummary]);
+  // A booking was sold, cancelled or deleted from its details: reload the lists and the figures.
+  const refresh = () => { setReloadTick(t => t + 1); fetchSummary(); };
 
   const isProfitPositive = data && data.net_profit >= 0;
   // "Vehicle Purchase Cost" = bare purchase price, no accessories/repairs. Backend
@@ -259,7 +265,7 @@ function AccountingSummary({ range }) {
             {bookedNow.map(b => (
               <div
                 key={b.id}
-                onClick={() => navigate("/sales")}
+                onClick={() => setViewingBooking(b)}
                 data-testid="recent-booking-card"
                 className="shrink-0 w-56 bg-white rounded-lg border border-yellow-200 shadow-sm p-3 cursor-pointer hover:shadow-md hover:border-yellow-300 transition-all"
               >
@@ -300,6 +306,9 @@ function AccountingSummary({ range }) {
           </p>
         )}
       </div>
+
+      {/* A booked vehicle's details, opened from its card above (the same popup the Sales page opens) */}
+      {viewingBooking && <BookingDetailsHost booking={viewingBooking} isAdmin={user?.role === "admin"} onClose={() => setViewingBooking(null)} onChanged={refresh} />}
 
       {/* Sales-list popup — opened by either the Total Vehicle Sale or Net Profit tile
           (salesModalView says which). Net Profit adds a per-vehicle bill to each row
@@ -441,7 +450,12 @@ function AccountingSummary({ range }) {
                       {bookings.map(b => (
                         <div
                           key={b.id}
-                          onClick={() => { setSalesModalView(null); navigate("/sales"); }}
+                          onClick={() => {
+                            setSalesModalView(null);
+                            // A booking still booked, or cancelled, opens its details; one that became a sale opens that sale's details.
+                            if (b.status === "converted") navigate(`/sales/vehicle/${b.vehicle_id}`);
+                            else setViewingBooking(b);
+                          }}
                           data-testid="period-bookings-modal-row"
                           className="flex items-center justify-between gap-3 px-4 sm:px-5 py-3 cursor-pointer hover:bg-slate-50 transition-colors"
                         >
