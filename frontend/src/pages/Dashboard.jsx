@@ -125,6 +125,7 @@ function AccountingSummary({ range }) {
   const [recentSales, setRecentSales] = useState([]);
   const [purchases, setPurchases] = useState([]);
   const [bookings, setBookings] = useState([]);
+  const bookedNow = bookings.filter(b => b.status === "active"); // vehicles booked in the period and still booked
   // null | "sales" | "profit" — which tile opened the sales-list popup, and so which
   // summary (Total Sale only, or Total Sale + Total Profit) it shows top-right.
   const [salesModalView, setSalesModalView] = useState(null);
@@ -245,9 +246,32 @@ function AccountingSummary({ range }) {
           <span className="text-xs font-medium text-green-700 bg-green-100 px-2 py-0.5 rounded-full">
             {recentSales.length} {rl}
           </span>
+          {bookedNow.length > 0 && (
+            <span className="text-xs font-medium text-yellow-800 bg-yellow-100 px-2 py-0.5 rounded-full" data-testid="recent-booked-count">
+              {bookedNow.length} booked
+            </span>
+          )}
         </div>
-        {recentSales.length > 0 ? (
+        {recentSales.length > 0 || bookedNow.length > 0 ? (
           <div className="flex gap-3 overflow-x-auto pb-1">
+            {/* Vehicles booked in the period come first, tagged "Booked": a booking is a deposit, not yet a sale, so it is
+                shown here but never counted in the sales figures. */}
+            {bookedNow.map(b => (
+              <div
+                key={b.id}
+                onClick={() => navigate("/sales")}
+                data-testid="recent-booking-card"
+                className="shrink-0 w-56 bg-white rounded-lg border border-yellow-200 shadow-sm p-3 cursor-pointer hover:shadow-md hover:border-yellow-300 transition-all"
+              >
+                <div className="flex items-start justify-between gap-2 mb-1">
+                  <div className="font-bold text-slate-900 text-sm truncate" style={{ fontFamily: "Manrope" }}>{b.vehicle_info || "Vehicle"}</div>
+                  <span className="shrink-0 px-1.5 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide bg-yellow-100 text-yellow-800" data-testid="recent-booking-tag">Booked</span>
+                </div>
+                <div className="text-xs text-slate-500 mb-1 truncate">{b.customer_name}</div>
+                <div className="text-sm font-semibold text-amber-700 mb-1">{formatNPR(b.booking_amount)} <span className="text-xs font-medium text-slate-400">deposit</span></div>
+                <div className="text-xs text-slate-500">Booked: <HoverADDate date={b.booking_date} /></div>
+              </div>
+            ))}
             {recentSales.map(s => {
               const extraCosts = (s.expenses_total || 0) + (s.job_card_cost || 0);
               return (
@@ -431,7 +455,7 @@ function AccountingSummary({ range }) {
                           </div>
                           <div className="text-right shrink-0">
                             <div className="text-sm font-bold text-amber-700">{formatNPR(b.booking_amount)}</div>
-                            <div className="text-xs capitalize text-slate-500">{b.status === "cancelled" ? "withdrawn" : b.status}</div>
+                            <div className="text-xs text-slate-500" data-testid="period-booking-status">{{ active: "Booked", converted: "Sold", cancelled: "Cancelled" }[b.status] || b.status}</div>
                           </div>
                         </div>
                       ))}

@@ -987,7 +987,7 @@ export default function Inventory() {
                   <div className="text-xs text-yellow-900 bg-yellow-100 border border-yellow-200 rounded-lg px-2.5 py-1.5 mb-3" data-testid="vehicle-card-booking">
                     {v.booking
                       ? <>Booked by <span className="font-semibold">{v.booking.customer_name || "customer"}</span>{v.booking.booking_amount != null && <> · {formatNPR(v.booking.booking_amount)} deposit</>}{v.booking.booking_date && <> · <HoverADDate date={v.booking.booking_date} /></>}</>
-                      : "Reserved"}
+                      : "Booked"}
                   </div>
                 )}
                 <div className="text-xs text-slate-500 mb-3">
