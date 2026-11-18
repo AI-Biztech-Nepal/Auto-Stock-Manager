@@ -21,10 +21,10 @@ const EMPTY_FORM = {
   sanakhat_cost: "", resanakhat_cost: "",
   exchange_valuation: "", exchange_brand: "", exchange_model: "", exchange_reg_no: "", exchange_year: "",
   witness_name: "", witness_address: "", witness_phone: "", witness_id_number: "",
-  // "Booking" tick (a new sale only): it only marks the vehicle as booked, the form stays the same. Save then records a booking
-  // instead of a sale - the vehicle reserved. The deposit is not asked for here (it starts at Rs 0 and is filled in from the
-  // booking's details).
-  booking: false,
+  // "Booking" tick (a new sale only): it marks the vehicle as booked and opens the booking amount (the deposit), nothing else in
+  // the form changes. Save then records a booking instead of a sale - the vehicle reserved. The amount may be left empty (Rs 0)
+  // and filled in later from the booking's details.
+  booking: false, booking_amount: "",
 };
 
 const EMPTY_BUYER = { name: "", contact_number: "", address: "", id_number: "" };
@@ -231,12 +231,12 @@ export default function useSaleForm({ booking = null, sale = null } = {}) {
     });
   };
 
-  // The body for POST /bookings (the "Booking" tick): no deposit yet (Rs 0, paid in cash until it is edited). The agreed price
-  // is the Sale price (if filled in) and the booking date is the form's Date (blank means today).
+  // The body for POST /bookings (the "Booking" tick): the booking amount typed (Rs 0 when left empty), paid in cash until it is
+  // edited. The agreed price is the Sale price (if filled in) and the booking date is the form's Date (blank means today).
   const bookingPayload = (customerId) => ({
     vehicle_id: form.vehicle_id,
     customer_id: customerId,
-    booking_amount: 0,
+    booking_amount: Math.max(Number(form.booking_amount) || 0, 0),
     payment_method: "Cash",
     booking_date: form.sale_date || undefined,
     agreed_price: Number(form.sale_price) || undefined,

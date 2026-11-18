@@ -185,9 +185,10 @@ export default function SaleFormBody({ f, booking = null, sale = null, readOnly 
         </div>
       </section>
 
-      {/* Booking: just the tick, to say the vehicle is booked. It changes nothing else in the form. Ticked, Save books the vehicle
-          (reserved, shown as Booked on the Sales page) instead of recording a sale; the deposit and how it was paid are filled
-          in afterwards from the booking's details (Edit). Not offered on a recorded sale or when the sale completes a booking. */}
+      {/* Booking: the tick, to say the vehicle is booked; ticked, it opens one box for the booking amount (the deposit) and
+          changes nothing else in the form. Save then books the vehicle (reserved, shown as Booked on the Sales page) instead of
+          recording a sale. The amount may be left empty and entered later from the booking's details (Edit). Not offered on a
+          recorded sale or when the sale completes a booking. */}
       {!existing && !booking && (
         <section id="sv-section-booking" className={SECTION} data-testid="booking-section">
           {/* The title is a heading like "Sale" and "Notes" (same size and weight as H2), with the tick in front of it. */}
@@ -200,6 +201,14 @@ export default function SaleFormBody({ f, booking = null, sale = null, readOnly 
               <label htmlFor="sv-booking" className="cursor-pointer select-none">Booking</label>
             </h3>
           </div>
+          {form.booking && (
+            <div className={`${GRID} mt-4`} data-testid="booking-fields">
+              <div>
+                <label htmlFor="sv-booking-amount" className={LBL}>Booking Amount (NPR)</label>
+                <Money id="sv-booking-amount" testid="booking-amount-input" placeholder="e.g. 20000" value={form.booking_amount} onChange={v => set({ booking_amount: v })} />
+              </div>
+            </div>
+          )}
         </section>
       )}
 
