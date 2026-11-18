@@ -128,7 +128,7 @@ function AccountingSummary({ range }) {
   const [purchases, setPurchases] = useState([]);
   const [bookings, setBookings] = useState([]);
   const bookedNow = bookings.filter(b => b.status === "active"); // vehicles booked in the period and still booked
-  const [viewingBooking, setViewingBooking] = useState(null);   // the booking whose details are open (its card was clicked)
+  const [viewingBooking, setViewingBooking] = useState(null);   // the cancelled booking whose details are open
   const [reloadTick, setReloadTick] = useState(0);              // bumped after a change made from those details, to reload the lists
   // null | "sales" | "profit" — which tile opened the sales-list popup, and so which
   // summary (Total Sale only, or Total Sale + Total Profit) it shows top-right.
@@ -265,7 +265,7 @@ function AccountingSummary({ range }) {
             {bookedNow.map(b => (
               <div
                 key={b.id}
-                onClick={() => setViewingBooking(b)}
+                onClick={() => navigate(`/sales/vehicle/${b.vehicle_id}`)}
                 data-testid="recent-booking-card"
                 className="shrink-0 w-56 bg-white rounded-lg border border-yellow-200 shadow-sm p-3 cursor-pointer hover:shadow-md hover:border-yellow-300 transition-all"
               >
@@ -307,7 +307,7 @@ function AccountingSummary({ range }) {
         )}
       </div>
 
-      {/* A booked vehicle's details, opened from its card above (the same popup the Sales page opens) */}
+      {/* A cancelled booking's details (opened from the Bookings list of the Today's Sale popup): the same popup the Sales page opens */}
       {viewingBooking && <BookingDetailsHost booking={viewingBooking} isAdmin={user?.role === "admin"} onClose={() => setViewingBooking(null)} onChanged={refresh} />}
 
       {/* Sales-list popup — opened by either the Total Vehicle Sale or Net Profit tile
@@ -452,9 +452,10 @@ function AccountingSummary({ range }) {
                           key={b.id}
                           onClick={() => {
                             setSalesModalView(null);
-                            // A booking still booked, or cancelled, opens its details; one that became a sale opens that sale's details.
-                            if (b.status === "converted") navigate(`/sales/vehicle/${b.vehicle_id}`);
-                            else setViewingBooking(b);
+                            // A booking still booked, or one that became a sale, opens its vehicle's details page, as a sold
+                            // vehicle does; a cancelled one (the vehicle is for sale again) opens the cancellation details.
+                            if (b.status === "cancelled") setViewingBooking(b);
+                            else navigate(`/sales/vehicle/${b.vehicle_id}`);
                           }}
                           data-testid="period-bookings-modal-row"
                           className="flex items-center justify-between gap-3 px-4 sm:px-5 py-3 cursor-pointer hover:bg-slate-50 transition-colors"
