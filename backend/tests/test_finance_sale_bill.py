@@ -158,5 +158,117 @@ class SaleBillTests(unittest.TestCase):
         self.assertEqual(len(books["customer_ledger"]), 1)
 
 
+def a_booking(**over):
+    booking = {"id": "b1", "customer_id": "c1", "vehicle_id": "v1", "status": "active", "booking_amount": 50000,
+               "payment_method": "Cash", "booking_date": "2026-11-10", "receipt_no": 19}
+    booking.update(over)
+    return booking
+
+
+class BookingEntryTests(unittest.TestCase):
+    """A booking's deposit on the customer's Finance Ledger (finance_books.sync_booking_entries)."""
+
+    def setUp(self):
+        self.db = _DB()
+
+    def post(self, booking=None, customer=RAMJI, label="Honda Dio 2026 (064/1606)"):
+        run(finance_books.sync_booking_entries(self.db, booking or a_booking(), customer, label))
+
+    def rows(self, source_type):
+        return [e for e in self.db.fin_customer_ledger.rows if e.get("source_type") == source_type]
+
+    def net(self):
+        """What the customer owes after everything on the ledger: debits less credits (negative = we owe them)."""
+        return sum(e["amount"] if e["entry_type"] == "debit" else -e["amount"] for e in self.db.fin_customer_ledger.rows)
+
+    def kept_bills(self):
+        return [t for t in self.db.fin_transactions.rows if t.get("source_type") == finance_books.BOOKING_KEPT_SOURCE]
+
+    def test_the_deposit_is_a_received_entry_on_the_customers_ledger(self):
+        self.post()
+        (dep,) = self.rows(finance_books.BOOKING_DEPOSIT_SOURCE)
+        (party,) = self.db.fin_parties.rows
+        self.assertEqual((dep["customer_id"], dep["entry_type"], dep["amount"], dep["entry_date"], dep["receipt_no"]),
+                         (party["id"], "credit", 50000, "2026-11-10", "19"))
+        self.assertEqual(dep["source"], "manual")  # reads like any Received entry in Finance
+        self.assertEqual(dep["note"], "Booking deposit · Honda Dio 2026 (064/1606) · Cash")
+        self.assertIsNone(dep["bank_account_id"])
+        self.assertEqual(self.net(), -50000)  # the customer has paid in advance
+
+    def test_no_deposit_or_no_customer_posts_nothing(self):
+        self.post(a_booking(booking_amount=0))
+        self.assertEqual(self.db.fin_customer_ledger.rows, [])
+        self.post(a_booking(), customer=None)
+        self.assertEqual((self.db.fin_customer_ledger.rows, self.db.fin_parties.rows), ([], []))
+
+    def test_editing_the_booking_updates_the_same_entry_and_zero_removes_it(self):
+        self.post(a_booking(booking_amount=0))
+        self.post(a_booking(booking_amount=20000))
+        (dep,) = self.rows(finance_books.BOOKING_DEPOSIT_SOURCE)
+        entry_id = dep["id"]
+        self.post(a_booking(booking_amount=30000, booking_date="2026-11-12"))
+        (dep,) = self.rows(finance_books.BOOKING_DEPOSIT_SOURCE)
+        self.assertEqual((dep["id"], dep["amount"], dep["entry_date"]), (entry_id, 30000, "2026-11-12"))
+        self.post(a_booking(booking_amount=0))
+        self.assertEqual(self.rows(finance_books.BOOKING_DEPOSIT_SOURCE), [])
+
+    def test_a_bank_transfer_goes_to_the_bank_account_when_there_is_only_one(self):
+        self.db.fin_bank_accounts.rows.append({"id": "bank1", "name": "Nabil"})
+        self.post(a_booking(payment_method="Bank Transfer"))
+        self.assertEqual(self.rows(finance_books.BOOKING_DEPOSIT_SOURCE)[0]["bank_account_id"], "bank1")
+        self.post(a_booking(payment_method="Cash"))
+        self.assertIsNone(self.rows(finance_books.BOOKING_DEPOSIT_SOURCE)[0]["bank_account_id"])
+        self.db.fin_bank_accounts.rows.append({"id": "bank2", "name": "Global IME"})  # two to choose from: cash in hand
+        self.post(a_booking(payment_method="Bank Transfer"))
+        self.assertIsNone(self.rows(finance_books.BOOKING_DEPOSIT_SOURCE)[0]["bank_account_id"])
+
+    def test_cancelling_pays_the_refund_back_and_books_what_was_kept_so_the_ledger_balances(self):
+        self.post()
+        self.post(a_booking(status="cancelled", cancelled_at="2026-11-20T08:00:00+00:00", refund_amount=45000, retained_amount=5000))
+        (refund,) = self.rows(finance_books.BOOKING_REFUND_SOURCE)
+        self.assertEqual((refund["entry_type"], refund["amount"], refund["entry_date"], refund["source"]), ("debit", 45000, "2026-11-20", "manual"))
+        (kept,) = self.kept_bills()
+        self.assertEqual((kept["type"], kept["amount"], kept["bill_date"], kept["payment_mode"]), ("sale", 5000, "2026-11-20", "credit"))
+        self.assertEqual(kept["note"], "Booking cancelled: amount kept · Honda Dio 2026 (064/1606)")
+        self.assertEqual(len(self.rows("business_transaction")), 1)      # the debt the kept bill books
+        self.assertEqual(len(self.rows(finance_books.BOOKING_DEPOSIT_SOURCE)), 1)  # the deposit stays: it was received
+        self.assertEqual(self.net(), 0)                                  # 50,000 in, 45,000 back, 5,000 kept
+
+    def test_cancelling_with_everything_refunded_or_everything_kept(self):
+        self.post()
+        self.post(a_booking(status="cancelled", cancelled_at="2026-11-20T08:00:00+00:00", refund_amount=50000, retained_amount=0))
+        self.assertEqual((len(self.rows(finance_books.BOOKING_REFUND_SOURCE)), self.kept_bills(), self.net()), (1, [], 0))
+        self.post(a_booking(status="cancelled", cancelled_at="2026-11-20T08:00:00+00:00", refund_amount=0, retained_amount=50000))
+        self.assertEqual((self.rows(finance_books.BOOKING_REFUND_SOURCE), self.kept_bills()[0]["amount"], self.net()), ([], 50000, 0))
+
+    def test_deleting_the_booking_takes_everything_it_posted_out(self):
+        self.post()
+        self.post(a_booking(status="cancelled", cancelled_at="2026-11-20T08:00:00+00:00", refund_amount=45000, retained_amount=5000))
+        self.db.fin_customer_ledger.rows.append({"id": "mine", "customer_id": "x", "entry_type": "credit", "amount": 1,
+                                                 "source": "manual", "source_type": None, "source_id": None})
+        run(finance_books.remove_booking_entries(self.db, "b1"))
+        self.assertEqual([e["id"] for e in self.db.fin_customer_ledger.rows], ["mine"])
+        self.assertEqual(self.db.fin_transactions.rows, [])
+        run(finance_books.remove_booking_entries(self.db, "b1"))  # nothing left: not an error
+
+    def test_a_sale_made_from_the_booking_keeps_the_deposit_and_bills_the_rest(self):
+        self.post()
+        self.post(a_booking(status="converted", sale_id="s1"))
+        self.assertEqual(len(self.rows(finance_books.BOOKING_DEPOSIT_SOURCE)), 1)
+        run(finance_books.sync_sale_bill(self.db, a_sale(total_amount=160000, sale_price=160000), RAMJI, "Honda Dio 2026 (064/1606)"))
+        self.assertEqual(self.net(), 110000)  # sale 160,000 less the 50,000 already paid
+
+    def test_the_booking_and_the_sale_share_one_party_for_the_customer(self):
+        self.post()
+        run(finance_books.sync_sale_bill(self.db, a_sale(), RAMJI, ""))
+        self.assertEqual(len(self.db.fin_parties.rows), 1)
+
+    def test_a_problem_in_the_finance_books_never_stops_the_booking(self):
+        class Broken:
+            def __getattr__(self, name):
+                raise RuntimeError("the finance tables are not there")
+        run(finance_books.sync_booking_entries(Broken(), a_booking(), RAMJI, "x"))  # must not raise
+
+
 if __name__ == "__main__":
     unittest.main()

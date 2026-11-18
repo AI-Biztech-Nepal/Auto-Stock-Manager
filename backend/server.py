@@ -4049,6 +4049,17 @@ async def _plan_exchange_change(existing: dict, sale: SaleUpdate, sold: dict, sa
     plan["link"] = plan["insert"]["id"]
     return plan
 
+async def _finance_context(customer_id, vehicle_id):
+    """The customer and the vehicle's label ("Honda Shine 2020 (78/4613)") a Finance entry is written with."""
+    c = await db.customers.find_one({"id": customer_id}, {"_id": 0}) if customer_id else None
+    v = await db.vehicles.find_one({"id": vehicle_id}, {"_id": 0, "brand": 1, "model": 1, "year": 1, "registration_number": 1}) if vehicle_id else None
+    label = ""
+    if v:
+        label = f"{v.get('brand') or ''} {v.get('model') or ''} {v.get('year') or ''}".strip()
+        if v.get("registration_number"):
+            label += f" ({v['registration_number']})"
+    return c, label
+
 async def _sale_to_finance(sale_id: str) -> None:
     """Keep the sale's Sale bill in the Finance books (and so on its customer's Finance Ledger) in step with the sale: made
     when the sale is recorded, changed when it is edited or returned, removed when it is deleted. See
@@ -4058,16 +4069,24 @@ async def _sale_to_finance(sale_id: str) -> None:
         if not s:
             await finance_books.remove_sale_bill(db, sale_id)
             return
-        c = await db.customers.find_one({"id": s["customer_id"]}, {"_id": 0}) if s.get("customer_id") else None
-        v = await db.vehicles.find_one({"id": s.get("vehicle_id")}, {"_id": 0, "brand": 1, "model": 1, "year": 1, "registration_number": 1}) if s.get("vehicle_id") else None
-        label = ""
-        if v:
-            label = f"{v.get('brand') or ''} {v.get('model') or ''} {v.get('year') or ''}".strip()
-            if v.get("registration_number"):
-                label += f" ({v['registration_number']})"
+        c, label = await _finance_context(s.get("customer_id"), s.get("vehicle_id"))
         await finance_books.sync_sale_bill(db, s, c, label)
     except Exception:  # noqa: BLE001
         logger.warning("Could not update the Finance books for sale %s", sale_id, exc_info=True)
+
+async def _booking_to_finance(booking_id: str) -> None:
+    """Keep a booking's deposit (and, once cancelled, its refund and the amount kept) on the customer's Finance Ledger in step
+    with the booking: made when it is booked, changed when it is edited or cancelled, removed when it is deleted. See
+    finance_books.sync_booking_entries. Never raises: the booking itself has already been saved."""
+    try:
+        b = await db.bookings.find_one({"id": booking_id}, {"_id": 0})
+        if not b:
+            await finance_books.remove_booking_entries(db, booking_id)
+            return
+        c, label = await _finance_context(b.get("customer_id"), b.get("vehicle_id"))
+        await finance_books.sync_booking_entries(db, b, c, label)
+    except Exception:  # noqa: BLE001
+        logger.warning("Could not update the Finance books for booking %s", booking_id, exc_info=True)
 
 @api_router.post("/sales")
 async def create_sale(sale: SaleCreate, cu: dict = Depends(require("sales", "create"))):
@@ -4553,6 +4572,7 @@ async def create_booking(body: BookingCreate, cu: dict = Depends(require("sales"
     await db.audit_logs.insert_one({"action": "booking_created", "vehicle_id": body.vehicle_id, "user": cu["username"],
         "timestamp": now, "details": f"Booking {doc['id']} — deposit {doc['booking_amount']}"})
     asyncio.create_task(_notify_storefront())
+    await _booking_to_finance(doc["id"])  # the deposit, as a Received entry on the customer's Finance Ledger
     return (await _enrich_bookings([doc]))[0]
 
 @api_router.put("/bookings/{bid}")
@@ -4576,6 +4596,7 @@ async def update_booking(bid: str, body: BookingUpdate, cu: dict = Depends(requi
         await db.vehicles.update_one({"id": upd["vehicle_id"]}, {"$set": {"status": "reserved", "updated_at": upd["updated_at"]}})
     await db.bookings.update_one({"id": bid}, {"$set": upd})
     if swap: asyncio.create_task(_notify_storefront())
+    await _booking_to_finance(bid)  # amount, date, customer or vehicle may have changed
     return (await _enrich_bookings([await db.bookings.find_one({"id": bid}, {"_id": 0})]))[0]
 
 @api_router.post("/bookings/{bid}/cancel")
@@ -4598,6 +4619,7 @@ async def cancel_booking(bid: str, body: BookingCancel, cu: dict = Depends(admin
     await db.audit_logs.insert_one({"action": "booking_cancelled", "vehicle_id": b["vehicle_id"], "user": cu["username"],
         "timestamp": now, "details": f"Booking {bid} withdrawn — {refund} refunded, {round(deposit - refund, 2)} retained"})
     asyncio.create_task(_notify_storefront())
+    await _booking_to_finance(bid)  # the refund paid back, and the amount kept as income
     return (await _enrich_bookings([await db.bookings.find_one({"id": bid}, {"_id": 0})]))[0]
 
 @api_router.delete("/bookings/{bid}")
@@ -4607,6 +4629,7 @@ async def delete_booking(bid: str, cu: dict = Depends(admin_only)):
     if not b: raise HTTPException(404, "Booking not found")
     if b.get("status") == "converted": raise HTTPException(400, "This booking became a sale — delete the sale instead")
     await db.bookings.delete_one({"id": bid})
+    await _booking_to_finance(bid)  # takes its entries out of the Finance books
     if b.get("status") == "active":
         await db.vehicles.update_one({"id": b["vehicle_id"], "status": "reserved"}, {"$set": {"status": "available", "updated_at": datetime.now(timezone.utc).isoformat()}})
         asyncio.create_task(_notify_storefront())

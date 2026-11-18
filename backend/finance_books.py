@@ -584,12 +584,42 @@ async def _party_for_customer(db, customer: dict) -> Optional[dict]:
     return doc
 
 
-async def remove_sale_bill(db, sale_id: str) -> None:
-    """Take a sale's bill, and the debt it booked, out of the books (the sale was deleted, or no longer has a customer)."""
-    existing = await db.fin_transactions.find_one({"source_type": SALE_BILL_SOURCE, "source_id": sale_id}, {"_id": 0, "id": 1})
+async def _remove_linked_bill(db, source_type: str, source_id: str) -> None:
+    """Take a linked bill, and the debt it booked, out of the books."""
+    existing = await db.fin_transactions.find_one({"source_type": source_type, "source_id": source_id}, {"_id": 0, "id": 1})
     if existing:
         await db.fin_customer_ledger.delete_many({"source_type": "business_transaction", "source_id": existing["id"]})
         await db.fin_transactions.delete_one({"id": existing["id"]})
+
+
+async def _upsert_linked_bill(db, source_type: str, source_id: str, party: dict, customer: dict, amount: float, note: str,
+                              bill_date: Optional[str], label: str) -> None:
+    """Make (or update) the Sale bill linked to source_type / source_id: a debt of `amount` on the party's ledger. A bill
+    number or anything else typed on the bill in Finance is kept; the fields set here are overwritten."""
+    now = _now()
+    fields = {
+        "type": "sale", "amount": amount, "note": note, "party_name": party.get("name"), "customer_id": party["id"],
+        "bill_date": (bill_date or "")[:10] or None, "party_address": (_clean(customer.get("address")) or "")[:300] or None,
+        "items": [{"description": label or "Vehicle", "qty": 1, "rate": amount, "amount": amount}],
+        "discount_amount": 0, "vat_amount": 0, "payment_mode": "credit", "bank_account_id": None, "expense_category_id": None,
+    }
+    if _services_ready:
+        fields.update({"service_charges": [], "installation_charge": 0})
+    existing = await db.fin_transactions.find_one({"source_type": source_type, "source_id": source_id}, {"_id": 0})
+    if existing:
+        fields["updated_at"] = now
+        await db.fin_transactions.update_one({"id": existing["id"]}, {"$set": fields})
+        bill = {**existing, **fields}
+    else:
+        bill = {"id": _id(), "source_type": source_type, "source_id": source_id, "bill_no": None,
+                "created_at": now, "updated_at": now, **fields}
+        await db.fin_transactions.insert_one(dict(bill))
+    await sync_bill_ledger(db, bill)
+
+
+async def remove_sale_bill(db, sale_id: str) -> None:
+    """Take a sale's bill, and the debt it booked, out of the books (the sale was deleted, or no longer has a customer)."""
+    await _remove_linked_bill(db, SALE_BILL_SOURCE, sale_id)
 
 
 async def sync_sale_bill(db, sale: dict, customer: Optional[dict], vehicle_label: str = "") -> None:
@@ -605,28 +635,86 @@ async def sync_sale_bill(db, sale: dict, customer: Optional[dict], vehicle_label
         if not party:
             await remove_sale_bill(db, sale["id"])
             return
-        now = _now()
         note = "Vehicle sale" + (f" · {vehicle_label}" if vehicle_label else "") + (" (returned)" if returned else "")
-        fields = {
-            "type": "sale", "amount": amount, "note": note, "party_name": party.get("name"), "customer_id": party["id"],
-            "bill_date": (sale.get("sale_date") or "")[:10] or None, "party_address": (_clean(customer.get("address")) or "")[:300] or None,
-            "items": [{"description": vehicle_label or "Vehicle", "qty": 1, "rate": amount, "amount": amount}],
-            "discount_amount": 0, "vat_amount": 0, "payment_mode": "credit", "bank_account_id": None, "expense_category_id": None,
-        }
-        if _services_ready:
-            fields.update({"service_charges": [], "installation_charge": 0})
-        existing = await db.fin_transactions.find_one({"source_type": SALE_BILL_SOURCE, "source_id": sale["id"]}, {"_id": 0})
-        if existing:
-            fields["updated_at"] = now
-            await db.fin_transactions.update_one({"id": existing["id"]}, {"$set": fields})
-            bill = {**existing, **fields}
-        else:
-            bill = {"id": _id(), "source_type": SALE_BILL_SOURCE, "source_id": sale["id"], "bill_no": None,
-                    "created_at": now, "updated_at": now, **fields}
-            await db.fin_transactions.insert_one(dict(bill))
-        await sync_bill_ledger(db, bill)
+        await _upsert_linked_bill(db, SALE_BILL_SOURCE, sale["id"], party, customer, amount, note, sale.get("sale_date"), vehicle_label)
     except Exception:  # noqa: BLE001
         logger.warning("Could not post sale %s to the Finance books", sale.get("id"), exc_info=True)
+
+
+# ── a booking made on the Sales page ──────────────────────────────────────
+# The deposit a customer leaves on a booked vehicle is money received: a Received entry on their Finance Ledger. If they cancel,
+# the refund is money paid back (a debit) and what the shop keeps is income, booked as a Sale bill, so the ledger balances out
+# and the kept amount counts in the books. Each is linked to the booking (source_type below, source_id = the booking's id), so
+# editing, cancelling or deleting the booking changes or removes it. A sale made from the booking keeps the deposit entry: the
+# customer has paid that much towards it. A booking with no customer, or no deposit, posts nothing.
+BOOKING_DEPOSIT_SOURCE = "booking_deposit"
+BOOKING_REFUND_SOURCE = "booking_refund"
+BOOKING_KEPT_SOURCE = "booking_kept"
+
+
+async def _put_ledger_entry(db, source_type: str, source_id: str, party: Optional[dict], entry_type: str, amount: float,
+                            note: str, entry_date: Optional[str], bank_account_id: Optional[str] = None,
+                            receipt_no: Optional[str] = None) -> None:
+    """Make, update or (when there is nothing to record) remove the one linked entry on the customer's ledger. It is a normal
+    entry (source "manual"), so it reads like any Received / Payment entry in Finance."""
+    existing = await db.fin_customer_ledger.find_one({"source_type": source_type, "source_id": source_id}, {"_id": 0})
+    if not party or not amount > 0:
+        if existing:
+            await db.fin_customer_ledger.delete_one({"id": existing["id"]})
+        return
+    fields = {"customer_id": party["id"], "entry_type": entry_type, "amount": amount, "note": note, "entry_date": entry_date,
+              "bank_account_id": bank_account_id, "receipt_no": receipt_no}
+    if existing:
+        await db.fin_customer_ledger.update_one({"id": existing["id"]}, {"$set": fields})
+    else:
+        await db.fin_customer_ledger.insert_one({"id": _id(), "source": "manual", "source_type": source_type,
+                                                 "source_id": source_id, "created_at": _now(), **fields})
+
+
+async def _bank_account_for(db, payment_method: Optional[str]) -> Optional[str]:
+    """The bank account a Bank Transfer went into, when there is only one to choose from; otherwise None (cash in hand)."""
+    if (payment_method or "").strip().lower() != "bank transfer":
+        return None
+    rows = await db.fin_bank_accounts.find({}, {"_id": 0, "id": 1}).to_list(10)
+    return rows[0]["id"] if len(rows) == 1 else None
+
+
+async def remove_booking_entries(db, booking_id: str) -> None:
+    """Take everything a booking put on the books out (the booking was deleted)."""
+    for source_type in (BOOKING_DEPOSIT_SOURCE, BOOKING_REFUND_SOURCE):
+        await db.fin_customer_ledger.delete_many({"source_type": source_type, "source_id": booking_id})
+    await _remove_linked_bill(db, BOOKING_KEPT_SOURCE, booking_id)
+
+
+async def sync_booking_entries(db, booking: dict, customer: Optional[dict], vehicle_label: str = "") -> None:
+    """Make the customer's Finance Ledger match the booking: its deposit as a Received entry and, once cancelled, the refund
+    paid back and the amount kept (a Sale bill). Safe to call again and again. Never raises: a problem in the Finance books
+    must not stop a booking from being saved."""
+    try:
+        bid = booking["id"]
+        cancelled = booking.get("status") == "cancelled"
+        deposit = round(float(booking.get("booking_amount") or 0), 2)
+        refund = round(float(booking.get("refund_amount") or 0), 2) if cancelled else 0
+        kept = round(float(booking.get("retained_amount") or 0), 2) if cancelled else 0
+        # The party is only looked up (or made) when there is something to record on its ledger.
+        party = await _party_for_customer(db, customer) if customer and (deposit > 0 or refund > 0 or kept > 0) else None
+        label = f" · {vehicle_label}" if vehicle_label else ""
+        method = booking.get("payment_method")
+        bank = await _bank_account_for(db, method)
+        receipt = str(booking["receipt_no"]) if booking.get("receipt_no") else None
+        await _put_ledger_entry(db, BOOKING_DEPOSIT_SOURCE, bid, party, "credit", deposit,
+                                f"Booking deposit{label}" + (f" · {method}" if method else ""),
+                                (booking.get("booking_date") or "")[:10] or None, bank, receipt)
+        ended = (booking.get("cancelled_at") or "")[:10] or None
+        await _put_ledger_entry(db, BOOKING_REFUND_SOURCE, bid, party, "debit", refund,
+                                f"Booking cancelled: deposit refunded{label}", ended, bank)
+        if party and kept > 0:
+            await _upsert_linked_bill(db, BOOKING_KEPT_SOURCE, bid, party, customer, kept,
+                                      f"Booking cancelled: amount kept{label}", ended, vehicle_label or "Booking")
+        else:
+            await _remove_linked_bill(db, BOOKING_KEPT_SOURCE, bid)
+    except Exception:  # noqa: BLE001
+        logger.warning("Could not post booking %s to the Finance books", booking.get("id"), exc_info=True)
 
 
 def register(api_router, db, admin_only):
