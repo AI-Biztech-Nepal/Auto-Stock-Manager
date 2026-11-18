@@ -101,7 +101,7 @@ export default function Sales() {
   // sale are tagged on their sale row.
   const [bookings, setBookings] = useState([]);
   const [reservedVehicles, setReservedVehicles] = useState([]); // the booked vehicles: their cost price shows on the booked rows
-  const [viewingBookingId, setViewingBookingId] = useState(null); // the booked row that was clicked: its details are open
+  const [viewingBookingId, setViewingBookingId] = useState(null); // the cancelled booking that was clicked: its details are open
   const [receipt, setReceipt] = useState(null);                   // the booking whose receipt is open for printing
   const [editingBooking, setEditingBooking] = useState(null);     // the booking being edited
   const [withdrawingBooking, setWithdrawingBooking] = useState(null); // the booking whose customer is backing out
@@ -175,7 +175,9 @@ export default function Sales() {
   // sold vehicle, and Edit, Return and Delete.
   const [detailId, setDetailId] = useState(null);
   const openSale = (s) => setDetailId(s.id);
-  const openBooking = (b) => setViewingBookingId(b.id);
+  // A booked row opens its vehicle's details page, the same page a sold vehicle opens (/sales/vehicle/:id, SoldStockDetail). A
+  // cancelled one (its vehicle is for sale again) opens the cancellation popup.
+  const openBooking = (b) => (b.status === "cancelled" ? setViewingBookingId(b.id) : navigate(`/sales/vehicle/${b.vehicle_id}`));
 
   const openModal = (booking = null) => { setActiveBooking(booking); setShowModal(true); };
   const closeModal = () => { setShowModal(false); setActiveBooking(null); };
