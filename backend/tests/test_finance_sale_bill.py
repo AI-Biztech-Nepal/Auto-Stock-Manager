@@ -269,6 +269,29 @@ class BookingEntryTests(unittest.TestCase):
                 raise RuntimeError("the finance tables are not there")
         run(finance_books.sync_booking_entries(Broken(), a_booking(), RAMJI, "x"))  # must not raise
 
+    def test_the_result_says_what_happened_so_the_page_can_tell_the_user(self):
+        sync = lambda b, c=RAMJI, db=None: run(finance_books.sync_booking_entries(db or self.db, b, c, "x"))  # noqa: E731
+        self.assertEqual(sync(a_booking()), "posted")
+        self.assertEqual(sync(a_booking(booking_amount=0)), "nothing")      # no deposit: nothing on the ledger now
+        self.assertEqual(sync(a_booking(), c=None), "nothing")              # no customer
+        self.assertEqual(sync(a_booking(status="cancelled", refund_amount=50000, retained_amount=0, cancelled_at="2026-11-20T00:00:00+00:00")), "posted")
+
+        class Broken:
+            def __getattr__(self, name):
+                raise RuntimeError("the finance tables are not there")
+        failed = sync(a_booking(), db=Broken())
+        self.assertTrue(failed.startswith("failed: RuntimeError: the finance tables are not there"), failed)
+
+    def test_a_sale_reports_the_same_way(self):
+        sync = lambda s, c=RAMJI, db=None: run(finance_books.sync_sale_bill(db or self.db, s, c, "x"))  # noqa: E731
+        self.assertEqual(sync(a_sale()), "posted")
+        self.assertEqual(sync(a_sale(customer_id=None), c=None), "nothing")
+
+        class Broken:
+            def __getattr__(self, name):
+                raise RuntimeError("boom")
+        self.assertTrue(sync(a_sale(), db=Broken()).startswith("failed: RuntimeError: boom"))
+
 
 if __name__ == "__main__":
     unittest.main()

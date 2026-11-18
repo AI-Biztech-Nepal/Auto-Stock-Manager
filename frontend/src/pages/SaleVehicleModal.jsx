@@ -14,6 +14,7 @@ import { toast } from "sonner";
 import api from "../utils/api";
 import { formatNPR } from "../utils/helpers";
 import { digits } from "../components/formKit";
+import { financeNotice } from "../utils/financeNotice";
 import useSaleForm from "../hooks/useSaleForm";
 import useBackdropClose from "../hooks/useBackdropClose";
 import SaleFormBody from "./SaleFormBody";
@@ -51,14 +52,16 @@ export default function SaleVehicleModal({ booking = null, onClose, onSaved }) {
     try {
       const customerId = await f.ensureCustomer();
       if (isBooking) {
-        await api.post("/bookings", f.bookingPayload(customerId));
+        const r = await api.post("/bookings", f.bookingPayload(customerId));
         toast.success("Vehicle booked");
+        financeNotice(r.data);
         onSaved();
         onClose();
         return;
       }
-      await api.post("/sales", f.payload(customerId));
+      const r = await api.post("/sales", f.payload(customerId));
       toast.success(booking ? "Booking converted to a sale!" : "Sale recorded successfully!");
+      financeNotice(r.data);
       onSaved();
       onClose();
     } catch (err) { toast.error(getErrMsg(err, isBooking ? "Failed to save booking" : "Failed to save sale")); }

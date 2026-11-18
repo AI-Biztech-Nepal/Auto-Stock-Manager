@@ -15,6 +15,7 @@ import { ReturnModal } from "./VehicleModals";
 import SaleFormBody from "./SaleFormBody";
 import useSaleForm from "../hooks/useSaleForm";
 import useBackdropClose from "../hooks/useBackdropClose";
+import { financeNotice } from "../utils/financeNotice";
 import WarrantyHistory from "../components/WarrantyHistory";
 import WarrantyBadge from "../components/WarrantyBadge";
 import { useAuth } from "../context/AuthContext";
@@ -73,6 +74,7 @@ function Loaded({ sale, vehicle, booking, reload, onClose, onChanged }) {
       if (buyerSaved) toast.success("Sale updated successfully!");
       else toast.error("The sale was saved, but the buyer's details could not be updated");
       if (r.data?.exchange_note) toast(r.data.exchange_note);
+      financeNotice(r.data);
       await reload(); // shows the saved sale, read-only again
       onChanged?.();
     } catch (err) { toast.error(getErrMsg(err, "Failed to save sale")); setSaving(false); }

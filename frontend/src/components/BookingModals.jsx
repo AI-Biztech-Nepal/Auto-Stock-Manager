@@ -10,6 +10,7 @@ import api from "../utils/api";
 import { formatNPR } from "../utils/helpers";
 import VehicleComboBox from "./VehicleComboBox";
 import useBackdropClose from "../hooks/useBackdropClose";
+import { financeNotice } from "../utils/financeNotice";
 
 const inp = "w-full h-9 px-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500";
 
@@ -53,8 +54,9 @@ export function EditBookingModal({ booking, onClose, onSaved }) {
     if (!(amount >= 0)) { toast.error("Enter a valid booking amount"); return; }
     setSaving(true);
     try {
-      await api.put(`/bookings/${booking.id}`, { vehicle_id: form.vehicle_id, booking_amount: amount, payment_method: form.payment_method, notes: form.notes });
+      const r = await api.put(`/bookings/${booking.id}`, { vehicle_id: form.vehicle_id, booking_amount: amount, payment_method: form.payment_method, notes: form.notes });
       toast.success("Booking updated");
+      financeNotice(r.data);
       onSaved();
       onClose();
     } catch (err) { toast.error(errMsg(err, "Failed to save booking")); }
@@ -110,8 +112,9 @@ export function WithdrawBookingModal({ booking, onClose, onSaved }) {
   const confirm = async () => {
     setSaving(true);
     try {
-      await api.post(`/bookings/${booking.id}/cancel`, { refund_amount: Number(refund) || 0, notes: notes || undefined });
+      const r = await api.post(`/bookings/${booking.id}/cancel`, { refund_amount: Number(refund) || 0, notes: notes || undefined });
       toast.success("Booking withdrawn — vehicle is available again");
+      financeNotice(r.data);
       onSaved();
       onClose();
     } catch (err) { toast.error(errMsg(err, "Failed to withdraw booking")); }

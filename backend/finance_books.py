@@ -622,11 +622,17 @@ async def remove_sale_bill(db, sale_id: str) -> None:
     await _remove_linked_bill(db, SALE_BILL_SOURCE, sale_id)
 
 
-async def sync_sale_bill(db, sale: dict, customer: Optional[dict], vehicle_label: str = "") -> None:
+def _why(e: Exception) -> str:
+    """A short, readable reason for a failed posting: it is shown to the user so a missing entry can be explained."""
+    return f"failed: {type(e).__name__}: {str(e)[:140]}"
+
+
+async def sync_sale_bill(db, sale: dict, customer: Optional[dict], vehicle_label: str = "") -> str:
     """Make the sale's Sale bill match the sale: made when it is new, otherwise updated, and removed when the sale has no
     customer or nothing is owed. The amount is what the customer pays (the sale price and any extra charges), or, for a
     returned sale, what the shop kept. Safe to call again and again. Never raises: a problem in the Finance books must not
-    stop a sale from being saved."""
+    stop a sale from being saved. Returns "posted" (the bill is on the customer's ledger), "nothing" (there was nothing to
+    post) or "failed: <why>"."""
     try:
         returned = bool(sale.get("returned"))
         owed = sale.get("retained_amount") if returned else (sale.get("total_amount") or sale.get("sale_price"))
@@ -634,11 +640,13 @@ async def sync_sale_bill(db, sale: dict, customer: Optional[dict], vehicle_label
         party = await _party_for_customer(db, customer) if customer and amount > 0 else None
         if not party:
             await remove_sale_bill(db, sale["id"])
-            return
+            return "nothing"
         note = "Vehicle sale" + (f" · {vehicle_label}" if vehicle_label else "") + (" (returned)" if returned else "")
         await _upsert_linked_bill(db, SALE_BILL_SOURCE, sale["id"], party, customer, amount, note, sale.get("sale_date"), vehicle_label)
-    except Exception:  # noqa: BLE001
+        return "posted"
+    except Exception as e:  # noqa: BLE001
         logger.warning("Could not post sale %s to the Finance books", sale.get("id"), exc_info=True)
+        return _why(e)
 
 
 # ── a booking made on the Sales page ──────────────────────────────────────
@@ -686,10 +694,11 @@ async def remove_booking_entries(db, booking_id: str) -> None:
     await _remove_linked_bill(db, BOOKING_KEPT_SOURCE, booking_id)
 
 
-async def sync_booking_entries(db, booking: dict, customer: Optional[dict], vehicle_label: str = "") -> None:
+async def sync_booking_entries(db, booking: dict, customer: Optional[dict], vehicle_label: str = "") -> str:
     """Make the customer's Finance Ledger match the booking: its deposit as a Received entry and, once cancelled, the refund
     paid back and the amount kept (a Sale bill). Safe to call again and again. Never raises: a problem in the Finance books
-    must not stop a booking from being saved."""
+    must not stop a booking from being saved. Returns "posted" (something is on the customer's ledger), "nothing" (there was
+    nothing to post: no deposit, or no customer) or "failed: <why>"."""
     try:
         bid = booking["id"]
         cancelled = booking.get("status") == "cancelled"
@@ -713,8 +722,10 @@ async def sync_booking_entries(db, booking: dict, customer: Optional[dict], vehi
                                       f"Booking cancelled: amount kept{label}", ended, vehicle_label or "Booking")
         else:
             await _remove_linked_bill(db, BOOKING_KEPT_SOURCE, bid)
-    except Exception:  # noqa: BLE001
+        return "posted" if party else "nothing"
+    except Exception as e:  # noqa: BLE001
         logger.warning("Could not post booking %s to the Finance books", booking.get("id"), exc_info=True)
+        return _why(e)
 
 
 def register(api_router, db, admin_only):
