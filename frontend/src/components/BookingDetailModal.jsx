@@ -1,7 +1,8 @@
 /**
  * BookingDetailModal.jsx — a booked vehicle's details as a pop-up over the Sales list, the way a sale's open
  * (pages/SaleDetailModal.jsx). The booking comes first (the deposit, how it was paid, when, the receipt, the price agreed),
- * then the vehicle and the customer. The booking's actions are here: Sale Vehicle (it becomes a sale), Receipt, Edit and,
+ * then the vehicle and the customer. The booking's actions are here: Edit (the green button: it opens the Sale Vehicle form
+ * filled in from the booking, and saving that makes it a sale; actions.onSell), Receipt and,
  * for admins, Cancel (the customer withdraws) and Delete. A booking the customer already cancelled opens with a Cancellation
  * section first (the amount the shop kept, what was refunded, when and why) and keeps only Receipt and Delete.
  *
@@ -10,7 +11,7 @@
  */
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { Pencil, Printer, Trash2, Undo2, ExternalLink } from "lucide-react";
+import { Printer, Trash2, Undo2, ExternalLink } from "lucide-react";
 import api from "../utils/api";
 import { formatNPR, formatOwnership } from "../utils/helpers";
 import HoverADDate from "./HoverADDate";
@@ -65,9 +66,8 @@ export default function BookingDetailModal({ booking: b, isAdmin, actions, onClo
           <div className="flex items-center gap-2 flex-wrap px-4 sm:px-5 pb-4 sm:pb-5">
             {cancelled ? <CancelledStatus /> : <BookedStatus />}
             <div className="flex-1" />
-            {!cancelled && <button onClick={() => actions.onSell(b)} data-testid="booking-record-sale-btn" className={`${actionBtn} bg-green-600 hover:bg-green-700 text-white font-semibold active:scale-95`}>Sale Vehicle</button>}
+            {!cancelled && <button onClick={() => actions.onSell(b)} data-testid="booking-record-sale-btn" className={`${actionBtn} bg-green-600 hover:bg-green-700 text-white font-semibold active:scale-95`}>Edit</button>}
             <button onClick={() => actions.onReceipt(b)} data-testid="booking-receipt-btn" className={`${actionBtn} border border-slate-200 text-slate-700 hover:bg-slate-50`}><Printer size={14} /> Receipt</button>
-            {!cancelled && <button onClick={() => actions.onEdit(b)} data-testid="booking-edit-btn" className={`${actionBtn} border border-slate-200 text-slate-700 hover:bg-slate-50`}><Pencil size={14} /> Edit</button>}
             {isAdmin && !cancelled && <button onClick={() => actions.onWithdraw(b)} data-testid="booking-withdraw-btn" className={`${actionBtn} border border-amber-200 text-amber-700 hover:bg-amber-50`}><Undo2 size={14} /> Cancel</button>}
             {isAdmin && <button onClick={() => actions.onDelete(b)} data-testid="booking-delete-btn" className={`${actionBtn} border border-red-200 text-red-600 hover:bg-red-50`}><Trash2 size={14} /> Delete</button>}
           </div>
