@@ -377,19 +377,14 @@ export default function Layout() {
           >
             <Menu size={20} />
           </button>
-          {/* On every Marketing tab the page title sits here, level with the bell. */}
+          {/* The page's name sits here, level with the bell: plain bold text, no icon or logo beside it. */}
           {pathname.startsWith("/sanakhat") ? (
-            <h1 className="flex-1 min-w-0 flex items-center gap-2 text-lg font-bold text-slate-900 truncate" data-testid="header-title">
-              <span className="size-8 shrink-0 rounded-lg bg-gradient-to-br from-blue-600 to-indigo-600 text-white flex items-center justify-center"><FileCheck2 size={17} /></span> Sanakhat
-            </h1>
+            <h1 className="flex-1 min-w-0 text-2xl font-bold text-slate-900 truncate" data-testid="header-title">Sanakhat</h1>
           ) : pathname === "/inventory" ? (() => {
             // Product or Spare Parts, whichever is open (the detail page, /inventory/:id, has its own heading).
             const parts = new URLSearchParams(search).get("tab") === "spare-parts" && canAccessPath(user?.role, "/spare-parts");
-            const TitleIcon = parts ? Boxes : Bike;
             return (
-              <h1 className="flex-1 min-w-0 flex items-center gap-2 text-lg font-bold text-slate-900 truncate" data-testid="header-title">
-                <TitleIcon size={19} className="shrink-0 text-slate-400" /> {parts ? "Spare Parts" : "Inventory"}
-              </h1>
+              <h1 className="flex-1 min-w-0 text-2xl font-bold text-slate-900 truncate" data-testid="header-title">{parts ? "Spare Parts" : "Inventory"}</h1>
             );
           })() : pathname.startsWith("/finance") ? (
             <div ref={setTitleSlot} className="flex-1 min-w-0 flex items-center gap-3" data-testid="title-slot" />
@@ -399,11 +394,9 @@ export default function Layout() {
             // Named after the tab that is open (Leads, CRM, Share...), like any other page's title.
             const tabs = marketingTabsFor(user?.role);
             const requested = new URLSearchParams(search).get("tab");
-            const { label: title, icon: TitleIcon } = MARKETING_NAV[tabs.includes(requested) ? requested : tabs[0]] || { label: "Marketing", icon: Megaphone };
+            const { label: title } = MARKETING_NAV[tabs.includes(requested) ? requested : tabs[0]] || { label: "Marketing" };
             return (
-              <h1 className="flex-1 min-w-0 flex items-center gap-2 text-lg font-bold text-slate-900 truncate" data-testid="header-title">
-                <TitleIcon size={19} className="shrink-0 text-slate-400" /> {title}
-              </h1>
+              <h1 className="flex-1 min-w-0 text-2xl font-bold text-slate-900 truncate" data-testid="header-title">{title}</h1>
             );
           })() : <div className="flex-1" />}
           {/* Pages put their date range / view switch / buttons here (wide screens only); see Inventory and Sales. */}
