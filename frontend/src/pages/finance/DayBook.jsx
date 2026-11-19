@@ -4,7 +4,7 @@ import { useBooks } from "./BooksContext";
 import EntryEditor from "./EntryEditor";
 import EntryViewer from "./EntryViewer";
 import { Card, Pill, ExportBar, exportXlsx, inputCls, btnPrimary, btnGhost } from "./ui";
-import { cashBook, todayStr, addDays, num, npr } from "./money";
+import { cashBook, accountBook, accountChoices, balances, todayStr, addDays, num, npr } from "./money";
 import { formatBSDate } from "../../utils/nepali-date";
 
 // The Day Book as Jageer Nepal draws it: the New entry buttons and the date stepper up top, then one bordered
@@ -98,7 +98,21 @@ export default function DayBook({ date, setDate, goTab, openParty, editBill }) {
   const today = todayStr();
   const [range, setRangeState] = useState({ from: date || today, to: date || today });
   const setRange = (r) => { setRangeState(r); if (r.from === r.to) setDate?.(r.from); };
-  const book = useMemo(() => cashBook(books, range.from, range.to), [books, range.from, range.to]);
+  // Which account the book is of: "all" (cash and every bank together) or one account, with its own opening and closing balance.
+  const [acct, setAcct] = useState("all");
+  const choices = useMemo(() => accountChoices(books), [books]);
+  const picked = acct === "all" || choices.some((c) => c.id === acct) ? acct : "all"; // an account that was deleted falls back to all
+  const pickedName = choices.find((c) => c.id === picked)?.name;
+  const book = useMemo(
+    () => (picked === "all" ? cashBook(books, range.from, range.to) : accountBook(books, picked, range.from, range.to)),
+    [books, range.from, range.to, picked],
+  );
+  // What each account held when the first day shown began (the opening balance of that day, account by account).
+  const openings = useMemo(() => {
+    const buckets = balances(books, { before: range.from }).buckets;
+    return choices.map((c) => ({ ...c, total: buckets[c.id]?.total || 0 }));
+  }, [books, choices, range.from]);
+  const hasBanks = books.accounts.length > 0;
   const singleDay = range.from === range.to;
 
   const time = (r) => (r.at ? new Date(r.at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }) : "");
@@ -124,9 +138,25 @@ export default function DayBook({ date, setDate, goTab, openParty, editBill }) {
         <NewEntryButtons goTab={goTab} />
         <div className="flex flex-wrap items-center gap-2">
           <DateStepper range={range} setRange={setRange} today={today} />
+          {hasBanks && (
+            <select value={picked} onChange={(e) => setAcct(e.target.value)} aria-label="Account" data-testid="daybook-account" className={`${inputCls} !w-auto min-w-[9.5rem]`}>
+              <option value="all">All accounts</option>
+              {choices.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          )}
           <ExportBar onXlsx={() => exportXlsx(`daybook-${range.from}${singleDay ? "" : `-to-${range.to}`}`, cols, book.rows)} />
         </div>
       </div>
+
+      {/* Each account's opening balance for the day shown (all accounts together, one figure per account) */}
+      {hasBanks && picked === "all" && (
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-1.5 rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-[13px]" data-testid="daybook-openings">
+          <span className="font-semibold text-gray-700">Opening balance · {formatBSDate(range.from)}</span>
+          {openings.map((o) => (
+            <span key={o.id} className="text-gray-600" data-testid="daybook-opening">{o.name} <b style={{ color: balanceColor(o.total) }}>{num(o.total)}</b></span>
+          ))}
+        </div>
+      )}
 
       <Card className="overflow-hidden">
         <div className="overflow-x-auto">
@@ -150,7 +180,7 @@ export default function DayBook({ date, setDate, goTab, openParty, editBill }) {
                 <td />
                 <td className="hidden sm:table-cell" />
                 <td className="hidden xl:table-cell" />
-                <td className="font-semibold">Opening balance</td>
+                <td className="font-semibold">Opening balance{picked !== "all" ? ` · ${pickedName}` : ""}</td>
                 <td className="hidden md:table-cell"><Pill text="Opening" color="#374151" bg="#F3F4F6" /></td>
                 <td className="hidden xl:table-cell" />
                 <td className="hidden md:table-cell" />
@@ -199,8 +229,11 @@ export default function DayBook({ date, setDate, goTab, openParty, editBill }) {
 
       {book.rows.length === 0 && <p className="px-1 text-[13px] text-gray-500">{singleDay ? "No entries on this day." : "No entries in this period."}</p>}
       <p className="px-1 text-xs leading-[17px] text-gray-500">
-        Tap an entry to open it; the person's name in it opens their ledger. Sale and purchase bills show what was billed; only money that moved (received, paid, expenses, walk-in sales)
-        changes the balance. Opening {num(book.opening)} + In {num(book.cashIn)} − Out {num(book.cashOut)} = Closing {num(book.closing)}.
+        Tap an entry to open it; the person's name in it opens their ledger.{" "}
+        {picked === "all"
+          ? "Sale and purchase bills show what was billed; only money that moved (received, paid, expenses, walk-in sales) changes the balance."
+          : `This is ${pickedName} only: the entries that moved money through it (a bill against a person moves none, so it is not listed here).`}{" "}
+        Opening {num(book.opening)} + In {num(book.cashIn)} − Out {num(book.cashOut)} = Closing {num(book.closing)}.
       </p>
       {viewing && (
         <EntryViewer row={viewing} kind={KIND[viewing.kind]} openParty={openParty} onClose={() => setViewing(null)}

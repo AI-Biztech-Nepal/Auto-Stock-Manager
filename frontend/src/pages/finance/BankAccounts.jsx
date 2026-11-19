@@ -4,7 +4,8 @@ import { toast } from "sonner";
 import { useBooks } from "./BooksContext";
 import EntryEditor from "./EntryEditor";
 import { Card, Field, Modal, DateField, Empty, Stat, TwoTapDelete, inputCls, btnPrimary, btnGhost } from "./ui";
-import { balances, transferDate, todayStr, npr, CASH, COLORS } from "./money";
+import { balances, accountDays, accountChoices, transferDate, todayStr, addDays, npr, num, CASH, COLORS } from "./money";
+import { formatBSDate } from "../../utils/nepali-date";
 
 // The lines behind one account's balance, so a wrong total can be traced.
 export function AccountLines({ title, bucket, onClose }) {
@@ -89,6 +90,71 @@ export function TransferForm({ onDone }) {
   );
 }
 
+// One account, day by day: for every day that has entries, what the account held when the day began (its opening balance), the
+// money in and out, and what it held at the end. Worked out from the entries, newest day first.
+function DayByDay() {
+  const { books } = useBooks();
+  const choices = useMemo(() => accountChoices(books, "Cash in hand"), [books]);
+  const [acct, setAcct] = useState(CASH);
+  const [from, setFrom] = useState(() => addDays(todayStr(), -30));
+  const [to, setTo] = useState(todayStr());
+  const picked = choices.some((c) => c.id === acct) ? acct : CASH; // an account that was deleted falls back to cash
+  const book = useMemo(() => accountDays(books, picked, from, to), [books, picked, from, to]);
+  const days = [...book.days].reverse();
+  const tone = (n) => (n < 0 ? COLORS.out : COLORS.balance);
+  return (
+    <Card className="overflow-hidden">
+      <div className="flex flex-wrap items-end justify-between gap-3 px-4 py-3 border-b border-slate-100">
+        <div>
+          <div className="text-sm font-semibold text-slate-800">Day by day</div>
+          <div className="text-xs text-slate-500">Each day's opening balance, money in and out, and closing balance.</div>
+        </div>
+        <div className="flex flex-wrap items-end gap-3">
+          <Field label="Account">
+            <select value={picked} onChange={(e) => setAcct(e.target.value)} className={`${inputCls} !w-auto min-w-[10rem]`} data-testid="dayby-account">
+              {choices.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          </Field>
+          <DateField label="From" value={from} onChange={setFrom} />
+          <DateField label="To" value={to} onChange={setTo} />
+        </div>
+      </div>
+      {days.length === 0 ? <Empty>Nothing moved through this account in these days.</Empty> : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm" data-testid="dayby-table">
+            <thead>
+              <tr className="text-left text-xs text-slate-500 border-b border-slate-100">
+                <th className="px-4 py-2 font-semibold">Date</th>
+                <th className="px-4 py-2 text-right font-semibold">Opening balance</th>
+                <th className="px-4 py-2 text-right font-semibold">Money in</th>
+                <th className="px-4 py-2 text-right font-semibold">Money out</th>
+                <th className="px-4 py-2 text-right font-semibold">Closing balance</th>
+                <th className="px-4 py-2 text-right font-semibold">Entries</th>
+              </tr>
+            </thead>
+            <tbody>
+              {days.map((d) => (
+                <tr key={d.date} className="border-t border-slate-100" data-testid="dayby-row">
+                  <td className="px-4 py-2.5 whitespace-nowrap">{formatBSDate(d.date)}<div className="text-[11px] text-slate-400">{d.date}</div></td>
+                  <td className="px-4 py-2.5 text-right font-semibold whitespace-nowrap" style={{ color: tone(d.opening) }}>{num(d.opening)}</td>
+                  <td className="px-4 py-2.5 text-right whitespace-nowrap" style={{ color: COLORS.in }}>{d.in ? num(d.in) : <span className="text-slate-300">—</span>}</td>
+                  <td className="px-4 py-2.5 text-right whitespace-nowrap" style={{ color: COLORS.out }}>{d.out ? num(d.out) : <span className="text-slate-300">—</span>}</td>
+                  <td className="px-4 py-2.5 text-right font-semibold whitespace-nowrap" style={{ color: tone(d.closing) }}>{num(d.closing)}</td>
+                  <td className="px-4 py-2.5 text-right text-slate-500">{d.count}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <p className="px-4 py-3 text-xs text-slate-400 border-t border-slate-100">
+        Opening on {from}: <b style={{ color: tone(book.opening) }}>{npr(book.opening)}</b> · closing on {to}: <b style={{ color: tone(book.closing) }}>{npr(book.closing)}</b>.
+        A day with no entries is left out: it opens and closes on the day before's closing balance.
+      </p>
+    </Card>
+  );
+}
+
 export default function BankAccounts() {
   const { books, del } = useBooks();
   const [form, setForm] = useState(null);       // null | "new" | "cash" | account
@@ -135,6 +201,8 @@ export default function BankAccounts() {
         <button onClick={() => setForm("new")} className="bg-white border-2 border-dashed border-slate-300 rounded-xl p-4 text-slate-500 hover:border-blue-400 hover:text-blue-600 flex items-center justify-center gap-2 text-sm font-semibold"><Plus size={16} /> Add bank account</button>
       </div>
       <p className="text-xs text-slate-400">Total available: <b style={{ color: COLORS.balance }}>{npr(bal.total)}</b>. Deleting an account moves its entries back to cash in hand and removes transfers that used it.</p>
+
+      <DayByDay />
 
       <TransferForm />
 

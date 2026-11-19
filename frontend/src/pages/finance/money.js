@@ -434,6 +434,59 @@ export function cashBook(books, from, to) {
 // A paper cash book for one day.
 export const dayBook = (books, date) => cashBook(books, date, date);
 
+// Cash in hand and each bank account, as the Day Book's account picker and the Bank Accounts page list them. `id` is the bucket
+// the balances are kept under (CASH, or the account's id).
+export const accountChoices = (books, cashLabel = "Cash") => [
+  { id: CASH, name: books.cash_account?.name || cashLabel },
+  ...books.accounts.map((a) => ({ id: a.id, name: a.name })),
+];
+
+// The cash book of ONE account: cash in hand (CASH) or a bank account's id. The same rows and columns as cashBook, but only the
+// entries that moved money through that account (a bill against a person moves none, and a journal voucher touches no account),
+// with the account's own opening balance and running balance. A transfer is a row in each account it touches: money out of one,
+// money in to the other.
+export function accountBook(books, bucket, from, to) {
+  const rows = [];
+  for (const r of cashBook(books, from, to).rows) {
+    if (r.table === "tr") {
+      if (bucketOf(r.data.from_account_id) === bucket) rows.push({ ...r, out: r.transferAmount });
+      else if (bucketOf(r.data.to_account_id) === bucket) rows.push({ ...r, in: r.transferAmount });
+    } else if (r.table !== "jv" && (r.in || r.out) && bucketOf(r.data.bank_account_id) === bucket) rows.push({ ...r });
+  }
+  const opening = from ? balances(books, { before: from }).buckets[bucket]?.total || 0 : 0;
+  let running = opening, cashIn = 0, cashOut = 0;
+  for (const r of rows) {
+    if (r.in) { running += r.in; cashIn += r.in; }
+    if (r.out) { running -= r.out; cashOut += r.out; }
+    r.balance = running;
+  }
+  return { opening, rows, cashIn, cashOut, closing: running };
+}
+
+// An account's days from `from` to `to`, oldest first: each day that has entries with its opening balance (the account's
+// balance from everything before that day), the money in and out, and its closing balance. A day with no entries is left out:
+// its opening and closing are simply the day before's closing. `opening` / `closing` are for the whole period.
+export function accountDays(books, bucket, from, to) {
+  const lines = balances(books).buckets[bucket]?.lines || [];
+  let opening = 0;
+  const byDay = new Map();
+  for (const l of lines) {
+    if (from && l.date < from) { opening += l.amount; continue; }
+    if (to && l.date > to) continue;
+    const d = byDay.get(l.date) || { date: l.date, in: 0, out: 0, count: 0 };
+    if (l.amount >= 0) d.in += l.amount; else d.out += -l.amount;
+    d.count += 1;
+    byDay.set(l.date, d);
+  }
+  let run = opening;
+  const days = [...byDay.values()].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0)).map((d) => {
+    const dayOpening = run;
+    run = dayOpening + d.in - d.out;
+    return { ...d, opening: dayOpening, closing: run };
+  });
+  return { days, opening, closing: run };
+}
+
 // ── the interleaved feed under the entry forms ────────────────────────────
 export function feedRows(books) {
   const rows = [];
