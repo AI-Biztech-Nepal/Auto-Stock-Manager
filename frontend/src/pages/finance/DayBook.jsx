@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight, CalendarDays, ArrowDownCircle, ArrowUpCircle, ShoppingBag, ShoppingCart, Receipt, FileText, ArrowLeftRight } from "lucide-react";
 import { useBooks } from "./BooksContext";
 import EntryEditor from "./EntryEditor";
+import EntryViewer from "./EntryViewer";
 import { Card, Pill, ExportBar, exportXlsx, inputCls, btnPrimary, btnGhost } from "./ui";
 import { cashBook, todayStr, addDays, num, npr } from "./money";
 import { formatBSDate } from "../../utils/nepali-date";
@@ -88,20 +89,12 @@ function DateStepper({ range, setRange, today }) {
   );
 }
 
-// The person an entry belongs to (a party that is still in the books), or null: expenses, walk-in sales, transfers and journal
-// vouchers belong to no one's ledger.
-const partyOfRow = (books, r) => {
-  if (r.kind === "expense") return null;
-  const id = r.table === "tx" || r.table === "cl" ? r.data.customer_id : r.table === "vl" ? r.data.vendor_id : null;
-  return id && books.parties.some((p) => p.id === id) ? id : null;
-};
-
 export default function DayBook({ date, setDate, goTab, openParty }) {
   const { books } = useBooks();
-  const [editing, setEditing] = useState(null);
-  // Tapping an entry opens that person's ledger (where the entry itself can be opened, edited or deleted); an entry with no
-  // person opens its editor right here.
-  const open = (r) => { const party = openParty && partyOfRow(books, r); if (party) openParty(party); else setEditing(r); };
+  const [viewing, setViewing] = useState(null); // the entry tapped: opened to look at (EntryViewer), as Jageer Nepal does
+  const [editing, setEditing] = useState(null); // the entry being changed (EntryEditor), from the viewer's Edit button
+  // A journal voucher opens straight to its own viewer (inside EntryEditor); every other entry opens the bill view first.
+  const open = (r) => (r.table === "jv" ? setEditing(r) : setViewing(r));
   const today = todayStr();
   const [range, setRangeState] = useState({ from: date || today, to: date || today });
   const setRange = (r) => { setRangeState(r); if (r.from === r.to) setDate?.(r.from); };
@@ -206,9 +199,13 @@ export default function DayBook({ date, setDate, goTab, openParty }) {
 
       {book.rows.length === 0 && <p className="px-1 text-[13px] text-gray-500">{singleDay ? "No entries on this day." : "No entries in this period."}</p>}
       <p className="px-1 text-xs leading-[17px] text-gray-500">
-        Tap an entry to open that person's ledger (an entry with no person opens here). Sale and purchase bills show what was billed; only money that moved (received, paid, expenses, walk-in sales)
+        Tap an entry to open it; the person's name in it opens their ledger. Sale and purchase bills show what was billed; only money that moved (received, paid, expenses, walk-in sales)
         changes the balance. Opening {num(book.opening)} + In {num(book.cashIn)} − Out {num(book.cashOut)} = Closing {num(book.closing)}.
       </p>
+      {viewing && (
+        <EntryViewer row={viewing} kind={KIND[viewing.kind]} openParty={openParty} onClose={() => setViewing(null)}
+          onEdit={() => { setEditing(viewing); setViewing(null); }} />
+      )}
       {editing && <EntryEditor row={editing} onClose={() => setEditing(null)} />}
     </div>
   );
