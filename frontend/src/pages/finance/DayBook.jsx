@@ -88,9 +88,20 @@ function DateStepper({ range, setRange, today }) {
   );
 }
 
-export default function DayBook({ date, setDate, goTab }) {
+// The person an entry belongs to (a party that is still in the books), or null: expenses, walk-in sales, transfers and journal
+// vouchers belong to no one's ledger.
+const partyOfRow = (books, r) => {
+  if (r.kind === "expense") return null;
+  const id = r.table === "tx" || r.table === "cl" ? r.data.customer_id : r.table === "vl" ? r.data.vendor_id : null;
+  return id && books.parties.some((p) => p.id === id) ? id : null;
+};
+
+export default function DayBook({ date, setDate, goTab, openParty }) {
   const { books } = useBooks();
   const [editing, setEditing] = useState(null);
+  // Tapping an entry opens that person's ledger (where the entry itself can be opened, edited or deleted); an entry with no
+  // person opens its editor right here.
+  const open = (r) => { const party = openParty && partyOfRow(books, r); if (party) openParty(party); else setEditing(r); };
   const today = todayStr();
   const [range, setRangeState] = useState({ from: date || today, to: date || today });
   const setRange = (r) => { setRangeState(r); if (r.from === r.to) setDate?.(r.from); };
@@ -156,7 +167,7 @@ export default function DayBook({ date, setDate, goTab }) {
               {book.rows.map((r, i) => {
                 const k = KIND[r.kind];
                 return (
-                  <tr key={r.key} onClick={() => setEditing(r)} className="cursor-pointer">
+                  <tr key={r.key} onClick={() => open(r)} className="cursor-pointer" data-testid="daybook-row">
                     <td className="text-gray-500">{i + 1}</td>
                     <td className="hidden sm:table-cell text-gray-600 whitespace-nowrap">{formatBSDate(r.date)}<div className="text-[11px] text-gray-400">{time(r)}</div></td>
                     <td className="hidden xl:table-cell text-gray-600">{r.invoice || <span className="text-gray-300">—</span>}</td>
@@ -195,7 +206,7 @@ export default function DayBook({ date, setDate, goTab }) {
 
       {book.rows.length === 0 && <p className="px-1 text-[13px] text-gray-500">{singleDay ? "No entries on this day." : "No entries in this period."}</p>}
       <p className="px-1 text-xs leading-[17px] text-gray-500">
-        Tap any entry to open it. Sale and purchase bills show what was billed; only money that moved (received, paid, expenses, walk-in sales)
+        Tap an entry to open that person's ledger (an entry with no person opens here). Sale and purchase bills show what was billed; only money that moved (received, paid, expenses, walk-in sales)
         changes the balance. Opening {num(book.opening)} + In {num(book.cashIn)} − Out {num(book.cashOut)} = Closing {num(book.closing)}.
       </p>
       {editing && <EntryEditor row={editing} onClose={() => setEditing(null)} />}
