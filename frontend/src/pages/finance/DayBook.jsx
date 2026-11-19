@@ -116,15 +116,25 @@ export default function DayBook({ date, setDate, goTab, openParty, editBill }) {
   const singleDay = range.from === range.to;
 
   const time = (r) => (r.at ? new Date(r.at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }) : "");
-  const billAmount = (r) => r.bill ?? r.transferAmount ?? (r.kind === "expense" ? r.out : null);
+  // The amount of an entry under the column of its kind: what a purchase bill / a sale bill was billed for, and what a contra (a
+  // transfer between your own accounts) moved. Anything else has no amount here (its money is in Cash in / Cash out).
+  const purchaseOf = (r) => (r.kind === "purchase" ? r.bill : null);
+  const saleOf = (r) => (r.kind === "sale" ? r.bill : null);
+  const contraOf = (r) => (r.kind === "transfer" ? r.transferAmount : null);
+  const totals = useMemo(() => ({
+    purchase: book.rows.reduce((s, r) => s + (purchaseOf(r) || 0), 0),
+    sale: book.rows.reduce((s, r) => s + (saleOf(r) || 0), 0),
+    contra: book.rows.reduce((s, r) => s + (contraOf(r) || 0), 0),
+  }), [book]);
   const cols = [
     { header: "SN", value: (r) => book.rows.indexOf(r) + 1 },
     { header: "Date", value: (r) => r.date },
     { header: "Invoice no.", value: (r) => r.invoice || "" },
     { header: "Transaction details", value: (r) => [r.label, r.note].filter(Boolean).join(" · ") },
     { header: "Type", value: (r) => KIND[r.kind]?.label || "" },
-    { header: "Discount", value: (r) => r.discount || "" },
-    { header: "Bill amount", value: (r) => billAmount(r) ?? "" },
+    { header: "Purchase", value: (r) => purchaseOf(r) ?? "" },
+    { header: "Sale", value: (r) => saleOf(r) ?? "" },
+    { header: "Contra", value: (r) => contraOf(r) ?? "" },
     { header: "Cash in", value: (r) => r.in ?? "" },
     { header: "Cash out", value: (r) => r.out ?? "" },
     { header: "Balance", value: (r) => r.balance ?? "" },
@@ -168,8 +178,9 @@ export default function DayBook({ date, setDate, goTab, openParty, editBill }) {
                 <th className="hidden xl:table-cell">Invoice no.</th>
                 <th>Transaction details</th>
                 <th className="hidden md:table-cell">Type</th>
-                <th className="text-right hidden xl:table-cell">Discount</th>
-                <th className="text-right hidden md:table-cell">Bill amount</th>
+                <th className="text-right hidden md:table-cell">Purchase</th>
+                <th className="text-right hidden md:table-cell">Sale</th>
+                <th className="text-right hidden md:table-cell">Contra</th>
                 <th className="text-right">Cash in</th>
                 <th className="text-right">Cash out</th>
                 <th className="text-right">Balance</th>
@@ -182,7 +193,8 @@ export default function DayBook({ date, setDate, goTab, openParty, editBill }) {
                 <td className="hidden xl:table-cell" />
                 <td className="font-semibold">Opening balance{picked !== "all" ? ` · ${pickedName}` : ""}</td>
                 <td className="hidden md:table-cell"><Pill text="Opening" color="#374151" bg="#F3F4F6" /></td>
-                <td className="hidden xl:table-cell" />
+                <td className="hidden md:table-cell" />
+                <td className="hidden md:table-cell" />
                 <td className="hidden md:table-cell" />
                 <td /><td />
                 <td className="text-right font-bold" style={{ color: balanceColor(book.opening) }}>{num(book.opening)}</td>
@@ -200,8 +212,9 @@ export default function DayBook({ date, setDate, goTab, openParty, editBill }) {
                       <div className="md:hidden mt-0.5 flex items-center gap-1.5"><Pill text={k.label} color={k.color} bg={k.bg} />{!singleDay && <span className="sm:hidden text-[11px] text-gray-400">{formatBSDate(r.date)}</span>}</div>
                     </td>
                     <td className="hidden md:table-cell"><Pill text={k.label} color={k.color} bg={k.bg} /></td>
-                    <td className="text-right hidden xl:table-cell">{fig(r.discount, "#4B5563")}</td>
-                    <td className="text-right hidden md:table-cell">{fig(billAmount(r), r.kind === "sale" || r.kind === "purchase" ? "#111827" : k.color)}</td>
+                    <td className="text-right hidden md:table-cell" data-testid="daybook-purchase">{fig(purchaseOf(r), "#111827")}</td>
+                    <td className="text-right hidden md:table-cell" data-testid="daybook-sale">{fig(saleOf(r), "#111827")}</td>
+                    <td className="text-right hidden md:table-cell" data-testid="daybook-contra">{fig(contraOf(r), k.color)}</td>
                     <td className="text-right">{fig(r.in, "#047857", true)}</td>
                     <td className="text-right">{fig(r.out, "#B91C1C", true)}</td>
                     <td className="text-right font-bold whitespace-nowrap" style={{ color: r.balance != null ? balanceColor(r.balance) : undefined }}>{r.balance != null ? num(r.balance) : <span className="text-gray-300 font-normal">—</span>}</td>
@@ -216,8 +229,9 @@ export default function DayBook({ date, setDate, goTab, openParty, editBill }) {
                 <td colSpan={2} className="text-right hidden sm:table-cell xl:hidden" />
                 <td className="text-right text-gray-700">Closing balance</td>
                 <td className="hidden md:table-cell" />
-                <td className="hidden xl:table-cell" />
-                <td className="hidden md:table-cell" />
+                <td className="text-right hidden md:table-cell font-semibold" style={{ color: "#111827" }} data-testid="daybook-total-purchase">{num(totals.purchase)}</td>
+                <td className="text-right hidden md:table-cell font-semibold" style={{ color: "#111827" }} data-testid="daybook-total-sale">{num(totals.sale)}</td>
+                <td className="text-right hidden md:table-cell font-semibold" style={{ color: KIND.transfer.color }} data-testid="daybook-total-contra">{num(totals.contra)}</td>
                 <td className="text-right" style={{ color: "#047857" }}>{num(book.cashIn)}</td>
                 <td className="text-right" style={{ color: "#B91C1C" }}>{num(book.cashOut)}</td>
                 <td className="text-right whitespace-nowrap" style={{ color: balanceColor(book.closing) }}>{npr(book.closing)}</td>
@@ -231,7 +245,7 @@ export default function DayBook({ date, setDate, goTab, openParty, editBill }) {
       <p className="px-1 text-xs leading-[17px] text-gray-500">
         Tap an entry to open it; the person's name in it opens their ledger.{" "}
         {picked === "all"
-          ? "Sale and purchase bills show what was billed; only money that moved (received, paid, expenses, walk-in sales) changes the balance."
+          ? "Purchase and Sale show what a bill was billed for and Contra what moved between your own accounts; only money that moved (received, payment, expenses, walk-in sales) changes the balance."
           : `This is ${pickedName} only: the entries that moved money through it (a bill against a person moves none, so it is not listed here).`}{" "}
         Opening {num(book.opening)} + In {num(book.cashIn)} − Out {num(book.cashOut)} = Closing {num(book.closing)}.
       </p>
