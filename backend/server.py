@@ -6559,6 +6559,15 @@ async def _run_startup_tasks():
         except Exception:
             logger.warning("Could not ensure the Finance rent tables", exc_info=True)
     if DB_BACKEND == "postgres":
+        # leads.seen_by (who first read a lead) was added after the Supabase schema was loaded: add it here so the Leads screen
+        # keeps working without a manual SQL step. If the database user may not alter tables, stop asking for the column
+        # instead of failing every Leads query ("column seen_by does not exist").
+        try:
+            await db.execute_raw('ALTER TABLE leads ADD COLUMN IF NOT EXISTS seen_by varchar(100)')
+        except Exception:
+            logger.warning("Could not add leads.seen_by; Leads will not show who read a lead", exc_info=True)
+            import sqldb
+            sqldb.TABLES["leads"]["columns"].discard("seen_by")
         # Supabase: the tables and columns come from backend/supabase/schema.sql; this only registers Finance's late-added ones.
         try:
             await finance_books.ensure_schema_postgres(db)
