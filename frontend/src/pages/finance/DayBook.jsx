@@ -4,7 +4,7 @@ import { useBooks } from "./BooksContext";
 import EntryEditor from "./EntryEditor";
 import EntryViewer from "./EntryViewer";
 import { Card, Pill, ExportBar, exportXlsx, inputCls, btnPrimary, btnGhost } from "./ui";
-import { cashBook, accountBook, accountChoices, balances, todayStr, addDays, num, npr } from "./money";
+import { cashBook, accountBook, accountChoices, balances, todayStr, addDays, num } from "./money";
 import { formatBSDate } from "../../utils/nepali-date";
 
 // The Day Book as Jageer Nepal draws it: the New entry buttons and the date stepper up top, then one bordered
@@ -45,6 +45,9 @@ export function NewEntryButtons({ goTab }) {
     </div>
   );
 }
+
+// The opening row's tint, set on its cells (the table's row hover would otherwise paint over it).
+const OPENING_BG = { background: "#EEF3FB" };
 
 const daysBetween = (a, b) => Math.round((new Date(b) - new Date(a)) / 86400000);
 
@@ -139,6 +142,11 @@ export default function DayBook({ date, setDate, goTab, openParty, editBill }) {
     { header: "Cash out", value: (r) => r.out ?? "" },
     { header: "Balance", value: (r) => r.balance ?? "" },
   ];
+  // The opening row's second line: what each account held (Cash −41,830 + Esewa −52,656 + JBBL 740,472 = 645,985). Only when the
+  // book is of every account and there is more than cash to add up.
+  const split = hasBanks && picked === "all" ? `${openings.map((o) => `${o.name} ${num(o.total)}`).join(" + ")} = ${num(book.opening)}` : "";
+  const dash = <span className="text-gray-300">—</span>;
+  const formula = <b>Opening {num(book.opening)} + In {num(book.cashIn)} − Out {num(book.cashOut)} = Closing Balance</b>;
   const fig = (v, color, strong) => (v ? <span className={strong ? "font-bold" : "font-medium"} style={{ color }}>{num(v)}</span> : <span className="text-gray-300">—</span>);
   const balanceColor = (b) => (b < 0 ? "#B91C1C" : "#1D4ED8");
 
@@ -157,16 +165,6 @@ export default function DayBook({ date, setDate, goTab, openParty, editBill }) {
           <ExportBar onXlsx={() => exportXlsx(`daybook-${range.from}${singleDay ? "" : `-to-${range.to}`}`, cols, book.rows)} />
         </div>
       </div>
-
-      {/* Each account's opening balance for the day shown (all accounts together, one figure per account) */}
-      {hasBanks && picked === "all" && (
-        <div className="flex flex-wrap items-center gap-x-6 gap-y-1.5 rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-[13px]" data-testid="daybook-openings">
-          <span className="font-semibold text-gray-700">Opening balance · {formatBSDate(range.from)}</span>
-          {openings.map((o) => (
-            <span key={o.id} className="text-gray-600" data-testid="daybook-opening">{o.name} <b style={{ color: balanceColor(o.total) }}>{num(o.total)}</b></span>
-          ))}
-        </div>
-      )}
 
       <Card className="overflow-hidden">
         <div className="overflow-x-auto">
@@ -187,17 +185,22 @@ export default function DayBook({ date, setDate, goTab, openParty, editBill }) {
               </tr>
             </thead>
             <tbody>
-              <tr className="text-gray-500">
-                <td />
-                <td className="hidden sm:table-cell" />
-                <td className="hidden xl:table-cell" />
-                <td className="font-semibold">Opening balance{picked !== "all" ? ` · ${pickedName}` : ""}</td>
-                <td className="hidden md:table-cell"><Pill text="Opening" color="#374151" bg="#F3F4F6" /></td>
-                <td className="hidden md:table-cell" />
-                <td className="hidden md:table-cell" />
-                <td className="hidden md:table-cell" />
-                <td /><td />
-                <td className="text-right font-bold" style={{ color: balanceColor(book.opening) }}>{num(book.opening)}</td>
+              {/* The first row: what the book held when the first day shown began, tinted, with what each account held under it */}
+              <tr data-testid="daybook-opening-row">
+                <td style={OPENING_BG} />
+                <td style={OPENING_BG} className="hidden sm:table-cell" />
+                <td style={OPENING_BG} className="hidden xl:table-cell">{dash}</td>
+                <td style={OPENING_BG}>
+                  <div className="font-semibold text-gray-900">Opening balance{picked !== "all" ? ` · ${pickedName}` : ""}</div>
+                  {split && <div className="text-xs text-gray-400" data-testid="daybook-openings">{split}</div>}
+                </td>
+                <td style={OPENING_BG} className="hidden md:table-cell"><Pill text="Opening" color="#374151" bg="#F3F4F6" /></td>
+                <td style={OPENING_BG} className="text-right hidden md:table-cell">{dash}</td>
+                <td style={OPENING_BG} className="text-right hidden md:table-cell">{dash}</td>
+                <td style={OPENING_BG} className="text-right hidden md:table-cell">{dash}</td>
+                <td style={OPENING_BG} className="text-right">{dash}</td>
+                <td style={OPENING_BG} className="text-right">{dash}</td>
+                <td className="text-right font-bold whitespace-nowrap" style={{ ...OPENING_BG, color: book.opening < 0 ? "#B91C1C" : "#111827" }} data-testid="daybook-opening-balance">{num(book.opening)}</td>
               </tr>
               {book.rows.map((r, i) => {
                 const k = KIND[r.kind];
@@ -224,17 +227,18 @@ export default function DayBook({ date, setDate, goTab, openParty, editBill }) {
             </tbody>
             <tfoot>
               <tr>
-                <td className="sm:hidden" />
-                <td colSpan={3} className="text-right hidden xl:table-cell" />
-                <td colSpan={2} className="text-right hidden sm:table-cell xl:hidden" />
-                <td className="text-right text-gray-700">Closing balance</td>
-                <td className="hidden md:table-cell" />
+                {/* "Opening + In − Out = Closing balance", right-aligned over every column before the totals. One cell for each
+                    width, since the Date, Invoice no. and Type columns come and go with the screen size. */}
+                <td colSpan={2} className="text-right text-gray-900 sm:hidden" data-testid="daybook-formula">{formula}</td>
+                <td colSpan={3} className="text-right text-gray-900 hidden sm:table-cell md:hidden">{formula}</td>
+                <td colSpan={4} className="text-right text-gray-900 hidden md:table-cell xl:hidden">{formula}</td>
+                <td colSpan={5} className="text-right text-gray-900 hidden xl:table-cell">{formula}</td>
                 <td className="text-right hidden md:table-cell font-semibold" style={{ color: "#111827" }} data-testid="daybook-total-purchase">{num(totals.purchase)}</td>
                 <td className="text-right hidden md:table-cell font-semibold" style={{ color: "#111827" }} data-testid="daybook-total-sale">{num(totals.sale)}</td>
                 <td className="text-right hidden md:table-cell font-semibold" style={{ color: KIND.transfer.color }} data-testid="daybook-total-contra">{num(totals.contra)}</td>
                 <td className="text-right" style={{ color: "#047857" }}>{num(book.cashIn)}</td>
                 <td className="text-right" style={{ color: "#B91C1C" }}>{num(book.cashOut)}</td>
-                <td className="text-right whitespace-nowrap" style={{ color: balanceColor(book.closing) }}>{npr(book.closing)}</td>
+                <td className="text-right whitespace-nowrap" style={{ color: balanceColor(book.closing) }} data-testid="daybook-closing">{num(book.closing)}</td>
               </tr>
             </tfoot>
           </table>
@@ -246,8 +250,7 @@ export default function DayBook({ date, setDate, goTab, openParty, editBill }) {
         Tap an entry to open it; the person's name in it opens their ledger.{" "}
         {picked === "all"
           ? "Purchase and Sale show what a bill was billed for and Contra what moved between your own accounts; only money that moved (received, payment, expenses, walk-in sales) changes the balance."
-          : `This is ${pickedName} only: the entries that moved money through it (a bill against a person moves none, so it is not listed here).`}{" "}
-        Opening {num(book.opening)} + In {num(book.cashIn)} − Out {num(book.cashOut)} = Closing {num(book.closing)}.
+          : `This is ${pickedName} only: the entries that moved money through it (a bill against a person moves none, so it is not listed here).`}
       </p>
       {viewing && (
         <EntryViewer row={viewing} kind={KIND[viewing.kind]} openParty={openParty} onClose={() => setViewing(null)}
