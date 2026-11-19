@@ -12,6 +12,11 @@ import HoverADDate from "./HoverADDate";
 
 // What the vehicle is to be sold for: the price agreed with the customer, else the vehicle's own selling price.
 export const agreedOf = (b) => b.agreed_price ?? b.vehicle_selling_price ?? null;
+// What the customer still owes on it: that price less the deposit (null when no price is known).
+export const duesOf = (b) => {
+  const agreed = agreedOf(b);
+  return agreed != null ? Math.max(agreed - (b.booking_amount || 0), 0) : null;
+};
 
 export const BookedStatus = () => (
   <span className="px-2 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wide whitespace-nowrap bg-yellow-100 text-yellow-800" data-testid="booking-status-tag">Booked</span>
@@ -29,9 +34,10 @@ export const cancelledOn = (b) => (b.cancelled_at || "").slice(0, 10);
 const keptOf = (b) => b.retained_amount || 0;
 
 // The cells line up with the Sales table's columns: SN, Date, Vehicle, Customer, Transfer, Sale Price, Cost Price, Profit,
-// Payment, Status ("Booked").
+// Dues (the price less the deposit, with the deposit under it), Status ("Booked").
 export function BookedTableRow({ b, index, cost, onOpen }) {
   const agreed = agreedOf(b);
+  const dues = duesOf(b);
   return (
     <tr data-testid="booking-row" onClick={() => onOpen(b)} className="cursor-pointer">
       <td className="text-gray-500">{index}</td>
@@ -48,9 +54,9 @@ export function BookedTableRow({ b, index, cost, onOpen }) {
       <td className="text-right font-medium text-gray-800 whitespace-nowrap">{agreed != null ? formatNPR(agreed) : <Dash />}</td>
       <td className="text-right font-medium text-gray-800 whitespace-nowrap" data-testid="booking-cost-price">{cost != null ? formatNPR(cost) : <Dash />}</td>
       <td className="text-right"><Dash /></td>
-      <td>
-        <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-700">{b.payment_method}</span>
-        <div className="mt-1 text-xs font-semibold text-amber-700 whitespace-nowrap">Deposit: {formatNPR(b.booking_amount)}</div>
+      <td className="text-right whitespace-nowrap" data-testid="booking-dues">
+        {dues > 0 ? <span className="font-semibold text-red-600">{formatNPR(dues)}</span> : <Dash />}
+        <div className="mt-1 text-xs font-semibold text-amber-700">Deposit: {formatNPR(b.booking_amount)}</div>
       </td>
       <td><BookedStatus /></td>
     </tr>
@@ -58,7 +64,7 @@ export function BookedTableRow({ b, index, cost, onOpen }) {
 }
 
 // A cancelled booking as a row of the table (same cells as above): the day it was cancelled, the amount kept as the Profit, and
-// what was refunded under Payment.
+// no dues (what was refunded, and the deposit, are under it).
 export function CancelledTableRow({ b, index, onOpen }) {
   const kept = keptOf(b);
   return (
@@ -79,9 +85,10 @@ export function CancelledTableRow({ b, index, onOpen }) {
       <td className="text-right font-bold whitespace-nowrap" data-testid="cancelled-kept">
         <span className={kept > 0 ? "text-green-700" : "text-gray-400"}>{formatNPR(kept)}</span>
       </td>
-      <td>
-        <div className="text-xs text-amber-700 whitespace-nowrap">Refunded {formatNPR(b.refund_amount || 0)}</div>
-        <div className="mt-1 text-xs text-gray-400 whitespace-nowrap">Deposit: {formatNPR(b.booking_amount)}</div>
+      <td className="text-right whitespace-nowrap" data-testid="cancelled-dues">
+        <Dash />
+        <div className="text-xs text-amber-700">Refunded {formatNPR(b.refund_amount || 0)}</div>
+        <div className="mt-1 text-xs text-gray-400">Deposit: {formatNPR(b.booking_amount)}</div>
       </td>
       <td><CancelledStatus /></td>
     </tr>
@@ -109,6 +116,7 @@ export function CancelledCard({ b, onOpen }) {
 }
 
 export function BookedCard({ b, cost, onOpen }) {
+  const dues = duesOf(b);
   return (
     <div data-testid="booking-row-mobile" onClick={() => onOpen(b)} className="p-4 space-y-2 cursor-pointer active:bg-slate-50">
       <div className="flex items-start justify-between gap-2">
@@ -118,8 +126,9 @@ export function BookedCard({ b, cost, onOpen }) {
         </div>
         <BookedStatus />
       </div>
-      <div className="text-sm">
+      <div className="flex items-center justify-between text-sm">
         <span className="font-bold text-green-700">{formatNPR(b.booking_amount)} <span className="text-xs font-normal text-slate-400">{b.payment_method} deposit</span></span>
+        {dues > 0 && <span className="text-xs font-semibold text-red-600" data-testid="booking-dues-mobile">Dues {formatNPR(dues)}</span>}
       </div>
       {cost != null && <div className="text-xs text-slate-500">Cost price <span className="font-semibold text-slate-700">{formatNPR(cost)}</span></div>}
       <div className="text-xs text-slate-400"><HoverADDate date={b.booking_date} /></div>

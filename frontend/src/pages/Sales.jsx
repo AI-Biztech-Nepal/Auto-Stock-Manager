@@ -461,7 +461,9 @@ export default function Sales() {
                         : <span className="text-sm font-bold text-green-700"><span className="text-xs font-medium text-slate-400">Sale price </span>{formatNPR(s.sale_price)}</span>}
                       {s.returned
                         ? <span className="text-xs text-amber-700">Refunded {formatNPR(s.refund_amount || 0)}</span>
-                        : <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-700">{s.payment_method}</span>}
+                        : s.due_amount > 0
+                          ? <span className="text-xs font-semibold text-red-600" data-testid="sale-dues-mobile">Dues {formatNPR(s.due_amount)}</span>
+                          : <span className="text-xs font-medium text-green-600">No dues</span>}
                     </div>
                     {cost != null && <div className="mt-1 text-xs text-slate-500" data-testid="sale-cost-mobile">Cost price <span className="font-semibold text-slate-700">{formatNPR(cost)}</span></div>}
                     {!s.returned && v && (
@@ -491,7 +493,7 @@ export default function Sales() {
                     <th className="text-right">Sale Price</th>
                     <th className="text-right" title="The vehicle's overall cost: purchase price + expenses + accessories">Cost Price</th>
                     <th className="text-right" title="What the sale earned: the sale price less the vehicle's overall cost (what was kept, for a returned sale)">Profit</th>
-                    <th>Payment</th>
+                    <th className="text-right" title="What the customer still owes on the sale (for a booked vehicle: the agreed price less the deposit)">Dues</th>
                     <th>Status</th>
                   </tr>
                 </thead>
@@ -530,12 +532,18 @@ export default function Sales() {
                         <td className="text-right font-bold whitespace-nowrap" data-testid="sale-profit">
                           {s.profit != null ? <span className={s.profit < 0 ? "text-red-600" : "text-green-700"}>{formatNPR(s.profit)}</span> : <span className="text-gray-300 font-normal">—</span>}
                         </td>
-                        <td>
+                        <td className="text-right whitespace-nowrap" data-testid="sale-dues">
                           {s.returned ? (
-                            <div className="text-xs text-amber-700 whitespace-nowrap">Refunded {formatNPR(s.refund_amount || 0)}</div>
-                          ) : (
-                            <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-700">{s.payment_method}</span>
-                          )}
+                            <>
+                              <span className="text-gray-300">—</span>
+                              <div className="text-xs text-amber-700">Refunded {formatNPR(s.refund_amount || 0)}</div>
+                            </>
+                          ) : s.due_amount > 0 ? (
+                            <>
+                              <span className="font-semibold text-red-600">{formatNPR(s.due_amount)}</span>
+                              {s.due_date && <div className="text-xs text-gray-400">by <HoverADDate date={s.due_date} /></div>}
+                            </>
+                          ) : <span className="text-gray-300">—</span>}
                         </td>
                         <td><SaleStatus sale={s} /></td>
                       </tr>
