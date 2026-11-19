@@ -62,7 +62,7 @@ export default function Payment({ direction }) {
     if (todo.some((r) => !r.party.name.trim() || !(Number(r.amount) > 0))) return toast.error("Every row needs a name and an amount above 0");
     const sum = todo.reduce((s, r) => s + Number(r.amount), 0);
     const ok = await confirm({
-      title: `Save this ${received ? "Received" : "Paid"} entry?`,
+      title: `Save this ${received ? "Received" : "Payment"} entry?`,
       rows: [
         ...todo.map((r) => ({ label: r.party.name.trim() + (r.item ? ` · ${r.item}` : ""), value: `NPR ${num(r.amount)}` })),
         ...(number.trim() ? [{ label: received ? "Receipt no." : "Payment no.", value: number.trim() }] : []),

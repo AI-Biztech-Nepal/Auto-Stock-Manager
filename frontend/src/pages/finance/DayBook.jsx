@@ -15,7 +15,7 @@ import { formatBSDate } from "../../utils/nepali-date";
 // The Type pill of each row, in Jageer's words and colours.
 const KIND = {
   received: { label: "Received", color: "#047857", bg: "#ECFDF5" },
-  paid: { label: "Paid", color: "#B91C1C", bg: "#FEF2F2" },
+  paid: { label: "Payment", color: "#B91C1C", bg: "#FEF2F2" },
   expense: { label: "Expenses", color: "#B91C1C", bg: "#FEF2F2" },
   sale: { label: "Sale bill", color: "#047857", bg: "#ECFDF5" },
   purchase: { label: "Purchase bill", color: "#B91C1C", bg: "#FEF2F2" },
@@ -26,7 +26,7 @@ const KIND = {
 // Every entry form, one button each, with its own coloured icon.
 const NEW_ENTRY = [
   ["received", "Received", ArrowDownCircle, "#059669"],
-  ["paid", "Paid", ArrowUpCircle, "#DC2626"],
+  ["paid", "Payment", ArrowUpCircle, "#DC2626"],
   ["sales", "Sales", ShoppingBag, "#059669"],
   ["purchases", "Purchase", ShoppingCart, "#DC2626"],
   ["expenses", "Expenses", Receipt, "#DC2626"],
