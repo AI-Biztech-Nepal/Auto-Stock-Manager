@@ -1,4 +1,7 @@
 import { useMemo, useState } from "react";
+import { createPortal } from "react-dom";
+import { useOutletContext } from "react-router-dom";
+import useMediaQuery from "../../hooks/useMediaQuery";
 import { Search, Plus, ChevronLeft, ArrowUpCircle, Pencil } from "lucide-react";
 import { toast } from "sonner";
 import { useBooks } from "./BooksContext";
@@ -96,11 +99,13 @@ function PartyForm({ party, onClose, onOpenExisting }) {
 }
 
 // One person's full ledger page, laid out like Jageer Nepal's customer page: a back arrow and the ledger type as the title with Payment,
-// Print and Excel at the right; a card with their name, their Balance, Edit and Delete; then one row per entry (the vehicle or what it
+// Print and Excel at the right (all in the app's top bar); a card with their name, their Balance, Edit and Delete; then one row per entry (the vehicle or what it
 // was for, its date and reference number, the transaction amount, what was paid and received, and what it adds to Payable /
 // Receivable) with a total row. `Balance` in a row is the original amount of a sale or purchase; the person's balance now is in the card.
 function PartyDetail({ party, onBack, openReport, payParty }) {
   const { books, del } = useBooks();
+  const { titleSlot, topbarSlot } = useOutletContext() || {};
+  const wide = useMediaQuery("(min-width: 1024px)");
   const [editing, setEditing] = useState(false);
   const [openRow, setOpenRow] = useState(null);
   const st = useMemo(() => partyStatement(books, party.id), [books, party.id]);
@@ -125,19 +130,28 @@ function PartyDetail({ party, onBack, openReport, payParty }) {
     { header: "Receivable", value: (l) => l.debit || "" },
   ];
 
+  // The back arrow and the title are in the app's top bar, and on wide screens the buttons are up there too (as on the Sales page);
+  // on narrower screens the buttons sit in a row here.
+  const heading = (
+    <>
+      <button type="button" onClick={onBack} aria-label="Back to all parties" data-testid="party-back"
+        className="fin-no-print h-10 w-10 shrink-0 rounded-xl border border-gray-200 bg-white hover:bg-gray-50 flex items-center justify-center text-gray-800"><ChevronLeft size={20} /></button>
+      <h1 className="min-w-0 truncate text-2xl font-bold text-slate-900" data-testid="party-title">{title}</h1>
+    </>
+  );
+  const buttons = (
+    <>
+      {payParty && <button type="button" onClick={() => payParty(party.id)} className={btnPrimary} data-testid="party-pay"><ArrowUpCircle size={16} /> Payment</button>}
+      <ExportBar onXlsx={() => exportXlsx(`ledger-${party.name}`, cols, st.lines)} />
+    </>
+  );
+
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-3 min-w-0">
-          <button type="button" onClick={onBack} aria-label="Back to all parties" data-testid="party-back"
-            className="fin-no-print h-10 w-10 shrink-0 rounded-xl border border-gray-200 bg-white hover:bg-gray-50 flex items-center justify-center text-gray-800"><ChevronLeft size={20} /></button>
-          <h1 className="text-xl font-bold text-gray-900 truncate" data-testid="party-title">{title}</h1>
-        </div>
-        <div className="fin-no-print flex flex-wrap items-center gap-2">
-          {payParty && <button type="button" onClick={() => payParty(party.id)} className={btnPrimary} data-testid="party-pay"><ArrowUpCircle size={16} /> Payment</button>}
-          <ExportBar onXlsx={() => exportXlsx(`ledger-${party.name}`, cols, st.lines)} />
-        </div>
-      </div>
+      {titleSlot ? createPortal(heading, titleSlot) : <div className="flex items-center gap-3 min-w-0">{heading}</div>}
+      {wide && topbarSlot
+        ? createPortal(<div className="fin-no-print flex items-center gap-2">{buttons}</div>, topbarSlot)
+        : <div className="fin-no-print flex flex-wrap items-center justify-end gap-2">{buttons}</div>}
 
       <Card className="px-5 py-4 flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0">

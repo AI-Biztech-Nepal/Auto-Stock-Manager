@@ -46,6 +46,13 @@ const navItems = [
   { path: "/settings",     label: "Settings",     icon: Settings },
 ];
 
+// The page's name in the top bar, for every page that has no heading of its own up there (Inventory, Marketing, Sanakhat and
+// Finance are drawn below). A page keeps its description under it; its buttons stay where they were.
+const PAGE_TITLES = {
+  "/": "Dashboard", "/sales": "Sales", "/jobs": "Job Cards", "/warranty": "Warranty", "/ledger": "Ledger", "/import-stock": "Import Stock",
+  "/ai": "AI Assistant", "/platform": "Companies", "/reports": "Reports & Analytics", "/settings": "Settings",
+};
+
 export default function Layout() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
@@ -57,6 +64,7 @@ export default function Layout() {
   const [financeOpen, setFinanceOpen] = useState(null);     // ...the Finance dropdown...
   const [reportOpen, setReportOpen] = useState(null);       // ...and the family of reports under its Report item
   const [topbarSlot, setTopbarSlot] = useState(null);     // the top bar's spot for a page's own controls
+  const [titleSlot, setTitleSlot] = useState(null);       // the spot for a heading the page draws itself (Finance: its title changes with the tab)
 
   const handleLogout = () => { logout(); navigate("/login"); };
   // Admin's people live in Finance's Ledger now, so the main Ledger item goes for admin; stock and parts supervisors
@@ -383,8 +391,10 @@ export default function Layout() {
                 <TitleIcon size={19} className="shrink-0 text-slate-400" /> {parts ? "Spare Parts" : "Inventory"}
               </h1>
             );
-          })() : pathname === "/sales" ? (
-            <h1 className="flex-1 min-w-0 text-2xl font-bold text-slate-900 truncate" data-testid="header-title">Sales</h1>
+          })() : pathname.startsWith("/finance") ? (
+            <div ref={setTitleSlot} className="flex-1 min-w-0 flex items-center gap-3" data-testid="title-slot" />
+          ) : PAGE_TITLES[pathname.replace(/\/+$/, "") || "/"] ? (
+            <h1 className="flex-1 min-w-0 text-2xl font-bold text-slate-900 truncate" data-testid="header-title">{PAGE_TITLES[pathname.replace(/\/+$/, "") || "/"]}</h1>
           ) : pathname.startsWith("/marketing") ? (() => {
             // Named after the tab that is open (Leads, CRM, Share...), like any other page's title.
             const tabs = marketingTabsFor(user?.role);
@@ -502,7 +512,7 @@ export default function Layout() {
           {/* Boundary here (not only at the app root) so a lazy page loading keeps the
               sidebar/header on screen instead of swapping the whole layout for a spinner. */}
           <Suspense fallback={<div className="flex items-center justify-center h-64"><div className="animate-spin w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full" /></div>}>
-            <Outlet context={{ newLeads, topbarSlot }} />
+            <Outlet context={{ newLeads, topbarSlot, titleSlot }} />
           </Suspense>
           <div className="pb-safe" aria-hidden="true" />
         </main>

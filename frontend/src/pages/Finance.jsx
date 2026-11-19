@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { createPortal } from "react-dom";
+import { useSearchParams, useOutletContext } from "react-router-dom";
 import { BooksProvider, useBooks } from "./finance/BooksContext";
 import DayBook from "./finance/DayBook";
 import Payment from "./finance/Payment";
@@ -68,6 +69,7 @@ function SetupNotice({ message }) {
 
 function FinanceInner() {
   const { loading, setupMessage, loadError, books } = useBooks();
+  const { titleSlot } = useOutletContext() || {}; // the app's top bar, where the page's name goes
   const [params, setParams] = useSearchParams();
   const [bookDate, setBookDate] = useState(todayStr());
   const tab = financeTab(params.get("tab"));
@@ -82,13 +84,19 @@ function FinanceInner() {
   const openReport = (kind, id) => setParams({ tab: `${kind}-report`, party: id });
   // The Payment form with this person already picked (the Payment button on their ledger page).
   const payParty = (id) => setParams({ tab: "paid", party: id });
-  // A person's ledger page has its own top bar (back arrow, ledger type, buttons), so the page's name above it is left out.
   const onPartyPage = tab === "ledger" && !!partyId && !!books?.parties?.some((p) => p.id === partyId);
   const showEveryone = () => setParams({ tab: tab });
 
-  if (loading) return <div className="flex items-center justify-center h-48"><div className="animate-spin w-7 h-7 border-4 border-blue-600 border-t-transparent rounded-full" /></div>;
-  if (setupMessage) return <SetupNotice message={setupMessage} />;
-  if (loadError) return <Notice tone="red">{loadError}</Notice>;
+  // The page's name sits in the app's top bar, like every other page's. A person's ledger page puts its own there instead
+  // (back arrow and ledger type: see PartyDetail in finance/Ledger.jsx).
+  const heading = titleSlot && !onPartyPage
+    ? createPortal(<h1 className="min-w-0 truncate text-2xl font-bold text-slate-900" data-testid="header-title">{titleOf(tab)}</h1>, titleSlot)
+    : null;
+  const wrap = (node) => <>{heading}{node}</>;
+
+  if (loading) return wrap(<div className="flex items-center justify-center h-48"><div className="animate-spin w-7 h-7 border-4 border-blue-600 border-t-transparent rounded-full" /></div>);
+  if (setupMessage) return wrap(<SetupNotice message={setupMessage} />);
+  if (loadError) return wrap(<Notice tone="red">{loadError}</Notice>);
 
   const screens = {
     "balance-sheet": <BalanceSheet goTab={goTab} openParty={openParty} />,
@@ -119,7 +127,7 @@ function FinanceInner() {
 
   return (
     <div className="min-w-0 w-full space-y-3.5">
-      {!onPartyPage && <h1 className="text-xl font-bold text-gray-900">{titleOf(tab)}</h1>}
+      {heading}
       {screens[tab]}
     </div>
   );

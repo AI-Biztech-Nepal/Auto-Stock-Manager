@@ -9,7 +9,7 @@
  * vehicle — labour free, parts charged — and show up here as its service history.
  */
 import { useEffect, useMemo, useState } from "react";
-import { ShieldCheck, ShieldOff, Search, Phone, ChevronDown, ChevronRight, X, Clock, RotateCcw, CalendarClock } from "lucide-react";
+import { ShieldOff, Search, Phone, ChevronDown, ChevronRight, X, Clock, RotateCcw, CalendarClock } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
 import { peek, remember, cacheTicket } from "../utils/listCache";
@@ -139,9 +139,6 @@ export default function Warranty() {
     <div className="space-y-5 animate-fade-in">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
-            <ShieldCheck size={22} className="text-slate-400" /> Warranty
-          </h1>
           <p className="text-sm text-slate-500">
             {formatWarrantyLength(defaultDays)} from the sale date by default · labour free, parts charged · void if serviced outside Hamro G&amp;G
           </p>

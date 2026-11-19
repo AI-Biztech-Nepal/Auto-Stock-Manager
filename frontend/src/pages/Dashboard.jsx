@@ -621,8 +621,7 @@ export default function Dashboard() {
       {/* Header */}
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">Dashboard</h1>
-          <p className="text-sm text-slate-500 mt-0.5">Overview of {user?.company_name || "your"} operations</p>
+          <p className="text-sm text-slate-500">Overview of {user?.company_name || "your"} operations</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           {/* Status pills — one tidy row (was date+clock stacked over online-count, which

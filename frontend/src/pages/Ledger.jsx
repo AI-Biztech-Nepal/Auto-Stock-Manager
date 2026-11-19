@@ -1,6 +1,6 @@
 import { Suspense, lazy } from "react";
 import { useSearchParams } from "react-router-dom";
-import { BookOpen, Users, Store, UsersRound } from "lucide-react";
+import { Users, Store, UsersRound } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { ledgerTabsFor } from "../utils/permissions";
 
@@ -31,9 +31,6 @@ export default function Ledger() {
   return (
     <div className="space-y-5 animate-fade-in">
       <div>
-        <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
-          <BookOpen size={22} className="text-slate-400" /> Ledger
-        </h1>
         <p className="text-sm text-slate-500">Everyone you deal with: customers, vendors and staff</p>
       </div>
 

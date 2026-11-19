@@ -47,7 +47,6 @@ export default function Reports() {
   return (
     <div className="space-y-5 animate-fade-in">
       <div>
-        <h1 className="text-2xl font-bold text-slate-900">Reports & Analytics</h1>
         <p className="text-sm text-slate-500">Business performance overview</p>
       </div>
 

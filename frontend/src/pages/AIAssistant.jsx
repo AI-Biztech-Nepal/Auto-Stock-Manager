@@ -345,7 +345,6 @@ export default function AIAssistant() {
           <Sparkles size={20} className="text-white" />
         </div>
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">AI Assistant</h1>
           <p className="text-sm text-slate-500">Pricing Engine · Festival Intel · Sales Chatbot · Business Advisor</p>
         </div>
       </div>

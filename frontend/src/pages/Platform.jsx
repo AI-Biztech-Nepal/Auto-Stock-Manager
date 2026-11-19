@@ -61,7 +61,6 @@ export default function Platform() {
   return (
     <div className="space-y-6 animate-fade-in">
       <div>
-        <h1 className="text-2xl font-bold text-slate-900">Companies</h1>
         <p className="text-sm text-slate-500">Every business that's signed up, and their accounts</p>
       </div>
 
