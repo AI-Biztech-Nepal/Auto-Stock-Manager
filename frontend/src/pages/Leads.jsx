@@ -216,9 +216,19 @@ export default function Leads() {
                       </p>
                     )}
                   </div>
-                  {state(l) !== "rejected" && (isNew
-                    ? <span data-testid="lead-new" className="inline-flex items-center gap-1 rounded-full bg-blue-600 px-2.5 py-1 text-xs font-bold text-white"><Sparkles size={12} /> New</span>
-                    : <span data-testid="lead-read" className="inline-flex items-center gap-1 rounded-full bg-emerald-600 px-2.5 py-1 text-xs font-bold text-white"><CheckCheck size={13} /> Read</span>)}
+                  {state(l) !== "rejected" && (
+                    <div className="flex flex-col items-end gap-1 text-right">
+                      {isNew
+                        ? <span data-testid="lead-new" className="inline-flex items-center gap-1 rounded-full bg-blue-600 px-2.5 py-1 text-xs font-bold text-white"><Sparkles size={12} /> New</span>
+                        : <span data-testid="lead-read" className="inline-flex items-center gap-1 rounded-full bg-emerald-600 px-2.5 py-1 text-xs font-bold text-white"><CheckCheck size={13} /> Read</span>}
+                      {/* The first person to open the lead (older leads were read before this was recorded: no name, just the time). */}
+                      {l.seen_at && (
+                        <span data-testid="lead-read-by" className="text-[11px] leading-tight text-slate-500">
+                          Read{l.seen_by ? <> by <b className="font-semibold text-slate-700">{l.seen_by}</b></> : ""}<br />{clock(l.seen_at)} · {dateOnly(l.seen_at)}
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 {(l.requested_service || l.vehicle_type || l.preferred_date) && (
