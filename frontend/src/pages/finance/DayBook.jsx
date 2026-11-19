@@ -89,7 +89,7 @@ function DateStepper({ range, setRange, today }) {
   );
 }
 
-export default function DayBook({ date, setDate, goTab, openParty }) {
+export default function DayBook({ date, setDate, goTab, openParty, editBill }) {
   const { books } = useBooks();
   const [viewing, setViewing] = useState(null); // the entry tapped: opened to look at (EntryViewer), as Jageer Nepal does
   const [editing, setEditing] = useState(null); // the entry being changed (EntryEditor), from the viewer's Edit button
@@ -204,7 +204,14 @@ export default function DayBook({ date, setDate, goTab, openParty }) {
       </p>
       {viewing && (
         <EntryViewer row={viewing} kind={KIND[viewing.kind]} openParty={openParty} onClose={() => setViewing(null)}
-          onEdit={() => { setEditing(viewing); setViewing(null); }} />
+          onEdit={() => {
+            const r = viewing;
+            setViewing(null);
+            // A sale or purchase bill against a person is changed in its own form (the Sales / Purchase page, opened filled in
+            // with it); every other entry in the small editor.
+            if (editBill && r.table === "tx" && (r.data.type === "sale" || r.data.type === "purchase") && r.data.customer_id) editBill(r.data.type, r.data.id);
+            else setEditing(r);
+          }} />
       )}
       {editing && <EntryEditor row={editing} onClose={() => setEditing(null)} />}
     </div>

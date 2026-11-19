@@ -4,31 +4,55 @@ import { toast } from "sonner";
 import { useBooks } from "./BooksContext";
 import Feed from "./Feed";
 import { Card, Field, Modal, DateField, AccountSelect, PartyPicker, TwoTapDelete, useConfirmSave, useAskNewParty, inputCls, btnPrimary, btnGhost, btnSave } from "./ui";
-import { todayStr, billTotals, serviceLines, nextBillNo, balances, accountName, npr, COLORS } from "./money";
+import { todayStr, billDate, partyName, billTotals, serviceLines, nextBillNo, balances, accountName, npr, COLORS } from "./money";
 
 let seq = 0;
 const newLine = () => ({ key: ++seq, description: "", qty: "1", rate: "" });
 const newService = () => ({ key: ++seq, name: "", amount: "" });
 const newExpenseRow = () => ({ key: ++seq, payee: "", category_id: "", amount: "", note: "" });
 
+// The form's fields for a bill that is already saved, to change it (Edit on a Day Book entry). The VAT percentage is worked
+// back from the VAT amount (billTotals takes it from the subtotal less the discount), so the bill totals the same again. A
+// bill saved with no item lines (an older or imported one) gets one line holding its amount, so the total survives.
+function fieldsOfBill(d, books, sale) {
+  const discount = Number(d.discount_amount) || 0;
+  const vat = Number(d.vat_amount) || 0;
+  const services = (d.service_charges || []).map((s) => ({ key: ++seq, name: s.name || "", amount: String(s.amount ?? "") }));
+  let lines = (d.items || []).map((i) => ({ key: ++seq, description: i.description || "", qty: String(i.qty ?? 1), rate: String(i.rate ?? "") }));
+  if (!lines.length) {
+    const subtotal = Number(d.amount) + discount - vat; // items + services, before the discount and VAT
+    const itemsTotal = subtotal - services.reduce((s, x) => s + (Number(x.amount) || 0), 0);
+    lines = itemsTotal > 0 ? [{ key: ++seq, description: d.note || (sale ? "Sale" : "Purchase"), qty: "1", rate: String(itemsTotal) }] : [newLine()];
+  }
+  const base = Number(d.amount) - vat; // subtotal less discount: what VAT was charged on
+  return {
+    date: billDate(d), party: { id: d.customer_id || null, name: d.party_name || partyName(books, d.customer_id) },
+    billNo: d.bill_no || "", pan: d.vat_pan_no || "", address: d.party_address || "", lines, services,
+    showDiscount: discount > 0, discount: discount > 0 ? String(discount) : "",
+    showVat: vat > 0, vatPercent: vat > 0 && base > 0 ? String(Math.round((vat / base) * 10000) / 100) : "0", note: d.note || "",
+  };
+}
+
 // ── Sale / Purchase: an itemised bill against a SAVED party ───────────────
-function ItemisedBill({ type }) {
-  const { books, post } = useBooks();
+// `edit`: a saved bill to change instead of making a new one (the form opens filled in, saves over it and calls onDone).
+function ItemisedBill({ type, edit = null, onDone }) {
+  const { books, post, put } = useBooks();
   const sale = type === "sale";
   const color = sale ? COLORS.sale : COLORS.purchase;
-  const [date, setDate] = useState(todayStr());
-  const [party, setParty] = useState({ id: null, name: "" });
-  const [billNo, setBillNo] = useState("");
-  const [touched, setTouched] = useState(false);
-  const [pan, setPan] = useState("");
-  const [address, setAddress] = useState("");
-  const [lines, setLines] = useState([newLine()]);
-  const [services, setServices] = useState([]);
-  const [showDiscount, setShowDiscount] = useState(false);
-  const [discount, setDiscount] = useState("");
-  const [showVat, setShowVat] = useState(false);
-  const [vatPercent, setVatPercent] = useState("0");
-  const [note, setNote] = useState("");
+  const [init] = useState(() => (edit ? fieldsOfBill(edit, books, sale) : null));
+  const [date, setDate] = useState(init?.date ?? todayStr());
+  const [party, setParty] = useState(init?.party ?? { id: null, name: "" });
+  const [billNo, setBillNo] = useState(init?.billNo ?? "");
+  const [touched, setTouched] = useState(!!edit); // an edited bill keeps its number: the next-number suggestion never replaces it
+  const [pan, setPan] = useState(init?.pan ?? "");
+  const [address, setAddress] = useState(init?.address ?? "");
+  const [lines, setLines] = useState(init?.lines ?? [newLine()]);
+  const [services, setServices] = useState(init?.services ?? []);
+  const [showDiscount, setShowDiscount] = useState(init?.showDiscount ?? false);
+  const [discount, setDiscount] = useState(init?.discount ?? "");
+  const [showVat, setShowVat] = useState(init?.showVat ?? false);
+  const [vatPercent, setVatPercent] = useState(init?.vatPercent ?? "0");
+  const [note, setNote] = useState(init?.note ?? "");
   const [busy, setBusy] = useState(false);
   const { confirm, dialog: confirmDialog } = useConfirmSave();
   const { askNewParty, dialog: newPartyDialog } = useAskNewParty(books.types_ready ? books.party_types : []);
@@ -73,7 +97,7 @@ function ItemisedBill({ type }) {
     if (!good.length) return toast.error("Add at least one item with a name, quantity and rate");
     if (!(t.total > 0)) return toast.error("The bill total must be above 0");
     const confirmed = await confirm({
-      title: `Save this ${sale ? "sale" : "purchase"}?`,
+      title: edit ? `Save the changes to this ${sale ? "sale" : "purchase"}?` : `Save this ${sale ? "sale" : "purchase"}?`,
       rows: [
         { label: sale ? "Customer" : "Vendor", value: party.name },
         ...(billNo.trim() ? [{ label: "Bill no.", value: billNo.trim() }] : []),
@@ -88,19 +112,24 @@ function ItemisedBill({ type }) {
     setBusy(true);
     // Remember typed names for next time; a failure here must not lose the bill.
     let notRemembered = false;
-    for (const l of good) {
+    for (const l of edit ? [] : good) { // an edited bill's lines are not added to the item suggestions again
       const exists = books.items.some((i) => i.name === l.description.trim() && Number(i.rate) === Number(l.rate));
       if (!exists && !(await post("/fin/items", { name: l.description.trim(), rate: Number(l.rate) }))) notRemembered = true;
     }
-    const ok = await post("/fin/transactions", {
+    const body = {
       type, amount: t.total, note, party_name: party.name, customer_id: party.id, bill_no: billNo, bill_date: date,
       party_address: address, vat_pan_no: pan, discount_amount: t.discount, vat_amount: t.vat,
       items: good.map((l) => ({ description: l.description.trim(), qty: Number(l.qty), rate: Number(l.rate), amount: Number(l.qty) * Number(l.rate) })),
       payment_mode: "cash", bank_account_id: null,
       service_charges: serviceLines(services).map((x) => ({ name: x.name.trim(), amount: Number(x.amount) })),
-    });
+    };
+    // Changing a bill keeps how it was settled (a vehicle sale's bill is a credit one); a new bill is entered as cash.
+    const ok = edit
+      ? await put(`/fin/transactions/${edit.id}`, { ...body, payment_mode: edit.payment_mode || "cash", bank_account_id: edit.bank_account_id || null }, "Saved")
+      : await post("/fin/transactions", body);
     setBusy(false);
     if (!ok) return;
+    if (edit) { onDone?.(); return; }
     toast.success(`${sale ? "Sale" : "Purchase"} saved${notRemembered ? ". Some item names were not remembered for next time." : ""}`);
     setParty({ id: null, name: "" }); setPan(""); setAddress(""); setLines([newLine()]); setServices([]); setDiscount(""); setShowDiscount(false);
     setShowVat(false); setVatPercent("0"); setNote(""); setTouched(false);
@@ -109,8 +138,8 @@ function ItemisedBill({ type }) {
   return (
     <Card className="p-5 space-y-4">
       <div>
-        <h3 className="text-base font-bold" style={{ color }}>{sale ? "New sale bill" : "New purchase bill"}</h3>
-        <p className="text-xs text-slate-500">{sale ? "A sale is a debt: it raises “to receive”, not your balance. The cash comes later as a Received entry." : "A purchase is a debt: it raises “to give”, not your balance. The cash goes out later as a Payment Out."}</p>
+        <h3 className="text-base font-bold" style={{ color }} data-testid="bill-form-title">{edit ? (sale ? "Edit sale bill" : "Edit purchase bill") : sale ? "New sale bill" : "New purchase bill"}</h3>
+        <p className="text-xs text-slate-500">{edit ? `Changing this bill also changes the debt it books on the ${sale ? "customer" : "vendor"}'s ledger.` : sale ? "A sale is a debt: it raises “to receive”, not your balance. The cash comes later as a Received entry." : "A purchase is a debt: it raises “to give”, not your balance. The cash goes out later as a Payment Out."}</p>
       </div>
       <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
         <div className="lg:col-span-2">
@@ -174,7 +203,8 @@ function ItemisedBill({ type }) {
           {t.discount > 0 && <div className="flex justify-between"><span className="text-slate-500">Discount</span><span>− {npr(t.discount)}</span></div>}
           {showVat && <div className="flex justify-between"><span className="text-slate-500">VAT ({vatPercent || 0}%)</span><span>+ {npr(t.vat)}</span></div>}
           <div className="flex justify-between border-t border-slate-200 pt-2 text-base font-bold" style={{ color }}><span>Total</span><span>{npr(t.total)}</span></div>
-          <button onClick={save} disabled={busy} className={`${btnSave} w-full mt-3`}>{busy ? "Saving…" : `Save ${type}`}</button>
+          <button onClick={save} disabled={busy} className={`${btnSave} w-full mt-3`} data-testid="bill-form-save">{busy ? "Saving…" : edit ? "Save changes" : `Save ${type}`}</button>
+          {edit && <button type="button" onClick={onDone} className={`${btnGhost} w-full mt-2`} data-testid="bill-form-cancel">Cancel</button>}
         </div>
       </div>
       {confirmDialog}
@@ -308,11 +338,15 @@ function ExpenseForm() {
   );
 }
 
-export default function Bills({ type }) {
+// editId: a saved sale / purchase bill to change (the Day Book's Edit): the form opens filled in with it, and Save changes /
+// Cancel go back through onDone. Without one (or when that bill is gone) it is the usual New bill form.
+export default function Bills({ type, editId, onDone }) {
+  const { books } = useBooks();
+  const edit = editId && type !== "expense" ? books.transactions.find((t) => t.id === editId && t.type === type) || null : null;
   return (
     <div className="space-y-5">
-      {type === "expense" ? <ExpenseForm /> : <ItemisedBill type={type} />}
-      <Feed defaultFilter={type} title={type === "sale" ? "Sales and related entries" : type === "purchase" ? "Purchases and related entries" : "Expenses and related entries"} />
+      {type === "expense" ? <ExpenseForm /> : <ItemisedBill key={edit?.id || "new"} type={type} edit={edit} onDone={onDone} />}
+      {!edit && <Feed defaultFilter={type} title={type === "sale" ? "Sales and related entries" : type === "purchase" ? "Purchases and related entries" : "Expenses and related entries"} />}
     </div>
   );
 }

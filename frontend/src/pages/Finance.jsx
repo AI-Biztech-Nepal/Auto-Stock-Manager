@@ -72,8 +72,10 @@ function FinanceInner() {
   const [bookDate, setBookDate] = useState(todayStr());
   const tab = financeTab(params.get("tab"));
   const partyId = params.get("party");
+  const editId = params.get("edit"); // a saved sale / purchase bill opened in its form to be changed (?tab=sales&edit=<id>)
 
   const goTab = (t) => setParams({ tab: t }, { replace: false });
+  const editBill = (type, id) => setParams({ tab: type === "sale" ? "sales" : "purchases", edit: id });
   const openParty = (id) => setParams({ tab: "ledger", party: id });
   const setPartyId = (id) => setParams(id ? { tab: "ledger", party: id } : { tab: "ledger" });
   // A sales / purchase / expenses report of one person, from their ledger (?party= narrows the report).
@@ -86,14 +88,14 @@ function FinanceInner() {
 
   const screens = {
     "balance-sheet": <BalanceSheet goTab={goTab} openParty={openParty} />,
-    daybook: <DayBook date={bookDate} setDate={setBookDate} goTab={goTab} openParty={openParty} />,
+    daybook: <DayBook date={bookDate} setDate={setBookDate} goTab={goTab} openParty={openParty} editBill={editBill} />,
     statement: <Statement goTab={goTab} openParty={openParty} />,
     voucher: <Journal onDone={() => goTab("daybook")} />,
     contra: <Contra />,
     received: <Payment direction="received" />,
     paid: <Payment direction="paid" />,
-    sales: <Bills type="sale" />,
-    purchases: <Bills type="purchase" />,
+    sales: <Bills type="sale" editId={editId} onDone={() => goTab("daybook")} />,
+    purchases: <Bills type="purchase" editId={editId} onDone={() => goTab("daybook")} />,
     expenses: <Bills type="expense" />,
     ledger: <Ledger partyId={partyId} setPartyId={setPartyId} openReport={openReport} goTab={goTab} />,
     banks: <BankAccounts />,
