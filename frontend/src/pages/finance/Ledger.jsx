@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Search, Plus, ArrowLeft, Phone, MapPin } from "lucide-react";
+import { Search, Plus, ChevronLeft, ArrowUpCircle, Pencil } from "lucide-react";
 import { toast } from "sonner";
 import { useBooks } from "./BooksContext";
 import EntryEditor from "./EntryEditor";
@@ -95,105 +95,120 @@ function PartyForm({ party, onClose, onOpenExisting }) {
   );
 }
 
-function PartyDetail({ party, onBack, openReport }) {
+// One person's full ledger page, laid out like Jageer Nepal's customer page: a back arrow and the ledger type as the title with Payment,
+// Print and Excel at the right; a card with their name, their Balance, Edit and Delete; then one row per entry (the vehicle or what it
+// was for, its date and reference number, the transaction amount, what was paid and received, and what it adds to Payable /
+// Receivable) with a total row. `Balance` in a row is the original amount of a sale or purchase; the person's balance now is in the card.
+function PartyDetail({ party, onBack, openReport, payParty }) {
   const { books, del } = useBooks();
   const [editing, setEditing] = useState(false);
   const [openRow, setOpenRow] = useState(null);
   const st = useMemo(() => partyStatement(books, party.id), [books, party.id]);
-  const typeName = books.party_types.find((t) => t.id === party.party_type_id)?.name;
+  const title = useMemo(() => ledgerRows(books).find((r) => r.party.id === party.id)?.shownType || "Ledger", [books, party.id]);
 
   const sideWord = (b) => (b > 0 ? " Dr" : b < 0 ? " Cr" : "");
-  const balanceText = (b) => `${num(Math.abs(b))}${sideWord(b)}`;
-  const balanceColor = (b) => (b > 0 ? TONE.receivable.text : b < 0 ? TONE.payable.text : "#64748B");
+  const balanceColor = (b) => (b > 0 ? TONE.receivable.text : b < 0 ? TONE.payable.text : "#111827");
+  const closing = st.closing ? `${num(Math.abs(st.closing))}${sideWord(st.closing)}` : "0";
+  // What the entry was for: the bill's items (the vehicle), else its kind and note ("Paid · TONER BROTHER*10").
+  const whatOf = (l) => l.what || [l.label, l.memo].filter(Boolean).join(" · ");
+  const lineWord = st.lines.length === 1 ? "Line" : "Lines";
 
   const cols = [
     { header: "SN", value: (l) => st.lines.indexOf(l) + 1 },
+    { header: "Vehicle", value: whatOf },
     { header: "Date", value: (l) => l.date },
-    { header: "Details", value: (l) => [l.label, l.sub].filter(Boolean).join(" · ") },
-    { header: "Transaction", value: (l) => (l.kind === "billed" ? l.e.amount : "") },
+    { header: "Ref no.", value: (l) => l.ref },
+    { header: "Balance", value: (l) => (l.kind === "billed" ? l.e.amount : "") },
     { header: "Total paid", value: (l) => (l.kind === "paid" ? l.e.amount : "") },
     { header: "Total received", value: (l) => (l.kind === "received" ? l.e.amount : "") },
-    { header: "Balance", value: (l) => balanceText(l.balance) },
+    { header: "Payable", value: (l) => l.credit || "" },
+    { header: "Receivable", value: (l) => l.debit || "" },
   ];
 
   return (
     <div className="space-y-4">
-      <button onClick={onBack} className="text-sm text-blue-600 hover:underline inline-flex items-center gap-1"><ArrowLeft size={14} /> All parties</button>
-      <Card className="p-5">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h2 className="text-xl font-bold text-slate-900">{party.name}</h2>
-            {typeName && <span className="inline-block mt-1 rounded-full bg-blue-50 px-2.5 py-0.5 text-xs font-semibold text-blue-700">{typeName}</span>}
-            <div className="text-sm text-slate-500 mt-1 space-y-0.5">
-              {party.phone && <div className="flex items-center gap-1.5"><Phone size={13} />{party.phone}</div>}
-              {party.address && <div className="flex items-center gap-1.5"><MapPin size={13} />{party.address}</div>}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-3 min-w-0">
+          <button type="button" onClick={onBack} aria-label="Back to all parties" data-testid="party-back"
+            className="fin-no-print h-10 w-10 shrink-0 rounded-xl border border-gray-200 bg-white hover:bg-gray-50 flex items-center justify-center text-gray-800"><ChevronLeft size={20} /></button>
+          <h1 className="text-xl font-bold text-gray-900 truncate" data-testid="party-title">{title}</h1>
+        </div>
+        <div className="fin-no-print flex flex-wrap items-center gap-2">
+          {payParty && <button type="button" onClick={() => payParty(party.id)} className={btnPrimary} data-testid="party-pay"><ArrowUpCircle size={16} /> Payment</button>}
+          <ExportBar onXlsx={() => exportXlsx(`ledger-${party.name}`, cols, st.lines)} />
+        </div>
+      </div>
+
+      <Card className="px-5 py-4 flex flex-wrap items-center justify-between gap-3">
+        <div className="min-w-0">
+          <h2 className="text-lg font-bold text-slate-900" data-testid="party-name">{party.name}</h2>
+          {(party.phone || party.address) && <div className="text-xs text-slate-500 mt-0.5">{[party.phone, party.address].filter(Boolean).join(" · ")}</div>}
+          {openReport && (
+            <div className="fin-no-print mt-1 flex flex-wrap gap-x-3 text-xs">
+              {[["sales", "Sales"], ["purchase", "Purchases"], ["expense", "Expenses"]].map(([k, l]) => (
+                <button key={k} type="button" onClick={() => openReport(k, party.id)} className="text-blue-600 hover:underline" data-testid={`party-report-${k}`}>{l} report</button>
+              ))}
             </div>
+          )}
+        </div>
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="text-right pr-1">
+            <div className="text-[11px] font-semibold text-gray-400">Balance</div>
+            <div className="text-lg font-extrabold leading-tight" style={{ color: balanceColor(st.closing) }} data-testid="party-balance">NPR {closing}</div>
           </div>
-          <div className="fin-no-print flex flex-wrap gap-2">
-            <ExportBar onXlsx={() => exportXlsx(`ledger-${party.name}`, cols, st.lines)} />
-            {openReport && [["sales", "Sales"], ["purchase", "Purchases"], ["expense", "Expenses"]].map(([k, l]) => (
-              <button key={k} onClick={() => openReport(k, party.id)} className={btnGhost} data-testid={`party-report-${k}`}>{l} report</button>
-            ))}
-            <button onClick={() => setEditing(true)} className={btnGhost}>Edit details</button>
-            <TwoTapDelete label="Delete party" onConfirm={async () => { if (await del(`/fin/parties/${party.id}`, "Party deleted")) onBack(); }} />
+          <div className="fin-no-print flex items-center gap-2">
+            <button type="button" onClick={() => setEditing(true)} className={btnGhost} data-testid="party-edit"><Pencil size={14} className="text-blue-600" /> Edit</button>
+            <TwoTapDelete label="Delete" onConfirm={async () => { if (await del(`/fin/parties/${party.id}`, "Party deleted")) onBack(); }} />
           </div>
         </div>
-        <p className="text-xs text-slate-400 mt-3">Deleting a party also deletes their whole ledger. Bills keep the name that was typed on them.</p>
       </Card>
-
-      {/* The Ledger table's own figures for this one party */}
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
-        <SummaryCard label="Transaction (original price)" value={npr(st.billed)} tone={{ text: "#111827", base: "#374151" }} />
-        <SummaryCard label="Total paid" value={npr(st.paid)} tone={TONE.payable} />
-        <SummaryCard label="Total received" value={npr(st.received)} tone={TONE.receivable} />
-        <SummaryCard label={st.closing > 0 ? "Balance (to receive)" : st.closing < 0 ? "Balance (to pay)" : "Balance"} value={`NPR ${balanceText(st.closing)}`} tone={st.closing < 0 ? TONE.payable : st.closing > 0 ? TONE.receivable : TONE.settled} />
-        <SummaryCard label="Entries" value={String(st.lines.length)} tone={TONE.settled} />
-      </div>
 
       <Card className="overflow-x-auto">
         {st.lines.length === 0 ? <Empty>No entries yet.</Empty> : (
-          <table className="w-full text-[13px]">
+          <table className="w-full text-[13px]" data-testid="party-table">
             <thead>
-              <tr className="bg-slate-50 text-left text-xs font-semibold text-slate-500">
-                <th className="px-3 py-2.5 w-12">SN</th>
-                <th className="px-3 py-2.5 hidden sm:table-cell">Date</th>
-                <th className="px-3 py-2.5">Details</th>
-                <th className="px-3 py-2.5 text-right">Transaction</th>
-                <th className="px-3 py-2.5 text-right">Total paid</th>
-                <th className="px-3 py-2.5 text-right">Total received</th>
-                <th className="px-3 py-2.5 text-right">Balance</th>
+              <tr className="text-left">
+                <th className="w-12">SN</th>
+                <th>Vehicle</th>
+                <th>Last Transaction</th>
+                <th className="text-right">Balance</th>
+                <th className="text-right">Total Paid</th>
+                <th className="text-right">Total Received</th>
+                <th className="text-right">Payable</th>
+                <th className="text-right">Receivable</th>
               </tr>
             </thead>
             <tbody>
               {st.lines.map((l, i) => (
-                <tr key={`${l.table}${l.e.id}`} onClick={() => setOpenRow({ table: l.table, data: l.e })} className="border-t border-slate-100 hover:bg-slate-50 cursor-pointer">
-                  <td className="px-3 py-2.5 text-slate-500">{i + 1}</td>
-                  <td className="px-3 py-2.5 hidden sm:table-cell text-slate-600 whitespace-nowrap">{formatBSDate(l.date)}</td>
-                  <td className="px-3 py-2.5 min-w-0">
-                    <div className="font-medium text-slate-900 truncate">{l.label}{l.sub && <span className="font-normal text-slate-500"> · {l.sub}</span>}</div>
-                    <div className="sm:hidden text-[11px] text-slate-400">{formatBSDate(l.date)}</div>
+                <tr key={`${l.table}${l.e.id}`} onClick={() => setOpenRow({ table: l.table, data: l.e })} className="cursor-pointer" data-testid="party-line">
+                  <td className="text-slate-500">{i + 1}</td>
+                  <td className="font-semibold text-slate-900 min-w-[12rem]">{whatOf(l)}</td>
+                  <td className="whitespace-nowrap">
+                    <div className="text-slate-800">{formatBSDate(l.date)}</div>
+                    {l.ref && <div className="text-xs text-slate-400">Ref {l.ref}</div>}
                   </td>
-                  <td className="px-3 py-2.5 text-right">{fig(l.kind === "billed" ? l.e.amount : 0, "#0F172A")}</td>
-                  <td className="px-3 py-2.5 text-right">{fig(l.kind === "paid" ? l.e.amount : 0, TONE.payable.text)}</td>
-                  <td className="px-3 py-2.5 text-right">{fig(l.kind === "received" ? l.e.amount : 0, TONE.receivable.text)}</td>
-                  <td className="px-3 py-2.5 text-right font-bold whitespace-nowrap" style={{ color: balanceColor(l.balance) }}>{l.balance ? balanceText(l.balance) : "—"}</td>
+                  <td className="text-right" data-testid="party-line-balance">{fig(l.kind === "billed" ? l.e.amount : 0, "#0F172A")}</td>
+                  <td className="text-right" data-testid="party-line-paid">{fig(l.kind === "paid" ? l.e.amount : 0, TONE.payable.text)}</td>
+                  <td className="text-right" data-testid="party-line-received">{fig(l.kind === "received" ? l.e.amount : 0, TONE.receivable.text)}</td>
+                  <td className="text-right" data-testid="party-line-payable">{fig(l.credit, TONE.payable.text)}</td>
+                  <td className="text-right" data-testid="party-line-receivable">{fig(l.debit, TONE.receivable.text)}</td>
                 </tr>
               ))}
             </tbody>
             <tfoot>
-              <tr className="border-t-2 border-slate-200 bg-slate-50 font-bold">
-                <td className="px-3 py-2.5 hidden sm:table-cell" colSpan={3}>Total</td>
-                <td className="px-3 py-2.5 sm:hidden" colSpan={2}>Total</td>
-                <td className="px-3 py-2.5 text-right">{num(st.billed)}</td>
-                <td className="px-3 py-2.5 text-right" style={{ color: TONE.payable.text }}>{num(st.paid)}</td>
-                <td className="px-3 py-2.5 text-right" style={{ color: TONE.receivable.text }}>{num(st.received)}</td>
-                <td className="px-3 py-2.5 text-right" style={{ color: balanceColor(st.closing) }}>{balanceText(st.closing)}</td>
+              <tr data-testid="party-total">
+                <td colSpan={3} className="text-right">{st.lines.length} {lineWord} · Total</td>
+                <td className="text-right">{fig(st.billed, "#0F172A")}</td>
+                <td className="text-right">{fig(st.paid, TONE.payable.text)}</td>
+                <td className="text-right">{fig(st.received, TONE.receivable.text)}</td>
+                <td className="text-right">{fig(st.credit, TONE.payable.text)}</td>
+                <td className="text-right">{fig(st.debit, TONE.receivable.text)}</td>
               </tr>
             </tfoot>
           </table>
         )}
       </Card>
-      <p className="text-xs text-slate-400">Dr = they owe you, Cr = you owe them. A journal voucher moves the balance but no money.</p>
+      <p className="text-xs text-slate-400">Payable = you owe them, Receivable = they owe you. A journal voucher moves these but no money. Deleting a party also deletes their whole ledger; bills keep the name that was typed on them.</p>
 
       {editing && <PartyForm party={party} onClose={() => setEditing(false)} onOpenExisting={() => {}} />}
       {openRow && <EntryEditor row={openRow} onClose={() => setOpenRow(null)} />}
@@ -222,7 +237,7 @@ function SummaryCard({ label, value, tone, active, onClick }) {
 
 const fig = (n, color) => (n ? <span className="font-bold" style={{ color }}>{num(n)}</span> : <span className="text-slate-300">—</span>);
 
-export default function Ledger({ partyId, setPartyId, openReport, goTab }) {
+export default function Ledger({ partyId, setPartyId, openReport, payParty, goTab }) {
   const { books, post } = useBooks();
   const [q, setQ] = useState("");
   const [period, setPeriod] = useState("all");
@@ -262,7 +277,7 @@ export default function Ledger({ partyId, setPartyId, openReport, goTab }) {
       .sort((a, b) => ((b.last || "") > (a.last || "") ? 1 : (b.last || "") < (a.last || "") ? -1 : a.party.name.localeCompare(b.party.name)));
   }, [analysed, q, filter, typeFilter]);
 
-  if (party) return <PartyDetail party={party} onBack={() => setPartyId(null)} openReport={openReport} />;
+  if (party) return <PartyDetail party={party} onBack={() => setPartyId(null)} openReport={openReport} payParty={payParty} />;
 
   const toggle = (id) => setSelected((prev) => { const next = new Set(prev); if (next.has(id)) next.delete(id); else next.add(id); return next; });
   const allOn = filtered.length > 0 && filtered.every((r) => selected.has(r.party.id));

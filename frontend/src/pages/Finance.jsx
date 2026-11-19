@@ -67,7 +67,7 @@ function SetupNotice({ message }) {
 }
 
 function FinanceInner() {
-  const { loading, setupMessage, loadError } = useBooks();
+  const { loading, setupMessage, loadError, books } = useBooks();
   const [params, setParams] = useSearchParams();
   const [bookDate, setBookDate] = useState(todayStr());
   const tab = financeTab(params.get("tab"));
@@ -80,6 +80,10 @@ function FinanceInner() {
   const setPartyId = (id) => setParams(id ? { tab: "ledger", party: id } : { tab: "ledger" });
   // A sales / purchase / expenses report of one person, from their ledger (?party= narrows the report).
   const openReport = (kind, id) => setParams({ tab: `${kind}-report`, party: id });
+  // The Payment form with this person already picked (the Payment button on their ledger page).
+  const payParty = (id) => setParams({ tab: "paid", party: id });
+  // A person's ledger page has its own top bar (back arrow, ledger type, buttons), so the page's name above it is left out.
+  const onPartyPage = tab === "ledger" && !!partyId && !!books?.parties?.some((p) => p.id === partyId);
   const showEveryone = () => setParams({ tab: tab });
 
   if (loading) return <div className="flex items-center justify-center h-48"><div className="animate-spin w-7 h-7 border-4 border-blue-600 border-t-transparent rounded-full" /></div>;
@@ -93,11 +97,11 @@ function FinanceInner() {
     voucher: <Journal onDone={() => goTab("daybook")} />,
     contra: <Contra />,
     received: <Payment direction="received" />,
-    paid: <Payment direction="paid" />,
+    paid: <Payment direction="paid" partyId={partyId} />,
     sales: <Bills type="sale" editId={editId} onDone={() => goTab("daybook")} />,
     purchases: <Bills type="purchase" editId={editId} onDone={() => goTab("daybook")} />,
     expenses: <Bills type="expense" />,
-    ledger: <Ledger partyId={partyId} setPartyId={setPartyId} openReport={openReport} goTab={goTab} />,
+    ledger: <Ledger partyId={partyId} setPartyId={setPartyId} openReport={openReport} payParty={payParty} goTab={goTab} />,
     banks: <BankAccounts />,
     import: <ImportStatement />,
     report: <Report goTab={goTab} />,
@@ -115,7 +119,7 @@ function FinanceInner() {
 
   return (
     <div className="min-w-0 w-full space-y-3.5">
-      <h1 className="text-xl font-bold text-gray-900">{titleOf(tab)}</h1>
+      {!onPartyPage && <h1 className="text-xl font-bold text-gray-900">{titleOf(tab)}</h1>}
       {screens[tab]}
     </div>
   );

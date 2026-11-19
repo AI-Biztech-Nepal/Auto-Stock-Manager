@@ -176,8 +176,10 @@ export function partyStatement(books, partyId) {
     const note = j ? [j.code, j.narration].filter(Boolean).join(" · ") : e.note;
     // customer debit and vendor credit raise what they owe you; the other two lower it
     const up = side === "c" ? debitEntry : !debitEntry;
+    // `what`: the items of the bill this entry belongs to (the vehicle, for a vehicle sale); `ref`: its bill / receipt number; `memo`: its note.
+    const what = bill ? [...(bill.items || []).map((i) => i.description), ...(bill.service_charges || []).map((s) => s.name)].filter(Boolean).join(", ") : "";
     items.push({
-      e, side, table: side === "c" ? "cl" : "vl", date: entryDate(e), kind, label,
+      e, side, table: side === "c" ? "cl" : "vl", date: entryDate(e), kind, label, what, ref: no || "", memo: note || "",
       sub: [no ? `${refKind} ${no}` : null, note].filter(Boolean).join(" · "),
       debit: up ? e.amount : 0, credit: up ? 0 : e.amount,
     });

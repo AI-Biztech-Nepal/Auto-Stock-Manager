@@ -8,19 +8,23 @@ import { todayStr, nextReceiptNo, isJournal, balances, accountName, num, COLORS 
 import { noteWithItem, vehicleNames } from "./rentLogic";
 
 let rowSeq = 0;
-const newRow = () => ({ key: ++rowSeq, party: { id: null, name: "" }, item: "", amount: "", note: "" });
+const newRow = (party = { id: null, name: "" }) => ({ key: ++rowSeq, party, item: "", amount: "", note: "" });
 
 // One form, two directions -- and the direction decides the table, which is the bug this design
 // exists to prevent:  Received -> customer ledger credit;  Payment Out -> VENDOR ledger credit.
 // (Booking a payment out as a customer debit would inflate "to receive" for someone you only ever
 // bought from.) One date, one number and one payment method, several people and amounts at once.
-export default function Payment({ direction }) {
+export default function Payment({ direction, partyId }) {
   const received = direction === "received";
   const { books, post } = useBooks();
   const side = received ? "customer" : "vendor";
   const [date, setDate] = useState(todayStr());
   const [method, setMethod] = useState(null);
-  const [rows, setRows] = useState([newRow()]);
+  // partyId: a person already picked for the first row (from the Payment button on their ledger page).
+  const [rows, setRows] = useState(() => {
+    const p = partyId ? books.parties.find((x) => x.id === partyId) : null;
+    return [newRow(p ? { id: p.id, name: p.name } : undefined)];
+  });
   const [number, setNumber] = useState("");
   const [touched, setTouched] = useState(false);
   const [busy, setBusy] = useState(false);
