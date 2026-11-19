@@ -3,6 +3,7 @@ import { Search, Plus, ArrowLeft, Phone, MapPin } from "lucide-react";
 import { toast } from "sonner";
 import { useBooks } from "./BooksContext";
 import EntryEditor from "./EntryEditor";
+import PartyLedgerPopup from "./PartyLedgerPopup";
 import { Card, Field, Modal, Empty, TwoTapDelete, Notice, ExportBar, exportXlsx, inputCls, btnPrimary, btnGhost } from "./ui";
 import { ledgerRows, partyStatement, npr, num } from "./money";
 import { getCurrentBSMonthRange, getCurrentBSYearRange, formatBSDate } from "../../utils/nepali-date";
@@ -230,7 +231,9 @@ export default function Ledger({ partyId, setPartyId, openReport, goTab }) {
   const [selected, setSelected] = useState(() => new Set());
   const [bulkType, setBulkType] = useState(null);
   const [adding, setAdding] = useState(false);
+  const [peek, setPeek] = useState(null); // the party whose ledger is open as a pop-up over the list
   const party = partyId ? books.parties.find((p) => p.id === partyId) : null;
+  const peeked = peek ? books.parties.find((p) => p.id === peek) : null;
 
   const range = period === "month" ? getCurrentBSMonthRange() : period === "year" ? getCurrentBSYearRange() : null;
   const analysed = useMemo(() => ledgerRows(books, range?.start, range?.end), [books, range?.start, range?.end]);
@@ -332,7 +335,7 @@ export default function Ledger({ partyId, setPartyId, openReport, goTab }) {
             </thead>
             <tbody>
               {filtered.map((r, i) => (
-                <tr key={r.party.id} onClick={() => setPartyId(r.party.id)} className="border-t border-slate-100 hover:bg-slate-50 cursor-pointer">
+                <tr key={r.party.id} onClick={() => setPeek(r.party.id)} data-testid="ledger-row" className="border-t border-slate-100 hover:bg-slate-50 cursor-pointer">
                   {books.types_ready && <td className="fin-no-print px-3 py-2.5" onClick={(e) => e.stopPropagation()}><input type="checkbox" checked={selected.has(r.party.id)} onChange={() => toggle(r.party.id)} aria-label={`Select ${r.party.name}`} /></td>}
                   <td className="px-3 py-2.5 text-slate-500">{i + 1}</td>
                   <td className="px-3 py-2.5"><div className="font-semibold text-slate-900">{r.party.name}</div>{r.party.phone && <div className="text-xs text-slate-400">{r.party.phone}</div>}</td>
@@ -351,6 +354,7 @@ export default function Ledger({ partyId, setPartyId, openReport, goTab }) {
         )}
       </Card>
       {adding && <PartyForm onClose={(created) => { setAdding(false); if (created?.id) setPartyId(created.id); }} onOpenExisting={setPartyId} />}
+      {peeked && <PartyLedgerPopup party={peeked} onClose={() => setPeek(null)} onOpen={() => { setPeek(null); setPartyId(peeked.id); }} />}
     </div>
   );
 }
