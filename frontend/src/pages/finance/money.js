@@ -216,6 +216,12 @@ export function owedTotals(books) {
   };
 }
 
+// The opening balance set on one account (CASH or a bank account's id), and on all of them together: what the books start from
+// when there is no earlier day to carry a balance over from.
+export const startingOf = (books, bucket) =>
+  Number(bucket === CASH ? books.cash_account?.opening_balance : books.accounts.find((a) => a.id === bucket)?.opening_balance) || 0;
+export const startingTotal = (books) => startingOf(books, CASH) + books.accounts.reduce((s, a) => s + (Number(a.opening_balance) || 0), 0);
+
 // ── 2.2 available balance (cash + every bank account) ─────────────────────
 // `before` (exclusive) makes this the opening balance for a day; `upTo` (inclusive) caps it.
 // Each bucket keeps the lines behind its number, so a wrong total can be traced.
@@ -228,6 +234,11 @@ export function balances(books, { before, upTo } = {}) {
     b.total += amount;
     b.lines.push({ amount, ...line });
   };
+  // What each account held before its first entry in these books (the opening balance set on the account) is there from the very
+  // beginning: a line with no date, which every `before` / `upTo` cut-off includes.
+  for (const c of [{ id: null, v: books.cash_account?.opening_balance }, ...books.accounts.map((a) => ({ id: a.id, v: a.opening_balance }))]) {
+    if (Number(c.v)) add(c.id, Number(c.v), { date: "", label: "Opening balance", kind: "opening" });
+  }
   for (const t of books.transactions) {
     const d = billDate(t);
     if (!inRange(d) || isJournal(t)) continue;
@@ -391,7 +402,7 @@ export function tradingAccount(books, from, to) {
 // day; rows run oldest first, then by time. No `from` means from the very first entry.
 export function cashBook(books, from, to) {
   const inRange = (d) => (!from || d >= from) && (!to || d <= to);
-  const opening = from ? balances(books, { before: from }).total : 0;
+  const opening = from ? balances(books, { before: from }).total : startingTotal(books);
   const rows = [];
   for (const t of books.transactions) {
     if (!inRange(billDate(t)) || isJournal(t)) continue;
@@ -453,7 +464,7 @@ export function accountBook(books, bucket, from, to) {
       else if (bucketOf(r.data.to_account_id) === bucket) rows.push({ ...r, in: r.transferAmount });
     } else if (r.table !== "jv" && (r.in || r.out) && bucketOf(r.data.bank_account_id) === bucket) rows.push({ ...r });
   }
-  const opening = from ? balances(books, { before: from }).buckets[bucket]?.total || 0 : 0;
+  const opening = from ? balances(books, { before: from }).buckets[bucket]?.total || 0 : startingOf(books, bucket);
   let running = opening, cashIn = 0, cashOut = 0;
   for (const r of rows) {
     if (r.in) { running += r.in; cashIn += r.in; }
@@ -471,7 +482,7 @@ export function accountDays(books, bucket, from, to) {
   let opening = 0;
   const byDay = new Map();
   for (const l of lines) {
-    if (from && l.date < from) { opening += l.amount; continue; }
+    if (!l.date || (from && l.date < from)) { opening += l.amount; continue; } // the account's own opening balance has no date: it is always before
     if (to && l.date > to) continue;
     const d = byDay.get(l.date) || { date: l.date, in: 0, out: 0, count: 0 };
     if (l.amount >= 0) d.in += l.amount; else d.out += -l.amount;

@@ -54,9 +54,9 @@ if fb.exists():
     import ast as _ast
     wanted = {}
     for node in _ast.parse(fb.read_text(encoding="utf-8")).body:
-        if isinstance(node, _ast.Assign) and getattr(node.targets[0], "id", "") in ("RENT_DDL", "PARTY_TYPE_DDL", "QUOTATION_DDL", "GROUP_DDL", "SERVICE_COLUMNS"):
+        if isinstance(node, _ast.Assign) and getattr(node.targets[0], "id", "") in ("RENT_DDL", "PARTY_TYPE_DDL", "QUOTATION_DDL", "GROUP_DDL", "OPENING_DDL", "SERVICE_COLUMNS"):
             wanted[node.targets[0].id] = _ast.literal_eval(node.value)
-    texts = [wanted.get("QUOTATION_DDL", ""), wanted.get("GROUP_DDL", ""), *wanted.get("RENT_DDL", []), *wanted.get("PARTY_TYPE_DDL", [])]
+    texts = [wanted.get("QUOTATION_DDL", ""), wanted.get("GROUP_DDL", ""), *wanted.get("RENT_DDL", []), *wanted.get("PARTY_TYPE_DDL", []), *wanted.get("OPENING_DDL", [])]
     for t in texts:
         if t.upper().startswith("CREATE TABLE"):
             stmts.append(t)

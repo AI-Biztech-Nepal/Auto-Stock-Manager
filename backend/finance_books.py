@@ -83,6 +83,19 @@ _services_ready = True
 # Same for fin_expense_categories.expense_group.
 _groups_ready = True
 
+# An account's opening balance: what it already held before the first entry in these books (0 = nothing; negative for an
+# overdrawn account). One column on each bank account and on the cash account, added at start-up like the other late columns, and
+# only offered (opening_ready in /fin/books) once both are known to exist. Every balance the screens work out starts from it.
+OPENING_DDL = [
+    "ALTER TABLE fin_bank_accounts ADD COLUMN IF NOT EXISTS opening_balance DOUBLE NOT NULL DEFAULT 0",
+    "ALTER TABLE fin_cash_account ADD COLUMN IF NOT EXISTS opening_balance DOUBLE NOT NULL DEFAULT 0",
+]
+OPENING_TABLES = ("fin_bank_accounts", "fin_cash_account")
+OPENING_MESSAGE = ("Opening balances need one more database update, which the server applies when it starts and could not. "
+                   "Run backend/supabase/schema.sql (or ALTER TABLE fin_bank_accounts and fin_cash_account ADD COLUMN "
+                   "opening_balance DOUBLE NOT NULL DEFAULT 0) on the database once, then restart the server.")
+_opening_ready = True
+
 # Ledger types, as in Finance Nepal: a label on each party (Customer, Vendor, Employee, or any type the company adds).
 # It only files the party; it moves nothing between the customer and vendor ledgers. Deleting a type leaves its parties
 # untyped, and an untyped party shows as Customer or Vendor from what its ledger holds most of.
@@ -118,13 +131,14 @@ async def ensure_schema(db, registry=None):
     fetch_raw). Creates what the Rent screen needs, adds the two service columns, and only then tells the SQL
     layer's table registry about them. Never raises: a database user that cannot alter tables simply leaves
     Rent and services off, and the rest of Finance exactly as it was."""
-    global _services_ready, _groups_ready, _types_ready
+    global _services_ready, _groups_ready, _types_ready, _opening_ready
     if registry is None:
         import sqldb
         registry = sqldb.TABLES
     _services_ready = False
     _groups_ready = False
     _types_ready = False
+    _opening_ready = False
     for ddl in RENT_DDL:
         try:
             await db.execute_raw(ddl)
@@ -182,17 +196,39 @@ async def ensure_schema(db, registry=None):
             logger.warning("Ledger types are off: fin_parties has no party_type_id column")
     except Exception:  # noqa: BLE001
         logger.warning("Could not check fin_parties' columns", exc_info=True)
+    for ddl in OPENING_DDL:
+        try:
+            await db.execute_raw(ddl)
+        except Exception:  # noqa: BLE001
+            logger.warning("Could not ensure the opening balance column: %s", ddl, exc_info=True)
+    try:
+        have = []
+        for table in OPENING_TABLES:
+            rows = await db.fetch_raw("SELECT COLUMN_NAME FROM information_schema.COLUMNS "
+                                      f"WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = '{table}'")
+            if "opening_balance" in {r["COLUMN_NAME"] for r in rows}:
+                have.append(table)
+        if len(have) == len(OPENING_TABLES):
+            for table in OPENING_TABLES:
+                registry[table]["columns"].add("opening_balance")
+            _opening_ready = True
+        else:
+            logger.warning("Opening balances are off: fin_bank_accounts / fin_cash_account have no opening_balance column")
+    except Exception:  # noqa: BLE001
+        logger.warning("Could not check the opening balance columns", exc_info=True)
 
 
 async def ensure_schema_postgres(db, registry=None):
-    """The Supabase (Postgres) counterpart of ensure_schema. The tables and every column already exist there (they
-    come from backend/supabase/schema.sql), so nothing is created; this only checks that the late-added columns are
-    present and tells the SQL layer's table registry about them, exactly as ensure_schema does. Never raises."""
-    global _services_ready, _groups_ready, _types_ready
+    """The Supabase (Postgres) counterpart of ensure_schema. The tables and nearly every column already exist there (they
+    come from backend/supabase/schema.sql), so nothing is created; this checks that the late-added columns are present
+    and tells the SQL layer's table registry about them, exactly as ensure_schema does. The one exception is the opening
+    balance column: it is new, so it is added here (additive and harmless to run again) when the database lets us, and
+    otherwise left off with a warning. Never raises."""
+    global _services_ready, _groups_ready, _types_ready, _opening_ready
     if registry is None:
         import sqldb
         registry = sqldb.TABLES
-    _services_ready = _groups_ready = _types_ready = False
+    _services_ready = _groups_ready = _types_ready = _opening_ready = False
 
     async def columns(table):
         try:
@@ -221,6 +257,21 @@ async def ensure_schema_postgres(db, registry=None):
         _types_ready = True
     else:
         logger.warning("Ledger types are off: fin_parties has no party_type_id column")
+    for ddl in OPENING_DDL:
+        try:
+            await db.execute_raw(ddl.replace(" DOUBLE ", " double precision "))
+        except Exception:  # noqa: BLE001
+            logger.warning("Could not add the opening balance column: %s", ddl, exc_info=True)
+    have = []
+    for table in OPENING_TABLES:
+        if "opening_balance" in await columns(table):
+            have.append(table)
+    if len(have) == len(OPENING_TABLES):
+        for table in OPENING_TABLES:
+            registry[table]["columns"].add("opening_balance")
+        _opening_ready = True
+    else:
+        logger.warning("Opening balances are off: fin_bank_accounts / fin_cash_account have no opening_balance column")
 
 LEDGER_SIDES = {"customer": ("fin_customer_ledger", "customer_id"),
                 "vendor": ("fin_vendor_ledger", "vendor_id")}
@@ -280,6 +331,22 @@ def _date(v: Optional[str], what: str, required: bool = False) -> Optional[str]:
         return date.fromisoformat(v[:10]).isoformat()
     except ValueError:
         raise HTTPException(400, f"{what} must be a date (YYYY-MM-DD)")
+
+
+def _opening_fields(v) -> dict:
+    """The opening balance a form sent, as fields to save: nothing when it was left out (the saved one is kept) or when
+    the column is not in the database and the amount is 0; the amount (negative allowed, for an overdrawn account) when
+    it can be saved; and a clear 503 when a real amount was sent but cannot be saved, rather than dropping it quietly."""
+    if v is None:
+        return {}
+    amount = round(float(v), 2)
+    if amount != amount or amount in (float("inf"), float("-inf")):
+        raise HTTPException(400, "Opening balance must be a number")
+    if not _opening_ready:
+        if amount == 0:
+            return {}
+        raise HTTPException(503, OPENING_MESSAGE)
+    return {"opening_balance": amount}
 
 
 def _money(v, what: str) -> float:
@@ -408,6 +475,7 @@ class AccountBody(BaseModel):
     account_number: Optional[str] = None
     account_holder_name: Optional[str] = None
     address: Optional[str] = None
+    opening_balance: Optional[float] = None  # left out, the saved one is kept
 
 
 class TransferBody(BaseModel):
@@ -489,6 +557,7 @@ class CashAccountBody(BaseModel):
     account_number: Optional[str] = None
     account_holder_name: Optional[str] = None
     address: Optional[str] = None
+    opening_balance: Optional[float] = None  # left out, the saved one is kept
 
 
 class LedgerBody(BaseModel):
@@ -892,6 +961,8 @@ def register(api_router, db, admin_only):
             "rent_ready": rentals is not None and cash_rows is not None,
             "services_ready": _services_ready,
             "groups_ready": _groups_ready,
+            # False while the accounts have no opening_balance column: the account form says so instead of offering the field.
+            "opening_ready": _opening_ready,
         }
 
     # ── parties ────────────────────────────────────────────────────────────
@@ -1065,7 +1136,7 @@ def register(api_router, db, admin_only):
         now = _now()
         doc = {"id": _id(), "name": name, "bank_name": _clean(body.bank_name), "account_number": _clean(body.account_number),
                "account_holder_name": _clean(body.account_holder_name), "address": _clean(body.address),
-               "created_at": now, "updated_at": now}
+               "created_at": now, "updated_at": now, **_opening_fields(body.opening_balance)}
         await db.fin_bank_accounts.insert_one(doc)
         doc.pop("_id", None)
         return doc
@@ -1078,9 +1149,10 @@ def register(api_router, db, admin_only):
         if not name:
             raise HTTPException(400, "Account name is required")
         await _account_name_free(name, exclude=aid)
+        opening = _opening_fields(body.opening_balance)  # checked before anything is saved
         await db.fin_bank_accounts.update_one({"id": aid}, {"$set": {
             "name": name, "bank_name": _clean(body.bank_name), "account_number": _clean(body.account_number),
-            "account_holder_name": _clean(body.account_holder_name), "address": _clean(body.address), "updated_at": _now()}})
+            "account_holder_name": _clean(body.account_holder_name), "address": _clean(body.address), "updated_at": _now(), **opening}})
         return await db.fin_bank_accounts.find_one({"id": aid}, {"_id": 0})
 
     @api_router.delete("/fin/accounts/{aid}")
@@ -1549,7 +1621,7 @@ def register(api_router, db, admin_only):
         kept in one row of their own and shown on the Bank Accounts page like any other account."""
         doc = {"name": _clean(body.name), "bank_name": _clean(body.bank_name), "account_number": _clean(body.account_number),
                "account_holder_name": _clean(body.account_holder_name), "address": _clean(body.address),
-               "updated_at": _now()}
+               "updated_at": _now(), **_opening_fields(body.opening_balance)}
         existing = await db.fin_cash_account.find_one({}, {"_id": 0})
         if existing:
             await db.fin_cash_account.update_one({"id": existing["id"]}, {"$set": doc})

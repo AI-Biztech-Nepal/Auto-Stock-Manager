@@ -17,7 +17,7 @@ export function AccountLines({ title, bucket, onClose }) {
         <div className="divide-y divide-slate-100">
           {lines.map((l, i) => (
             <div key={i} className="py-2 flex items-center gap-3 text-sm">
-              <span className="text-xs text-slate-400 w-24 shrink-0">{l.date}</span>
+              <span className="text-xs text-slate-400 w-24 shrink-0">{l.date || "Opening"}</span>
               <span className="flex-1 min-w-0 truncate text-slate-700">{l.label}</span>
               <span className="font-semibold shrink-0" style={{ color: l.amount >= 0 ? COLORS.in : COLORS.out }}>{l.amount >= 0 ? "+" : "−"}{npr(Math.abs(l.amount)).replace("NPR ", "")}</span>
             </div>
@@ -29,16 +29,26 @@ export function AccountLines({ title, bucket, onClose }) {
 }
 
 function AccountForm({ account, onClose, isCash = false }) {
-  const { post, put } = useBooks();
-  const [f, setF] = useState({ name: account?.name || "", bank_name: account?.bank_name || "", account_number: account?.account_number || "", account_holder_name: account?.account_holder_name || "", address: account?.address || "" });
+  const { books, post, put } = useBooks();
+  const [f, setF] = useState({
+    name: account?.name || "", bank_name: account?.bank_name || "", account_number: account?.account_number || "",
+    account_holder_name: account?.account_holder_name || "", address: account?.address || "",
+    opening_balance: account?.opening_balance ? String(account.opening_balance) : "",
+  });
   const [busy, setBusy] = useState(false);
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
+  // The opening balance can be saved once the server has the column for it (/fin/books says so); until then the box is off.
+  const canOpen = !!books.opening_ready;
   const save = async () => {
     if (!f.name.trim()) return toast.error("Account name is required");
+    const opening = f.opening_balance.trim() === "" ? 0 : Number(f.opening_balance);
+    if (canOpen && !Number.isFinite(opening)) return toast.error("Opening balance must be a number");
+    const { opening_balance: _typed, ...details } = f;
+    const body = canOpen ? { ...details, opening_balance: opening } : details;
     setBusy(true);
     // Cash is never a bank account row (cash is bank_account_id = null): its label and details are one row of their own.
-    const ok = isCash ? await put("/fin/cash-account", f, "Saved")
-      : account ? await put(`/fin/accounts/${account.id}`, f, "Saved") : await post("/fin/accounts", f, "Account added");
+    const ok = isCash ? await put("/fin/cash-account", body, "Saved")
+      : account ? await put(`/fin/accounts/${account.id}`, body, "Saved") : await post("/fin/accounts", body, "Account added");
     setBusy(false);
     if (ok) onClose();
   };
@@ -46,6 +56,10 @@ function AccountForm({ account, onClose, isCash = false }) {
     <Modal title={isCash ? "Edit cash account" : account ? "Edit account" : "Add bank account"} onClose={onClose}>
       <div className="space-y-4">
         <Field label="Name *" hint={isCash ? "How cash in hand is labelled here, for example “Cash”" : "Shown in dropdowns, for example “Nabil”"}><input value={f.name} onChange={set("name")} className={inputCls} autoFocus /></Field>
+        <Field label="Opening balance (NPR)"
+          hint={canOpen ? "What was already in this account before your first entry here. Every day's opening balance builds on it. Use a minus sign if it is overdrawn." : "Needs one more database update on the server, which is applied when it restarts."}>
+          <input type="number" step="any" value={f.opening_balance} onChange={set("opening_balance")} disabled={!canOpen} placeholder="0" className={inputCls} data-testid="account-opening-balance" />
+        </Field>
         <Field label="Bank name"><input value={f.bank_name} onChange={set("bank_name")} className={inputCls} /></Field>
         <Field label="Account number"><input value={f.account_number} onChange={set("account_number")} className={inputCls} /></Field>
         <Field label="Account holder"><input value={f.account_holder_name} onChange={set("account_holder_name")} className={inputCls} /></Field>
