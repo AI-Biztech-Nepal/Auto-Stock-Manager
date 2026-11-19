@@ -1,10 +1,12 @@
 import { NavLink } from "react-router-dom";
 import { ChevronDown } from "lucide-react";
-import { FINANCE_NAV, financeTab, financeNavKey } from "../pages/finance/nav";
+import { FINANCE_NAV, FINANCE_DEFAULT_TAB, financeTab, financeNavKey } from "../pages/finance/nav";
 
 // Finance in the main side panel: a dropdown, open by default while on a Finance page, like Marketing.
 // Day Book (its entry forms) and Report (its family of reports) each nest one step further in; Report is a single
 // row with its chevron inside it (click opens the Report page, and again on that page folds its list).
+// The Finance row itself works the same way: a click takes you to the Finance home (the Balance Sheet dashboard) from
+// anywhere, inside Finance or out, and a click while you are on that home folds / unfolds the list.
 // The open/closed state lives in Layout (Sidebar is rebuilt on every render there, so state kept here
 // would be lost): `reportOpen` maps an item's key to open (true) / closed (false); unset follows the page.
 export default function FinanceNavGroup({ label, Icon, pathname, search, navigate, open, setOpen, reportOpen, setReportOpen, onPick }) {
@@ -12,6 +14,7 @@ export default function FinanceNavGroup({ label, Icon, pathname, search, navigat
   const tab = financeTab(new URLSearchParams(search).get("tab"));
   const current = onFinance ? financeNavKey(tab) : null;
   const isOpen = open ?? onFinance;
+  const onHome = onFinance && tab === FINANCE_DEFAULT_TAB; // the Balance Sheet: the page the Finance row itself opens
   const familyOpen = (item) => reportOpen?.[item.key] ?? (current === item.key || item.children.some((c) => c.key === current));
 
   const row = (active, nested = false) =>
@@ -33,7 +36,11 @@ export default function FinanceNavGroup({ label, Icon, pathname, search, navigat
   return (
     <div data-testid="nav-finance-group">
       <button
-        onClick={() => { setOpen(!isOpen); if (!onFinance) navigate("/finance"); }}
+        onClick={() => {
+          if (!onFinance) { setOpen(!isOpen); navigate("/finance"); return; } // from another section: open Finance
+          if (onHome) { setOpen(!isOpen); return; }                           // already on the Finance home: fold / unfold the list
+          setOpen(true); navigate("/finance", { replace: true });             // on another Finance page: back to the Finance home
+        }}
         aria-expanded={isOpen}
         className={`w-full flex items-center gap-3 px-3 py-3 rounded-lg text-sm font-medium transition-all duration-150 ${onFinance ? "bg-blue-600 text-white" : "text-slate-400 hover:text-white hover:bg-slate-800"}`}
         data-testid="nav-finance"
