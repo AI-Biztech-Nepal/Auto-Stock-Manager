@@ -96,7 +96,14 @@ export default function Leads() {
       // takes them out of All on the next visit (the list above keeps them there for this one).
       // Done before the ping below so the badge's refetch already sees them as seen.
       const unseen = data.filter(l => state(l) === "new" && !l.seen_at).map(l => l.id);
-      if (unseen.length) await api.post("/leads/seen", { ids: unseen }, { suppressErrorToast: true }).catch(() => {});
+      if (unseen.length) {
+        const seen = await api.post("/leads/seen", { ids: unseen }, { suppressErrorToast: true }).catch(() => null);
+        // Show who read them right away (the list above was fetched before they were marked).
+        if (seen?.data?.seen_by) {
+          const now = new Date().toISOString();
+          setLeads(ls => ls.map(l => (unseen.includes(l.id) ? { ...l, seen_at: now, seen_by: seen.data.seen_by } : l)));
+        }
+      }
       window.dispatchEvent(new Event("leads-changed"));
     } catch {
       toast.error("Failed to load leads");

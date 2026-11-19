@@ -5913,9 +5913,10 @@ async def mark_leads_seen(body: LeadsSeen, cu: dict = Depends(admin_only)):
     """The Leads screen was opened with these leads on it: they stop counting as new in the nav badge and the bell.
     Only the ids the screen actually showed are marked, so a lead that arrived a moment later still notifies."""
     if body.ids:
+        # seen_by is the first person to open the lead (same username format as decided_by); it is never overwritten.
         await db.leads.update_many({"id": {"$in": body.ids}, "seen_at": {"$exists": False}},
-                                   {"$set": {"seen_at": datetime.now(timezone.utc).isoformat()}})
-    return {"ok": True}
+                                   {"$set": {"seen_at": datetime.now(timezone.utc).isoformat(), "seen_by": cu.get("username")}})
+    return {"ok": True, "seen_by": cu.get("username")}
 
 @api_router.post("/leads/{lid}/accept")
 async def accept_lead(lid: str, cu: dict = Depends(admin_only)):
@@ -6521,6 +6522,7 @@ async def _run_startup_tasks():
             ("leads", "customer_id", "VARCHAR(36)"),
             ("leads", "vehicle_id", "VARCHAR(36)"),  # the vehicle the visitor was looking at when they tapped WhatsApp / Call
             ("leads", "seen_at", "VARCHAR(40)"),  # when staff first opened the lead; unseen pending leads drive the nav badge
+            ("leads", "seen_by", "VARCHAR(100)"),  # who opened it first
             # Who sold the vehicle (a Team member); the name is kept on the sale so it survives the member being removed.
             ("sales", "sold_by_id", "VARCHAR(36)"),
             ("sales", "sold_by_name", "VARCHAR(255)"),
