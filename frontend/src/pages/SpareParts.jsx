@@ -437,7 +437,7 @@ export default function SpareParts() {
 
   return (
     <div className="space-y-5 animate-fade-in">
-      <TopbarRow note={`${parts.length} parts in inventory`}>
+      <TopbarRow>
         <button onClick={openBulkAdd} data-testid="bulk-add-part-btn" className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-3 rounded-lg transition-all active:scale-95 shadow-sm">
           <Layers size={16} /> Bulk Add (Bill)
         </button>
