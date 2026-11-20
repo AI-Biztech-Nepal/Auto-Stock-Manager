@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import TopbarRow from "../components/TopbarRow";
 import { toast } from "sonner";
 import { Fingerprint, UserPlus, Shield, ShieldCheck, Edit, Trash2 } from "lucide-react";
 import WarrantyLengthInput from "../components/WarrantyLengthInput";
@@ -188,9 +189,7 @@ export default function Settings() {
 
   return (
     <div className="space-y-6 animate-fade-in max-w-2xl">
-      <div>
-        <p className="text-sm text-slate-500">Manage your account and preferences</p>
-      </div>
+      <TopbarRow note="Manage your account and preferences" />
 
       {/* Profile */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">

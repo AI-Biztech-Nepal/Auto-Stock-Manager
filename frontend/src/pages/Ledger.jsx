@@ -1,4 +1,5 @@
 import { Suspense, lazy } from "react";
+import TopbarRow from "../components/TopbarRow";
 import { useSearchParams } from "react-router-dom";
 import { Users, Store, UsersRound } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
@@ -30,9 +31,7 @@ export default function Ledger() {
 
   return (
     <div className="space-y-5 animate-fade-in">
-      <div>
-        <p className="text-sm text-slate-500">Everyone you deal with: customers, vendors and staff</p>
-      </div>
+      <TopbarRow note="Everyone you deal with: customers, vendors and staff" />
 
       {allowed.length > 1 && (
         <div className="grid gap-2 bg-slate-100 rounded-2xl p-1.5" style={{ gridTemplateColumns: `repeat(${allowed.length}, minmax(0, 1fr))` }} role="tablist" aria-label="Ledger" data-testid="ledger-tabs">

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import TopbarRow from "../components/TopbarRow";
 import { Building2, Users, Bike, Shield, Trash2, UserRound, HardDrive } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
@@ -60,9 +61,7 @@ export default function Platform() {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <div>
-        <p className="text-sm text-slate-500">Every business that's signed up, and their accounts</p>
-      </div>
+      <TopbarRow note="Every business that's signed up, and their accounts" />
 
       {!companies ? (
         <div className="flex items-center justify-center h-32"><div className="animate-spin w-6 h-6 border-4 border-blue-600 border-t-transparent rounded-full" /></div>

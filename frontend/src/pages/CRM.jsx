@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import TopbarRow from "../components/TopbarRow";
 import { Plus, Upload, Download, Search, ChevronDown, X, UserCheck, RefreshCw, AlertCircle } from "lucide-react";
 import { notify } from "../utils/notify";
 import api from "../utils/api";
@@ -213,12 +214,10 @@ export default function CRM() {
 
   return (
     <div className="space-y-4" data-testid="crm-page">
-      <div className="flex flex-wrap items-center justify-end gap-3">
-        <div className="flex gap-2">
-          <button onClick={() => setAdding(true)} className={btnPrimary} data-testid="crm-add"><Plus size={17} /> Add Customer</button>
-          <button onClick={() => setImportOpen(true)} className={btnGhost} data-testid="crm-import"><Upload size={16} /> Import</button>
-        </div>
-      </div>
+      <TopbarRow>
+        <button onClick={() => setAdding(true)} className={btnPrimary} data-testid="crm-add"><Plus size={17} /> Add Customer</button>
+        <button onClick={() => setImportOpen(true)} className={btnGhost} data-testid="crm-import"><Upload size={16} /> Import</button>
+      </TopbarRow>
 
       {loadFailed && !data ? (
         <div className="bg-white border border-red-200 rounded-2xl"><EmptyState icon={AlertCircle} title="Couldn't load the CRM" action={<button onClick={() => { setLoadFailed(false); load(false); }} className={btnPrimary}><RefreshCw size={15} /> Try again</button>}>Check your connection and try again.</EmptyState></div>

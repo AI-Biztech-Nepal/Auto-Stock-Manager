@@ -1,4 +1,5 @@
 import { useState, useRef } from "react";
+import TopbarRow from "../components/TopbarRow";
 import { UploadCloud, FileSpreadsheet, CheckCircle2, AlertTriangle, X } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
@@ -75,10 +76,7 @@ export default function ImportStock() {
 
   return (
     <div className="space-y-5 animate-fade-in">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <p className="text-sm text-slate-500">Bulk-add vehicles to inventory from a spreadsheet</p>
-        </div>
+      <TopbarRow note="Bulk-add vehicles to inventory from a spreadsheet">
         <button
           type="button"
           onClick={downloadTemplate}
@@ -87,7 +85,7 @@ export default function ImportStock() {
         >
           <FileSpreadsheet size={16} /> Download Template (.csv)
         </button>
-      </div>
+      </TopbarRow>
 
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
         <label
