@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useBooks } from "./BooksContext";
 import EntryEditor from "./EntryEditor";
-import { Card, Stat, Empty, Notice, ExportBar, exportXlsx, inputCls } from "./ui";
+import { Card, Stat, Empty, Notice, ExportBar, TopbarControls, exportXlsx, inputCls } from "./ui";
 import { owedTotals, receivableAgeing, AGEING_BUCKETS, billDate, partyName, accountName, npr, num, COLORS } from "./money";
 import { getCurrentBSMonthRange, getCurrentBSYearRange, formatBSDate } from "../../utils/nepali-date";
 
@@ -13,12 +13,12 @@ const PERIODS = [["month", "This month"], ["year", "This year"], ["all", "All ti
 function PeriodBar({ period, setPeriod, range, onXlsx }) {
   return (
     <>
-      <div className="fin-no-print flex flex-wrap items-center justify-between gap-2">
+      <TopbarControls className="justify-between">
         <div className="inline-flex gap-0.5 bg-gray-100 rounded-lg p-1">
           {PERIODS.map(([k, l]) => <button key={k} onClick={() => setPeriod(k)} className={`px-3 py-1.5 rounded-md text-xs font-bold ${period === k ? "bg-white shadow-sm text-blue-700" : "text-slate-500"}`}>{l}</button>)}
         </div>
         <ExportBar onXlsx={onXlsx} />
-      </div>
+      </TopbarControls>
       {range && <p className="text-xs text-slate-500">{range.start} to {range.end} · {formatBSDate(range.start)} to {formatBSDate(range.end)} BS</p>}
     </>
   );
@@ -202,10 +202,10 @@ function OwedReport({ side, openParty }) {
 
   return (
     <div className="space-y-4">
-      <div className="fin-no-print flex flex-wrap items-center justify-between gap-2">
+      <TopbarControls className="justify-between" minWidth={1280}>
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search by name or phone" className={`${inputCls} max-w-xs`} />
         <ExportBar onXlsx={() => exportXlsx(`${side}-report`, columns.map((c) => ({ header: c.header, value: c.value })), rows)} />
-      </div>
+      </TopbarControls>
       <div className="grid grid-cols-2 gap-3">
         <Stat label={receivable ? "Total to receive" : "Total to give"} value={receivable ? owed.totalReceivable : owed.totalPayable} color={color} />
         <Stat label={receivable ? "People who owe you" : "People you owe"} value={String(all.length)} />
@@ -252,7 +252,7 @@ export function AgeingReport({ openParty }) {
         <Stat label="Total to receive" value={age.receivable} color={COLORS.in} onClick={() => setFilter("all")} />
         {AGEING_BUCKETS.map((b, i) => <Stat key={b.label} label={b.label} value={age.ageing[i]} color={b.color} onClick={() => setFilter(filter === String(i) ? "all" : String(i))} />)}
       </div>
-      <div className="fin-no-print flex flex-wrap items-center justify-between gap-2">
+      <TopbarControls className="justify-between" minWidth={1536}>
         <div className="inline-flex gap-0.5 bg-gray-100 rounded-lg p-1">
           {AGE_FILTERS.map(([k, l]) => <button key={k} onClick={() => setFilter(k)} className={`px-3 py-1.5 rounded-md text-xs font-bold ${filter === k ? "bg-white shadow-sm text-blue-700" : "text-slate-500"}`}>{l}</button>)}
         </div>
@@ -260,7 +260,7 @@ export function AgeingReport({ openParty }) {
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search by name or phone" className={`${inputCls} max-w-xs`} />
           <ExportBar onXlsx={() => exportXlsx("ageing-report", columns.map((c) => ({ header: c.header, value: c.value })), rows)} />
         </div>
-      </div>
+      </TopbarControls>
       <ReportTable columns={columns} rows={rows} onRow={(r) => openParty(r.party.id)} empty={q || filter !== "all" ? "Nobody matches." : "Nobody owes you. All settled."} noun={["party", "parties"]} />
       <p className="text-xs text-slate-400">A balance is as old as the last time that party was billed. Oldest first. Tap a party to open their ledger.</p>
     </div>

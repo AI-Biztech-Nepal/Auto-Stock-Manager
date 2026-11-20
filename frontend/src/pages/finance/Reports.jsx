@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend, CartesianGrid } from "recharts";
 import { useBooks } from "./BooksContext";
 import EntryEditor from "./EntryEditor";
-import { Card, Stat, Empty, ExportBar, exportXlsx } from "./ui";
+import { Card, Stat, Empty, ExportBar, TopbarControls, exportXlsx } from "./ui";
 import { balances, tradingAccount, cashMovements, receivedPaid, owedTotals, npr, num, COLORS } from "./money";
 import { getCurrentBSMonthRange, getCurrentBSYearRange, formatBSDate } from "../../utils/nepali-date";
 
@@ -88,12 +88,12 @@ export function Report({ goTab }) {
 
   return (
     <div className="space-y-4">
-      <div className="fin-no-print flex flex-wrap items-center justify-between gap-2">
+      <TopbarControls className="justify-between">
         <div className="inline-flex gap-0.5 bg-gray-100 rounded-lg p-1">
           {PERIODS.map(([k, l]) => <button key={k} onClick={() => setPeriod(k)} className={`px-3 py-1.5 rounded-md text-xs font-bold ${period === k ? "bg-white shadow-sm text-blue-700" : "text-slate-500"}`}>{l}</button>)}
         </div>
         <ExportBar onXlsx={() => exportXlsx(`profit-and-loss-${period}`, cols, rows)} />
-      </div>
+      </TopbarControls>
 
       {/* the report heading: one brand-blue band with the period and the key figures */}
       <div className="overflow-hidden rounded-2xl" style={{ backgroundColor: BRAND_DARK }}>
@@ -311,13 +311,13 @@ export function MoneyMoved({ dir, openParty }) {
         <Card className="p-4"><div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Entries</div><div className="text-xl font-bold mt-1 text-slate-900" style={{ fontFamily: "Manrope" }}>{shown.length}</div></Card>
         <Stat label="Largest" value={stats.largest} />
       </div>
-      <div className="fin-no-print flex flex-wrap items-center gap-2">
+      <TopbarControls minWidth={1280}>
         <div className="inline-flex gap-0.5 bg-gray-100 rounded-lg p-1">
           {MOVED_PERIODS.map(([k, l]) => <button key={k} onClick={() => setPeriod(k)} className={`px-3 py-1.5 rounded-md text-xs font-bold ${period === k ? "bg-white shadow-sm text-blue-700" : "text-slate-500"}`}>{l}</button>)}
         </div>
-        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search by name or number" className="flex-1 min-w-[200px] h-10 px-3 rounded-lg border border-slate-300 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search by name or number" className="flex-1 min-w-[200px] max-w-xs h-10 px-3 rounded-lg border border-slate-300 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
         <ExportBar onXlsx={() => exportXlsx(incoming ? "total-received" : "total-paid", cols, shown)} />
-      </div>
+      </TopbarControls>
       {range && <p className="text-xs text-slate-500">{formatBSDate(range.start)} to {formatBSDate(range.end)} BS</p>}
       <Card className="overflow-x-auto">
         {shown.length === 0 ? <Empty>{incoming ? "Nothing received in this period." : "Nothing paid in this period."}</Empty> : (

@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { useOutletContext } from "react-router-dom";
 import { X, Plus, Check, Printer, FileSpreadsheet, CalendarDays } from "lucide-react";
+import useMediaQuery from "../../hooks/useMediaQuery";
 import * as XLSX from "xlsx";
 import { formatBSDate } from "../../utils/nepali-date";
 import { npr } from "./money";
@@ -240,6 +243,15 @@ export function exportXlsx(filename, columns, rows) {
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Sheet1");
   XLSX.writeFile(wb, filename.endsWith(".xlsx") ? filename : `${filename}.xlsx`);
+}
+
+// A page's row of controls (a period switch, a search, Print / Excel ...). On screens at least `minWidth` px wide it is drawn in the
+// app's top bar beside the page's title; on narrower ones it stays at the top of the page, where `className` lays it out.
+export function TopbarControls({ children, minWidth = 1024, className = "" }) {
+  const { topbarSlot } = useOutletContext() || {};
+  const wide = useMediaQuery(`(min-width: ${minWidth}px)`);
+  if (wide && topbarSlot) return createPortal(<div className="fin-no-print flex items-center gap-2">{children}</div>, topbarSlot);
+  return <div className={`fin-no-print flex flex-wrap items-center gap-2 ${className}`}>{children}</div>;
 }
 
 export const ExportBar = ({ onXlsx }) => (
