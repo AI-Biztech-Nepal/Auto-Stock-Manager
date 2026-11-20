@@ -1,5 +1,7 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
+import { createPortal } from "react-dom";
+import { useNavigate, useOutletContext } from "react-router-dom";
+import useMediaQuery from "../hooks/useMediaQuery";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
 import { AlertTriangle, TrendingUp, Package, Users, Wrench, DollarSign, ShoppingCart, CalendarDays, TrendingDown, Banknote, Sparkles } from "lucide-react";
 import api from "../utils/api";
@@ -564,6 +566,8 @@ const PERIOD_STORAGE_KEY = "dashboard_date_filter";
 
 export default function Dashboard() {
   const { user } = useAuth();
+  const wideScreen = useMediaQuery("(min-width: 1024px)");
+  const { topbarSlot } = useOutletContext() || {}; // the app's top bar: on wide screens the page's status pills and date filter sit there
   // Coming back to the Dashboard shows the last figures at once (see utils/listCache.js); they are refreshed below as always.
   const [stats, setStats] = useState(() => peek("dashboard:stats") ?? null);
   const [loading, setLoading] = useState(() => peek("dashboard:stats") === undefined);
@@ -615,30 +619,47 @@ export default function Dashboard() {
 
   const bs = getCurrentBSDate();
   const bsDateStr = bs ? `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year} BS` : "";
+  const overview = `Overview of ${user?.company_name || "your"} operations`;
+  const statusPills = (
+    <>
+      <OnlineUsers />
+      {bsDateStr && (
+        <div className="flex items-center gap-2 bg-blue-50 border border-blue-100 px-3 py-1.5 rounded-lg" data-testid="bs-today-display">
+          <CalendarDays size={14} className="text-blue-600" />
+          <span className="text-xs font-semibold text-blue-700">{bsDateStr}</span>
+        </div>
+      )}
+    </>
+  );
+  const dateFilter = <DateRangeFilter value={filter.key} custom={filter.custom} onChange={changeFilter} testid="dashboard-date-filter" />;
 
   return (
     <div className="space-y-6 animate-fade-in">
-      {/* Header */}
-      <div className="flex items-start justify-between gap-3 flex-wrap">
-        <div>
-          <p className="text-sm text-slate-500">Overview of {user?.company_name || "your"} operations</p>
-        </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          {/* Status pills — one tidy row (was date+clock stacked over online-count, which
-              read as misaligned once the toggle grew a third tab). Hidden below sm: purely
-              informational, and the toggle above already stays reachable on phones. */}
-          <div className="hidden sm:flex items-center gap-2 flex-wrap">
-            <OnlineUsers />
-            {bsDateStr && (
-              <div className="flex items-center gap-2 bg-blue-50 border border-blue-100 px-3 py-1.5 rounded-lg" data-testid="bs-today-display">
-                <CalendarDays size={14} className="text-blue-600" />
-                <span className="text-xs font-semibold text-blue-700">{bsDateStr}</span>
-              </div>
-            )}
+      {/* The title "Dashboard" is in the app's top bar. On wide screens the overview line, the status pills and the date filter are up
+          there too (the overview line only where there is room for it); on narrower ones they are here. */}
+      {wideScreen && topbarSlot
+        ? createPortal(
+          <>
+            <span className="hidden 2xl:block min-w-0 truncate text-sm text-slate-500 mr-1" data-testid="dashboard-overview">{overview}</span>
+            {statusPills}
+            {dateFilter}
+          </>,
+          topbarSlot,
+        )
+        : (
+          <div className="flex items-start justify-between gap-3 flex-wrap">
+            <div>
+              <p className="text-sm text-slate-500" data-testid="dashboard-overview">{overview}</p>
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              {/* Status pills — one tidy row (was date+clock stacked over online-count, which
+                  read as misaligned once the toggle grew a third tab). Hidden below sm: purely
+                  informational, and the toggle above already stays reachable on phones. */}
+              <div className="hidden sm:flex items-center gap-2 flex-wrap">{statusPills}</div>
+              {dateFilter}
+            </div>
           </div>
-          <DateRangeFilter value={filter.key} custom={filter.custom} onChange={changeFilter} testid="dashboard-date-filter" />
-        </div>
-      </div>
+        )}
 
       {/* Period-scoped: follows the toggle above. Lifetime totals now live on the Finance tab. */}
       <AccountingSummary range={range} />
