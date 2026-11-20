@@ -1,4 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { useOutletContext } from "react-router-dom";
+import useMediaQuery from "../../hooks/useMediaQuery";
 import { ChevronLeft, ChevronRight, CalendarDays, ArrowDownCircle, ArrowUpCircle, ShoppingBag, ShoppingCart, Receipt, FileText, ArrowLeftRight } from "lucide-react";
 import { useBooks } from "./BooksContext";
 import EntryEditor from "./EntryEditor";
@@ -94,6 +97,9 @@ function DateStepper({ range, setRange, today }) {
 
 export default function DayBook({ date, setDate, goTab, openParty, editBill }) {
   const { books } = useBooks();
+  const { topbarSlot } = useOutletContext() || {}; // the app's top bar
+  const roomy = useMediaQuery("(min-width: 1280px)"); // wide enough for the date stepper, account picker and Print / Excel beside the title
+  const inTopbar = roomy && !!topbarSlot;
   const [viewing, setViewing] = useState(null); // the entry tapped: opened to look at (EntryViewer), as Jageer Nepal does
   const [editing, setEditing] = useState(null); // the entry being changed (EntryEditor), from the viewer's Edit button
   // A journal voucher opens straight to its own viewer (inside EntryEditor); every other entry opens the bill view first.
@@ -150,21 +156,31 @@ export default function DayBook({ date, setDate, goTab, openParty, editBill }) {
   const fig = (v, color, strong) => (v ? <span className={strong ? "font-bold" : "font-medium"} style={{ color }}>{num(v)}</span> : <span className="text-gray-300">—</span>);
   const balanceColor = (b) => (b < 0 ? "#B91C1C" : "#1D4ED8");
 
+  const controls = (
+    <>
+      <DateStepper range={range} setRange={setRange} today={today} />
+      {hasBanks && (
+        <select value={picked} onChange={(e) => setAcct(e.target.value)} aria-label="Account" data-testid="daybook-account" className={`${inputCls} !w-auto min-w-[9.5rem]`}>
+          <option value="all">All accounts</option>
+          {choices.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </select>
+      )}
+      <ExportBar onXlsx={() => exportXlsx(`daybook-${range.from}${singleDay ? "" : `-to-${range.to}`}`, cols, book.rows)} />
+    </>
+  );
+
   return (
     <div className="space-y-3.5">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <NewEntryButtons goTab={goTab} />
-        <div className="flex flex-wrap items-center gap-2">
-          <DateStepper range={range} setRange={setRange} today={today} />
-          {hasBanks && (
-            <select value={picked} onChange={(e) => setAcct(e.target.value)} aria-label="Account" data-testid="daybook-account" className={`${inputCls} !w-auto min-w-[9.5rem]`}>
-              <option value="all">All accounts</option>
-              {choices.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
-          )}
-          <ExportBar onXlsx={() => exportXlsx(`daybook-${range.from}${singleDay ? "" : `-to-${range.to}`}`, cols, book.rows)} />
-        </div>
-      </div>
+      {/* The date stepper, the account picker and Print / Excel are in the app's top bar on wide screens; on narrower ones they are here. */}
+      {inTopbar
+        ? createPortal(controls, topbarSlot)
+        : (
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <NewEntryButtons goTab={goTab} />
+            <div className="flex flex-wrap items-center gap-2">{controls}</div>
+          </div>
+        )}
+      {inTopbar && <NewEntryButtons goTab={goTab} />}
 
       <Card className="overflow-hidden">
         <div className="overflow-x-auto">
