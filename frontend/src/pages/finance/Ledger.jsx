@@ -145,8 +145,8 @@ function PartyDetail({ party, onBack, openReport, payParty }) {
 
   const cols = [
     { header: "SN", value: (l) => st.lines.indexOf(l) + 1 },
-    { header: "Vehicle", value: whatOf },
     { header: "Date", value: (l) => l.date },
+    { header: "Transaction details", value: whatOf },
     { header: "Ref no.", value: (l) => l.ref },
     { header: "Balance", value: (l) => (l.kind === "billed" ? l.e.amount : "") },
     { header: "Total paid", value: (l) => (l.kind === "paid" ? l.e.amount : "") },
@@ -208,8 +208,8 @@ function PartyDetail({ party, onBack, openReport, payParty }) {
             <thead>
               <tr className="text-left">
                 <th className="w-12">SN</th>
-                <th>Vehicle</th>
-                <th>Last Transaction</th>
+                <th>Date</th>
+                <th>Transaction details</th>
                 <th className="text-right">Balance</th>
                 <th className="text-right">Total Paid</th>
                 <th className="text-right">Total Received</th>
@@ -221,9 +221,9 @@ function PartyDetail({ party, onBack, openReport, payParty }) {
               {st.lines.map((l, i) => (
                 <tr key={`${l.table}${l.e.id}`} onClick={() => (isOpening(l.e) ? setEditing(true) : setOpenRow({ table: l.table, data: l.e }))} className="cursor-pointer" data-testid="party-line">
                   <td className="text-slate-500">{i + 1}</td>
-                  <td className="font-semibold text-slate-900 min-w-[12rem]">{whatOf(l)}</td>
-                  <td className="whitespace-nowrap">
-                    <div className="text-slate-800">{formatBSDate(l.date)}</div>
+                  <td className="whitespace-nowrap text-slate-800">{l.date ? formatBSDate(l.date) : <span className="text-slate-300">—</span>}</td>
+                  <td className="min-w-[12rem]">
+                    <div className="font-semibold text-slate-900">{whatOf(l)}</div>
                     {l.ref && <div className="text-xs text-slate-400">Ref {l.ref}</div>}
                   </td>
                   <td className="text-right" data-testid="party-line-balance">{fig(l.kind === "billed" ? l.e.amount : 0, "#0F172A")}</td>
