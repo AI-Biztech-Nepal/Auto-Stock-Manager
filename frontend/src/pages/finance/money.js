@@ -205,8 +205,12 @@ export function partyStatement(books, partyId) {
     const up = side === "c" ? debitEntry : !debitEntry;
     // `what`: the items of the bill this entry belongs to (the vehicle, for a vehicle sale); `ref`: its bill / receipt number; `memo`: its note.
     const what = bill ? [...(bill.items || []).map((i) => i.description), ...(bill.service_charges || []).map((s) => s.name)].filter(Boolean).join(", ") : "";
+    // `type`: what the line is, in the Day Book's words: sale, purchase, expense (a bill), received, paid, journal or opening.
+    const type = opening ? "opening" : journal ? "journal"
+      : ["sale", "purchase", "expense"].includes(bill?.type) ? bill.type
+      : side === "c" ? (debitEntry ? (manual ? "paid" : "sale") : "received") : (debitEntry ? "purchase" : "paid");
     items.push({
-      e, side, table: side === "c" ? "cl" : "vl", date: entryDate(e), kind, label, what, ref: no || "", memo: note || "",
+      e, side, table: side === "c" ? "cl" : "vl", date: entryDate(e), kind, type, label, what, ref: no || "", memo: note || "",
       sub: [no ? `${refKind} ${no}` : null, note].filter(Boolean).join(" · "),
       debit: up ? e.amount : 0, credit: up ? 0 : e.amount,
     });

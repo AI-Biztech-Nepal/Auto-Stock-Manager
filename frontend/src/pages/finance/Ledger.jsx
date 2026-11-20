@@ -7,7 +7,8 @@ import { toast } from "sonner";
 import { useBooks } from "./BooksContext";
 import EntryEditor from "./EntryEditor";
 import PeriodStepper, { periodAt } from "./PeriodStepper";
-import { Card, Field, Modal, DateField, Empty, TwoTapDelete, Notice, ExportBar, exportXlsx, inputCls, btnPrimary, btnGhost } from "./ui";
+import { KIND } from "./DayBook";
+import { Card, Pill, Field, Modal, DateField, Empty, TwoTapDelete, Notice, ExportBar, exportXlsx, inputCls, btnPrimary, btnGhost } from "./ui";
 import { ledgerRows, partyStatement, partyOpening, suggestedOpeningDay, isOpening, npr, num } from "./money";
 import { formatBSDate } from "../../utils/nepali-date";
 
@@ -123,6 +124,9 @@ function PartyForm({ party, onClose, onOpenExisting }) {
   );
 }
 
+// The Type of a ledger line, in the Day Book's words and colours (Sale bill, Purchase bill, Received, Payment ...).
+const TYPE_PILL = { ...KIND, opening: { label: "Opening", color: "#374151", bg: "#F3F4F6" } };
+
 // One person's full ledger page, laid out like Jageer Nepal's customer page: a back arrow and the ledger type as the title with Payment,
 // Print and Excel at the right (all in the app's top bar); a card with their name, their Balance, Edit and Delete; then one row per entry (the vehicle or what it
 // was for, its date and reference number, the transaction amount, what was paid and received, and what it adds to Payable /
@@ -139,15 +143,20 @@ function PartyDetail({ party, onBack, openReport, payParty }) {
   const sideWord = (b) => (b > 0 ? " Dr" : b < 0 ? " Cr" : "");
   const balanceColor = (b) => (b > 0 ? TONE.receivable.text : b < 0 ? TONE.payable.text : "#111827");
   const closing = st.closing ? `${num(Math.abs(st.closing))}${sideWord(st.closing)}` : "0";
-  // What the entry was for: the bill's items (the vehicle), else its kind and note ("Paid · TONER BROTHER*10").
-  const whatOf = (l) => l.what || [l.label, l.memo].filter(Boolean).join(" · ");
+  // A line as the Day Book words it: "Sale: Babu Tamang" over "Vehicle sale · Honda Dio 2019 (015/2817)" (its note, else the bill's items,
+  // then its reference number).
+  const headOf = (l) => ({
+    sale: `Sale: ${party.name}`, purchase: `Purchase: ${party.name}`, expense: `Expense: ${party.name}`,
+    received: `Received from ${party.name}`, paid: `Paid to ${party.name}`,
+  }[l.type] || l.label);
+  const subOf = (l) => [l.memo || l.what, l.ref ? `Ref ${l.ref}` : null].filter(Boolean).join(" · ");
   const lineWord = st.lines.length === 1 ? "Line" : "Lines";
 
   const cols = [
     { header: "SN", value: (l) => st.lines.indexOf(l) + 1 },
     { header: "Date", value: (l) => l.date },
-    { header: "Transaction details", value: whatOf },
-    { header: "Ref no.", value: (l) => l.ref },
+    { header: "Transaction details", value: (l) => [headOf(l), subOf(l)].filter(Boolean).join(" · ") },
+    { header: "Type", value: (l) => TYPE_PILL[l.type]?.label || "" },
     { header: "Balance", value: (l) => (l.kind === "billed" ? l.e.amount : "") },
     { header: "Total paid", value: (l) => (l.kind === "paid" ? l.e.amount : "") },
     { header: "Total received", value: (l) => (l.kind === "received" ? l.e.amount : "") },
@@ -210,6 +219,7 @@ function PartyDetail({ party, onBack, openReport, payParty }) {
                 <th className="w-12">SN</th>
                 <th>Date</th>
                 <th>Transaction details</th>
+                <th>Type</th>
                 <th className="text-right">Balance</th>
                 <th className="text-right">Total Paid</th>
                 <th className="text-right">Total Received</th>
@@ -223,9 +233,10 @@ function PartyDetail({ party, onBack, openReport, payParty }) {
                   <td className="text-slate-500">{i + 1}</td>
                   <td className="whitespace-nowrap text-slate-800">{l.date ? formatBSDate(l.date) : <span className="text-slate-300">—</span>}</td>
                   <td className="min-w-[12rem]">
-                    <div className="font-semibold text-slate-900">{whatOf(l)}</div>
-                    {l.ref && <div className="text-xs text-slate-400">Ref {l.ref}</div>}
+                    <div className="font-medium text-slate-900">{headOf(l)}</div>
+                    {subOf(l) && <div className="text-xs text-slate-400">{subOf(l)}</div>}
                   </td>
+                  <td data-testid="party-line-type">{TYPE_PILL[l.type] && <Pill text={TYPE_PILL[l.type].label} color={TYPE_PILL[l.type].color} bg={TYPE_PILL[l.type].bg} />}</td>
                   <td className="text-right" data-testid="party-line-balance">{fig(l.kind === "billed" ? l.e.amount : 0, "#0F172A")}</td>
                   <td className="text-right" data-testid="party-line-paid">{fig(l.kind === "paid" ? l.e.amount : 0, TONE.payable.text)}</td>
                   <td className="text-right" data-testid="party-line-received">{fig(l.kind === "received" ? l.e.amount : 0, TONE.receivable.text)}</td>
@@ -236,7 +247,7 @@ function PartyDetail({ party, onBack, openReport, payParty }) {
             </tbody>
             <tfoot>
               <tr data-testid="party-total">
-                <td colSpan={3} className="text-right">{st.lines.length} {lineWord} · Total</td>
+                <td colSpan={4} className="text-right">{st.lines.length} {lineWord} · Total</td>
                 <td className="text-right">{fig(st.billed, "#0F172A")}</td>
                 <td className="text-right">{fig(st.paid, TONE.payable.text)}</td>
                 <td className="text-right">{fig(st.received, TONE.receivable.text)}</td>
