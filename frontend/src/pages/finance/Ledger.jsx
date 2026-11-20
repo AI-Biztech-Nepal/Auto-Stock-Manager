@@ -351,15 +351,19 @@ export default function Ledger({ partyId, setPartyId, openReport, payParty, goTa
 
       {/* Print, Excel and New party are in the app's top bar on wide screens; on narrower ones they end this row. */}
       {inTopbar && createPortal(<div className="fin-no-print flex items-center gap-2">{actions}</div>, topbarSlot)}
-      <div className="fin-no-print flex flex-wrap items-center gap-2">
-        <div className="relative flex-1 min-w-[200px]"><Search size={15} className="absolute left-3 top-3 text-slate-400" /><input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search by ledger name or phone" className={`${inputCls} pl-9`} /></div>
+      {/* The search and the type picker in one white bar, as on the Sales page (sticky, so they stay reachable down a long list) */}
+      <div className="fin-no-print sm:sticky top-0 z-20 bg-white rounded-xl border border-slate-200 shadow-sm p-3 sm:p-4 flex flex-wrap items-center gap-2 sm:gap-3" data-testid="ledger-filters">
+        <div className="relative flex-1 min-w-[14rem] max-w-sm">
+          <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search by ledger name or phone" className="w-full h-9 pl-9 pr-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" data-testid="ledger-search" />
+        </div>
         {books.types_ready && (
-          <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} className={`${inputCls} w-auto`} aria-label="Ledger type">
+          <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} className="h-9 px-3 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500" aria-label="Ledger type" data-testid="ledger-type-filter">
             {typeChoices.map((c) => <option key={c.id} value={c.id}>{c.label} ({c.count})</option>)}
           </select>
         )}
         {(q.trim() || typeFilter) && <span className="text-xs font-semibold text-blue-900">{filtered.length} {filtered.length === 1 ? "match" : "matches"}</span>}
-        {!inTopbar && actions}
+        {!inTopbar && <div className="ml-auto flex items-center gap-2">{actions}</div>}
       </div>
 
       {selected.size > 0 && books.types_ready && (
