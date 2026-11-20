@@ -8,7 +8,7 @@ import { useBooks } from "./BooksContext";
 import EntryEditor from "./EntryEditor";
 import { Card, Field, Modal, DateField, Empty, TwoTapDelete, Notice, ExportBar, exportXlsx, inputCls, btnPrimary, btnGhost } from "./ui";
 import { ledgerRows, partyStatement, partyOpening, suggestedOpeningDay, isOpening, npr, num } from "./money";
-import { getCurrentBSMonthRange, getCurrentBSYearRange, formatBSDate } from "../../utils/nepali-date";
+import { formatBSDate } from "../../utils/nepali-date";
 
 const PhoneHint = "10-digit phone";
 
@@ -257,7 +257,6 @@ function PartyDetail({ party, onBack, openReport, payParty }) {
 // The table's colours, as in Finance Nepal: money going out red, coming in green.
 // Jageer Nepal's LEDGER_TONE: `text` for the figure, `base` for the card's coloured edge.
 const TONE = { payable: { text: "#B91C1C", base: "#DC2626" }, receivable: { text: "#047857", base: "#059669" }, settled: { text: "#4B5563", base: "#9CA3AF" } };
-const PERIODS = [["all", "All time"], ["month", "This month"], ["year", "This year"]];
 const NO_TYPE = "__none";
 
 function SummaryCard({ label, value, tone, active, onClick }) {
@@ -278,7 +277,8 @@ const fig = (n, color) => (n ? <span className="font-bold" style={{ color }}>{nu
 export default function Ledger({ partyId, setPartyId, openReport, payParty, goTab }) {
   const { books, post } = useBooks();
   const [q, setQ] = useState("");
-  const [period, setPeriod] = useState("all");
+  const { topbarSlot } = useOutletContext() || {}; // the app's top bar
+  const inTopbar = useMediaQuery("(min-width: 1024px)") && !!topbarSlot;
   const [filter, setFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState("");
   const [selected, setSelected] = useState(() => new Set());
@@ -286,8 +286,7 @@ export default function Ledger({ partyId, setPartyId, openReport, payParty, goTa
   const [adding, setAdding] = useState(false);
   const party = partyId ? books.parties.find((p) => p.id === partyId) : null;
 
-  const range = period === "month" ? getCurrentBSMonthRange() : period === "year" ? getCurrentBSYearRange() : null;
-  const analysed = useMemo(() => ledgerRows(books, range?.start, range?.end), [books, range?.start, range?.end]);
+  const analysed = useMemo(() => ledgerRows(books), [books]);
   const cards = useMemo(() => analysed.reduce((c, r) => {
     c.paid += r.paid; c.received += r.received;
     if (r.balance > 0) c.receivable += r.balance; else c.payable -= r.balance;
@@ -333,6 +332,13 @@ export default function Ledger({ partyId, setPartyId, openReport, payParty, goTa
     { header: "Balance (NPR)", value: (r) => r.balance },
   ];
 
+  const actions = (
+    <>
+      <ExportBar onXlsx={() => exportXlsx("ledger", cols, filtered)} />
+      <button onClick={() => setAdding(true)} className={btnPrimary} data-testid="ledger-new-party"><Plus size={16} /> New party</button>
+    </>
+  );
+
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
@@ -343,10 +349,9 @@ export default function Ledger({ partyId, setPartyId, openReport, payParty, goTa
         <SummaryCard label="Total ledgers" value={String(analysed.length)} tone={TONE.settled} active={filter === "all"} onClick={() => setFilter("all")} />
       </div>
 
+      {/* Print, Excel and New party are in the app's top bar on wide screens; on narrower ones they end this row. */}
+      {inTopbar && createPortal(<div className="fin-no-print flex items-center gap-2">{actions}</div>, topbarSlot)}
       <div className="fin-no-print flex flex-wrap items-center gap-2">
-        <div className="inline-flex gap-0.5 bg-gray-100 rounded-lg p-1">
-          {PERIODS.map(([k, l]) => <button key={k} onClick={() => setPeriod(k)} className={`px-3 py-1.5 rounded-md text-xs font-bold ${period === k ? "bg-white shadow-sm text-blue-700" : "text-slate-500"}`}>{l}</button>)}
-        </div>
         <div className="relative flex-1 min-w-[200px]"><Search size={15} className="absolute left-3 top-3 text-slate-400" /><input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search by ledger name or phone" className={`${inputCls} pl-9`} /></div>
         {books.types_ready && (
           <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} className={`${inputCls} w-auto`} aria-label="Ledger type">
@@ -354,10 +359,8 @@ export default function Ledger({ partyId, setPartyId, openReport, payParty, goTa
           </select>
         )}
         {(q.trim() || typeFilter) && <span className="text-xs font-semibold text-blue-900">{filtered.length} {filtered.length === 1 ? "match" : "matches"}</span>}
-        <ExportBar onXlsx={() => exportXlsx("ledger", cols, filtered)} />
-        <button onClick={() => setAdding(true)} className={btnPrimary}><Plus size={16} /> New party</button>
+        {!inTopbar && actions}
       </div>
-      {range && <p className="text-xs text-slate-500">Total paid and received count {formatBSDate(range.start)} to {formatBSDate(range.end)} BS; balances are what is owed at its end.</p>}
 
       {selected.size > 0 && books.types_ready && (
         <div className="fin-no-print flex flex-wrap items-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-4 py-2.5">
