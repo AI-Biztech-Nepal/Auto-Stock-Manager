@@ -118,22 +118,22 @@ function PartyDetail({ party, onBack, openReport, payParty }) {
   const sideWord = (b) => (b > 0 ? " Dr" : b < 0 ? " Cr" : "");
   const balanceColor = (b) => (b > 0 ? TONE.receivable.text : b < 0 ? TONE.payable.text : "#111827");
   const closing = st.closing ? `${num(Math.abs(st.closing))}${sideWord(st.closing)}` : "0";
-  // A line as the Day Book words it, without the person's name (this is their page): "Sale: Honda Dio 2019 (015/2817)" over
-  // "Vehicle sale · Honda Dio 2019 (015/2817)" (its note, else the bill's items, then its reference number). A bill says what it
-  // was for after its type; a payment is just "Received" / "Paid".
+  // A line in one line, as the Day Book words it but without the person's name (this is their page): "Sale: Honda Dio 2019 (015/2817)",
+  // "Purchase: Toner", "Received: advance", "Paid: TONER BROTHER*10". What it was for is the bill's items, else its note.
   const headOf = (l) => {
     const word = { sale: "Sale", purchase: "Purchase", expense: "Expense", received: "Received", paid: "Paid" }[l.type];
-    if (!word) return l.label;
-    return ["sale", "purchase", "expense"].includes(l.type) && l.what ? `${word}: ${l.what}` : word;
+    const detail = l.what || l.memo;
+    if (!word) return [l.label, l.memo].filter(Boolean).join(": ");
+    return detail ? `${word}: ${detail}` : word;
   };
-  const subOf = (l) => [l.memo || l.what, l.ref ? `Ref ${l.ref}` : null].filter(Boolean).join(" · ");
   const lineWord = st.lines.length === 1 ? "Line" : "Lines";
 
   const cols = [
     { header: "SN", value: (l) => st.lines.indexOf(l) + 1 },
     { header: "Date", value: (l) => l.date },
-    { header: "Transaction details", value: (l) => [headOf(l), subOf(l)].filter(Boolean).join(" · ") },
+    { header: "Transaction details", value: headOf },
     { header: "Type", value: (l) => TYPE_PILL[l.type]?.label || "" },
+    { header: "Ref no.", value: (l) => l.ref },
     { header: "Balance", value: (l) => (l.kind === "billed" ? l.e.amount : "") },
     { header: "Total paid", value: (l) => (l.kind === "paid" ? l.e.amount : "") },
     { header: "Total received", value: (l) => (l.kind === "received" ? l.e.amount : "") },
@@ -211,7 +211,6 @@ function PartyDetail({ party, onBack, openReport, payParty }) {
                   <td className="whitespace-nowrap text-slate-800">{l.date ? formatBSDate(l.date) : <span className="text-slate-300">—</span>}</td>
                   <td className="min-w-[12rem]">
                     <div className="font-medium text-slate-900">{headOf(l)}</div>
-                    {subOf(l) && <div className="text-xs text-slate-400">{subOf(l)}</div>}
                   </td>
                   <td data-testid="party-line-type">{TYPE_PILL[l.type] && <Pill text={TYPE_PILL[l.type].label} color={TYPE_PILL[l.type].color} bg={TYPE_PILL[l.type].bg} />}</td>
                   <td className="text-right" data-testid="party-line-balance">{fig(l.kind === "billed" ? l.e.amount : 0, "#0F172A")}</td>
