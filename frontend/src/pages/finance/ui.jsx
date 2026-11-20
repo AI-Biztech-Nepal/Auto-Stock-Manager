@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useOutletContext } from "react-router-dom";
-import { X, Plus, Check, Printer, FileSpreadsheet, CalendarDays } from "lucide-react";
+import { X, Plus, Check, Printer, FileSpreadsheet, CalendarDays, Search } from "lucide-react";
 import useMediaQuery from "../../hooks/useMediaQuery";
 import * as XLSX from "xlsx";
 import { formatBSDate } from "../../utils/nepali-date";
@@ -252,6 +252,16 @@ export function TopbarControls({ children, minWidth = 1024, className = "" }) {
   const wide = useMediaQuery(`(min-width: ${minWidth}px)`);
   if (wide && topbarSlot) return createPortal(<div className="fin-no-print flex items-center gap-2">{children}</div>, topbarSlot);
   return <div className={`fin-no-print flex flex-wrap items-center gap-2 ${className}`}>{children}</div>;
+}
+
+// The search box of a report page: a fixed width, so it is the same in the top bar as in the page.
+export function SearchBox({ value, onChange, placeholder }) {
+  return (
+    <div className="relative">
+      <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+      <input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} className={`${inputCls} !w-64 max-w-full pl-9`} data-testid="report-search" />
+    </div>
+  );
 }
 
 export const ExportBar = ({ onXlsx }) => (

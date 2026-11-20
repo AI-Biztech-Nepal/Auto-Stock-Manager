@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend, CartesianGrid } from "recharts";
 import { useBooks } from "./BooksContext";
 import EntryEditor from "./EntryEditor";
-import { Card, Stat, Empty, ExportBar, TopbarControls, exportXlsx } from "./ui";
+import { Card, Stat, Empty, ExportBar, SearchBox, TopbarControls, exportXlsx } from "./ui";
 import { balances, tradingAccount, cashMovements, receivedPaid, owedTotals, npr, num, COLORS } from "./money";
 import { getCurrentBSMonthRange, getCurrentBSYearRange, formatBSDate } from "../../utils/nepali-date";
 
@@ -315,7 +315,7 @@ export function MoneyMoved({ dir, openParty }) {
         <div className="inline-flex gap-0.5 bg-gray-100 rounded-lg p-1">
           {MOVED_PERIODS.map(([k, l]) => <button key={k} onClick={() => setPeriod(k)} className={`px-3 py-1.5 rounded-md text-xs font-bold ${period === k ? "bg-white shadow-sm text-blue-700" : "text-slate-500"}`}>{l}</button>)}
         </div>
-        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search by name or number" className="flex-1 min-w-[200px] max-w-xs h-10 px-3 rounded-lg border border-slate-300 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+        <SearchBox value={q} onChange={setQ} placeholder="Search by name or number" />
         <ExportBar onXlsx={() => exportXlsx(incoming ? "total-received" : "total-paid", cols, shown)} />
       </TopbarControls>
       {range && <p className="text-xs text-slate-500">{formatBSDate(range.start)} to {formatBSDate(range.end)} BS</p>}

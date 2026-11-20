@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useBooks } from "./BooksContext";
 import EntryEditor from "./EntryEditor";
-import { Card, Stat, Empty, Notice, ExportBar, TopbarControls, exportXlsx, inputCls } from "./ui";
+import { Card, Stat, Empty, Notice, ExportBar, SearchBox, TopbarControls, exportXlsx } from "./ui";
 import { owedTotals, receivableAgeing, AGEING_BUCKETS, billDate, partyName, accountName, npr, num, COLORS } from "./money";
 import { getCurrentBSMonthRange, getCurrentBSYearRange, formatBSDate } from "../../utils/nepali-date";
 
@@ -10,13 +10,14 @@ import { getCurrentBSMonthRange, getCurrentBSYearRange, formatBSDate } from "../
 // stand now. Every report prints and exports to Excel from the same column definitions.
 const PERIODS = [["month", "This month"], ["year", "This year"], ["all", "All time"]];
 
-function PeriodBar({ period, setPeriod, range, onXlsx }) {
+function PeriodBar({ period, setPeriod, range, onXlsx, q, setQ, placeholder }) {
   return (
     <>
-      <TopbarControls className="justify-between">
+      <TopbarControls className="justify-between" minWidth={1280}>
         <div className="inline-flex gap-0.5 bg-gray-100 rounded-lg p-1">
           {PERIODS.map(([k, l]) => <button key={k} onClick={() => setPeriod(k)} className={`px-3 py-1.5 rounded-md text-xs font-bold ${period === k ? "bg-white shadow-sm text-blue-700" : "text-slate-500"}`}>{l}</button>)}
         </div>
+        <SearchBox value={q} onChange={setQ} placeholder={placeholder} />
         <ExportBar onXlsx={onXlsx} />
       </TopbarControls>
       {range && <p className="text-xs text-slate-500">{range.start} to {range.end} · {formatBSDate(range.start)} to {formatBSDate(range.end)} BS</p>}
@@ -31,6 +32,11 @@ function usePeriod() {
 }
 
 const inRange = (date, range) => !range || (date >= range.start && date <= range.end);
+// Does what was typed in a report's search box appear in any of these (names, numbers, notes, amounts)?
+const matches = (q, fields) => {
+  const needle = q.trim().toLowerCase();
+  return !needle || fields.some((f) => String(f ?? "").toLowerCase().includes(needle));
+};
 
 // A report narrowed to one person (opened from their ledger, ?party=): who, and a way back to everyone.
 function PartyBanner({ party, what, onShowAll }) {
@@ -82,16 +88,18 @@ function BillsReport({ type, partyId, onShowAll }) {
   const { books } = useBooks();
   const party = partyId ? books.parties.find((p) => p.id === partyId) : null;
   const { period, setPeriod, range } = usePeriod();
+  const [q, setQ] = useState("");
   const [editing, setEditing] = useState(null);
   const sale = type === "sale";
   const color = sale ? COLORS.sale : COLORS.purchase;
+  const items = (t) => (t.items || []).map((i) => i.description).filter(Boolean).join(", ");
   const rows = useMemo(() => books.transactions
     .filter((t) => t.type === type && inRange(billDate(t), range) && (!party || t.customer_id === party.id))
     .map((t) => ({ key: t.id, t, date: billDate(t), who: t.party_name || partyName(books, t.customer_id) || "Walk-in" }))
+    .filter((r) => matches(q, [r.who, r.t.bill_no, items(r.t), r.t.note, r.t.amount]))
     .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : (b.t.created_at || "") > (a.t.created_at || "") ? 1 : -1)),
-  [books, type, party, range?.start, range?.end]); // eslint-disable-line react-hooks/exhaustive-deps
+  [books, type, party, q, range?.start, range?.end]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const items = (t) => (t.items || []).map((i) => i.description).filter(Boolean).join(", ");
   const columns = [
     { header: "Date", cell: (r) => <DateCell date={r.date} />, value: (r) => r.date },
     { header: "Bill no.", cell: (r) => r.t.bill_no || <Dash />, value: (r) => r.t.bill_no || "" },
@@ -106,14 +114,14 @@ function BillsReport({ type, partyId, onShowAll }) {
 
   return (
     <div className="space-y-4">
-      <PeriodBar period={period} setPeriod={setPeriod} range={range}
+      <PeriodBar period={period} setPeriod={setPeriod} range={range} q={q} setQ={setQ} placeholder={sale ? "Search customer, bill no. or item" : "Search vendor, bill no. or item"}
         onXlsx={() => exportXlsx(`${sale ? "sales" : "purchase"}-report-${period}`, columns.map((c) => ({ header: c.header, value: c.value })), rows)} />
       <PartyBanner party={party} what={sale ? "sales" : "purchases"} onShowAll={onShowAll} />
       <div className="grid grid-cols-2 gap-3">
         <Stat label={sale ? "Sales billed" : "Purchases billed"} value={total} color={color} />
         <Stat label="Bills" value={String(rows.length)} />
       </div>
-      <ReportTable columns={columns} rows={rows} onRow={(r) => setEditing({ table: "tx", data: r.t })} empty={`No ${sale ? "sales" : "purchases"} in this period.`} noun={["bill", "bills"]} />
+      <ReportTable columns={columns} rows={rows} onRow={(r) => setEditing({ table: "tx", data: r.t })} empty={q ? "Nothing matches." : `No ${sale ? "sales" : "purchases"} in this period.`} noun={["bill", "bills"]} />
       <p className="text-xs text-slate-400">Billed, not collected: a {type} is a debt until the payment is recorded. Tap a bill to open or change it.</p>
       {editing && <EntryEditor row={editing} onClose={() => setEditing(null)} />}
     </div>
@@ -127,12 +135,14 @@ export function ExpenseReport({ partyId, onShowAll }) {
   const { books } = useBooks();
   const party = partyId ? books.parties.find((p) => p.id === partyId) : null;
   const { period, setPeriod, range } = usePeriod();
+  const [q, setQ] = useState("");
   const [editing, setEditing] = useState(null);
   const rows = useMemo(() => books.transactions
     .filter((t) => t.type === "expense" && inRange(billDate(t), range) && (!party || sameName(t.party_name, party.name)))
     .map((t) => ({ key: t.id, t, date: billDate(t), who: t.party_name || "—", category: books.categories.find((c) => c.id === t.expense_category_id)?.name || "No category" }))
+    .filter((r) => matches(q, [r.who, r.category, r.t.note, r.t.bill_no, r.t.amount]))
     .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0)),
-  [books, party, range?.start, range?.end]); // eslint-disable-line react-hooks/exhaustive-deps
+  [books, party, q, range?.start, range?.end]); // eslint-disable-line react-hooks/exhaustive-deps
   const byCategory = useMemo(() => {
     const m = {};
     for (const r of rows) m[r.category] = (m[r.category] || 0) + r.t.amount;
@@ -151,7 +161,7 @@ export function ExpenseReport({ partyId, onShowAll }) {
 
   return (
     <div className="space-y-4">
-      <PeriodBar period={period} setPeriod={setPeriod} range={range}
+      <PeriodBar period={period} setPeriod={setPeriod} range={range} q={q} setQ={setQ} placeholder="Search paid to, category or note"
         onXlsx={() => exportXlsx(`expenses-report-${period}`, columns.map((c) => ({ header: c.header, value: c.value })), rows)} />
       <PartyBanner party={party} what="expenses" onShowAll={onShowAll} />
       <div className="grid grid-cols-2 gap-3">
@@ -172,7 +182,7 @@ export function ExpenseReport({ partyId, onShowAll }) {
           </div>
         </Card>
       )}
-      <ReportTable columns={columns} rows={rows} onRow={(r) => setEditing({ table: "tx", data: r.t })} empty="No expenses in this period." noun={["expense", "expenses"]} />
+      <ReportTable columns={columns} rows={rows} onRow={(r) => setEditing({ table: "tx", data: r.t })} empty={q ? "Nothing matches." : "No expenses in this period."} noun={["expense", "expenses"]} />
       {editing && <EntryEditor row={editing} onClose={() => setEditing(null)} />}
     </div>
   );
@@ -203,7 +213,7 @@ function OwedReport({ side, openParty }) {
   return (
     <div className="space-y-4">
       <TopbarControls className="justify-between" minWidth={1280}>
-        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search by name or phone" className={`${inputCls} max-w-xs`} />
+        <SearchBox value={q} onChange={setQ} placeholder="Search by name or phone" />
         <ExportBar onXlsx={() => exportXlsx(`${side}-report`, columns.map((c) => ({ header: c.header, value: c.value })), rows)} />
       </TopbarControls>
       <div className="grid grid-cols-2 gap-3">
@@ -257,7 +267,7 @@ export function AgeingReport({ openParty }) {
           {AGE_FILTERS.map(([k, l]) => <button key={k} onClick={() => setFilter(k)} className={`px-3 py-1.5 rounded-md text-xs font-bold ${filter === k ? "bg-white shadow-sm text-blue-700" : "text-slate-500"}`}>{l}</button>)}
         </div>
         <div className="flex gap-2">
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search by name or phone" className={`${inputCls} max-w-xs`} />
+          <SearchBox value={q} onChange={setQ} placeholder="Search by name or phone" />
           <ExportBar onXlsx={() => exportXlsx("ageing-report", columns.map((c) => ({ header: c.header, value: c.value })), rows)} />
         </div>
       </TopbarControls>
