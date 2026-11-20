@@ -7,7 +7,7 @@ import { useBooks } from "./BooksContext";
 import EntryEditor from "./EntryEditor";
 import EntryViewer from "./EntryViewer";
 import { Card, Pill, ExportBar, exportXlsx, inputCls, btnPrimary, btnGhost } from "./ui";
-import { cashBook, accountBook, accountChoices, balances, todayStr, addDays, num } from "./money";
+import { cashBook, accountChoices, balances, todayStr, addDays, num } from "./money";
 import { formatBSDate } from "../../utils/nepali-date";
 
 // The Day Book as Jageer Nepal draws it: the New entry buttons and the date stepper up top, then one bordered
@@ -107,15 +107,9 @@ export default function DayBook({ date, setDate, goTab, openParty, editBill }) {
   const today = todayStr();
   const [range, setRangeState] = useState({ from: date || today, to: date || today });
   const setRange = (r) => { setRangeState(r); if (r.from === r.to) setDate?.(r.from); };
-  // Which account the book is of: "all" (cash and every bank together) or one account, with its own opening and closing balance.
-  const [acct, setAcct] = useState("all");
+  // The book is always of every account together (cash and each bank).
   const choices = useMemo(() => accountChoices(books), [books]);
-  const picked = acct === "all" || choices.some((c) => c.id === acct) ? acct : "all"; // an account that was deleted falls back to all
-  const pickedName = choices.find((c) => c.id === picked)?.name;
-  const book = useMemo(
-    () => (picked === "all" ? cashBook(books, range.from, range.to) : accountBook(books, picked, range.from, range.to)),
-    [books, range.from, range.to, picked],
-  );
+  const book = useMemo(() => cashBook(books, range.from, range.to), [books, range.from, range.to]);
   // What each account held when the first day shown began (the opening balance of that day, account by account).
   const openings = useMemo(() => {
     const buckets = balances(books, { before: range.from }).buckets;
@@ -148,9 +142,9 @@ export default function DayBook({ date, setDate, goTab, openParty, editBill }) {
     { header: "Cash out", value: (r) => r.out ?? "" },
     { header: "Balance", value: (r) => r.balance ?? "" },
   ];
-  // The opening row's second line: what each account held (Cash −41,830 + Esewa −52,656 + JBBL 740,472 = 645,985). Only when the
-  // book is of every account and there is more than cash to add up.
-  const split = hasBanks && picked === "all" ? `${openings.map((o) => `${o.name} ${num(o.total)}`).join(" + ")} = ${num(book.opening)}` : "";
+  // The opening row's second line: what each account held (Cash −41,830 + Esewa −52,656 + JBBL 740,472 = 645,985). Only when there
+  // is more than cash to add up.
+  const split = hasBanks ? `${openings.map((o) => `${o.name} ${num(o.total)}`).join(" + ")} = ${num(book.opening)}` : "";
   const dash = <span className="text-gray-300">—</span>;
   const formula = <b>Opening {num(book.opening)} + In {num(book.cashIn)} − Out {num(book.cashOut)} = Closing Balance</b>;
   const fig = (v, color, strong) => (v ? <span className={strong ? "font-bold" : "font-medium"} style={{ color }}>{num(v)}</span> : <span className="text-gray-300">—</span>);
@@ -159,19 +153,13 @@ export default function DayBook({ date, setDate, goTab, openParty, editBill }) {
   const controls = (
     <>
       <DateStepper range={range} setRange={setRange} today={today} />
-      {hasBanks && (
-        <select value={picked} onChange={(e) => setAcct(e.target.value)} aria-label="Account" data-testid="daybook-account" className={`${inputCls} !w-auto min-w-[9.5rem]`}>
-          <option value="all">All accounts</option>
-          {choices.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-        </select>
-      )}
       <ExportBar onXlsx={() => exportXlsx(`daybook-${range.from}${singleDay ? "" : `-to-${range.to}`}`, cols, book.rows)} />
     </>
   );
 
   return (
     <div className="space-y-3.5">
-      {/* The date stepper, the account picker and Print / Excel are in the app's top bar on wide screens; on narrower ones they are here. */}
+      {/* The date stepper and Print / Excel are in the app's top bar on wide screens; on narrower ones they are here. */}
       {inTopbar
         ? createPortal(controls, topbarSlot)
         : (
@@ -207,7 +195,7 @@ export default function DayBook({ date, setDate, goTab, openParty, editBill }) {
                 <td style={OPENING_BG} className="hidden sm:table-cell" />
                 <td style={OPENING_BG} className="hidden xl:table-cell">{dash}</td>
                 <td style={OPENING_BG}>
-                  <div className="font-semibold text-gray-900">Opening balance{picked !== "all" ? ` · ${pickedName}` : ""}</div>
+                  <div className="font-semibold text-gray-900">Opening balance</div>
                   {split && <div className="text-xs text-gray-400" data-testid="daybook-openings">{split}</div>}
                 </td>
                 <td style={OPENING_BG} className="hidden md:table-cell"><Pill text="Opening" color="#374151" bg="#F3F4F6" /></td>
@@ -264,9 +252,7 @@ export default function DayBook({ date, setDate, goTab, openParty, editBill }) {
       {book.rows.length === 0 && <p className="px-1 text-[13px] text-gray-500">{singleDay ? "No entries on this day." : "No entries in this period."}</p>}
       <p className="px-1 text-xs leading-[17px] text-gray-500">
         Tap an entry to open it; the person's name in it opens their ledger.{" "}
-        {picked === "all"
-          ? "Purchase and Sale show what a bill was billed for and Contra what moved between your own accounts; only money that moved (received, payment, expenses, walk-in sales) changes the balance."
-          : `This is ${pickedName} only: the entries that moved money through it (a bill against a person moves none, so it is not listed here).`}
+        Purchase and Sale show what a bill was billed for and Contra what moved between your own accounts; only money that moved (received, payment, expenses, walk-in sales) changes the balance.
       </p>
       {viewing && (
         <EntryViewer row={viewing} kind={KIND[viewing.kind]} openParty={openParty} onClose={() => setViewing(null)}
