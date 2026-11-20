@@ -358,13 +358,14 @@ export default function JobCards() {
 
   return (
     <div className="space-y-5 animate-fade-in">
+      {/* The plain record count is the Total card below; this line only shows while filters narrow the list, with the way to clear them. */}
       <TopbarRow note={hasActiveFilters ? (
         <>
           {filtered.length} of {jobs.length} records
           <span className="text-slate-400"> · filters active</span>
           <button onClick={clearFilters} data-testid="job-clear-filters" className="ml-2 text-blue-600 hover:underline font-medium">Clear filters</button>
         </>
-      ) : `${filtered.length} records`}>
+      ) : null}>
         <DateRangeFilter value={dateRange.key} custom={dateRange.custom} onChange={(key, custom) => setDateRange({ key, custom })} testid="job-cards-date-filter" />
         <ViewToggle view={view} onChange={setView} testid="job-cards-view-toggle" />
         {canEdit && (
@@ -375,11 +376,12 @@ export default function JobCards() {
       </TopbarRow>
 
       {/* Stats */}
-      <div className="grid grid-cols-3 gap-2 sm:gap-4">
+      <div className="grid grid-cols-4 gap-2 sm:gap-4">
         {[
           { label: "Pending", count: stats.pending, bg: "bg-yellow-50 border-yellow-100", text: "text-yellow-800" },
           { label: "In Progress", count: stats.in_progress, bg: "bg-blue-50 border-blue-100", text: "text-blue-800" },
           { label: "Completed", count: stats.completed, bg: "bg-green-50 border-green-100", text: "text-green-800" },
+          { label: "Total", count: jobs.length, bg: "bg-slate-50 border-slate-200", text: "text-slate-800" },
         ].map(s => (
           <div key={s.label} className={`${s.bg} border rounded-xl p-2.5 sm:p-4 text-center`} data-testid={`job-stat-${s.label.toLowerCase().replace(" ", "-")}`}>
             <div className={`text-2xl font-bold ${s.text}`} style={{ fontFamily: "Manrope" }}>{s.count}</div>
