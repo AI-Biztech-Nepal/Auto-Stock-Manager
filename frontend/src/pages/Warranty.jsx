@@ -138,7 +138,7 @@ export default function Warranty() {
 
   return (
     <div className="space-y-5 animate-fade-in">
-      <TopbarRow note={`${formatWarrantyLength(defaultDays)} from the sale date by default · labour free, parts charged · void if serviced outside Hamro G&G`}>
+      <TopbarRow>
         <div className="relative w-full sm:w-72">
           <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
           <input
