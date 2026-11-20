@@ -7,8 +7,8 @@ import { toast } from "sonner";
 import { useBooks } from "./BooksContext";
 import EntryEditor from "./EntryEditor";
 import PartyLedgerPopup from "./PartyLedgerPopup";
-import { Card, Field, Modal, Empty, TwoTapDelete, Notice, ExportBar, exportXlsx, inputCls, btnPrimary, btnGhost } from "./ui";
-import { ledgerRows, partyStatement, npr, num } from "./money";
+import { Card, Field, Modal, DateField, Empty, TwoTapDelete, Notice, ExportBar, exportXlsx, inputCls, btnPrimary, btnGhost } from "./ui";
+import { ledgerRows, partyStatement, partyOpening, suggestedOpeningDay, isOpening, npr, num } from "./money";
 import { getCurrentBSMonthRange, getCurrentBSYearRange, formatBSDate } from "../../utils/nepali-date";
 
 const PhoneHint = "10-digit phone";
@@ -62,6 +62,11 @@ function PartyForm({ party, onClose, onOpenExisting }) {
   const [phone, setPhone] = useState(party?.phone || "");
   const [address, setAddress] = useState(party?.address || "");
   const [typeId, setTypeId] = useState(party ? party.party_type_id || null : books.party_types.find((t) => t.name === "Customer")?.id || null);
+  // Opening balance: what they owed you (receive) or you owed them (pay) before these books began.
+  const had = useMemo(() => (party ? partyOpening(books, party.id) : null), [books, party]);
+  const [opening, setOpening] = useState(had ? String(had.amount) : "");
+  const [direction, setDirection] = useState(had?.direction || "receive");
+  const [openingDate, setOpeningDate] = useState(had?.date || suggestedOpeningDay(books));
   const [busy, setBusy] = useState(false);
   // Look the phone up first so the user gets a way forward instead of a raw duplicate error.
   const clash = useMemo(() => {
@@ -73,9 +78,16 @@ function PartyForm({ party, onClose, onOpenExisting }) {
     if (!name.trim()) return toast.error("Name is required");
     const digits = phone.replace(/\D/g, "");
     if (digits && digits.length !== 10) return toast.error("Phone must be 10 digits");
+    const amount = opening.trim() === "" ? 0 : Math.abs(Number(opening));
+    if (!Number.isFinite(amount)) return toast.error("Opening balance must be a number");
     setBusy(true);
     const body = { name, phone: digits, address, ...(books.types_ready ? { party_type_id: typeId } : {}) };
     const ok = party ? await put(`/fin/parties/${party.id}`, body, "Saved") : await post("/fin/parties", body, "Party added");
+    // Only touch the opening entry when there is something to save or something to clear.
+    if (ok && (amount > 0 || had)) {
+      const done = await put(`/fin/parties/${party?.id || ok.id}/opening`, { amount, direction, entry_date: openingDate || null });
+      if (!done) toast.error("The party was saved, but the opening balance was not");
+    }
     setBusy(false);
     if (ok) onClose(ok);
   };
@@ -92,6 +104,19 @@ function PartyForm({ party, onClose, onOpenExisting }) {
         )}
         <Field label="Address"><input value={address} onChange={(e) => setAddress(e.target.value)} className={inputCls} /></Field>
         {books.types_ready && <Field label="Ledger type"><TypeSelect value={typeId} onChange={setTypeId} /></Field>}
+        <div className="rounded-lg border border-blue-100 bg-blue-50/50 p-3 space-y-3" data-testid="party-opening">
+          <div className="text-xs font-semibold text-slate-700">Opening balance</div>
+          <div className="grid grid-cols-2 gap-2">
+            {[["receive", "They owe me (to receive)"], ["pay", "I owe them (to pay)"]].map(([k, label]) => (
+              <button key={k} type="button" onClick={() => setDirection(k)} aria-pressed={direction === k}
+                className={`h-10 rounded-lg border text-[13px] font-semibold transition-colors ${direction === k ? (k === "receive" ? "border-emerald-600 bg-emerald-600 text-white" : "border-red-600 bg-red-600 text-white") : "border-gray-200 bg-white text-gray-700 hover:bg-gray-50"}`}>{label}</button>
+            ))}
+          </div>
+          <Field label="Amount (NPR)" hint="What was owed before these books began. Leave empty for none; clear it to remove an opening balance.">
+            <input type="number" min="0" step="any" value={opening} onChange={(e) => setOpening(e.target.value)} className={inputCls} placeholder="0" data-testid="party-opening-amount" />
+          </Field>
+          <DateField label="As of" value={openingDate} onChange={setOpeningDate} />
+        </div>
         <div className="flex justify-end gap-2"><button onClick={() => onClose(null)} className={btnGhost}>Cancel</button><button onClick={save} disabled={busy || !!clash} className={btnPrimary}>Save</button></div>
       </div>
     </Modal>
@@ -194,7 +219,7 @@ function PartyDetail({ party, onBack, openReport, payParty }) {
             </thead>
             <tbody>
               {st.lines.map((l, i) => (
-                <tr key={`${l.table}${l.e.id}`} onClick={() => setOpenRow({ table: l.table, data: l.e })} className="cursor-pointer" data-testid="party-line">
+                <tr key={`${l.table}${l.e.id}`} onClick={() => (isOpening(l.e) ? setEditing(true) : setOpenRow({ table: l.table, data: l.e }))} className="cursor-pointer" data-testid="party-line">
                   <td className="text-slate-500">{i + 1}</td>
                   <td className="font-semibold text-slate-900 min-w-[12rem]">{whatOf(l)}</td>
                   <td className="whitespace-nowrap">

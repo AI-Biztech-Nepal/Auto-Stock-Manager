@@ -102,6 +102,31 @@ export const emptyBooks = () => ({
 export const partyName = (books, id, fallback = "") => books.parties.find((p) => p.id === id)?.name || fallback;
 export const accountName = (books, id) => (id ? books.accounts.find((a) => a.id === id)?.name || "Account" : "Cash");
 
+// ── a party's opening balance ─────────────────────────────────────────────
+// One ledger entry (source_type "opening_balance"): money to receive is a debit on their customer ledger, money to pay a
+// debit on their vendor ledger. It moves a balance, never cash. (A bank or cash account's own opening balance is a field
+// on the account: see startingOf below.)
+export const OPENING = "opening_balance";
+export const isOpening = (e) => e.source_type === OPENING;
+
+// What a party's opening balance is now: { amount, direction: "receive" | "pay", date }, or null when there is none.
+export function partyOpening(books, partyId) {
+  const c = books.customer_ledger.find((e) => e.customer_id === partyId && isOpening(e));
+  if (c) return { amount: c.amount, direction: "receive", date: c.entry_date || "" };
+  const v = books.vendor_ledger.find((e) => e.vendor_id === partyId && isOpening(e));
+  return v ? { amount: v.amount, direction: "pay", date: v.entry_date || "" } : null;
+}
+
+// The day an opening balance starts from unless told otherwise: the day before the books' first entry, so it sits first on
+// every statement. Today when the books are empty.
+export function suggestedOpeningDay(books) {
+  const days = [
+    ...books.transactions.map(billDate), ...books.customer_ledger.filter((e) => !isOpening(e)).map(entryDate),
+    ...books.vendor_ledger.filter((e) => !isOpening(e)).map(entryDate), ...books.transfers.map(transferDate),
+  ].filter(Boolean).sort();
+  return days.length ? addDays(days[0], -1) : todayStr();
+}
+
 // ── 2.1 what a party owes / is owed ───────────────────────────────────────
 export function partyBalances(books) {
   const by = {};
@@ -129,6 +154,7 @@ export function ledgerRows(books, from, to) {
     if (to && d > to) return;
     const debit = e.entry_type === "debit";
     if (side === "c") { r.custCount++; r.balance += debit ? e.amount : -e.amount; } else { r.vendCount++; r.balance -= debit ? e.amount : -e.amount; }
+    if (isOpening(e)) return; // counts in the balance only: not billed / paid / received, and not "last activity"
     if (!r.last || d > r.last) r.last = d;
     if (from && d < from) return;
     if (isJournal(e)) return;
@@ -165,15 +191,16 @@ export function partyStatement(books, partyId) {
     const debitEntry = e.entry_type === "debit";
     const manual = e.source === "manual";
     const journal = isJournal(e);
-    const kind = journal ? "none" : side === "c" ? (debitEntry ? (manual ? "paid" : "billed") : "received") : (debitEntry ? "billed" : "paid");
-    const label = journal ? "Journal voucher"
+    const opening = isOpening(e);
+    const kind = journal || opening ? "none" : side === "c" ? (debitEntry ? (manual ? "paid" : "billed") : "received") : (debitEntry ? "billed" : "paid");
+    const label = journal ? "Journal voucher" : opening ? "Opening balance"
       : side === "c" ? (debitEntry ? (manual ? "Paid out" : e.source_type === "rental_rent" ? "Daily rent" : "Billed") : "Received")
       : (debitEntry ? "Bought on credit" : "Paid");
     const bill = e.source_type === "business_transaction" ? bills.get(e.source_id) : null;
     const no = bill?.bill_no || e.receipt_no;
     const refKind = bill ? BILL_KIND[bill.type] : side === "v" ? (debitEntry ? "Purchase no." : "Payment no.") : (debitEntry ? (manual ? "Payment no." : "Sales no.") : "Receipt no.");
     const j = journalOf(e.note);
-    const note = j ? [j.code, j.narration].filter(Boolean).join(" · ") : e.note;
+    const note = j ? [j.code, j.narration].filter(Boolean).join(" · ") : opening ? "" : e.note;
     // customer debit and vendor credit raise what they owe you; the other two lower it
     const up = side === "c" ? debitEntry : !debitEntry;
     // `what`: the items of the bill this entry belongs to (the vehicle, for a vehicle sale); `ref`: its bill / receipt number; `memo`: its note.
@@ -621,8 +648,8 @@ export function statementRows(books) {
     rows.push({
       id: `l-${e.id}`, key: `l-${e.id}`, kind: v ? "journal" : isIn ? "received" : manual ? "paid" : "creditSale", table: "cl", data: e, party: e.customer_id,
       date: entryDate(e), at: e.created_at,
-      details: v ? `Journal voucher · ${isIn ? "out of" : "onto"} ${name}` : isIn ? `Received from ${name}` : manual ? `Paid to ${name}` : e.source_type === "rental_rent" ? `Daily rent · ${name}` : `Receivable from ${name}`,
-      sub: v ? [v.code, v.narration].filter(Boolean).join(" · ") : [e.receipt_no ? `${isIn ? "Receipt" : "Payment"} No. ${e.receipt_no}` : null, e.note, isIn || manual ? accountName(books, e.bank_account_id) : null].filter(Boolean).join(" · "),
+      details: v ? `Journal voucher · ${isIn ? "out of" : "onto"} ${name}` : isIn ? `Received from ${name}` : manual ? `Paid to ${name}` : isOpening(e) ? `Opening balance · ${name}` : e.source_type === "rental_rent" ? `Daily rent · ${name}` : `Receivable from ${name}`,
+      sub: v ? [v.code, v.narration].filter(Boolean).join(" · ") : [e.receipt_no ? `${isIn ? "Receipt" : "Payment"} No. ${e.receipt_no}` : null, isOpening(e) ? null : e.note, isIn || manual ? accountName(books, e.bank_account_id) : null].filter(Boolean).join(" · "),
       pill: v ? P.journal : isIn ? P.received : manual ? P.paid : P.creditSale,
       invoice: null, discount: null,
       amount: v || (!isIn && !manual) ? e.amount : null,
@@ -639,8 +666,8 @@ export function statementRows(books) {
     rows.push({
       id: `v-${e.id}`, key: `v-${e.id}`, kind: v ? "journal" : isPay ? "paid" : "creditPurchase", table: "vl", data: e, party: e.vendor_id,
       date: entryDate(e), at: e.created_at,
-      details: v ? `Journal voucher · ${isPay ? "onto" : "out of"} ${name}` : isPay ? `Paid to ${name}` : `Bought on credit · ${name}`,
-      sub: v ? [v.code, v.narration].filter(Boolean).join(" · ") : [e.receipt_no ? `Payment No. ${e.receipt_no}` : null, e.note, isPay ? accountName(books, e.bank_account_id) : null].filter(Boolean).join(" · "),
+      details: v ? `Journal voucher · ${isPay ? "onto" : "out of"} ${name}` : isPay ? `Paid to ${name}` : isOpening(e) ? `Opening balance · ${name}` : `Bought on credit · ${name}`,
+      sub: v ? [v.code, v.narration].filter(Boolean).join(" · ") : [e.receipt_no ? `Payment No. ${e.receipt_no}` : null, isOpening(e) ? null : e.note, isPay ? accountName(books, e.bank_account_id) : null].filter(Boolean).join(" · "),
       pill: v ? P.journal : isPay ? P.paid : P.creditPurchase,
       invoice: null, discount: null,
       amount: v || !isPay ? e.amount : null,
