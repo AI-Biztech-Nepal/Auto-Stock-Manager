@@ -44,6 +44,10 @@ UPGRADE_MESSAGE = ("Rent and bill services need one more database update, which 
                    "and could not. Run backend/migration_add_finance_rent.sql on the database once, then reload this page.")
 
 RENT_SOURCE = "rental_rent"
+# A party's opening balance (what they owed you, or you owed them, before these books began) is one ordinary ledger entry with
+# this source_type: "receive" = a debit on their customer ledger, "pay" = a debit on their vendor ledger. It moves a balance,
+# never cash, so every ledger table, statement, ageing and report picks it up without a formula of its own.
+PARTY_OPENING_SOURCE = "opening_balance"
 _RENT_NS = uuid.UUID("5b0c6a4e-8f3a-4c57-9f0e-2a6c1d7b9e10")
 _rent_lock = asyncio.Lock()
 _ledger_sync_lock = asyncio.Lock()
@@ -560,6 +564,13 @@ class CashAccountBody(BaseModel):
     opening_balance: Optional[float] = None  # left out, the saved one is kept
 
 
+class PartyOpeningBody(BaseModel):
+    """A party's opening balance. direction "receive" = they owe you, "pay" = you owe them; an amount of 0 removes it."""
+    amount: float = 0
+    direction: str = "receive"
+    entry_date: Optional[str] = None  # YYYY-MM-DD, the day the balance is as of
+
+
 class LedgerBody(BaseModel):
     party_id: str
     entry_type: str = "credit"
@@ -1003,6 +1014,31 @@ def register(api_router, db, admin_only):
             fields["party_type_id"] = await _party_type_or_none(body.party_type_id)
         await db.fin_parties.update_one({"id": pid}, {"$set": fields})
         return await db.fin_parties.find_one({"id": pid}, {"_id": 0})
+
+    @api_router.put("/fin/parties/{pid}/opening")
+    @_safe
+    async def fin_set_party_opening(pid: str, body: PartyOpeningBody, cu: dict = Depends(admin_only)):
+        """Set (or clear, with 0) this party's opening balance: one entry, replacing any earlier one on either side."""
+        await _party_or_404(pid)
+        if body.direction not in ("receive", "pay"):
+            raise HTTPException(400, "Choose whether you receive or pay this amount")
+        try:
+            amount = round(abs(float(body.amount or 0)), 2)
+        except (TypeError, ValueError):
+            raise HTTPException(400, "Amount must be a number")
+        if amount != amount or amount > 1e12:
+            raise HTTPException(400, "Amount is not valid")
+        day = _clean(body.entry_date)
+        if day and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", day):
+            raise HTTPException(400, "Date must be a date")
+        await db.fin_customer_ledger.delete_many({"customer_id": pid, "source_type": PARTY_OPENING_SOURCE})
+        await db.fin_vendor_ledger.delete_many({"vendor_id": pid, "source_type": PARTY_OPENING_SOURCE})
+        if amount > 0:
+            coll, field = (db.fin_customer_ledger, "customer_id") if body.direction == "receive" else (db.fin_vendor_ledger, "vendor_id")
+            await coll.insert_one({"id": _id(), field: pid, "entry_type": "debit", "amount": amount, "note": "Opening balance",
+                                   "source": "booking", "source_type": PARTY_OPENING_SOURCE, "source_id": pid,
+                                   "bank_account_id": None, "entry_date": day, "receipt_no": None, "created_at": _now()})
+        return {"ok": True}
 
     # ── ledger types ───────────────────────────────────────────────────────
     async def _party_type_or_none(tid: Optional[str]):
