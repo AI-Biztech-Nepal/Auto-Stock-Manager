@@ -209,6 +209,12 @@ def lookup_customer(query: str, customers: list[dict], sales: list[dict], today:
     phone = _digits(q)[-10:] if len(_digits(q)) >= 7 else ""
     hits = [c for c in customers
             if (phone and _digits(c.get("contact_number"))[-10:] == phone) or (not phone and q in str(c.get("name") or "").lower())]
+    if not hits and not phone:
+        # Names are spelt many ways ("Manandhar" / "Manandar"): when nothing contains the text, take the close ones.
+        import difflib
+        scored = sorted(((difflib.SequenceMatcher(None, q, str(c.get("name") or "").lower()).ratio(), c) for c in customers),
+                        key=lambda x: -x[0])
+        hits = [c for score, c in scored if score >= 0.8][:MAX_ROWS]
     rows = []
     for c in hits[:MAX_ROWS]:
         mine = [s for s in sales if s.get("customer_id") == c.get("id")]
