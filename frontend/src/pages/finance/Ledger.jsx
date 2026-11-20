@@ -118,12 +118,14 @@ function PartyDetail({ party, onBack, openReport, payParty }) {
   const sideWord = (b) => (b > 0 ? " Dr" : b < 0 ? " Cr" : "");
   const balanceColor = (b) => (b > 0 ? TONE.receivable.text : b < 0 ? TONE.payable.text : "#111827");
   const closing = st.closing ? `${num(Math.abs(st.closing))}${sideWord(st.closing)}` : "0";
-  // A line as the Day Book words it: "Sale: Babu Tamang" over "Vehicle sale · Honda Dio 2019 (015/2817)" (its note, else the bill's items,
-  // then its reference number).
-  const headOf = (l) => ({
-    sale: `Sale: ${party.name}`, purchase: `Purchase: ${party.name}`, expense: `Expense: ${party.name}`,
-    received: `Received from ${party.name}`, paid: `Paid to ${party.name}`,
-  }[l.type] || l.label);
+  // A line as the Day Book words it, without the person's name (this is their page): "Sale: Honda Dio 2019 (015/2817)" over
+  // "Vehicle sale · Honda Dio 2019 (015/2817)" (its note, else the bill's items, then its reference number). A bill says what it
+  // was for after its type; a payment is just "Received" / "Paid".
+  const headOf = (l) => {
+    const word = { sale: "Sale", purchase: "Purchase", expense: "Expense", received: "Received", paid: "Paid" }[l.type];
+    if (!word) return l.label;
+    return ["sale", "purchase", "expense"].includes(l.type) && l.what ? `${word}: ${l.what}` : word;
+  };
   const subOf = (l) => [l.memo || l.what, l.ref ? `Ref ${l.ref}` : null].filter(Boolean).join(" · ");
   const lineWord = st.lines.length === 1 ? "Line" : "Lines";
 
