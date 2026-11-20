@@ -3,28 +3,26 @@ import { useBooks } from "./BooksContext";
 import EntryEditor from "./EntryEditor";
 import { Card, Stat, Empty, Notice, ExportBar, SearchBox, TopbarControls, exportXlsx } from "./ui";
 import { owedTotals, receivableAgeing, AGEING_BUCKETS, billDate, partyName, accountName, npr, num, COLORS } from "./money";
-import { getCurrentBSMonthRange, getCurrentBSYearRange, formatBSDate } from "../../utils/nepali-date";
+import PeriodStepper, { periodAt, periodSlug } from "./PeriodStepper";
+import { formatBSDate } from "../../utils/nepali-date";
 
 // The family of reports nested under Report in the side panel (the same five FINANCE-NEPAL lists): Sales,
 // Purchase and Expenses off the bills for a period, and Receivable / Payable off the two ledgers as they
 // stand now. Every report prints and exports to Excel from the same column definitions.
-const PERIODS = [["month", "This month"], ["year", "This year"], ["all", "All time"]];
-
 function PeriodBar({ period, setPeriod, onXlsx, q, setQ, placeholder }) {
   return (
-    <TopbarControls className="justify-between" minWidth={1280}>
-      <div className="inline-flex gap-0.5 bg-gray-100 rounded-lg p-1">
-        {PERIODS.map(([k, l]) => <button key={k} onClick={() => setPeriod(k)} className={`px-3 py-1.5 rounded-md text-xs font-bold ${period === k ? "bg-white shadow-sm text-blue-700" : "text-slate-500"}`}>{l}</button>)}
-      </div>
+    <TopbarControls className="justify-between" minWidth={1440}>
+      <PeriodStepper value={period} onChange={setPeriod} />
       <SearchBox value={q} onChange={setQ} placeholder={placeholder} />
       <ExportBar onXlsx={onXlsx} />
     </TopbarControls>
   );
 }
 
+// A report's period (this month to begin with) and the { start, end } it covers, or null for all time.
 function usePeriod() {
-  const [period, setPeriod] = useState("month");
-  const range = period === "month" ? getCurrentBSMonthRange() : period === "year" ? getCurrentBSYearRange() : null;
+  const [period, setPeriod] = useState(() => periodAt("month"));
+  const range = period.unit === "all" ? null : { start: period.from, end: period.to };
   return { period, setPeriod, range };
 }
 
@@ -112,7 +110,7 @@ function BillsReport({ type, partyId, onShowAll }) {
   return (
     <div className="space-y-4">
       <PeriodBar period={period} setPeriod={setPeriod} q={q} setQ={setQ} placeholder={sale ? "Search customer, bill no. or item" : "Search vendor, bill no. or item"}
-        onXlsx={() => exportXlsx(`${sale ? "sales" : "purchase"}-report-${period}`, columns.map((c) => ({ header: c.header, value: c.value })), rows)} />
+        onXlsx={() => exportXlsx(`${sale ? "sales" : "purchase"}-report-${periodSlug(period)}`, columns.map((c) => ({ header: c.header, value: c.value })), rows)} />
       <PartyBanner party={party} what={sale ? "sales" : "purchases"} onShowAll={onShowAll} />
       <div className="grid grid-cols-2 gap-3">
         <Stat label={sale ? "Sales billed" : "Purchases billed"} value={total} color={color} />
@@ -159,7 +157,7 @@ export function ExpenseReport({ partyId, onShowAll }) {
   return (
     <div className="space-y-4">
       <PeriodBar period={period} setPeriod={setPeriod} q={q} setQ={setQ} placeholder="Search paid to, category or note"
-        onXlsx={() => exportXlsx(`expenses-report-${period}`, columns.map((c) => ({ header: c.header, value: c.value })), rows)} />
+        onXlsx={() => exportXlsx(`expenses-report-${periodSlug(period)}`, columns.map((c) => ({ header: c.header, value: c.value })), rows)} />
       <PartyBanner party={party} what="expenses" onShowAll={onShowAll} />
       <div className="grid grid-cols-2 gap-3">
         <Stat label="Expenses" value={total} color={COLORS.out} />

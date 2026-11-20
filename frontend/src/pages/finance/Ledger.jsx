@@ -6,6 +6,7 @@ import { Search, Plus, ChevronLeft, ArrowUpCircle, Pencil } from "lucide-react";
 import { toast } from "sonner";
 import { useBooks } from "./BooksContext";
 import EntryEditor from "./EntryEditor";
+import PeriodStepper, { periodAt } from "./PeriodStepper";
 import { Card, Field, Modal, DateField, Empty, TwoTapDelete, Notice, ExportBar, exportXlsx, inputCls, btnPrimary, btnGhost } from "./ui";
 import { ledgerRows, partyStatement, partyOpening, suggestedOpeningDay, isOpening, npr, num } from "./money";
 import { formatBSDate } from "../../utils/nepali-date";
@@ -278,7 +279,8 @@ export default function Ledger({ partyId, setPartyId, openReport, payParty, goTa
   const { books, post } = useBooks();
   const [q, setQ] = useState("");
   const { topbarSlot } = useOutletContext() || {}; // the app's top bar
-  const inTopbar = useMediaQuery("(min-width: 1024px)") && !!topbarSlot;
+  const inTopbar = useMediaQuery("(min-width: 1280px)") && !!topbarSlot; // wide enough for the period stepper and the three buttons beside the title
+  const [period, setPeriod] = useState(() => periodAt("all")); // what Total paid / received count: all time to begin with
   const [filter, setFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState("");
   const [selected, setSelected] = useState(() => new Set());
@@ -286,7 +288,7 @@ export default function Ledger({ partyId, setPartyId, openReport, payParty, goTa
   const [adding, setAdding] = useState(false);
   const party = partyId ? books.parties.find((p) => p.id === partyId) : null;
 
-  const analysed = useMemo(() => ledgerRows(books), [books]);
+  const analysed = useMemo(() => ledgerRows(books, period.from || undefined, period.to || undefined), [books, period.from, period.to]);
   const cards = useMemo(() => analysed.reduce((c, r) => {
     c.paid += r.paid; c.received += r.received;
     if (r.balance > 0) c.receivable += r.balance; else c.payable -= r.balance;
@@ -334,6 +336,7 @@ export default function Ledger({ partyId, setPartyId, openReport, payParty, goTa
 
   const actions = (
     <>
+      <PeriodStepper value={period} onChange={setPeriod} />
       <ExportBar onXlsx={() => exportXlsx("ledger", cols, filtered)} />
       <button onClick={() => setAdding(true)} className={btnPrimary} data-testid="ledger-new-party"><Plus size={16} /> New party</button>
     </>

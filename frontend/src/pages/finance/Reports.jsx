@@ -4,9 +4,9 @@ import { useBooks } from "./BooksContext";
 import EntryEditor from "./EntryEditor";
 import { Card, Stat, Empty, ExportBar, SearchBox, TopbarControls, exportXlsx } from "./ui";
 import { balances, tradingAccount, cashMovements, receivedPaid, owedTotals, npr, num, COLORS } from "./money";
+import PeriodStepper, { periodAt, periodLabel, periodSlug } from "./PeriodStepper";
 import { getCurrentBSMonthRange, getCurrentBSYearRange, formatBSDate } from "../../utils/nepali-date";
 
-const PERIODS = [["month", "This month"], ["year", "This year"], ["all", "All time"]];
 const BRAND_DARK = "#1E3A8A";
 const BRAND_TINT = "#EFF6FF";
 
@@ -56,10 +56,10 @@ function Group({ id, open, onToggle, label, amount, rows, onOpen }) {
 // ── Profit & loss in Tally style, straight off the bills (billed, not collected) ──
 export function Report({ goTab }) {
   const { books } = useBooks();
-  const [period, setPeriod] = useState("month");
+  const [period, setPeriod] = useState(() => periodAt("month"));
   const [open, setOpen] = useState(() => new Set(["sales", "dincome", "purchase", "direct", "indirect"]));
   const toggle = (k) => setOpen((prev) => { const next = new Set(prev); if (next.has(k)) next.delete(k); else next.add(k); return next; });
-  const range = period === "month" ? getCurrentBSMonthRange() : period === "year" ? getCurrentBSYearRange() : null;
+  const range = period.unit === "all" ? null : { start: period.from, end: period.to };
   const pl = useMemo(() => tradingAccount(books, range?.start, range?.end), [books, range?.start, range?.end]);
   const cash = useMemo(() => receivedPaid(books, range?.start, range?.end), [books, range?.start, range?.end]);
   const bal = useMemo(() => balances(books), [books]);
@@ -89,10 +89,8 @@ export function Report({ goTab }) {
   return (
     <div className="space-y-4">
       <TopbarControls className="justify-between">
-        <div className="inline-flex gap-0.5 bg-gray-100 rounded-lg p-1">
-          {PERIODS.map(([k, l]) => <button key={k} onClick={() => setPeriod(k)} className={`px-3 py-1.5 rounded-md text-xs font-bold ${period === k ? "bg-white shadow-sm text-blue-700" : "text-slate-500"}`}>{l}</button>)}
-        </div>
-        <ExportBar onXlsx={() => exportXlsx(`profit-and-loss-${period}`, cols, rows)} />
+        <PeriodStepper value={period} onChange={setPeriod} />
+        <ExportBar onXlsx={() => exportXlsx(`profit-and-loss-${periodSlug(period)}`, cols, rows)} />
       </TopbarControls>
 
       {/* the report heading: one brand-blue band with the period and the key figures */}
@@ -254,17 +252,16 @@ const SRC_PILL = {
   walkIn: { label: "Sale", in: true }, customers: { label: "Received", in: true },
   expense: { label: "Expenses" }, toVendors: { label: "Paid" }, toCustomers: { label: "Paid" }, walkInBought: { label: "Purchase" },
 };
-const MOVED_PERIODS = [["month", "This month"], ["year", "This year"], ["all", "All time"]];
 
 export function MoneyMoved({ dir, openParty }) {
   const { books } = useBooks();
-  const [period, setPeriod] = useState("month");
+  const [period, setPeriod] = useState(() => periodAt("month"));
   const [q, setQ] = useState("");
   const [editing, setEditing] = useState(null);
   const incoming = dir === "in";
   const color = incoming ? COLORS.in : COLORS.out;
   const title = incoming ? "Total Received" : "Total Paid";
-  const range = period === "month" ? getCurrentBSMonthRange() : period === "year" ? getCurrentBSYearRange() : null;
+  const range = period.unit === "all" ? null : { start: period.from, end: period.to };
   const month = getCurrentBSMonthRange();
   const typeName = useMemo(() => {
     const names = new Map(books.party_types.map((t) => [t.id, t.name]));
@@ -306,15 +303,13 @@ export function MoneyMoved({ dir, openParty }) {
         <p className="text-sm text-slate-500">{incoming ? "Money actually collected, newest first" : "Money that actually left the business, newest first"}</p>
       </div>
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <Stat label={range ? `Total (${MOVED_PERIODS.find(([k]) => k === period)[1].toLowerCase()})` : "Total"} value={stats.total} color={color} />
+        <Stat label={range ? `Total (${periodLabel(period).toLowerCase()})` : "Total"} value={stats.total} color={color} />
         <Stat label="This month" value={stats.thisMonth} color={color} />
         <Card className="p-4"><div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Entries</div><div className="text-xl font-bold mt-1 text-slate-900" style={{ fontFamily: "Manrope" }}>{shown.length}</div></Card>
         <Stat label="Largest" value={stats.largest} />
       </div>
-      <TopbarControls minWidth={1280}>
-        <div className="inline-flex gap-0.5 bg-gray-100 rounded-lg p-1">
-          {MOVED_PERIODS.map(([k, l]) => <button key={k} onClick={() => setPeriod(k)} className={`px-3 py-1.5 rounded-md text-xs font-bold ${period === k ? "bg-white shadow-sm text-blue-700" : "text-slate-500"}`}>{l}</button>)}
-        </div>
+      <TopbarControls minWidth={1440}>
+        <PeriodStepper value={period} onChange={setPeriod} />
         <SearchBox value={q} onChange={setQ} placeholder="Search by name or number" />
         <ExportBar onXlsx={() => exportXlsx(incoming ? "total-received" : "total-paid", cols, shown)} />
       </TopbarControls>

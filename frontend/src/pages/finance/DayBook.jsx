@@ -1,16 +1,17 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { useOutletContext } from "react-router-dom";
 import useMediaQuery from "../../hooks/useMediaQuery";
-import { ChevronLeft, ChevronRight, CalendarDays, ArrowDownCircle, ArrowUpCircle, ShoppingBag, ShoppingCart, Receipt, FileText, ArrowLeftRight } from "lucide-react";
+import { ArrowDownCircle, ArrowUpCircle, ShoppingBag, ShoppingCart, Receipt, FileText, ArrowLeftRight } from "lucide-react";
 import { useBooks } from "./BooksContext";
 import EntryEditor from "./EntryEditor";
 import EntryViewer from "./EntryViewer";
-import { Card, Pill, ExportBar, exportXlsx, inputCls, btnPrimary, btnGhost } from "./ui";
-import { cashBook, accountChoices, balances, todayStr, addDays, num } from "./money";
+import PeriodStepper, { periodAt } from "./PeriodStepper";
+import { Card, Pill, ExportBar, exportXlsx, btnGhost } from "./ui";
+import { cashBook, accountChoices, balances, todayStr, num } from "./money";
 import { formatBSDate } from "../../utils/nepali-date";
 
-// The Day Book as Jageer Nepal draws it: the New entry buttons and the date stepper up top, then one bordered
+// The Day Book as Jageer Nepal draws it: the New entry buttons up top and the period stepper in the app's top bar, then one bordered
 // table - SN, Date, Invoice no., Transaction details, Type, Discount, Bill amount, Cash in, Cash out, Balance -
 // opening with the opening balance and closing on the closing balance. Only cash rows move the balance; a sale or
 // purchase bill shows what was billed. A day by default, or any run of days. Tap a row to open it.
@@ -52,49 +53,6 @@ export function NewEntryButtons({ goTab }) {
 // The opening row's tint, set on its cells (the table's row hover would otherwise paint over it).
 const OPENING_BG = { background: "#EEF3FB" };
 
-const daysBetween = (a, b) => Math.round((new Date(b) - new Date(a)) / 86400000);
-
-// ◀ [Today / the range] ▶ - the middle opens a small From / To picker with a Today shortcut.
-function DateStepper({ range, setRange, today }) {
-  const [open, setOpen] = useState(false);
-  const [from, setFrom] = useState(range.from);
-  const [to, setTo] = useState(range.to);
-  const box = useRef(null);
-  useEffect(() => { setFrom(range.from); setTo(range.to); }, [range.from, range.to]);
-  useEffect(() => {
-    const h = (e) => { if (box.current && !box.current.contains(e.target)) setOpen(false); };
-    document.addEventListener("mousedown", h);
-    return () => document.removeEventListener("mousedown", h);
-  }, []);
-  const span = daysBetween(range.from, range.to) + 1;
-  const step = (dir) => {
-    const nf = addDays(range.from, dir * span), nt = addDays(range.to, dir * span);
-    if (nt > today) return;
-    setRange({ from: nf, to: nt });
-  };
-  const isToday = range.from === today && range.to === today;
-  const label = isToday ? "Today" : range.from === range.to ? formatBSDate(range.from) : `${formatBSDate(range.from)} – ${formatBSDate(range.to)}`;
-  const iconBtn = "h-9 w-9 rounded-lg border border-gray-200 bg-white hover:bg-gray-50 disabled:opacity-40 flex items-center justify-center text-gray-600";
-  return (
-    <div className="fin-no-print relative flex items-center gap-1.5" ref={box}>
-      <button onClick={() => step(-1)} className={iconBtn} aria-label="Earlier"><ChevronLeft size={18} /></button>
-      <button onClick={() => setOpen(!open)} className={`${btnGhost} min-w-[8.5rem]`}><CalendarDays size={15} className="text-gray-500" /> {label}</button>
-      <button onClick={() => step(1)} disabled={range.to >= today} className={iconBtn} aria-label="Later"><ChevronRight size={18} /></button>
-      {open && (
-        <div className="absolute right-0 top-11 z-30 w-72 rounded-xl border border-gray-200 bg-white p-4 shadow-lg space-y-3">
-          <button onClick={() => { setRange({ from: today, to: today }); setOpen(false); }} className={`w-full rounded-lg px-3 py-2 text-left text-sm font-semibold ${isToday ? "bg-blue-50 text-blue-700" : "hover:bg-gray-50 text-gray-700"}`}>Today</button>
-          <div className="grid grid-cols-2 gap-2">
-            <label className="text-xs font-semibold text-gray-600">From<input type="date" value={from} max={to} onChange={(e) => e.target.value && setFrom(e.target.value)} className={`${inputCls} mt-1 !px-2`} /></label>
-            <label className="text-xs font-semibold text-gray-600">To<input type="date" value={to} min={from} max={today} onChange={(e) => e.target.value && setTo(e.target.value)} className={`${inputCls} mt-1 !px-2`} /></label>
-          </div>
-          <div className="text-[11px] text-gray-400">{formatBSDate(from)} to {formatBSDate(to)} BS</div>
-          <button onClick={() => { setRange({ from: from <= to ? from : to, to: to >= from ? to : from }); setOpen(false); }} className={`${btnPrimary} w-full`}>Apply</button>
-        </div>
-      )}
-    </div>
-  );
-}
-
 export default function DayBook({ date, setDate, goTab, openParty, editBill }) {
   const { books } = useBooks();
   const { topbarSlot } = useOutletContext() || {}; // the app's top bar
@@ -105,8 +63,10 @@ export default function DayBook({ date, setDate, goTab, openParty, editBill }) {
   // A journal voucher opens straight to its own viewer (inside EntryEditor); every other entry opens the bill view first.
   const open = (r) => (r.table === "jv" ? setEditing(r) : setViewing(r));
   const today = todayStr();
-  const [range, setRangeState] = useState({ from: date || today, to: date || today });
-  const setRange = (r) => { setRangeState(r); if (r.from === r.to) setDate?.(r.from); };
+  // The days shown: a day to begin with (the one Finance last had open), or a month, a year or a range of your own.
+  const [period, setPeriodState] = useState(() => periodAt("day", date || today));
+  const setPeriod = (p) => { setPeriodState(p); if (p.from && p.from === p.to) setDate?.(p.from); };
+  const range = { from: period.from, to: period.to };
   // The book is always of every account together (cash and each bank).
   const choices = useMemo(() => accountChoices(books), [books]);
   const book = useMemo(() => cashBook(books, range.from, range.to), [books, range.from, range.to]);
@@ -152,7 +112,7 @@ export default function DayBook({ date, setDate, goTab, openParty, editBill }) {
 
   const controls = (
     <>
-      <DateStepper range={range} setRange={setRange} today={today} />
+      <PeriodStepper value={period} onChange={setPeriod} units={["day", "month", "year", "custom"]} />
       <ExportBar onXlsx={() => exportXlsx(`daybook-${range.from}${singleDay ? "" : `-to-${range.to}`}`, cols, book.rows)} />
     </>
   );

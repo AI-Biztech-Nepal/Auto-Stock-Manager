@@ -7,6 +7,7 @@ import { useBooks } from "./BooksContext";
 import EntryEditor from "./EntryEditor";
 import EntryViewer from "./EntryViewer";
 import { KIND } from "./DayBook";
+import PeriodStepper, { periodAt, periodSlug } from "./PeriodStepper";
 import { Card, Pill, Empty, ExportBar, exportXlsx, btnGhost } from "./ui";
 import { accountBook, accountChoices, num, CASH, COLORS } from "./money";
 import { formatBSDate } from "../../utils/nepali-date";
@@ -32,7 +33,8 @@ export default function AccountDetail({ bucket, onBack, onEdit, openParty }) {
   const name = accountChoices(books, "Cash in hand").find((c) => c.id === bucket)?.name || "Account";
   const acct = bucket === CASH ? books.cash_account || {} : books.accounts.find((a) => a.id === bucket) || {};
   const details = [acct.bank_name, acct.account_number, acct.account_holder_name, acct.address].filter(Boolean).join(" · ");
-  const book = useMemo(() => accountBook(books, bucket), [books, bucket]);
+  const [period, setPeriod] = useState(() => periodAt("all")); // all time to begin with
+  const book = useMemo(() => accountBook(books, bucket, period.from || undefined, period.to || undefined), [books, bucket, period.from, period.to]);
   const rows = useMemo(() => [...book.rows].reverse(), [book]); // newest first
   const word = rows.length === 1 ? "Entry" : "Entries";
   const time = (r) => (r.at ? new Date(r.at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }) : "");
@@ -55,7 +57,12 @@ export default function AccountDetail({ bucket, onBack, onEdit, openParty }) {
       <h1 className="min-w-0 truncate text-2xl font-bold text-slate-900" data-testid="account-title">{name}</h1>
     </>
   );
-  const buttons = <ExportBar onXlsx={() => exportXlsx(`account-${name}`, cols, rows)} />;
+  const buttons = (
+    <>
+      <PeriodStepper value={period} onChange={setPeriod} />
+      <ExportBar onXlsx={() => exportXlsx(`account-${name}-${periodSlug(period)}`, cols, rows)} />
+    </>
+  );
   const label = <b>{rows.length} {word} · Total</b>;
 
   return (
