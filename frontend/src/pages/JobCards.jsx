@@ -378,7 +378,7 @@ export default function JobCards() {
       {/* Stats */}
       <div className="grid grid-cols-4 gap-2 sm:gap-4">
         {[
-          { label: "Total", count: jobs.length, bg: "bg-slate-50 border-slate-200", text: "text-slate-800" },
+          { label: "Total", count: jobs.length, bg: "bg-violet-50 border-violet-100", text: "text-violet-800" },
           { label: "Pending", count: stats.pending, bg: "bg-yellow-50 border-yellow-100", text: "text-yellow-800" },
           { label: "In Progress", count: stats.in_progress, bg: "bg-blue-50 border-blue-100", text: "text-blue-800" },
           { label: "Completed", count: stats.completed, bg: "bg-green-50 border-green-100", text: "text-green-800" },
