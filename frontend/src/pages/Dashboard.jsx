@@ -565,7 +565,6 @@ function AccountingSummary({ range }) {
 const PERIOD_STORAGE_KEY = "dashboard_date_filter";
 
 export default function Dashboard() {
-  const { user } = useAuth();
   const wideScreen = useMediaQuery("(min-width: 1024px)");
   const { topbarSlot } = useOutletContext() || {}; // the app's top bar: on wide screens the page's status pills and date filter sit there
   // Coming back to the Dashboard shows the last figures at once (see utils/listCache.js); they are refreshed below as always.
@@ -619,7 +618,6 @@ export default function Dashboard() {
 
   const bs = getCurrentBSDate();
   const bsDateStr = bs ? `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year} BS` : "";
-  const overview = `Overview of ${user?.company_name || "your"} operations`;
   const statusPills = (
     <>
       <OnlineUsers />
@@ -635,22 +633,18 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      {/* The title "Dashboard" is in the app's top bar. On wide screens the overview line, the status pills and the date filter are up
-          there too (the overview line only where there is room for it); on narrower ones they are here. */}
+      {/* The title "Dashboard" is in the app's top bar. On wide screens the status pills and the date filter are up there too;
+          on narrower ones they are here. */}
       {wideScreen && topbarSlot
         ? createPortal(
           <>
-            <span className="hidden 2xl:block min-w-0 truncate text-sm text-slate-500 mr-1" data-testid="dashboard-overview">{overview}</span>
             {statusPills}
             {dateFilter}
           </>,
           topbarSlot,
         )
         : (
-          <div className="flex items-start justify-between gap-3 flex-wrap">
-            <div>
-              <p className="text-sm text-slate-500" data-testid="dashboard-overview">{overview}</p>
-            </div>
+          <div className="flex items-start justify-end gap-3 flex-wrap">
             <div className="flex items-center gap-2 flex-wrap">
               {/* Status pills — one tidy row (was date+clock stacked over online-count, which
                   read as misaligned once the toggle grew a third tab). Hidden below sm: purely
