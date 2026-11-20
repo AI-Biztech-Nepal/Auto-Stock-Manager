@@ -361,7 +361,7 @@ export default function Visits({ embedded = false }) {
   return (
     <div className="space-y-6 animate-fade-in" data-testid="visits-page">
       {!embedded && <h1 className="text-2xl font-bold text-slate-900">Visits</h1>}
-      <TopbarRow note={`Who visits ${base.replace(/^https?:[/][/]/, "")}, where they come from, and how long they stay.`}>
+      <TopbarRow>
         <div className="flex gap-1 bg-slate-100 rounded-xl p-1 w-full sm:w-auto">
           {RANGES.map(r => (
             <button key={r.key} onClick={() => setRangeKey(r.key)} className={`flex-1 sm:flex-none h-9 sm:h-8 px-2 sm:px-4 rounded-lg text-xs sm:text-sm font-medium transition ${rangeKey === r.key ? "bg-white shadow-sm text-blue-700" : "text-slate-500 hover:text-slate-800"}`}>{r.label}</button>
