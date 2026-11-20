@@ -3,30 +3,9 @@ import { Plus, Landmark, Banknote, ArrowRightLeft } from "lucide-react";
 import { toast } from "sonner";
 import { useBooks } from "./BooksContext";
 import EntryEditor from "./EntryEditor";
+import AccountDetail from "./AccountDetail";
 import { Card, Field, Modal, DateField, Empty, Stat, TwoTapDelete, inputCls, btnPrimary, btnGhost } from "./ui";
-import { balances, accountDays, accountChoices, transferDate, todayStr, addDays, npr, num, CASH, COLORS } from "./money";
-import { formatBSDate } from "../../utils/nepali-date";
-
-// The lines behind one account's balance, so a wrong total can be traced.
-export function AccountLines({ title, bucket, onClose }) {
-  const lines = [...(bucket?.lines || [])].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
-  return (
-    <Modal title={title} onClose={onClose} wide>
-      <div className="flex justify-between text-sm mb-3"><span className="text-slate-500">{lines.length} entries</span><span className="font-bold" style={{ color: (bucket?.total || 0) < 0 ? COLORS.out : COLORS.balance }}>{npr(bucket?.total || 0)}</span></div>
-      {lines.length === 0 ? <Empty>Nothing has moved through here yet.</Empty> : (
-        <div className="divide-y divide-slate-100">
-          {lines.map((l, i) => (
-            <div key={i} className="py-2 flex items-center gap-3 text-sm">
-              <span className="text-xs text-slate-400 w-24 shrink-0">{l.date || "Opening"}</span>
-              <span className="flex-1 min-w-0 truncate text-slate-700">{l.label}</span>
-              <span className="font-semibold shrink-0" style={{ color: l.amount >= 0 ? COLORS.in : COLORS.out }}>{l.amount >= 0 ? "+" : "−"}{npr(Math.abs(l.amount)).replace("NPR ", "")}</span>
-            </div>
-          ))}
-        </div>
-      )}
-    </Modal>
-  );
-}
+import { balances, transferDate, todayStr, npr, CASH, COLORS } from "./money";
 
 function AccountForm({ account, onClose, isCash = false }) {
   const { books, post, put } = useBooks();
@@ -104,80 +83,35 @@ export function TransferForm({ onDone }) {
   );
 }
 
-// One account, day by day: for every day that has entries, what the account held when the day began (its opening balance), the
-// money in and out, and what it held at the end. Worked out from the entries, newest day first.
-function DayByDay() {
-  const { books } = useBooks();
-  const choices = useMemo(() => accountChoices(books, "Cash in hand"), [books]);
-  const [acct, setAcct] = useState(CASH);
-  const [from, setFrom] = useState(() => addDays(todayStr(), -30));
-  const [to, setTo] = useState(todayStr());
-  const picked = choices.some((c) => c.id === acct) ? acct : CASH; // an account that was deleted falls back to cash
-  const book = useMemo(() => accountDays(books, picked, from, to), [books, picked, from, to]);
-  const days = [...book.days].reverse();
-  const tone = (n) => (n < 0 ? COLORS.out : COLORS.balance);
-  return (
-    <Card className="overflow-hidden">
-      <div className="flex flex-wrap items-end justify-between gap-3 px-4 py-3 border-b border-slate-100">
-        <div>
-          <div className="text-sm font-semibold text-slate-800">Day by day</div>
-          <div className="text-xs text-slate-500">Each day's opening balance, money in and out, and closing balance.</div>
-        </div>
-        <div className="flex flex-wrap items-end gap-3">
-          <Field label="Account">
-            <select value={picked} onChange={(e) => setAcct(e.target.value)} className={`${inputCls} !w-auto min-w-[10rem]`} data-testid="dayby-account">
-              {choices.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
-          </Field>
-          <DateField label="From" value={from} onChange={setFrom} />
-          <DateField label="To" value={to} onChange={setTo} />
-        </div>
-      </div>
-      {days.length === 0 ? <Empty>Nothing moved through this account in these days.</Empty> : (
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm" data-testid="dayby-table">
-            <thead>
-              <tr className="text-left text-xs text-slate-500 border-b border-slate-100">
-                <th className="px-4 py-2 font-semibold">Date</th>
-                <th className="px-4 py-2 text-right font-semibold">Opening balance</th>
-                <th className="px-4 py-2 text-right font-semibold">Money in</th>
-                <th className="px-4 py-2 text-right font-semibold">Money out</th>
-                <th className="px-4 py-2 text-right font-semibold">Closing balance</th>
-                <th className="px-4 py-2 text-right font-semibold">Entries</th>
-              </tr>
-            </thead>
-            <tbody>
-              {days.map((d) => (
-                <tr key={d.date} className="border-t border-slate-100" data-testid="dayby-row">
-                  <td className="px-4 py-2.5 whitespace-nowrap">{formatBSDate(d.date)}<div className="text-[11px] text-slate-400">{d.date}</div></td>
-                  <td className="px-4 py-2.5 text-right font-semibold whitespace-nowrap" style={{ color: tone(d.opening) }}>{num(d.opening)}</td>
-                  <td className="px-4 py-2.5 text-right whitespace-nowrap" style={{ color: COLORS.in }}>{d.in ? num(d.in) : <span className="text-slate-300">—</span>}</td>
-                  <td className="px-4 py-2.5 text-right whitespace-nowrap" style={{ color: COLORS.out }}>{d.out ? num(d.out) : <span className="text-slate-300">—</span>}</td>
-                  <td className="px-4 py-2.5 text-right font-semibold whitespace-nowrap" style={{ color: tone(d.closing) }}>{num(d.closing)}</td>
-                  <td className="px-4 py-2.5 text-right text-slate-500">{d.count}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-      <p className="px-4 py-3 text-xs text-slate-400 border-t border-slate-100">
-        Opening on {from}: <b style={{ color: tone(book.opening) }}>{npr(book.opening)}</b> · closing on {to}: <b style={{ color: tone(book.closing) }}>{npr(book.closing)}</b>.
-        A day with no entries is left out: it opens and closes on the day before's closing balance.
-      </p>
-    </Card>
-  );
-}
-
-export default function BankAccounts() {
+// accountId: the account whose own page is open (CASH or a bank account's id; from ?account=), or null for the list of accounts.
+// setAccountId: opens / closes an account's page. openParty: opens a person's ledger (from an entry on an account's page).
+export default function BankAccounts({ accountId, setAccountId, openParty }) {
   const { books, del } = useBooks();
   const [form, setForm] = useState(null);       // null | "new" | "cash" | account
-  const [lines, setLines] = useState(null);     // { title, bucket }
   const [editing, setEditing] = useState(null); // a transfer row
   const bal = useMemo(() => balances(books), [books]);
   const cash = books.cash_account || {};
   const cashName = cash.name || "Cash in hand";
   const transfers = useMemo(() => [...books.transfers].sort((a, b) => (transferDate(a) < transferDate(b) ? 1 : -1)), [books.transfers]);
+
+  const forms = (
+    <>
+      {form === "cash" && <AccountForm account={{ ...cash, name: cashName }} isCash onClose={() => setForm(null)} />}
+      {form && form !== "cash" && <AccountForm account={form === "new" ? null : form} onClose={() => setForm(null)} />}
+    </>
+  );
+
+  // An account's own page: every entry that moved money through it
+  const openAccount = accountId === CASH ? CASH : books.accounts.find((a) => a.id === accountId)?.id;
+  if (openAccount) {
+    return (
+      <>
+        <AccountDetail bucket={openAccount} onBack={() => setAccountId(null)} openParty={openParty}
+          onEdit={() => setForm(openAccount === CASH ? "cash" : books.accounts.find((a) => a.id === openAccount))} />
+        {forms}
+      </>
+    );
+  }
 
   return (
     <div className="space-y-5">
@@ -189,7 +123,7 @@ export default function BankAccounts() {
       </div>
       <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
         <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
-          <button onClick={() => setLines({ title: cashName, bucket: bal.buckets[CASH] })} className="text-left w-full">
+          <button onClick={() => setAccountId(CASH)} className="text-left w-full" data-testid="account-card-cash">
             <div className="flex items-center gap-2 text-xs font-semibold uppercase text-slate-500"><Banknote size={14} /> {cashName}</div>
             <div className="text-xl font-bold mt-1" style={{ color: bal.cash < 0 ? COLORS.out : COLORS.balance, fontFamily: "Manrope" }}>{npr(bal.cash)}</div>
             <div className="text-xs text-slate-400 mt-0.5 truncate">{[cash.bank_name, cash.account_number, cash.account_holder_name, cash.address].filter(Boolean).join(" · ") || "No details yet"}</div>
@@ -200,7 +134,7 @@ export default function BankAccounts() {
           const total = bal.buckets[a.id]?.total || 0;
           return (
             <div key={a.id} className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
-              <button onClick={() => setLines({ title: a.name, bucket: bal.buckets[a.id] })} className="text-left w-full">
+              <button onClick={() => setAccountId(a.id)} className="text-left w-full" data-testid="account-card">
                 <div className="flex items-center gap-2 text-xs font-semibold uppercase text-slate-500"><Landmark size={14} /> {a.name}</div>
                 <div className="text-xl font-bold mt-1" style={{ color: total < 0 ? COLORS.out : COLORS.balance, fontFamily: "Manrope" }}>{npr(total)}</div>
                 <div className="text-xs text-slate-400 mt-0.5 truncate">{[a.bank_name, a.account_number].filter(Boolean).join(" · ") || "No details yet"}</div>
@@ -216,8 +150,6 @@ export default function BankAccounts() {
       </div>
       <p className="text-xs text-slate-400">Total available: <b style={{ color: COLORS.balance }}>{npr(bal.total)}</b>. Deleting an account moves its entries back to cash in hand and removes transfers that used it.</p>
 
-      <DayByDay />
-
       <TransferForm />
 
       <Card>
@@ -231,9 +163,7 @@ export default function BankAccounts() {
         ))}
       </Card>
 
-      {form === "cash" && <AccountForm account={{ ...cash, name: cashName }} isCash onClose={() => setForm(null)} />}
-      {form && form !== "cash" && <AccountForm account={form === "new" ? null : form} onClose={() => setForm(null)} />}
-      {lines && <AccountLines title={lines.title} bucket={lines.bucket} onClose={() => setLines(null)} />}
+      {forms}
       {editing && <EntryEditor row={editing} onClose={() => setEditing(null)} />}
     </div>
   );

@@ -16,7 +16,7 @@ import { formatBSDate } from "../../utils/nepali-date";
 // purchase bill shows what was billed. A day by default, or any run of days. Tap a row to open it.
 
 // The Type pill of each row, in Jageer's words and colours.
-const KIND = {
+export const KIND = {
   received: { label: "Received", color: "#047857", bg: "#ECFDF5" },
   paid: { label: "Payment", color: "#B91C1C", bg: "#FEF2F2" },
   expense: { label: "Expenses", color: "#B91C1C", bg: "#FEF2F2" },

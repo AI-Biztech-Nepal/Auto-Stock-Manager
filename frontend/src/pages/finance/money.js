@@ -503,30 +503,6 @@ export function accountBook(books, bucket, from, to) {
   return { opening, rows, cashIn, cashOut, closing: running };
 }
 
-// An account's days from `from` to `to`, oldest first: each day that has entries with its opening balance (the account's
-// balance from everything before that day), the money in and out, and its closing balance. A day with no entries is left out:
-// its opening and closing are simply the day before's closing. `opening` / `closing` are for the whole period.
-export function accountDays(books, bucket, from, to) {
-  const lines = balances(books).buckets[bucket]?.lines || [];
-  let opening = 0;
-  const byDay = new Map();
-  for (const l of lines) {
-    if (!l.date || (from && l.date < from)) { opening += l.amount; continue; } // the account's own opening balance has no date: it is always before
-    if (to && l.date > to) continue;
-    const d = byDay.get(l.date) || { date: l.date, in: 0, out: 0, count: 0 };
-    if (l.amount >= 0) d.in += l.amount; else d.out += -l.amount;
-    d.count += 1;
-    byDay.set(l.date, d);
-  }
-  let run = opening;
-  const days = [...byDay.values()].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0)).map((d) => {
-    const dayOpening = run;
-    run = dayOpening + d.in - d.out;
-    return { ...d, opening: dayOpening, closing: run };
-  });
-  return { days, opening, closing: run };
-}
-
 // ── the interleaved feed under the entry forms ────────────────────────────
 export function feedRows(books) {
   const rows = [];
