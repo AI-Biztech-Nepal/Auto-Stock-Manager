@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import TopbarRow from "../components/TopbarRow";
 import { useSearchParams } from "react-router-dom";
 import { Search, Copy, Share2, MessageCircle, Download, Sparkles, Package, RotateCcw, Check, Send, ShoppingBag, ExternalLink } from "lucide-react";
 import { toast } from "sonner";
@@ -359,7 +358,6 @@ export default function Share({ embedded = false }) {
   return (
     <div className="space-y-5 animate-fade-in">
       {!embedded && <h1 className="text-2xl font-bold text-slate-900">Share</h1>}
-      <TopbarRow note="Pick vehicles, get a ready-to-post caption for each, then share to Facebook, WhatsApp or anywhere else." />
 
       <FacebookBar status={fbStatus} isAdmin={role === "admin"} onChanged={loadFb} />
 
