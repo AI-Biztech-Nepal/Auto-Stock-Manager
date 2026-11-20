@@ -3,6 +3,7 @@ import { ChevronDown, Check, Download, Printer, CheckCircle2, AlertCircle } from
 import api from "../../utils/api";
 import { useAuth } from "../../context/AuthContext";
 import { useBooks } from "./BooksContext";
+import { TopbarControls } from "./ui";
 import { balances, entryDate, todayStr, addDays } from "./money";
 import { adToBsDate, bsToAdDate, BS_MONTHS, formatBSDateNumeric } from "../../utils/nepali-date";
 
@@ -277,13 +278,13 @@ export default function BalanceSheet({ goTab, openParty }) {
 
   return (
     <div className="space-y-4">
-      <div className="fin-no-print flex flex-wrap items-center gap-3">
-        <div className="flex-1 min-w-[240px] text-xs font-semibold text-gray-500">Choose the date and what to compare with</div>
+      {/* The date, what to compare with, Export CSV and Print / PDF are in the app's top bar on wide screens; on narrower ones they are here. */}
+      <TopbarControls minWidth={1536} className="justify-end">
         <Select label="As on" value={asOnKey} options={AS_ON} onChange={setAsOnKey} />
         <Select label="Compare" value={compareKey} options={COMPARE} onChange={setCompareKey} />
         <button onClick={exportCsv} className="flex items-center gap-1.5 rounded-xl border bg-white px-3.5 py-2.5 text-[13px] font-semibold text-slate-900" style={{ borderColor: LINE }}><Download size={15} className="text-blue-700" /> Export CSV</button>
         <button onClick={() => window.print()} className="flex items-center gap-1.5 rounded-xl px-3.5 py-2.5 text-[13px] font-semibold text-white bg-[#1D4ED8]"><Printer size={15} /> Print / PDF</button>
-      </div>
+      </TopbarControls>
 
       {vehicles === null && <p className="py-2 text-center text-sm text-gray-400">Reading your books…</p>}
 
