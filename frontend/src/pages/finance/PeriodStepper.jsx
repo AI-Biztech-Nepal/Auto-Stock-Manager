@@ -5,8 +5,9 @@ import { inputCls, btnPrimary } from "./ui";
 import { adToBsDate, bsToAdDate, getBSMonthRange, getBSMonthMaxDays, BS_MONTHS, formatBSDate } from "../../utils/nepali-date";
 
 // The Finance pages' period control, as ‹ [▾ This Year] ›: the middle button picks the kind of period (a day, a month, a year, all
-// time or a range of your own) and the arrows step back and forward by that much (the next one stops at today). Months and years
-// are Nepali (BS) ones. Each page keeps its own period and its own default.
+// time or a range of your own) and the arrows move ONE DAY per click, from any of them: from a month, a year, a range or all time the
+// first click lands on a single day (today's neighbour), and from there each click is the day before / after (the later one stops at
+// today). Months and years are Nepali (BS) ones. Each page keeps its own period and its own default.
 //
 // A period is { unit, from, to } with from / to as AD dates ("" for all time). unit: "day" | "month" | "year" | "all" | "custom".
 
@@ -28,24 +29,13 @@ export function periodAt(unit, day = todayStr()) {
   return (unit === "month" ? monthPeriod(bs.year, bs.month) : yearPeriod(bs.year)) || { unit: "day", from: day, to: day };
 }
 
-const daysBetween = (a, b) => Math.round((new Date(b) - new Date(a)) / 86400000);
-
-// The period one step back (dir = -1) or forward (+1), or null when there is nowhere to go.
-export function stepPeriod(p, dir) {
-  if (p.unit === "all") return null;
-  if (p.unit === "day") return { unit: "day", from: addDays(p.from, dir), to: addDays(p.from, dir) };
-  if (p.unit === "custom") {
-    const span = daysBetween(p.from, p.to) + 1;
-    return { unit: "custom", from: addDays(p.from, dir * span), to: addDays(p.to, dir * span) };
-  }
-  const bs = adToBsDate(p.from);
-  if (!bs) return null;
-  if (p.unit === "year") return yearPeriod(bs.year + dir);
-  const idx = bs.year * 12 + (bs.month - 1) + dir;
-  return monthPeriod(Math.floor(idx / 12), (idx % 12) + 1);
+// One day back (dir = -1) or forward (+1), as a single-day period, or null when that would be after today. From a day it is the
+// day next to it; from any other period it starts from the period's last day (today, when the period reaches today or is all time).
+export function stepPeriod(p, dir, today = todayStr()) {
+  const anchor = p.unit === "day" ? p.from : p.to && p.to < today ? p.to : today;
+  const day = addDays(anchor, dir);
+  return day > today ? null : { unit: "day", from: day, to: day };
 }
-
-export const canStepForward = (p, today = todayStr()) => p.unit !== "all" && !!p.to && p.to < today;
 
 // What the middle button says: "Today", "This Month", "This Year" for the current one, else which one it is.
 export function periodLabel(p, today = todayStr()) {
@@ -79,8 +69,8 @@ export default function PeriodStepper({ value, onChange, units = ["day", "month"
     return () => document.removeEventListener("mousedown", h);
   }, []);
 
-  const prev = stepPeriod(value, -1);
-  const next = canStepForward(value, today) ? stepPeriod(value, 1) : null;
+  const prev = stepPeriod(value, -1, today);
+  const next = stepPeriod(value, 1, today);
   const pick = (unit) => {
     if (unit === "custom") return setCustom(true);
     onChange(periodAt(unit));
@@ -93,14 +83,14 @@ export default function PeriodStepper({ value, onChange, units = ["day", "month"
 
   return (
     <div className="fin-no-print relative flex items-center gap-1.5" ref={box} data-testid="period-stepper">
-      <button type="button" onClick={() => prev && onChange(prev)} disabled={!prev} className={iconBtn} aria-label="Earlier" data-testid="period-prev"><ChevronLeft size={18} /></button>
+      <button type="button" onClick={() => prev && onChange(prev)} disabled={!prev} className={iconBtn} aria-label="Previous day" title="Previous day" data-testid="period-prev"><ChevronLeft size={18} /></button>
       <button type="button" onClick={() => { setOpen(!open); setCustom(false); }} aria-expanded={open} data-testid="period-button"
         className="h-9 min-w-[10rem] px-3.5 rounded-xl border border-gray-200 bg-white hover:bg-gray-50 flex items-center gap-2 text-[13px] font-semibold text-gray-900">
         <Filter size={15} className="text-gray-500" />
         <span className="flex-1 text-left whitespace-nowrap" data-testid="period-label">{periodLabel(value, today)}</span>
         <ChevronDown size={14} className="text-gray-500" />
       </button>
-      <button type="button" onClick={() => next && onChange(next)} disabled={!next} className={iconBtn} aria-label="Later" data-testid="period-next"><ChevronRight size={18} /></button>
+      <button type="button" onClick={() => next && onChange(next)} disabled={!next} className={iconBtn} aria-label="Next day" title="Next day" data-testid="period-next"><ChevronRight size={18} /></button>
       {open && (
         <div className="absolute left-0 top-11 z-40 w-64 rounded-xl border border-gray-200 bg-white p-2 shadow-lg" data-testid="period-menu">
           {units.map((u) => (
