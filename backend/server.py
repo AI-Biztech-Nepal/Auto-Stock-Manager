@@ -1751,7 +1751,7 @@ class SaleCreate(BaseModel):
     sale_date: Optional[str] = None
     ownership_transfer_date: Optional[str] = None  # BS date the vehicle "passes" to the buyer's name
     notes: Optional[str] = None
-    # Sale-deed witness block — all four required (validated in create_sale).
+    # Sale-deed witness block — all four optional.
     witness_name: Optional[str] = None
     witness_address: Optional[str] = None
     witness_phone: Optional[str] = None
@@ -4106,8 +4106,8 @@ async def create_sale(sale: SaleCreate, cu: dict = Depends(require("sales", "cre
         raise HTTPException(400, "Vehicle is booked — record the sale from its booking")
     if v.get("status") != ("reserved" if booking else "available"): raise HTTPException(400, f"Vehicle is already {v.get('status')}")
     # Sale-deed witness block — captured with the buyer when a new customer is entered
-    # on the form; the required-ness of it is enforced there, not here (a sale against an
-    # already-recorded customer skips the panel and sends nothing).
+    # on the form. It is optional everywhere (the form does not require it either, for a
+    # sale or a booking); a sale against an already-recorded customer sends nothing.
     _witness = {
         "witness_name": (sale.witness_name or "").strip() or None,
         "witness_address": (sale.witness_address or "").strip() or None,

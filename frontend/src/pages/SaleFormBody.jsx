@@ -127,7 +127,7 @@ export default function SaleFormBody({ f, booking = null, sale = null, readOnly 
                     <p className="text-xs font-semibold text-blue-700 uppercase tracking-wide" data-testid="witness-details-panel">Witness details <span className="normal-case font-medium text-blue-600/80">· for the sale deed</span></p>
                     {DEED_ROWS.map(({ label, ph: hint, wkey, wid }) => (
                       <div key={wkey} className="min-w-0">
-                        <label htmlFor={wid} className={LBL}>{label}{!existing && wkey !== "witness_id_number" && <span className="text-red-600"> *</span>}</label>
+                        <label htmlFor={wid} className={LBL}>{label}</label>
                         <input id={wid} aria-label={`Witness ${label}`} value={form[wkey]} onChange={e => set({ [wkey]: e.target.value })} placeholder={ph(hint)} className={`${BOX} ${bad(wid) ? BAD : OK}`} data-testid={wkey.replace(/_/g, "-")} />
                       </div>
                     ))}

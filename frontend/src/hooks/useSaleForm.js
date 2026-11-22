@@ -164,7 +164,7 @@ export default function useSaleForm({ booking = null, sale = null } = {}) {
     try {
       const c = await createCustomer();
       set({ customer_id: c.id });
-      toast.success(existing ? "Customer added" : "Customer added — now fill the witness details");
+      toast.success("Customer added");
     } catch (err) { toast.error(err.response?.data?.detail || "Failed to add customer"); }
     finally { setAddingCust(false); }
   };
@@ -197,8 +197,8 @@ export default function useSaleForm({ booking = null, sale = null } = {}) {
 
   // What Save needs, as [field id, name] in page order (the first one gets the focus); shown on the fields after a first
   // try. The panel only counts while it is open: then a typed-but-not-yet-saved buyer is created on the way through (an
-  // existing customer picked from the list covers the buyer half itself), and on a new sale the witness is mandatory
-  // too (sale deed). Lead and Referred by are optional, except that a new buyer must be tagged with one or the other.
+  // existing customer picked from the list covers the buyer half itself). The witness is never required, for a sale or a
+  // booking. Lead and Referred by are optional, except that a new buyer must be tagged with one or the other.
   const enteringNewBuyer = showAddCust && !form.customer_id;
   // The Booking tick changes none of this, except that a booking needs a customer on record (it can't be made for a walk-in).
   const missing = [
@@ -208,9 +208,6 @@ export default function useSaleForm({ booking = null, sale = null } = {}) {
     enteringNewBuyer && !buyer.contact_number.trim() && ["sv-buyer-phone", "buyer's phone"],
     buyerChanged && !buyerInfo.name.trim() && ["sv-buyer-name", "buyer's name"],
     buyerChanged && !buyerInfo.contact_number.trim() && ["sv-buyer-phone", "buyer's phone"],
-    !existing && showAddCust && !form.witness_name.trim() && ["sv-witness-name", "witness's name"],
-    !existing && showAddCust && !form.witness_address.trim() && ["sv-witness-address", "witness's address"],
-    !existing && showAddCust && !form.witness_phone.trim() && ["sv-witness-phone", "witness's phone"],
     !form.vehicle_id && ["sv-vehicle", "vehicle"],
     !form.sale_price && ["sv-sale_price", "sale price"],
     enteringNewBuyer && !isSourceComplete(buyerSource) && ["sv-lead", "lead, or who referred the buyer"],
