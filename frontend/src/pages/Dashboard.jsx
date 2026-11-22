@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
+import DashboardTrends from "../components/DashboardTrends";
+import FinanceOverview from "../components/FinanceOverview";
 import { AlertTriangle, TrendingUp, Package, Users, Wrench, DollarSign, ShoppingCart, CalendarDays, TrendingDown, Banknote, Sparkles } from "lucide-react";
 import api from "../utils/api";
 import { peek, remember, cacheTicket } from "../utils/listCache";
@@ -13,7 +14,6 @@ import { featureOn, itemsMode } from "../utils/permissions";
 import { getCurrentBSDate, BS_MONTHS } from "../utils/nepali-date";
 
 // ── Sub-components defined OUTSIDE to prevent remount ──────────────────
-const AGING_COLORS = { fresh: "#22c55e", normal: "#eab308", slow: "#f97316", dead: "#ef4444" };
 
 const KPICard = ({ title, value, subtitle, icon: Icon, color, testid, onClick }) => (
   <div
@@ -586,13 +586,6 @@ export default function Dashboard() {
 
   if (!stats) return null;
 
-  const agingData = [
-    { name: "Fresh (0-30d)", count: stats.fresh_count || 0, color: AGING_COLORS.fresh },
-    { name: "Normal (31-45d)", count: stats.normal_count || 0, color: AGING_COLORS.normal },
-    { name: "Slow (46-60d)", count: stats.slow_moving_count || 0, color: AGING_COLORS.slow },
-    { name: "Dead (60+d)", count: stats.dead_stock_count || 0, color: AGING_COLORS.dead },
-  ];
-
   const bs = getCurrentBSDate();
   const bsDateStr = bs ? `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year} BS` : "";
 
@@ -633,23 +626,8 @@ export default function Dashboard() {
         )}
       </div>
 
-      {/* Charts + Alerts */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Stock Aging Chart */}
-        <div className="lg:col-span-2 bg-white rounded-xl border border-slate-200 shadow-sm p-5" data-testid="aging-chart">
-          <h2 className="text-base font-bold text-slate-900 mb-4" style={{ fontFamily: "Manrope, sans-serif" }}>Stock Aging Overview</h2>
-          <ResponsiveContainer width="100%" height={200}>
-            <BarChart data={agingData} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
-              <XAxis dataKey="name" tick={{ fontSize: 11, fill: "#64748B" }} />
-              <YAxis tick={{ fontSize: 11, fill: "#64748B" }} allowDecimals={false} />
-              <Tooltip formatter={(val) => [`${val} vehicles`]} contentStyle={{ fontSize: 12, borderRadius: 8 }} />
-              <Bar dataKey="count" radius={[4, 4, 0, 0]}>
-                {agingData.map((entry) => <Cell key={entry.name} fill={entry.color} />)}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-
+      {/* Charts (sales trend, net trend) + Alerts */}
+      <DashboardTrends>
         {/* Alerts */}
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5" data-testid="alerts-panel">
           <h2 className="text-base font-bold text-slate-900 mb-4" style={{ fontFamily: "Manrope, sans-serif" }}>Stock Alerts</h2>
@@ -666,7 +644,10 @@ export default function Dashboard() {
             )}
           </div>
         </div>
-      </div>
+      </DashboardTrends>
+
+      {/* Finance books + job totals: the owner's view, as in the Finance dashboard */}
+      {user?.role === "admin" && <FinanceOverview jobsOn={jobsOn} />}
 
       {/* Quick Action */}
       <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 flex items-center justify-between">
