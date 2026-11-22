@@ -17,7 +17,6 @@ import DateRangeFilter, { resolveDateFilter } from "../components/DateRangeFilte
 import ViewToggle, { useViewMode } from "../components/ViewToggle";
 import LazyThumb from "../components/LazyThumb";
 import { useAuth } from "../context/AuthContext";
-import { featureOn, STATUS_FEATURE } from "../utils/permissions";
 import { hasFullVehicleAccess, canAddVehicle, isBasicStockRole, hidesVehiclePricing } from "../utils/permissions";
 
 // Sold vehicles get their own archive (the Sold list on the Sales page) rather than sitting in the active
@@ -62,7 +61,7 @@ const EMPTY = {
 
 export default function Inventory() {
   const navigate = useNavigate();
-  const { user, features } = useAuth();
+  const { user } = useAuth();
   const isAdmin = !user?.role || user.role === "admin";
   const isFrontDesk = user?.role === "stock_supervisor";
   const isSocialMedia = isBasicStockRole(user?.role);
@@ -591,7 +590,7 @@ export default function Inventory() {
           chips, full width). Import Stock lives inside the Purchase Vehicle form. */}
       <div className="flex flex-wrap lg:flex-nowrap items-center justify-between gap-2">
       <div className="flex items-center gap-1.5 overflow-x-auto min-w-0" data-testid="status-toggle-group">
-        {STATUSES.filter(s => featureOn(features, STATUS_FEATURE[s]) || statusFilter === s).map(s => {
+        {STATUSES.map(s => {
           const active = statusFilter === s;
           const Icon = STATUS_ICONS[s] || Filter;
           return (

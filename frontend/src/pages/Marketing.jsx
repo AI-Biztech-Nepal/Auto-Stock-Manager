@@ -3,7 +3,6 @@ import { useSearchParams } from "react-router-dom";
 import { Share2, Gift, Eye, Inbox, HeartHandshake } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { marketingTabsFor } from "../utils/permissions";
-import FeatureOff from "../components/FeatureOff";
 
 // Everything that brings customers in, in one place: website leads, each accepted or rejected (Leads), posting vehicles (Share), the festival gift
 // spin (Offers) and who is visiting the website (Visits). Each tab is the page that used to be its
@@ -23,12 +22,10 @@ const TABS = {
 };
 
 export default function Marketing() {
-  const { user, features } = useAuth();
+  const { user } = useAuth();
   const [searchParams] = useSearchParams();
-  const allowed = marketingTabsFor(user?.role, features);
+  const allowed = marketingTabsFor(user?.role);
   const requested = searchParams.get("tab");
-  // A tab the role has but the organization switched off (e.g. /marketing?tab=offers): say so, don't fall back silently.
-  if (requested && marketingTabsFor(user?.role).includes(requested) && !allowed.includes(requested)) return <FeatureOff />;
   const tab = allowed.includes(requested) ? requested : allowed[0];
   if (!tab) return null;
   const { Page, ownHeader } = TABS[tab];

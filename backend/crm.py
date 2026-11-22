@@ -158,14 +158,11 @@ def customer_rows(customers: list, sales: list, bookings: list, interactions=(),
         fu = next_fu.get(cid)
         rows.append({
             "id": cid, "name": c.get("name") or "", "contact_number": c.get("contact_number") or "", "address": c.get("address") or "", "notes": c.get("notes") or "",
-            "source": source_of(c) or (latest.get("lead_source") if latest.get("lead_source") in CRM_SOURCES else None), "source_note": c.get("source_note"),
+            "source": source_of(c), "source_note": c.get("source_note"),
             "referred_by_id": ref, "referred_by_name": names[ref] if ref else None,
             "lead_status": effective_status(c.get("lead_status"), n), "status_locked": n > 0,
             "interested_vehicle": c.get("interested_vehicle") or "",
             "purchased_vehicle": vehicle_label(vehicles.get(latest.get("vehicle_id"))) if latest else "",
-            # What the latest sale itself says, kept apart from the customer's own tags: price, who sold it, how the buyer found us.
-            "sale_price": latest.get("sale_price") or 0 if latest else 0, "sold_by_name": latest.get("sold_by_name") or "",
-            "sale_lead": latest.get("lead_source") or "", "sale_lead_note": latest.get("lead_note") or latest.get("referred_by_name") or "",
             "assigned_to_id": c.get("assigned_to_id") or latest.get("sold_by_id"),
             "assigned_to_name": c.get("assigned_to_name") or latest.get("sold_by_name"),
             "amount": round(amount.get(cid, 0), 2), "purchases": n,
@@ -717,17 +714,15 @@ def register(api_router, database, admin_only, sale_revenue):
         today = now.astimezone(NPT).date()
         lo, _ = day_bounds(today)
         # Six independent reads, asked at the same time (the database is in another city; one after another this waited for each).
-        customers, sales, bookings, interactions, open_followups, done_today, accepted = await asyncio.gather(
+        customers, sales, bookings, interactions, open_followups, done_today = await asyncio.gather(
             db.customers.find({}, {"_id": 0, "id": 1, "name": 1, "contact_number": 1, "address": 1, "source": 1, "source_note": 1, "referred_by_id": 1,
                                    "created_at": 1, "lead_status": 1, "interested_vehicle": 1, "assigned_to_id": 1, "assigned_to_name": 1, "notes": 1}).sort("created_at", -1).to_list(50000),
             db.sales.find({}, {"_id": 0, "customer_id": 1, "vehicle_id": 1, "returned": 1, "retained_amount": 1, "sale_price": 1,
-                               "sale_date": 1, "created_at": 1, "sold_by_id": 1, "sold_by_name": 1,
-                               "lead_source": 1, "lead_note": 1, "referred_by_name": 1}).to_list(50000),
+                               "sale_date": 1, "created_at": 1, "sold_by_id": 1, "sold_by_name": 1}).to_list(50000),
             db.bookings.find({"status": "active"}, {"_id": 0, "customer_id": 1, "booking_amount": 1, "status": 1}).to_list(50000),
             db.crm_interactions.find({}, {"_id": 0, "customer_id": 1, "occurred_at": 1}).to_list(200000),
             db.crm_followups.find({"status": "pending"}, {"_id": 0}).to_list(50000),
             db.crm_followups.find({"status": "done", "completed_at": {"$gte": lo.isoformat()}}, {"_id": 0}).to_list(5000),
-            db.leads.find({"status": "accepted", "customer_id": {"$ne": None}}, {"_id": 0, "customer_id": 1}).to_list(100000),
         )
         latest_ids = {}
         for s in sales:
@@ -735,25 +730,14 @@ def register(api_router, database, admin_only, sale_revenue):
             if not s.get("returned") and (cur is None or (s.get("sale_date") or "", s.get("created_at") or "") > (cur.get("sale_date") or "", cur.get("created_at") or "")): latest_ids[s.get("customer_id")] = s
         vehicles = await _vehicles_for(list(latest_ids.values()))
         rows = customer_rows(customers, sales, bookings, interactions, open_followups, vehicles)
-        # The CRM is the people who bought, i.e. who is on a sale. Everyone else stays on file (Ledger, bookings, website
-        # leads) but is not listed here; they were read above only so a referrer who never bought still gets a name.
-        bought = {s.get("customer_id") for s in sales if s.get("customer_id")}
-        # Website leads you accepted (nobody has sold them anything yet) are their own list, so they never mix with buyers;
-        # one who then buys moves across by itself.
-        # Every lead ever accepted stays here (the lead remembers its customer), even if their Lead Source tag is changed later.
-        from_website = {l["customer_id"] for l in accepted}
-        leads = [r for r in rows if r["id"] not in bought and (r["id"] in from_website or r["source"] == "website")]
-        rows = [r for r in rows if r["id"] in bought]
-        listed = bought | {r["id"] for r in leads}
         if not (month_start and month_end):  # default: this calendar month, and the one before
             first = today.replace(day=1)
             month_start, month_end = first.isoformat(), today.isoformat()
             pm_end = first - timedelta(days=1)
             prev_start, prev_end = pm_end.replace(day=1).isoformat(), pm_end.isoformat()
-        info = {c["id"]: {"name": c.get("name") or "", "phone": c.get("contact_number") or ""} for c in customers if c["id"] in listed}
+        info = {c["id"]: {"name": c.get("name") or "", "phone": c.get("contact_number") or ""} for c in customers}
         return {
             "customers": rows,
-            "leads": leads,
             # Sales amount the customers above don't account for (sold without customer details), so their totals can be
             # reconciled with the Dashboard's revenue.
             "sales_without_customer": round(sum((_sale_revenue(s) or 0) for s in sales if s.get("customer_id") not in info), 2),
@@ -789,8 +773,7 @@ def register(api_router, database, admin_only, sale_revenue):
         sale_list = [{"id": s["id"], "sale_date": s.get("sale_date"), "vehicle": vehicle_label(vehicles.get(s.get("vehicle_id"))) or "Vehicle removed",
                       "registration_number": (vehicles.get(s.get("vehicle_id")) or {}).get("registration_number") or "",
                       "sale_price": s.get("sale_price") or 0, "amount": _sale_revenue(s) or 0, "payment_status": s.get("payment_status"),
-                      "due_amount": s.get("due_amount") or 0, "returned": bool(s.get("returned")), "sold_by_name": s.get("sold_by_name"),
-                      "lead_source": s.get("lead_source") or "", "lead_note": s.get("lead_note") or s.get("referred_by_name") or ""} for s in sales]
+                      "due_amount": s.get("due_amount") or 0, "returned": bool(s.get("returned")), "sold_by_name": s.get("sold_by_name")} for s in sales]
         booking_list = [{"id": b["id"], "booking_date": b.get("booking_date"), "vehicle": vehicle_label(vehicles.get(b.get("vehicle_id"))) or "Vehicle removed",
                          "booking_amount": b.get("booking_amount") or 0, "status": b.get("status")} for b in bookings]
         return {"customer": row, "details": {"id_number": c.get("id_number") or "", "occupation": c.get("occupation") or "", "notes": c.get("notes") or ""},
