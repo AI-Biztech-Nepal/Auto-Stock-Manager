@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Plus, Upload, Download, Search, ChevronDown, X, UserCheck, RefreshCw, AlertCircle } from "lucide-react";
+import { Download, Search, ChevronDown, X, UserCheck, RefreshCw, AlertCircle } from "lucide-react";
 import { notify } from "../utils/notify";
 import api from "../utils/api";
 import { formatNPR } from "../utils/helpers";
@@ -58,6 +58,7 @@ export default function CRM() {
   const [assigned, setAssigned] = useState("all"); // all | none | a team member id
   const [dateRange, setDateRange] = useState({ key: "all", custom: null });
   const [search, setSearch] = useState("");
+  const [view, setView] = useState("customers"); // customers: people on a sale · leads: website leads nobody has sold to yet
   const [referrer, setReferrer] = useState(null); // { id, name }: only the people this customer referred
   const [sort, setSort] = useState({ key: "newest", dir: "desc" });
   const [shown, setShown] = useState(PAGE_SIZE);
@@ -89,9 +90,9 @@ export default function CRM() {
     return () => { clearInterval(timer); document.removeEventListener("visibilitychange", refresh); };
   }, [load]);
 
-  useEffect(() => { setShown(PAGE_SIZE); }, [filter, status, assigned, dateRange, search, referrer, sort]);
+  useEffect(() => { setShown(PAGE_SIZE); }, [filter, status, assigned, dateRange, search, referrer, sort, view]);
 
-  const customers = data?.customers;
+  const customers = view === "leads" ? data?.leads : data?.customers;
   // How many customers, and how much they have bought (the Transaction Amount column), per lead source.
   const { counts, amounts } = useMemo(() => {
     const n = { all: 0, needs: 0 }, a = { all: 0, needs: 0 };
@@ -122,7 +123,7 @@ export default function CRM() {
         if (referrer && c.referred_by_id !== referrer.id) return false;
         if (range) { const d = localDateOf(c.created_at); if (!d || d < range.start || d > range.end) return false; }
         return !q || c.name.toLowerCase().includes(q) || c.contact_number.includes(q) || c.address.toLowerCase().includes(q)
-          || (c.interested_vehicle || c.purchased_vehicle || "").toLowerCase().includes(q);
+          || (c.purchased_vehicle || c.interested_vehicle || "").toLowerCase().includes(q) || (c.sold_by_name || "").toLowerCase().includes(q);
       })
       .sort((a, b) => { const x = keyOf(a), y = keyOf(b); return (x < y ? -1 : x > y ? 1 : 0) * dir; });
   }, [customers, filter, status, assigned, referrer, range, search, sort]);
@@ -176,14 +177,14 @@ export default function CRM() {
   };
 
   const exportCsv = () => {
-    const rows = [["SN", "Customer", "Contact", "Address", "Interested Vehicle", "Lead Source", "Referred By", "Lead Status", "Last Contact", "Next Follow-up", "Assigned To", "Transaction Amount", "Notes"],
-      ...list.map((c, i) => [i + 1, c.name, c.contact_number, c.address, c.interested_vehicle || c.purchased_vehicle, leadLabel(c) || "Not tagged", referredByLabel(c),
+    const rows = [["SN", "Customer", "Contact", "Address", "Vehicle", "Price", "Lead Source", "Sold By", "Referred By", "Lead Status", "Last Contact", "Next Follow-up", "Assigned To", "Transaction Amount", "Notes"],
+      ...list.map((c, i) => [i + 1, c.name, c.contact_number, c.address, c.purchased_vehicle, c.sale_price || "", leadLabel(c) || "Not tagged", c.sold_by_name || "", referredByLabel(c),
         LEAD_STATUSES.find(s => s.key === c.lead_status)?.label, c.last_contact_at ? localDateOf(c.last_contact_at) : "",
         c.next_followup ? `${localDateOf(c.next_followup.due_at)} ${timeOf(c.next_followup.due_at)}` : "", c.assigned_to_name || "", c.amount, c.notes])];
     const blob = new Blob(["﻿" + rows.map(r => r.map(csvCell).join(",")).join("\r\n")], { type: "text/csv;charset=utf-8" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
-    a.download = `crm-customers-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.download = `crm-${view}-${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
     URL.revokeObjectURL(a.href);
     notify.success(`Exported ${list.length} customer${list.length === 1 ? "" : "s"}`);
@@ -199,12 +200,14 @@ export default function CRM() {
   const table = !customers ? null : list.length === 0 ? (
     <div className="bg-white border border-slate-200 rounded-2xl">
       {counts.all === 0
-        ? <EmptyState icon={UserCheck} title="No customers yet" action={<button onClick={() => setAdding(true)} className={btnPrimary}><Plus size={16} /> Add your first customer</button>}>Customers appear here as soon as they are added from Sales, Bookings or the Ledger, or you can add or import them here.</EmptyState>
+        ? (view === "leads"
+          ? <EmptyState icon={UserCheck} title="No website leads">People you accept from the website appear here until they buy, then they move to Customers.</EmptyState>
+          : <EmptyState icon={UserCheck} title="No customers yet">Customers appear here as soon as a sale is recorded for them in the Sales tab.</EmptyState>)
         : <EmptyState icon={UserCheck} title="No customers match" action={anyFilter && <button onClick={clearFilters} className={btnGhost}>Clear filters</button>}>Try another filter or search.</EmptyState>}
     </div>
   ) : (
     <>
-      <CustomerTable rows={visible} customers={customers} sellers={sellers} wide={wide} sort={sort} onSort={toggleSort} total={total} count={list.length} savingId={savingId}
+      <CustomerTable rows={visible} customers={customers} sellers={sellers} wide={wide} leads={view === "leads"} sort={sort} onSort={toggleSort} total={total} count={list.length} savingId={savingId}
         onSaveLead={saveLead} onStatus={changeStatus} onAssign={assign} onView={c => openProfile(c.id)} onEdit={c => openProfile(c.id, true)} onContact={logContact}
         onShowReferred={c => { setReferrer({ id: c.id, name: c.name }); setFilter("all"); setSearch(""); }} />
       {list.length > shown && <button onClick={() => setShown(s => s + PAGE_SIZE)} className="mt-3 w-full h-11 rounded-xl border border-slate-200 bg-white text-sm font-semibold text-slate-600 hover:bg-slate-50" data-testid="crm-more">Show more ({list.length - shown} left)</button>}
@@ -213,10 +216,14 @@ export default function CRM() {
 
   return (
     <div className="space-y-4" data-testid="crm-page">
-      <div className="flex flex-wrap items-center justify-end gap-3">
-        <div className="flex gap-2">
-          <button onClick={() => setAdding(true)} className={btnPrimary} data-testid="crm-add"><Plus size={17} /> Add Customer</button>
-          <button onClick={() => setImportOpen(true)} className={btnGhost} data-testid="crm-import"><Upload size={16} /> Import</button>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div role="tablist" aria-label="CRM list" className="inline-flex rounded-xl bg-slate-100 p-1" data-testid="crm-view-toggle">
+          {[["customers", "Sales customers", data?.customers?.length], ["leads", "Website leads", data?.leads?.length]].map(([k, label, n]) => (
+            <button key={k} role="tab" aria-selected={view === k} onClick={() => { setView(k); clearFilters(); }} data-testid={`crm-view-${k}`}
+              className={`h-9 px-4 rounded-lg text-sm font-semibold inline-flex items-center gap-2 transition-colors ${view === k ? "bg-white text-blue-700 shadow-sm" : "text-slate-500 hover:text-slate-800"}`}>
+              {label}<span className={`text-xs px-1.5 py-0.5 rounded-full ${view === k ? "bg-blue-50 text-blue-700" : "bg-slate-200 text-slate-500"}`}>{n ?? "–"}</span>
+            </button>
+          ))}
         </div>
       </div>
 
@@ -224,7 +231,7 @@ export default function CRM() {
         <div className="bg-white border border-red-200 rounded-2xl"><EmptyState icon={AlertCircle} title="Couldn't load the CRM" action={<button onClick={() => { setLoadFailed(false); load(false); }} className={btnPrimary}><RefreshCw size={15} /> Try again</button>}>Check your connection and try again.</EmptyState></div>
       ) : (
         <>
-          <StatCards summary={data?.summary} />
+          {view === "customers" && <StatCards summary={data?.summary} />}
           {data && !sidePanel && <FollowUpsPanel layout="top" {...panelProps} />}
 
           <div className="flex flex-wrap gap-2">

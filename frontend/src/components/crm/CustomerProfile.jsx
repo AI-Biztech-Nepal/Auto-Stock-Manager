@@ -206,7 +206,7 @@ export default function CustomerProfile({ customerId, customers, startEditing, r
                                 <div className="flex items-start justify-between gap-3">
                                   <div className="min-w-0">
                                     <p className="text-sm font-semibold text-slate-900">{s.vehicle}{s.registration_number && <span className="text-slate-400 font-normal"> · {s.registration_number}</span>}</p>
-                                    <p className="text-xs text-slate-500">{s.sale_date ? fullBS(`${s.sale_date}T00:00:00`) : ""}{s.sold_by_name ? ` · sold by ${s.sold_by_name}` : ""}</p>
+                                    <p className="text-xs text-slate-500">{s.sale_date ? fullBS(`${s.sale_date}T00:00:00`) : ""}{s.sold_by_name ? ` · sold by ${s.sold_by_name}` : ""}{s.lead_source ? ` · lead: ${SOURCE_LABEL[s.lead_source] || s.lead_source}${s.lead_note ? ` (${s.lead_note})` : ""}` : ""}</p>
                                     <button onClick={() => navigate(`/sales/${s.id}`)} className="mt-1 inline-flex items-center gap-1 text-xs font-semibold text-blue-600 hover:underline"><ExternalLink size={11} /> Open sale</button>
                                   </div>
                                   <div className="text-right shrink-0">
