@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { Phone, MessageCircle, Inbox, Wrench, Repeat, Bike, X, Mail, MapPin, Check, CheckCheck, Ban, Users, ExternalLink, UserPlus, Clock, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
@@ -82,11 +82,23 @@ export default function Leads() {
   const [rejecting, setRejecting] = useState(null); // { id, remark }: the lead whose reject box is open
   const [busyId, setBusyId] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState("all");
+  // ?type=signup (from the bell) opens on Accounts, even when the Leads page is already open.
+  const { search } = useLocation();
+  const [tab, setTab] = useState(() => { const t = new URLSearchParams(window.location.search).get("type"); return TABS.some(x => x.key === t) ? t : "all"; });
   const [zoom, setZoom] = useState(null);
   // Leads nobody had opened before this visit: they stay "New" (blue) while the page is open. Opening the page marks them
   // seen on the server, so on the next visit they show as "Read" (green).
   const [newIds, setNewIds] = useState(() => new Set());
+
+  // Tell the server these leads were on screen, and show who read them right away (the list was fetched before they were marked).
+  const markSeen = useCallback(async (ids) => {
+    if (!ids.length) return;
+    const seen = await api.post("/leads/seen", { ids }, { suppressErrorToast: true }).catch(() => null);
+    if (seen?.data?.seen_by) {
+      const now = new Date().toISOString();
+      setLeads(ls => ls.map(l => (ids.includes(l.id) ? { ...l, seen_at: now, seen_by: seen.data.seen_by } : l)));
+    }
+  }, []);
 
   const load = useCallback(async () => {
     try {
@@ -96,24 +108,25 @@ export default function Leads() {
       // Unseen leads are all on screen in the All tab, so they count as seen: this clears the nav badge and the bell, and
       // takes them out of All on the next visit (the list above keeps them there for this one).
       // Done before the ping below so the badge's refetch already sees them as seen.
-      const unseen = data.filter(l => state(l) === "new" && !l.seen_at).map(l => l.id);
-      if (unseen.length) {
-        const seen = await api.post("/leads/seen", { ids: unseen }, { suppressErrorToast: true }).catch(() => null);
-        // Show who read them right away (the list above was fetched before they were marked).
-        if (seen?.data?.seen_by) {
-          const now = new Date().toISOString();
-          setLeads(ls => ls.map(l => (unseen.includes(l.id) ? { ...l, seen_at: now, seen_by: seen.data.seen_by } : l)));
-        }
-      }
+      // Registered accounts are not on All, so opening All does not clear their notification: opening Accounts does (below).
+      await markSeen(data.filter(l => l.type !== "signup" && state(l) === "new" && !l.seen_at).map(l => l.id));
       window.dispatchEvent(new Event("leads-changed"));
     } catch {
       toast.error("Failed to load leads");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [markSeen]);
 
   useEffect(() => { load(); }, [load]);
+  useEffect(() => { const t = new URLSearchParams(search).get("type"); if (TABS.some(x => x.key === t)) setTab(t); }, [search]);
+
+  // Opening the Accounts tab is what reads the registered accounts.
+  useEffect(() => {
+    if (tab !== "signup" || loading) return;
+    const ids = leads.filter(l => l.type === "signup" && state(l) === "new" && !l.seen_at).map(l => l.id);
+    if (ids.length) markSeen(ids).then(() => window.dispatchEvent(new Event("leads-changed")));
+  }, [tab, loading, leads, markSeen]);
 
   const replaceLead = (l) => { setLeads(ls => ls.map(x => (x.id === l.id ? l : x))); window.dispatchEvent(new Event("leads-changed")); };
   const errText = (ex, fallback) => (typeof ex.response?.data?.detail === "string" ? ex.response.data.detail : fallback);

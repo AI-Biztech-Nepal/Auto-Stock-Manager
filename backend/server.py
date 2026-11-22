@@ -5892,10 +5892,13 @@ async def get_leads(request: Request, cu: dict = Depends(admin_only)):
 
 @api_router.get("/leads/new-count")
 async def get_new_leads_count(cu: dict = Depends(admin_only)):
-    """How many website leads are still new and unopened (the sidebar badge). The sidebar asks every minute, so this reads
-    two small columns instead of every lead together with the photos some of them carry (megabytes)."""
-    rows = await db.leads.find({"status": "new"}, {"_id": 0, "id": 1, "seen_at": 1}).to_list(100000)
-    return {"count": sum(1 for l in rows if not l.get("seen_at"))}
+    """How many website leads are still new and unopened (the sidebar badge), and, apart from them, how many newly registered
+    accounts (a signup is not a lead: it is told about in the bell and listed under Leads > Accounts). The sidebar asks every
+    minute, so this reads three small columns instead of every lead together with the photos some of them carry (megabytes)."""
+    rows = await db.leads.find({"status": "new"}, {"_id": 0, "id": 1, "seen_at": 1, "type": 1}).to_list(100000)
+    unseen = [l for l in rows if not l.get("seen_at")]
+    accounts = sum(1 for l in unseen if l.get("type") == "signup")
+    return {"count": len(unseen) - accounts, "accounts": accounts}
 
 # ── LEADS: every website lead is either accepted or rejected ─────────────
 # A new lead is pending (status "new"). Accepting it puts the person in the CRM (source: Website; someone who is already

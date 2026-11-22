@@ -8,7 +8,7 @@ import FinanceNavGroup from "./FinanceNavGroup";
 import SidebarProfile from "./SidebarProfile";
 import NavGroup from "./NavGroup";
 import { isSanakhatOverdue, sanakhatPendingDays } from "../utils/helpers";
-import {
+import { UserPlus,
   LayoutDashboard, Bike, Wrench, Sparkles, Settings, Menu, X, Bell,
   BookOpen, Wallet, Boxes, ShoppingBag, Building2, ImageOff, FileWarning, ShieldCheck, Megaphone, Inbox, ChevronDown, Share2, Gift, Eye, HeartHandshake, FileCheck2
 } from "lucide-react";
@@ -93,6 +93,7 @@ export default function Layout() {
   // Only pending leads nobody has opened yet count: opening the Leads screen marks what it shows as seen.
   // Polled every minute; the Leads screen pings "leads-changed" so the badge clears at once.
   const [newLeads, setNewLeads] = useState(0);
+  const [newAccounts, setNewAccounts] = useState(0); // newly registered accounts: not leads, so no badge or toast, only a bell line
   const lastNewLeads = useRef(null);
   const isAdmin = !user?.role || user.role === "admin";
   useEffect(() => {
@@ -106,6 +107,7 @@ export default function Layout() {
         }
         lastNewLeads.current = n;
         setNewLeads(n);
+        setNewAccounts(r.data.accounts || 0);
       }).catch(() => {});
     };
     load();
@@ -407,9 +409,9 @@ export default function Layout() {
                 title="Vehicles needing attention"
               >
                 <Bell size={17} />
-                {missingDataVehicles.length + newLeads + (backupProblem ? 1 : 0) > 0 && (
+                {missingDataVehicles.length + newLeads + newAccounts + (backupProblem ? 1 : 0) > 0 && (
                   <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center leading-none" data-testid="notif-bell-badge">
-                    {missingDataVehicles.length + newLeads + (backupProblem ? 1 : 0) > 99 ? "99+" : missingDataVehicles.length + newLeads + (backupProblem ? 1 : 0)}
+                    {missingDataVehicles.length + newLeads + newAccounts + (backupProblem ? 1 : 0) > 99 ? "99+" : missingDataVehicles.length + newLeads + newAccounts + (backupProblem ? 1 : 0)}
                   </span>
                 )}
               </button>
@@ -436,8 +438,13 @@ export default function Layout() {
                         <Inbox size={14} /> {newLeads} new website lead{newLeads > 1 ? "s" : ""}
                       </button>
                     )}
+                    {newAccounts > 0 && (
+                      <button onClick={() => { setNotifOpen(false); navigate("/marketing?tab=leads&type=signup"); }} data-testid="notif-new-accounts" className="w-full text-left px-4 py-2.5 hover:bg-violet-50 bg-violet-50/50 flex items-center gap-2 text-sm font-medium text-violet-700">
+                        <UserPlus size={14} /> {newAccounts} new registered account{newAccounts > 1 ? "s" : ""}
+                      </button>
+                    )}
                     {missingDataVehicles.length === 0 ? (
-                      !backupProblem && newLeads === 0 && <div className="px-4 py-6 text-center text-sm text-slate-400">Nothing needs attention ✅</div>
+                      !backupProblem && newLeads === 0 && newAccounts === 0 && <div className="px-4 py-6 text-center text-sm text-slate-400">Nothing needs attention ✅</div>
                     ) : (
                       missingDataVehicles.map(v => (
                         <button
