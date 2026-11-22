@@ -221,7 +221,7 @@ export default function Reports() {
           {monthlyData.length === 0 && (
             <div className="bg-white rounded-xl border border-slate-200 p-12 text-center text-slate-500">
               <p className="font-medium">No sales data yet</p>
-              <p className="text-sm mt-1">Record a sale to see financial reports</p>
+              <p className="text-sm mt-1">Mark vehicles as sold to see financial reports</p>
             </div>
           )}
         </div>

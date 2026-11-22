@@ -11,7 +11,6 @@ import SourceField, { ReferredByField } from "../components/SourceField";
 import SoldBySelect from "../components/SoldBySelect";
 import { EMPTY_REFERRER, EMPTY_SOURCE, SOURCE_LABEL, isSourceComplete, sourcePayload } from "../utils/crm";
 import { useAuth } from "../context/AuthContext";
-import { featureOn } from "../utils/permissions";
 import useGoBack from "../hooks/useGoBack";
 
 const PRESET_EXPENSES = [
@@ -64,7 +63,7 @@ export default function SaleDetail({ saleId, embedded = false, editTick = 0, onS
   const id = saleId || params.id;
   const navigate = useNavigate();
   const goBack = useGoBack("/sales");
-  const { user, features } = useAuth();
+  const { user } = useAuth();
   const isAdmin = user?.role === "admin";
   const handledTick = useRef(0);
   const pressedOnBackdrop = useRef(false); // a click closes the pop-up only if the press began outside it too (not a text-select drag)
@@ -676,8 +675,8 @@ export default function SaleDetail({ saleId, embedded = false, editTick = 0, onS
                   <option value="available">Available</option>
                   <option value="unlisted">Unlisted</option>
                   <option value="reserved">Booked</option>
-                  {featureOn(features, "stock.job_cards") && <option value="in_repair">In Repair</option>}
-                  {featureOn(features, "stock.job_cards") && <option value="scrap">Scrap</option>}
+                  <option value="in_repair">In Repair</option>
+                  <option value="scrap">Scrap</option>
                 </select>
               </Field>
               <Field label="Condition Notes">

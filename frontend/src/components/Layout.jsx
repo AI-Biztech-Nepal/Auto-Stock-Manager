@@ -3,13 +3,13 @@ import { Outlet, NavLink, useNavigate, useLocation } from "react-router-dom";
 import { toast } from "sonner";
 import api from "../utils/api";
 import { useAuth } from "../context/AuthContext";
-import { canAccessPath, marketingTabsFor, itemsMode } from "../utils/permissions";
+import { canAccessPath, marketingTabsFor } from "../utils/permissions";
 import FinanceNavGroup from "./FinanceNavGroup";
 import SidebarProfile from "./SidebarProfile";
 import NavGroup from "./NavGroup";
 import { isSanakhatOverdue, sanakhatPendingDays } from "../utils/helpers";
 import {
-  LayoutDashboard, Bike, Package, Wrench, Sparkles, Settings, Menu, X, Bell,
+  LayoutDashboard, Bike, Wrench, Sparkles, Settings, Menu, X, Bell,
   BookOpen, Wallet, Boxes, ShoppingBag, Building2, ImageOff, FileWarning, ShieldCheck, Megaphone, Inbox, ChevronDown, Share2, Gift, Eye, HeartHandshake, FileCheck2
 } from "lucide-react";
 
@@ -55,7 +55,7 @@ const PAGE_TITLES = {
 };
 
 export default function Layout() {
-  const { user, logout, features, terms } = useAuth();
+  const { user, logout } = useAuth();
   const navigate = useNavigate();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const { pathname, search } = useLocation();
@@ -70,7 +70,7 @@ export default function Layout() {
   const handleLogout = () => { logout(); navigate("/login"); };
   // Admin's people live in Finance's Ledger now, so the main Ledger item goes for admin; stock and parts supervisors
   // (who can't open Finance) keep it as their way to Staff / Vendors. The /ledger page itself still works.
-  const visibleNavItems = navItems.filter(({ path }) => canAccessPath(user?.role, path, features) && (path !== "/sanakhat" || user?.role === "sanakhat_officer" || canAccessPath(user?.role, "/sales")) && (path !== "/ledger" || (user?.role && user.role !== "admin")));
+  const visibleNavItems = navItems.filter(({ path }) => canAccessPath(user?.role, path) && (path !== "/sanakhat" || user?.role === "sanakhat_officer" || canAccessPath(user?.role, "/sales")) && (path !== "/ledger" || (user?.role && user.role !== "admin")));
 
   // Missing-data notifications: flags active-stock vehicles missing a photo or a
   // registration number so gaps get caught without staff having to go hunting for
@@ -224,33 +224,11 @@ export default function Layout() {
               />
             );
           }
-          if (path === "/inventory" && itemsMode(features)) {
-            // No vehicles for this organization: generic Items take Inventory's place, and Spare Parts (if on) gets its own link.
-            const links = [
-              canAccessPath(user?.role, "/items") && { to: "/items", label: terms.items, icon: Package },
-              canAccessPath(user?.role, "/spare-parts", features) && { to: "/inventory?tab=spare-parts", label: "Spare Parts", icon: Boxes },
-            ].filter(Boolean);
-            return links.map((l) => (
-              <NavLink
-                key={l.to}
-                to={l.to}
-                onClick={() => mobile && setSidebarOpen(false)}
-                className={() => {
-                  const here = l.to === "/items" ? pathname.startsWith("/items") : pathname.startsWith("/inventory");
-                  return `flex items-center gap-3 px-3 py-3 rounded-lg text-sm font-medium transition-all duration-150 ${here ? "bg-blue-600 text-white" : "text-slate-400 hover:text-white hover:bg-slate-800"}`;
-                }}
-                data-testid={`nav-${l.label.toLowerCase().replace(" ", "-")}`}
-              >
-                <l.icon size={17} />
-                {l.label}
-              </NavLink>
-            ));
-          }
           if (path === "/inventory") {
             // Spare Parts lives under Inventory: a dropdown when the role gets both pages, the plain link otherwise.
             const tabs = [
               { key: "product", label: "Product", icon: Bike, to: "/inventory" },
-              canAccessPath(user?.role, "/spare-parts", features) && { key: "spare-parts", label: "Spare Parts", icon: Boxes, to: "/inventory?tab=spare-parts" },
+              canAccessPath(user?.role, "/spare-parts") && { key: "spare-parts", label: "Spare Parts", icon: Boxes, to: "/inventory?tab=spare-parts" },
             ].filter(Boolean);
             if (tabs.length > 1) {
               const onInventory = pathname.startsWith("/inventory");
@@ -273,7 +251,7 @@ export default function Layout() {
           }
           if (path === "/jobs" || path === "/warranty") {
             // Job Cards and Warranty share one Service item, drawn where the first of them the role can open sits.
-            const tabs = SERVICE_TABS.filter(t => canAccessPath(user?.role, t.to, features));
+            const tabs = SERVICE_TABS.filter(t => canAccessPath(user?.role, t.to));
             if (path !== tabs[0].to) return null;
             if (tabs.length > 1) {
               const active = tabs.find(t => pathname.startsWith(t.to));
@@ -293,7 +271,7 @@ export default function Layout() {
               );
             }
           }
-          const subTabs = path === "/marketing" ? marketingTabsFor(user?.role, features) : [];
+          const subTabs = path === "/marketing" ? marketingTabsFor(user?.role) : [];
           const leadsBadge = (
             <span className="ml-auto min-w-[20px] h-5 px-1.5 rounded-full bg-red-500 text-white text-[11px] font-bold flex items-center justify-center" data-testid="nav-leads-badge">{newLeads > 99 ? "99+" : newLeads}</span>
           );
@@ -398,19 +376,17 @@ export default function Layout() {
             <h1 className="flex-1 min-w-0 text-2xl font-bold text-slate-900 truncate" data-testid="header-title">Sanakhat</h1>
           ) : pathname === "/inventory" ? (() => {
             // Product or Spare Parts, whichever is open (the detail page, /inventory/:id, has its own heading).
-            const parts = new URLSearchParams(search).get("tab") === "spare-parts" && canAccessPath(user?.role, "/spare-parts", features);
+            const parts = new URLSearchParams(search).get("tab") === "spare-parts" && canAccessPath(user?.role, "/spare-parts");
             return (
               <h1 className="flex-1 min-w-0 text-2xl font-bold text-slate-900 truncate" data-testid="header-title">{parts ? "Spare Parts" : "Inventory"}</h1>
             );
-          })() : pathname.startsWith("/items") ? (
-            <h1 className="flex-1 min-w-0 text-2xl font-bold text-slate-900 truncate" data-testid="header-title">{terms.items}</h1>
-          ) : pathname.startsWith("/finance") ? (
+          })() : pathname.startsWith("/finance") ? (
             <div ref={setTitleSlot} className="flex-1 min-w-0 flex items-center gap-3" data-testid="title-slot" />
           ) : PAGE_TITLES[pathname.replace(/\/+$/, "") || "/"] ? (
             <h1 className="flex-1 min-w-0 text-2xl font-bold text-slate-900 truncate" data-testid="header-title">{PAGE_TITLES[pathname.replace(/\/+$/, "") || "/"]}</h1>
           ) : pathname.startsWith("/marketing") ? (() => {
             // Named after the tab that is open (Leads, CRM, Share...), like any other page's title.
-            const tabs = marketingTabsFor(user?.role, features);
+            const tabs = marketingTabsFor(user?.role);
             const requested = new URLSearchParams(search).get("tab");
             const { label: title } = MARKETING_NAV[tabs.includes(requested) ? requested : tabs[0]] || { label: "Marketing" };
             return (

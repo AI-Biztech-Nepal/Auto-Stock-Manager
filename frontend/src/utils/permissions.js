@@ -8,7 +8,7 @@ export const ROLE_NAV_PATHS = {
   // Ledger: Staff tab only (see LEDGER_TABS below).
   // /sales/vehicle: the sold-vehicle page, so they can keep Transfer / Sanakhat status current
   // (the Sales list itself stays admin-only -- it carries prices and margins).
-  stock_supervisor: ["/inventory", "/items", "/warranty", "/ledger", "/sales/vehicle", "/settings"],
+  stock_supervisor: ["/inventory", "/warranty", "/ledger", "/sales/vehicle", "/settings"],
   // Sanakhat desk: one page, /sanakhat, and nothing else (no sales, stock, settings or team).
   sanakhat_officer: ["/sanakhat"],
   // Parts department gets read-only inventory browsing plus the ability to flip a vehicle's
@@ -16,7 +16,7 @@ export const ROLE_NAV_PATHS = {
   // Ledger: Vendors + Staff tabs (see LEDGER_TABS below).
   parts_supervisor: ["/spare-parts", "/ledger", "/jobs", "/inventory", "/settings"],
   // Social Media adds new stock (basic details only) and manages vehicle photos -- nothing else.
-  social_media: ["/inventory", "/items", "/marketing", "/settings"],
+  social_media: ["/inventory", "/marketing", "/settings"],
   // Cross-company visibility only -- no company_id of its own, so it must never reach any
   // of the regular per-company pages (they'd have nothing scoped to show it anyway).
   platform_owner: ["/platform"],
@@ -43,51 +43,9 @@ const MARKETING_TABS = {
   social_media: ["share"],
 };
 
-// Feature switches (the portal's stock.* catalogue). `features` is the map from GET /api/features, or null/undefined
-// when it is not known yet or the portal cannot say: then nothing is hidden and the server's own 403 stays the boundary.
-// A key missing from a loaded map reads as its catalogue default (same as the server).
-export const FEATURE_DEFAULTS = {
-  "stock.vehicles": false, "stock.sanakhat": false, "stock.job_cards": false, "stock.spare_parts": false,
-  "stock.warranty": true, "stock.bookings": true, "stock.crm": true, "stock.ai_assistant": true,
-  "stock.leads": false, "stock.public_site": false, "stock.share": false, "stock.visits": false, "stock.offers": false,
-};
-// An organization that does not keep vehicles (stock.vehicles off) works with generic Items instead. Unknown features
-// (null) and every dealership keep the vehicle screens exactly as before.
-export function itemsMode(features) {
-  return !!features && !featureOn(features, "stock.vehicles");
-}
-
-// The words screens use for what is in stock. The server sends them with /features (see terms.py); these are the
-// fallback before that arrives and for an old server.
-export const VEHICLE_TERMS = { kind: "vehicle", item: "Vehicle", items: "Vehicles", inventory: "Inventory", sold: "Sold", sold_stock: "Sold Stock", add: "Add Vehicle", sell: "Sell Vehicle" };
-export const GENERIC_TERMS = { kind: "item", item: "Item", items: "Items", inventory: "Inventory", sold: "Sold", sold_stock: "Sold Items", add: "Add Item", sell: "Sell Item" };
-
-// In Repair and Scrap belong to Job Cards; a role belongs to its feature. Hidden when the feature is off, never deleted.
-export const STATUS_FEATURE = { in_repair: "stock.job_cards", scrap: "stock.job_cards" };
-export const ROLE_FEATURE = { parts_supervisor: "stock.spare_parts", sanakhat_officer: "stock.sanakhat" };
-
-export const ALL_FEATURES_ON = Object.fromEntries(Object.keys(FEATURE_DEFAULTS).map((k) => [k, true]));
-
-export function featureOn(features, key) {
-  if (!key || !features) return true;
-  return key in features ? features[key] !== false : FEATURE_DEFAULTS[key] !== false;
-}
-
-// Pages that belong to one feature. Longest match wins by listing order; query strings are not part of the path.
-const PATH_FEATURES = [
-  ["/jobs", "stock.job_cards"], ["/warranty", "stock.warranty"], ["/sanakhat", "stock.sanakhat"],
-  ["/spare-parts", "stock.spare_parts"], ["/ai", "stock.ai_assistant"], ["/bookings", "stock.bookings"],
-];
-export function featureForPath(path) {
-  const hit = PATH_FEATURES.find(([p]) => path === p || path.startsWith(p + "/"));
-  return hit ? hit[1] : null;
-}
-
-const MARKETING_FEATURE = { leads: "stock.leads", crm: "stock.crm", share: "stock.share", offers: "stock.offers", visits: "stock.visits" };
-
-export function marketingTabsFor(role, features) {
-  const tabs = !role || role === "admin" ? ["leads", "crm", "share", "offers", "visits"] : MARKETING_TABS[role] || [];
-  return tabs.filter((t) => featureOn(features, MARKETING_FEATURE[t]));
+export function marketingTabsFor(role) {
+  if (!role || role === "admin") return ["leads", "crm", "share", "offers", "visits"];
+  return MARKETING_TABS[role] || [];
 }
 
 export function ledgerTabsFor(role) {
@@ -95,7 +53,7 @@ export function ledgerTabsFor(role) {
   return LEDGER_TABS[role] || [];
 }
 
-function roleAllowsPath(role, path) {
+export function canAccessPath(role, path) {
   // /platform is cross-company (platform_owner only) -- never covered by admin's normal
   // "full access to every company page" blanket rule, or every company's own admin would
   // see it in nav and 403 on the backend when they clicked it.
@@ -103,13 +61,6 @@ function roleAllowsPath(role, path) {
   if (!role || role === "admin") return true;
   const allowed = ROLE_NAV_PATHS[role] || [];
   return allowed.some((p) => path === p || path.startsWith(p + "/"));
-}
-
-// The one place that combines the role AND the organization's features. Without `features` it is the old role-only check.
-export function canAccessPath(role, path, features) {
-  if (!roleAllowsPath(role, path)) return false;
-  if (path === "/marketing" || path.startsWith("/marketing/")) return marketingTabsFor(role, features).length > 0;
-  return featureOn(features, featureForPath(path));
 }
 
 // Job Cards tab is shared: Front desk stock can only view, Parts department has full create/edit/delete access.
