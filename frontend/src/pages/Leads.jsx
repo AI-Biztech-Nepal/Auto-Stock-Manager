@@ -73,7 +73,8 @@ const state = l => (l.status === "accepted" || l.status === "rejected" ? l.statu
 const tabOf = l => (state(l) === "rejected" ? "rejected" : !TYPES[l.type] ? "all" : l.type);
 const tabLabel = key => TABS.find(t => t.key === key)?.label;
 // Where a lead is listed: its home tab, plus Accounts for a registered account that is still pending (it shows there at once).
-const inTab = (l, key) => key === "all" || tabOf(l) === key || (key === "signup" && l.type === "signup" && state(l) === "new");
+// "All" is the website enquiries only: a registered account is not a lead, so it is listed (and counted) under Accounts alone.
+const inTab = (l, key) => (key === "all" ? l.type !== "signup" : tabOf(l) === key) || (key === "signup" && l.type === "signup" && state(l) === "new");
 
 export default function Leads() {
   const navigate = useNavigate();
@@ -150,7 +151,7 @@ export default function Leads() {
   const countOf = key => leads.filter(l => inTab(l, key)).length; // the number of cards that tab shows
   const [emptyTitle, emptyText] = leads.length === 0
     ? ["No leads yet", "Sell, exchange and service requests, and people who tap WhatsApp or Call on your website, will appear here as they come in."]
-    : tab === "all" ? ["No leads yet", "Every lead from your website appears here, and also in the tab for its type."]
+    : tab === "all" ? ["No leads yet", "Every enquiry from your website appears here, and also in the tab for its type. Registered accounts are under Accounts."]
     : tab === "rejected" ? ["No rejected leads", "Leads you reject are kept here, with your reason."]
     : tab === "signup" ? ["No registered accounts yet", "People who sign in with Google on your website and add their phone number appear here."]
     : [`Nothing in ${tabLabel(tab)} yet`, "Leads of this type appear here as they come in."];
@@ -170,7 +171,7 @@ export default function Leads() {
           >
             {Icon && <Icon size={15} />}{label}
             {/* Every tab shows how many leads it holds; All is blue while any lead there is still undecided. */}
-            <span data-testid={`leads-count-${key}`} className={`ml-0.5 min-w-[20px] text-center text-xs px-1.5 py-0.5 rounded-full ${tab === key ? "bg-white/25 text-white" : key === "all" && leads.some(x => state(x) === "new") ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-600"}`}>{countOf(key)}</span>
+            <span data-testid={`leads-count-${key}`} className={`ml-0.5 min-w-[20px] text-center text-xs px-1.5 py-0.5 rounded-full ${tab === key ? "bg-white/25 text-white" : key === "all" && leads.some(x => x.type !== "signup" && state(x) === "new") ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-600"}`}>{countOf(key)}</span>
           </button>
         ))}
       </div>
