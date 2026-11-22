@@ -169,10 +169,11 @@ function LeadSourceCell({ c, pending, customers, disabled, onLeadChange, onPickR
   );
 }
 
+// The vehicle from their latest sale; "+N" when they have bought more than one.
 function VehicleCell({ c }) {
-  const text = c.interested_vehicle || c.purchased_vehicle;
-  if (!text) return <span className="text-slate-300">—</span>;
-  return <span className={`block max-w-[124px] truncate ${c.interested_vehicle ? "text-slate-700" : "text-slate-500"}`} title={c.interested_vehicle ? text : `Bought: ${text}`}>{text}</span>;
+  if (!c.purchased_vehicle && c.interested_vehicle) return <span className="block max-w-[150px] truncate text-slate-500" title={`Interested in ${c.interested_vehicle}`}>{c.interested_vehicle}</span>;
+  if (!c.purchased_vehicle) return <span className="text-slate-300">—</span>;
+  return <span className="block max-w-[150px] truncate text-slate-800 font-medium" title={c.purchased_vehicle}>{c.purchased_vehicle}{c.purchases > 1 && <span className="text-xs text-slate-400"> +{c.purchases - 1}</span>}</span>;
 }
 
 function NextFollowUp({ c }) {
@@ -240,7 +241,7 @@ function CustomerName({ c, onShowReferred }) {
 }
 
 export default function CustomerTable({
-  rows, customers, sellers, wide, sort, onSort, total, count, savingId,
+  rows, customers, sellers, wide, leads = false, sort, onSort, total, count, savingId,
   onSaveLead, onStatus, onAssign, onView, onEdit, onContact, onShowReferred,
 }) {
   // A Referral / Other being filled in: { id, source, note }. Saved only once the name or detail is given.
@@ -285,8 +286,9 @@ export default function CustomerTable({
                 <span className="tabular-nums">#{i + 1}{c.address ? ` · ${c.address}` : ""}</span>
                 {c.contact_number && <span className="font-medium text-slate-700 tabular-nums">{c.contact_number}</span>}
               </div>
-              {(c.interested_vehicle || c.purchased_vehicle) && (
-                <p className="mt-1.5 text-xs text-slate-600 truncate"><span className="text-slate-400">{c.interested_vehicle ? "Interested in " : "Bought "}</span>{c.interested_vehicle || c.purchased_vehicle}</p>
+              {!c.purchased_vehicle && c.interested_vehicle && <p className="mt-1.5 text-xs text-slate-600 truncate"><span className="text-slate-400">Interested in </span>{c.interested_vehicle}</p>}
+              {c.purchased_vehicle && (
+                <p className="mt-1.5 text-xs text-slate-600 truncate"><span className="text-slate-400">Bought </span>{c.purchased_vehicle}{c.sale_price > 0 && <> · {formatNPR(c.sale_price)}</>}{c.sold_by_name && <span className="text-slate-400"> · by {c.sold_by_name}</span>}</p>
               )}
               <dl className="mt-3 grid grid-cols-[92px_1fr] items-start gap-x-3 gap-y-2.5 text-xs">
                 <dt className="pt-1 font-semibold text-slate-400 uppercase tracking-wider whitespace-nowrap">Lead source</dt>
@@ -316,15 +318,17 @@ export default function CustomerTable({
     <div className={BOOK_CARD} data-testid="crm-table-wrap">
       <BookTableStyle />
       <div className="overflow-x-auto">
-      <table className="w-full min-w-[1320px]" data-testid="crm-table">
+      <table className={`w-full ${leads ? "min-w-[1320px]" : "min-w-[1560px]"}`} data-testid="crm-table">
         <thead>
           <tr>
             <th scope="col" className="sticky left-0 z-20 bg-slate-50 w-10 min-w-[40px] text-left">SN</th>
             {th("name", "Customer", "sticky left-10 z-20 bg-slate-50 min-w-[180px] shadow-[2px_0_4px_-2px_rgba(15,23,42,0.15)]")}
             {th(null, "Contact")}
             {th(null, "Address")}
-            {th("vehicle", "Interested Vehicle")}
+            {th("vehicle", "Vehicle")}
+            {!leads && th("price", "Price", "", true)}
             {th("lead", "Lead Source")}
+            {!leads && th("soldby", "Sold By")}
             {th("status", "Lead Status")}
             {th("lastcontact", "Last Contact")}
             {th("nextfollowup", "Next Follow-up")}
@@ -343,7 +347,9 @@ export default function CustomerTable({
                 <td className="px-2.5 whitespace-nowrap font-medium text-slate-700 tabular-nums">{c.contact_number || <span className="text-slate-300">—</span>}</td>
                 <td className="px-2.5 max-w-[110px] truncate text-slate-600" title={c.address}>{c.address || <span className="text-slate-300">—</span>}</td>
                 <td className="px-2.5"><VehicleCell c={c} /></td>
+                {!leads && <td className="px-2.5 text-right whitespace-nowrap font-medium text-slate-800">{c.sale_price > 0 ? formatNPR(c.sale_price) : <span className="text-slate-300">—</span>}</td>}
                 <td className="px-2.5"><LeadSourceCell c={c} disabled={busy} {...cell} /></td>
+                {!leads && <td className="px-2.5 whitespace-nowrap text-slate-700">{c.sold_by_name || <span className="text-slate-300">—</span>}</td>}
                 <td className="px-2.5"><StatusSelect c={c} disabled={busy} onChange={onStatus} /></td>
                 <td className="px-2.5"><LastContact c={c} /></td>
                 <td className="px-2.5"><NextFollowUp c={c} /></td>
@@ -356,7 +362,7 @@ export default function CustomerTable({
         </tbody>
         <tfoot>
           <tr>
-            <td colSpan={10} className="text-gray-600">Total · {count.toLocaleString()} customer{count === 1 ? "" : "s"}</td>
+            <td colSpan={leads ? 10 : 12} className="text-gray-600">Total · {count.toLocaleString()} customer{count === 1 ? "" : "s"}</td>
             <td className="text-right text-slate-900 whitespace-nowrap" style={FONT}>{formatNPR(total)}</td>
             <td />
           </tr>
@@ -371,7 +377,9 @@ export default function CustomerTable({
 export const SORTERS = {
   newest: c => c.created_at || "",
   name: c => c.name.toLowerCase(),
-  vehicle: c => (c.interested_vehicle || c.purchased_vehicle || "").toLowerCase(),
+  vehicle: c => (c.purchased_vehicle || "").toLowerCase(),
+  price: c => c.sale_price || 0,
+  soldby: c => (c.sold_by_name || "").toLowerCase(),
   lead: c => (c.source || "~").toLowerCase(),
   status: c => c.lead_status,
   lastcontact: c => c.last_contact_at || "",
@@ -379,4 +387,4 @@ export const SORTERS = {
   assigned: c => (c.assigned_to_name || "").toLowerCase(),
   amount: c => c.amount,
 };
-export const FIRST_DIR = { name: "asc", vehicle: "asc", lead: "asc", status: "asc", lastcontact: "desc", nextfollowup: "asc", assigned: "asc", amount: "desc" };
+export const FIRST_DIR = { name: "asc", vehicle: "asc", lead: "asc", soldby: "asc", price: "desc", status: "asc", lastcontact: "desc", nextfollowup: "asc", assigned: "asc", amount: "desc" };

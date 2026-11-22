@@ -2,19 +2,20 @@ import { useEffect, useState, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate, useOutletContext } from "react-router-dom";
 import useMediaQuery from "../hooks/useMediaQuery";
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
+import DashboardTrends from "../components/DashboardTrends";
+import FinanceOverview from "../components/FinanceOverview";
 import { AlertTriangle, TrendingUp, Package, Users, Wrench, DollarSign, ShoppingCart, CalendarDays, TrendingDown, Banknote, Sparkles } from "lucide-react";
 import api from "../utils/api";
 import { peek, remember, cacheTicket } from "../utils/listCache";
 import { formatNPR } from "../utils/helpers";
 import HoverADDate from "../components/HoverADDate";
+import SaleDetailModal from "./SaleDetailModal";
 import BookingDetailsHost from "../components/BookingDetailsHost";
 import DateRangeFilter, { resolveDateFilter } from "../components/DateRangeFilter";
 import { useAuth } from "../context/AuthContext";
 import { getCurrentBSDate, BS_MONTHS } from "../utils/nepali-date";
 
 // ── Sub-components defined OUTSIDE to prevent remount ──────────────────
-const AGING_COLORS = { fresh: "#22c55e", normal: "#eab308", slow: "#f97316", dead: "#ef4444" };
 
 const KPICard = ({ title, value, subtitle, icon: Icon, color, testid, onClick }) => (
   <div
@@ -136,6 +137,14 @@ function AccountingSummary({ range }) {
   // summary (Total Sale only, or Total Sale + Total Profit) it shows top-right.
   const [salesModalView, setSalesModalView] = useState(null);
   const [showPurchasesModal, setShowPurchasesModal] = useState(false);
+  // The sale open in the bill pop-up (refresh, below, re-reads the lists after it is edited, returned or deleted).
+  const [openSaleId, setOpenSaleId] = useState(null);
+  const openIdx = recentSales.findIndex(s => s.id === openSaleId);
+  const saleNav = openIdx < 0 ? undefined : {
+    index: openIdx, total: recentSales.length,
+    prev: openIdx > 0 ? () => setOpenSaleId(recentSales[openIdx - 1].id) : undefined,
+    next: openIdx < recentSales.length - 1 ? () => setOpenSaleId(recentSales[openIdx + 1].id) : undefined,
+  };
 
   useEffect(() => {
     const { start, end } = range;
@@ -285,7 +294,7 @@ function AccountingSummary({ range }) {
               return (
                 <div
                   key={s.id}
-                  onClick={() => navigate(`/sales/vehicle/${s.vehicle_id}`)}
+                  onClick={() => setOpenSaleId(s.id)}
                   data-testid="recent-sale-card"
                   className="shrink-0 w-56 bg-white rounded-lg border border-green-100 shadow-sm p-3 cursor-pointer hover:shadow-md hover:border-green-300 transition-all"
                 >
@@ -309,6 +318,9 @@ function AccountingSummary({ range }) {
         )}
       </div>
 
+      {openSaleId && (
+        <SaleDetailModal key={openSaleId} saleId={openSaleId} nav={saleNav} onClose={() => setOpenSaleId(null)} onChanged={refresh} />
+      )}
       {/* A cancelled booking's details (opened from the Bookings list of the Today's Sale popup): the same popup the Sales page opens */}
       {viewingBooking && <BookingDetailsHost booking={viewingBooking} isAdmin={user?.role === "admin"} onClose={() => setViewingBooking(null)} onChanged={refresh} />}
 
@@ -375,7 +387,7 @@ function AccountingSummary({ range }) {
                   return (
                     <div
                       key={s.id}
-                      onClick={() => { setSalesModalView(null); navigate(`/sales/vehicle/${s.vehicle_id}`); }}
+                      onClick={() => { setSalesModalView(null); setOpenSaleId(s.id); }}
                       data-testid="period-sales-modal-row"
                       className="px-4 sm:px-5 py-3 cursor-pointer hover:bg-slate-50 transition-colors"
                     >
@@ -565,6 +577,7 @@ function AccountingSummary({ range }) {
 const PERIOD_STORAGE_KEY = "dashboard_date_filter";
 
 export default function Dashboard() {
+  const { user } = useAuth();
   const wideScreen = useMediaQuery("(min-width: 1024px)");
   const { topbarSlot } = useOutletContext() || {}; // the app's top bar: on wide screens the page's status pills and date filter sit there
   // Coming back to the Dashboard shows the last figures at once (see utils/listCache.js); they are refreshed below as always.
@@ -607,14 +620,13 @@ export default function Dashboard() {
     </div>
   );
 
-  if (!stats) return null;
-
-  const agingData = [
-    { name: "Fresh (0-30d)", count: stats.fresh_count || 0, color: AGING_COLORS.fresh },
-    { name: "Normal (31-45d)", count: stats.normal_count || 0, color: AGING_COLORS.normal },
-    { name: "Slow (46-60d)", count: stats.slow_moving_count || 0, color: AGING_COLORS.slow },
-    { name: "Dead (60+d)", count: stats.dead_stock_count || 0, color: AGING_COLORS.dead },
-  ];
+  if (!stats) return (
+    <div className="bg-white rounded-xl border border-red-200 p-8 text-center" data-testid="dashboard-error">
+      <p className="font-semibold text-slate-900">The dashboard could not load</p>
+      <p className="text-sm text-slate-500 mt-1">The server did not answer the request for the dashboard figures. Check your connection, or ask whoever runs the server to look at its log.</p>
+      <button onClick={() => window.location.reload()} className="mt-4 px-4 h-10 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold">Try again</button>
+    </div>
+  );
 
   const bs = getCurrentBSDate();
   const bsDateStr = bs ? `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year} BS` : "";
@@ -665,23 +677,8 @@ export default function Dashboard() {
         <KPICard title="Pending Jobs" value={stats.pending_jobs} icon={Wrench} color="bg-orange-500" testid="kpi-pending-jobs" onClick={() => navigate("/jobs")} />
       </div>
 
-      {/* Charts + Alerts */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Stock Aging Chart */}
-        <div className="lg:col-span-2 bg-white rounded-xl border border-slate-200 shadow-sm p-5" data-testid="aging-chart">
-          <h2 className="text-base font-bold text-slate-900 mb-4" style={{ fontFamily: "Manrope, sans-serif" }}>Stock Aging Overview</h2>
-          <ResponsiveContainer width="100%" height={200}>
-            <BarChart data={agingData} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
-              <XAxis dataKey="name" tick={{ fontSize: 11, fill: "#64748B" }} />
-              <YAxis tick={{ fontSize: 11, fill: "#64748B" }} allowDecimals={false} />
-              <Tooltip formatter={(val) => [`${val} vehicles`]} contentStyle={{ fontSize: 12, borderRadius: 8 }} />
-              <Bar dataKey="count" radius={[4, 4, 0, 0]}>
-                {agingData.map((entry) => <Cell key={entry.name} fill={entry.color} />)}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-
+      {/* Charts (sales trend) + Alerts */}
+      <DashboardTrends>
         {/* Alerts */}
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5" data-testid="alerts-panel">
           <h2 className="text-base font-bold text-slate-900 mb-4" style={{ fontFamily: "Manrope, sans-serif" }}>Stock Alerts</h2>
@@ -694,7 +691,10 @@ export default function Dashboard() {
             )}
           </div>
         </div>
-      </div>
+      </DashboardTrends>
+
+      {/* Finance books + job totals: the owner's view, as in the Finance dashboard */}
+      {user?.role === "admin" && <FinanceOverview jobsOn />}
 
       {/* Quick Action */}
       <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 flex items-center justify-between">
