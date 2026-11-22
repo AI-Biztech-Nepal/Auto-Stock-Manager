@@ -21,6 +21,10 @@ const EMPTY_FORM = {
   sanakhat_cost: "", resanakhat_cost: "",
   exchange_valuation: "", exchange_brand: "", exchange_model: "", exchange_reg_no: "", exchange_year: "",
   witness_name: "", witness_address: "", witness_phone: "", witness_id_number: "",
+  // "Booking" tick (a new sale only): it marks the vehicle as booked and opens the booking amount (the deposit), nothing else in
+  // the form changes. Save then records a booking instead of a sale - the vehicle reserved. The amount may be left empty (Rs 0)
+  // and filled in later from the booking's details.
+  booking: false, booking_amount: "",
 };
 
 const EMPTY_BUYER = { name: "", contact_number: "", address: "", id_number: "" };
@@ -160,7 +164,7 @@ export default function useSaleForm({ booking = null, sale = null } = {}) {
     try {
       const c = await createCustomer();
       set({ customer_id: c.id });
-      toast.success(existing ? "Customer added" : "Customer added — now fill the witness details");
+      toast.success("Customer added");
     } catch (err) { toast.error(err.response?.data?.detail || "Failed to add customer"); }
     finally { setAddingCust(false); }
   };
@@ -193,19 +197,18 @@ export default function useSaleForm({ booking = null, sale = null } = {}) {
 
   // What Save needs, as [field id, name] in page order (the first one gets the focus); shown on the fields after a first
   // try. The panel only counts while it is open: then a typed-but-not-yet-saved buyer is created on the way through (an
-  // existing customer picked from the list covers the buyer half itself), and on a new sale the witness is mandatory
-  // too (sale deed). Lead and Referred by are optional, except that a new buyer must be tagged with one or the other.
+  // existing customer picked from the list covers the buyer half itself). The witness is never required, for a sale or a
+  // booking. Lead and Referred by are optional, except that a new buyer must be tagged with one or the other.
   const enteringNewBuyer = showAddCust && !form.customer_id;
+  // The Booking tick changes none of this, except that a booking needs a customer on record (it can't be made for a walk-in).
   const missing = [
-    !form.vehicle_id && ["sv-vehicle", "vehicle"],
+    form.booking && !form.customer_id && !enteringNewBuyer && ["sv-customer", "customer"],
     enteringNewBuyer && !buyer.name.trim() && ["sv-buyer-name", "buyer's name"],
     enteringNewBuyer && !buyer.address.trim() && ["sv-buyer-address", "buyer's address"],
     enteringNewBuyer && !buyer.contact_number.trim() && ["sv-buyer-phone", "buyer's phone"],
     buyerChanged && !buyerInfo.name.trim() && ["sv-buyer-name", "buyer's name"],
     buyerChanged && !buyerInfo.contact_number.trim() && ["sv-buyer-phone", "buyer's phone"],
-    !existing && showAddCust && !form.witness_name.trim() && ["sv-witness-name", "witness's name"],
-    !existing && showAddCust && !form.witness_address.trim() && ["sv-witness-address", "witness's address"],
-    !existing && showAddCust && !form.witness_phone.trim() && ["sv-witness-phone", "witness's phone"],
+    !form.vehicle_id && ["sv-vehicle", "vehicle"],
     !form.sale_price && ["sv-sale_price", "sale price"],
     enteringNewBuyer && !isSourceComplete(buyerSource) && ["sv-lead", "lead, or who referred the buyer"],
   ].filter(Boolean);
@@ -224,6 +227,18 @@ export default function useSaleForm({ booking = null, sale = null } = {}) {
       id_number: buyerInfo.id_number.trim() || null,
     });
   };
+
+  // The body for POST /bookings (the "Booking" tick): the booking amount typed (Rs 0 when left empty), paid in cash until it is
+  // edited. The agreed price is the Sale price (if filled in) and the booking date is the form's Date (blank means today).
+  const bookingPayload = (customerId) => ({
+    vehicle_id: form.vehicle_id,
+    customer_id: customerId,
+    booking_amount: Math.max(Number(form.booking_amount) || 0, 0),
+    payment_method: "Cash",
+    booking_date: form.sale_date || undefined,
+    agreed_price: Number(form.sale_price) || undefined,
+    notes: form.notes || undefined,
+  });
 
   // The body for POST /sales (a new sale) or PUT /sales/:id (a recorded one: it always sends the lead, referrer, witness and
   // exchange, so clearing them sticks, and has no booking).
@@ -295,6 +310,6 @@ export default function useSaleForm({ booking = null, sale = null } = {}) {
     newExpName, setNewExpName, newExpAmt, setNewExpAmt,
     addPresetExpense, addCustomExpense, updateExpenseAmount, removeExpenseItem,
     grandTotal, exchangeValuation, amountPaid, autoDue, amountDue,
-    missing, ensureCustomer, payload,
+    missing, ensureCustomer, payload, bookingPayload,
   };
 }

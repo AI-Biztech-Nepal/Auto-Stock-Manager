@@ -15,6 +15,8 @@ import { ReturnModal } from "./VehicleModals";
 import SaleFormBody from "./SaleFormBody";
 import SaleBill from "./SaleBill";
 import useSaleForm from "../hooks/useSaleForm";
+import useBackdropClose from "../hooks/useBackdropClose";
+import { financeNotice } from "../utils/financeNotice";
 import WarrantyHistory from "../components/WarrantyHistory";
 import WarrantyBadge from "../components/WarrantyBadge";
 import { useAuth } from "../context/AuthContext";
@@ -47,6 +49,7 @@ function Loaded({ sale, vehicle, booking, reload, onClose, onChanged, nav }) {
   const [showReturn, setShowReturn] = useState(false);
   const [returnForm, setReturnForm] = useState({ refund_amount: "", new_status: "available", notes: "" });
   const [returning, setReturning] = useState(false);
+  const backdrop = useBackdropClose(() => { if (!saving && !returning) onClose(); }); // clicking outside the pop-up closes it
 
   const returned = !!sale.returned;
   const live = !returned && vehicle?.status === "sold"; // still sold: it has a warranty and can be returned
@@ -72,6 +75,7 @@ function Loaded({ sale, vehicle, booking, reload, onClose, onChanged, nav }) {
       if (buyerSaved) toast.success("Sale updated successfully!");
       else toast.error("The sale was saved, but the buyer's details could not be updated");
       if (r.data?.exchange_note) toast(r.data.exchange_note);
+      financeNotice(r.data);
       await reload(); // shows the saved sale, read-only again
       onChanged?.();
     } catch (err) { toast.error(getErrMsg(err, "Failed to save sale")); setSaving(false); }
@@ -138,7 +142,7 @@ function Loaded({ sale, vehicle, booking, reload, onClose, onChanged, nav }) {
   const transfer = vehicle ? getTransferStatusStyle(vehicle.ownership_transfer_status) : null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 sm:p-4" data-testid="sale-detail-modal">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 sm:p-4" data-testid="sale-detail-modal" {...backdrop}>
       <div onTouchStart={onTouchStart} onTouchEnd={onTouchEnd} className={`bg-white sm:rounded-2xl shadow-2xl w-full h-full sm:h-auto sm:max-h-[94vh] ${isEditing ? "sm:max-w-5xl" : "sm:max-w-3xl"} overflow-y-auto`}>
         {/* Header + status and actions: sticky as one block, so Save Changes and the other buttons stay reachable. */}
         <div className="sticky top-0 bg-white z-10 border-b border-slate-100">

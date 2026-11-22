@@ -5,10 +5,11 @@ import api from "../utils/api";
 import { useAuth } from "../context/AuthContext";
 import { canAccessPath, marketingTabsFor, itemsMode } from "../utils/permissions";
 import FinanceNavGroup from "./FinanceNavGroup";
+import SidebarProfile from "./SidebarProfile";
 import NavGroup from "./NavGroup";
 import { isSanakhatOverdue, sanakhatPendingDays } from "../utils/helpers";
 import {
-  LayoutDashboard, Bike, Package, Wrench, Sparkles, Settings, LogOut, Menu, X, Bell,
+  LayoutDashboard, Bike, Package, Wrench, Sparkles, Settings, Menu, X, Bell,
   BookOpen, Wallet, Boxes, ShoppingBag, Building2, ImageOff, FileWarning, ShieldCheck, Megaphone, Inbox, ChevronDown, Share2, Gift, Eye, HeartHandshake, FileCheck2
 } from "lucide-react";
 
@@ -46,6 +47,13 @@ const navItems = [
   { path: "/settings",     label: "Settings",     icon: Settings },
 ];
 
+// The page's name in the top bar, for every page that has no heading of its own up there (Inventory, Marketing, Sanakhat and
+// Finance are drawn below). A page keeps its description under it; its buttons stay where they were.
+const PAGE_TITLES = {
+  "/": "Dashboard", "/sales": "Sales", "/jobs": "Job Cards", "/warranty": "Warranty", "/ledger": "Ledger", "/import-stock": "Import Stock",
+  "/ai": "AI Assistant", "/platform": "Companies", "/reports": "Reports & Analytics", "/settings": "Settings",
+};
+
 export default function Layout() {
   const { user, logout, features, terms } = useAuth();
   const navigate = useNavigate();
@@ -57,6 +65,7 @@ export default function Layout() {
   const [financeOpen, setFinanceOpen] = useState(null);     // ...the Finance dropdown...
   const [reportOpen, setReportOpen] = useState(null);       // ...and the family of reports under its Report item
   const [topbarSlot, setTopbarSlot] = useState(null);     // the top bar's spot for a page's own controls
+  const [titleSlot, setTitleSlot] = useState(null);       // the spot for a heading the page draws itself (Finance: its title changes with the tab)
 
   const handleLogout = () => { logout(); navigate("/login"); };
   // Admin's people live in Finance's Ledger now, so the main Ledger item goes for admin; stock and parts supervisors
@@ -67,16 +76,6 @@ export default function Layout() {
   // registration number so gaps get caught without staff having to go hunting for
   // them in Inventory. Only fetched for roles that can actually open Inventory.
   const canSeeInventory = canAccessPath(user?.role, "/inventory");
-  const [profileOpen, setProfileOpen] = useState(false);
-  const profileRef = useRef(null);
-  useEffect(() => {
-    if (!profileOpen) return;
-    const onDown = (e) => { if (!profileRef.current?.contains(e.target)) setProfileOpen(false); };
-    const onEsc = (e) => { if (e.key === "Escape") setProfileOpen(false); };
-    document.addEventListener("pointerdown", onDown);
-    document.addEventListener("keydown", onEsc);
-    return () => { document.removeEventListener("pointerdown", onDown); document.removeEventListener("keydown", onEsc); };
-  }, [profileOpen]);
   const [notifOpen, setNotifOpen] = useState(false);
   const [notifVehicles, setNotifVehicles] = useState([]);
   const notifRef = useRef(null);
@@ -363,11 +362,14 @@ export default function Layout() {
           );
         })}
       </nav>
+
+      {/* The signed-in account, at the foot of the panel (it is not in the top bar) */}
+      <SidebarProfile user={user} onLogout={handleLogout} onPick={() => mobile && setSidebarOpen(false)} />
     </aside>
   );
 
   return (
-    <div className="flex h-app overflow-hidden bg-slate-50 pl-safe pr-safe">
+    <div className="app-shell flex h-app overflow-hidden bg-slate-50 pl-safe pr-safe">
       {/* Desktop Sidebar */}
       {renderSidebar()}
 
@@ -383,7 +385,7 @@ export default function Layout() {
       {/* Main */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* Header */}
-        <header className="sticky top-0 z-30 bg-white border-b border-slate-200 shadow-sm h-14 box-content pt-safe flex items-center px-4 lg:px-6 gap-4">
+        <header className="sticky top-0 z-30 bg-white border-b border-slate-200 shadow-sm h-14 sm:h-16 box-content pt-safe flex items-center px-4 lg:px-6 gap-4">
           <button
             className="lg:hidden w-11 h-11 -ml-2.5 rounded-lg flex items-center justify-center text-slate-500 hover:bg-slate-50 hover:text-slate-900 transition-colors"
             onClick={() => setSidebarOpen(true)}
@@ -391,37 +393,32 @@ export default function Layout() {
           >
             <Menu size={20} />
           </button>
-          {/* On every Marketing tab the page title sits here, level with the bell. */}
+          {/* The page's name sits here, level with the bell: plain bold text, no icon or logo beside it. */}
           {pathname.startsWith("/sanakhat") ? (
-            <h1 className="flex-1 min-w-0 flex items-center gap-2 text-lg font-bold text-slate-900 truncate" data-testid="header-title">
-              <span className="size-8 shrink-0 rounded-lg bg-gradient-to-br from-blue-600 to-indigo-600 text-white flex items-center justify-center"><FileCheck2 size={17} /></span> Sanakhat
-            </h1>
+            <h1 className="flex-1 min-w-0 text-2xl font-bold text-slate-900 truncate" data-testid="header-title">Sanakhat</h1>
           ) : pathname === "/inventory" ? (() => {
             // Product or Spare Parts, whichever is open (the detail page, /inventory/:id, has its own heading).
             const parts = new URLSearchParams(search).get("tab") === "spare-parts" && canAccessPath(user?.role, "/spare-parts", features);
-            const TitleIcon = parts ? Boxes : Bike;
             return (
-              <h1 className="flex-1 min-w-0 flex items-center gap-2 text-lg font-bold text-slate-900 truncate" data-testid="header-title">
-                <TitleIcon size={19} className="shrink-0 text-slate-400" /> {parts ? "Spare Parts" : "Inventory"}
-              </h1>
+              <h1 className="flex-1 min-w-0 text-2xl font-bold text-slate-900 truncate" data-testid="header-title">{parts ? "Spare Parts" : "Inventory"}</h1>
             );
           })() : pathname.startsWith("/items") ? (
-            <h1 className="flex-1 min-w-0 flex items-center gap-2 text-lg font-bold text-slate-900 truncate" data-testid="header-title">
-              <Package size={19} className="shrink-0 text-slate-400" /> {terms.items}
-            </h1>
+            <h1 className="flex-1 min-w-0 text-2xl font-bold text-slate-900 truncate" data-testid="header-title">{terms.items}</h1>
+          ) : pathname.startsWith("/finance") ? (
+            <div ref={setTitleSlot} className="flex-1 min-w-0 flex items-center gap-3" data-testid="title-slot" />
+          ) : PAGE_TITLES[pathname.replace(/\/+$/, "") || "/"] ? (
+            <h1 className="flex-1 min-w-0 text-2xl font-bold text-slate-900 truncate" data-testid="header-title">{PAGE_TITLES[pathname.replace(/\/+$/, "") || "/"]}</h1>
           ) : pathname.startsWith("/marketing") ? (() => {
             // Named after the tab that is open (Leads, CRM, Share...), like any other page's title.
             const tabs = marketingTabsFor(user?.role, features);
             const requested = new URLSearchParams(search).get("tab");
-            const { label: title, icon: TitleIcon } = MARKETING_NAV[tabs.includes(requested) ? requested : tabs[0]] || { label: "Marketing", icon: Megaphone };
+            const { label: title } = MARKETING_NAV[tabs.includes(requested) ? requested : tabs[0]] || { label: "Marketing" };
             return (
-              <h1 className="flex-1 min-w-0 flex items-center gap-2 text-lg font-bold text-slate-900 truncate" data-testid="header-title">
-                <TitleIcon size={19} className="shrink-0 text-slate-400" /> {title}
-              </h1>
+              <h1 className="flex-1 min-w-0 text-2xl font-bold text-slate-900 truncate" data-testid="header-title">{title}</h1>
             );
           })() : <div className="flex-1" />}
-          {/* Pages put their date range / view switch here (wide screens only); see Inventory. */}
-          <div ref={setTopbarSlot} className="hidden sm:flex items-center gap-2" data-testid="topbar-slot" />
+          {/* Pages put their date range / view switch / buttons here (wide screens only); see Inventory and Sales. */}
+          <div ref={setTopbarSlot} className="hidden sm:flex items-center gap-2 min-w-0" data-testid="topbar-slot" />
           {canSeeInventory && (
             <div className="relative" ref={notifRef}>
               <button
@@ -499,26 +496,6 @@ export default function Layout() {
               )}
             </div>
           )}
-          <div className="relative" ref={profileRef}>
-            <button type="button" onClick={() => setProfileOpen(o => !o)} aria-label="Account menu" aria-expanded={profileOpen} data-testid="profile-btn"
-              className="touch-manipulation flex items-center gap-2 h-11 pl-1 pr-1 sm:pr-2 rounded-full hover:bg-slate-50 transition-colors">
-              <span className="w-9 h-9 rounded-full bg-blue-600 flex items-center justify-center text-white text-sm font-bold">{user?.name?.[0]?.toUpperCase() || "A"}</span>
-              <span className="hidden sm:block text-sm font-medium text-slate-700">{user?.name}</span>
-              <ChevronDown size={14} className={`hidden sm:block text-slate-400 transition-transform ${profileOpen ? "rotate-180" : ""}`} />
-            </button>
-            {profileOpen && (
-              <div className="absolute right-0 top-full mt-2 w-64 bg-white rounded-xl border border-slate-200 shadow-2xl overflow-hidden z-50" data-testid="profile-menu">
-                <div className="px-4 py-3 border-b border-slate-100">
-                  <div className="text-sm font-semibold text-slate-900 truncate">{user?.name}</div>
-                  <div className="text-xs text-slate-500 truncate">{user?.username}</div>
-                  <div className="mt-1 inline-block text-[11px] font-semibold text-blue-700 bg-blue-50 rounded-full px-2 py-0.5 capitalize">{String(user?.role || "admin").replace(/_/g, " ")}</div>
-                </div>
-                <button type="button" onClick={handleLogout} className="w-full flex items-center gap-2.5 px-4 h-12 text-sm font-semibold text-red-600 hover:bg-red-50" data-testid="profile-logout">
-                  <LogOut size={16} /> Sign out
-                </button>
-              </div>
-            )}
-          </div>
         </header>
 
         {/* Content */}
@@ -526,7 +503,7 @@ export default function Layout() {
           {/* Boundary here (not only at the app root) so a lazy page loading keeps the
               sidebar/header on screen instead of swapping the whole layout for a spinner. */}
           <Suspense fallback={<div className="flex items-center justify-center h-64"><div className="animate-spin w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full" /></div>}>
-            <Outlet context={{ newLeads, topbarSlot }} />
+            <Outlet context={{ newLeads, topbarSlot, titleSlot }} />
           </Suspense>
           <div className="pb-safe" aria-hidden="true" />
         </main>

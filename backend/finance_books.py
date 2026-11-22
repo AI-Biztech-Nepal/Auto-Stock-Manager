@@ -44,6 +44,10 @@ UPGRADE_MESSAGE = ("Rent and bill services need one more database update, which 
                    "and could not. Run backend/migration_add_finance_rent.sql on the database once, then reload this page.")
 
 RENT_SOURCE = "rental_rent"
+# A party's opening balance (what they owed you, or you owed them, before these books began) is one ordinary ledger entry with
+# this source_type: "receive" = a debit on their customer ledger, "pay" = a debit on their vendor ledger. It moves a balance,
+# never cash, so every ledger table, statement, ageing and report picks it up without a formula of its own.
+PARTY_OPENING_SOURCE = "opening_balance"
 _RENT_NS = uuid.UUID("5b0c6a4e-8f3a-4c57-9f0e-2a6c1d7b9e10")
 _rent_lock = asyncio.Lock()
 _ledger_sync_lock = asyncio.Lock()
@@ -83,6 +87,19 @@ _services_ready = True
 # Same for fin_expense_categories.expense_group.
 _groups_ready = True
 
+# An account's opening balance: what it already held before the first entry in these books (0 = nothing; negative for an
+# overdrawn account). One column on each bank account and on the cash account, added at start-up like the other late columns, and
+# only offered (opening_ready in /fin/books) once both are known to exist. Every balance the screens work out starts from it.
+OPENING_DDL = [
+    "ALTER TABLE fin_bank_accounts ADD COLUMN IF NOT EXISTS opening_balance DOUBLE NOT NULL DEFAULT 0",
+    "ALTER TABLE fin_cash_account ADD COLUMN IF NOT EXISTS opening_balance DOUBLE NOT NULL DEFAULT 0",
+]
+OPENING_TABLES = ("fin_bank_accounts", "fin_cash_account")
+OPENING_MESSAGE = ("Opening balances need one more database update, which the server applies when it starts and could not. "
+                   "Run backend/supabase/schema.sql (or ALTER TABLE fin_bank_accounts and fin_cash_account ADD COLUMN "
+                   "opening_balance DOUBLE NOT NULL DEFAULT 0) on the database once, then restart the server.")
+_opening_ready = True
+
 # Ledger types, as in Finance Nepal: a label on each party (Customer, Vendor, Employee, or any type the company adds).
 # It only files the party; it moves nothing between the customer and vendor ledgers. Deleting a type leaves its parties
 # untyped, and an untyped party shows as Customer or Vendor from what its ledger holds most of.
@@ -118,13 +135,14 @@ async def ensure_schema(db, registry=None):
     fetch_raw). Creates what the Rent screen needs, adds the two service columns, and only then tells the SQL
     layer's table registry about them. Never raises: a database user that cannot alter tables simply leaves
     Rent and services off, and the rest of Finance exactly as it was."""
-    global _services_ready, _groups_ready, _types_ready
+    global _services_ready, _groups_ready, _types_ready, _opening_ready
     if registry is None:
         import sqldb
         registry = sqldb.TABLES
     _services_ready = False
     _groups_ready = False
     _types_ready = False
+    _opening_ready = False
     for ddl in RENT_DDL:
         try:
             await db.execute_raw(ddl)
@@ -182,17 +200,39 @@ async def ensure_schema(db, registry=None):
             logger.warning("Ledger types are off: fin_parties has no party_type_id column")
     except Exception:  # noqa: BLE001
         logger.warning("Could not check fin_parties' columns", exc_info=True)
+    for ddl in OPENING_DDL:
+        try:
+            await db.execute_raw(ddl)
+        except Exception:  # noqa: BLE001
+            logger.warning("Could not ensure the opening balance column: %s", ddl, exc_info=True)
+    try:
+        have = []
+        for table in OPENING_TABLES:
+            rows = await db.fetch_raw("SELECT COLUMN_NAME FROM information_schema.COLUMNS "
+                                      f"WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = '{table}'")
+            if "opening_balance" in {r["COLUMN_NAME"] for r in rows}:
+                have.append(table)
+        if len(have) == len(OPENING_TABLES):
+            for table in OPENING_TABLES:
+                registry[table]["columns"].add("opening_balance")
+            _opening_ready = True
+        else:
+            logger.warning("Opening balances are off: fin_bank_accounts / fin_cash_account have no opening_balance column")
+    except Exception:  # noqa: BLE001
+        logger.warning("Could not check the opening balance columns", exc_info=True)
 
 
 async def ensure_schema_postgres(db, registry=None):
-    """The Supabase (Postgres) counterpart of ensure_schema. The tables and every column already exist there (they
-    come from backend/supabase/schema.sql), so nothing is created; this only checks that the late-added columns are
-    present and tells the SQL layer's table registry about them, exactly as ensure_schema does. Never raises."""
-    global _services_ready, _groups_ready, _types_ready
+    """The Supabase (Postgres) counterpart of ensure_schema. The tables and nearly every column already exist there (they
+    come from backend/supabase/schema.sql), so nothing is created; this checks that the late-added columns are present
+    and tells the SQL layer's table registry about them, exactly as ensure_schema does. The one exception is the opening
+    balance column: it is new, so it is added here (additive and harmless to run again) when the database lets us, and
+    otherwise left off with a warning. Never raises."""
+    global _services_ready, _groups_ready, _types_ready, _opening_ready
     if registry is None:
         import sqldb
         registry = sqldb.TABLES
-    _services_ready = _groups_ready = _types_ready = False
+    _services_ready = _groups_ready = _types_ready = _opening_ready = False
 
     async def columns(table):
         try:
@@ -221,6 +261,21 @@ async def ensure_schema_postgres(db, registry=None):
         _types_ready = True
     else:
         logger.warning("Ledger types are off: fin_parties has no party_type_id column")
+    for ddl in OPENING_DDL:
+        try:
+            await db.execute_raw(ddl.replace(" DOUBLE ", " double precision "))
+        except Exception:  # noqa: BLE001
+            logger.warning("Could not add the opening balance column: %s", ddl, exc_info=True)
+    have = []
+    for table in OPENING_TABLES:
+        if "opening_balance" in await columns(table):
+            have.append(table)
+    if len(have) == len(OPENING_TABLES):
+        for table in OPENING_TABLES:
+            registry[table]["columns"].add("opening_balance")
+        _opening_ready = True
+    else:
+        logger.warning("Opening balances are off: fin_bank_accounts / fin_cash_account have no opening_balance column")
 
 LEDGER_SIDES = {"customer": ("fin_customer_ledger", "customer_id"),
                 "vendor": ("fin_vendor_ledger", "vendor_id")}
@@ -280,6 +335,22 @@ def _date(v: Optional[str], what: str, required: bool = False) -> Optional[str]:
         return date.fromisoformat(v[:10]).isoformat()
     except ValueError:
         raise HTTPException(400, f"{what} must be a date (YYYY-MM-DD)")
+
+
+def _opening_fields(v) -> dict:
+    """The opening balance a form sent, as fields to save: nothing when it was left out (the saved one is kept) or when
+    the column is not in the database and the amount is 0; the amount (negative allowed, for an overdrawn account) when
+    it can be saved; and a clear 503 when a real amount was sent but cannot be saved, rather than dropping it quietly."""
+    if v is None:
+        return {}
+    amount = round(float(v), 2)
+    if amount != amount or amount in (float("inf"), float("-inf")):
+        raise HTTPException(400, "Opening balance must be a number")
+    if not _opening_ready:
+        if amount == 0:
+            return {}
+        raise HTTPException(503, OPENING_MESSAGE)
+    return {"opening_balance": amount}
 
 
 def _money(v, what: str) -> float:
@@ -408,6 +479,7 @@ class AccountBody(BaseModel):
     account_number: Optional[str] = None
     account_holder_name: Optional[str] = None
     address: Optional[str] = None
+    opening_balance: Optional[float] = None  # left out, the saved one is kept
 
 
 class TransferBody(BaseModel):
@@ -489,6 +561,14 @@ class CashAccountBody(BaseModel):
     account_number: Optional[str] = None
     account_holder_name: Optional[str] = None
     address: Optional[str] = None
+    opening_balance: Optional[float] = None  # left out, the saved one is kept
+
+
+class PartyOpeningBody(BaseModel):
+    """A party's opening balance. direction "receive" = they owe you, "pay" = you owe them; an amount of 0 removes it."""
+    amount: float = 0
+    direction: str = "receive"
+    entry_date: Optional[str] = None  # YYYY-MM-DD, the day the balance is as of
 
 
 class LedgerBody(BaseModel):
@@ -529,6 +609,205 @@ class StatementCheck(BaseModel):
     references: List[str]
 
 
+async def sync_bill_ledger(db, t: dict):
+    """Keep the debt a bill books in step with the bill (what the original triggers did)."""
+    for coll, field, kind in ((db.fin_customer_ledger, "customer_id", "sale"),
+                              (db.fin_vendor_ledger, "vendor_id", "purchase")):
+        existing = await coll.find_one({"source_type": "business_transaction", "source_id": t["id"]}, {"_id": 0})
+        if t["type"] == kind and t.get("customer_id") and (t.get("amount") or 0) > 0:
+            fields = {field: t["customer_id"], "amount": t["amount"], "note": t.get("note"),
+                      "entry_date": t.get("bill_date")}
+            if existing:
+                await coll.update_one({"id": existing["id"]}, {"$set": fields})
+            else:
+                await coll.insert_one({"id": _id(), "entry_type": "debit", "source": "booking",
+                                       "source_type": "business_transaction", "source_id": t["id"],
+                                       "bank_account_id": None, "receipt_no": None, "created_at": _now(), **fields})
+        elif existing:
+            await coll.delete_one({"id": existing["id"]})
+
+
+# ── a vehicle sold on the Sales page, as a Sale bill ──────────────────────
+# Recording a sale there books a Sale bill for it on the customer's Finance Ledger (a debt: what they owe), linked to the
+# sale (source_type "vehicle_sale", source_id = the sale's id) so editing, returning or deleting the sale changes or removes
+# that bill. Only the bill is posted: what the customer pays is entered in Finance as an ordinary Received entry. A sale
+# with no customer posts nothing (in Finance a bill with no party counts as cash taken on the spot). Sales imported from a
+# spreadsheet are not posted.
+SALE_BILL_SOURCE = "vehicle_sale"
+
+
+async def _party_for_customer(db, customer: dict) -> Optional[dict]:
+    """The Finance party of a customer of the main Ledger, found the way _sync_main_ledger finds one (by phone, else by name
+    when either side has no phone) and made, typed Customer, when there is none yet."""
+    name, phone = _clean(customer.get("name")), _ledger_phone(customer.get("contact_number"))
+    if not name:
+        return None
+    parties = await db.fin_parties.find({}, {"_id": 0, "id": 1, "name": 1, "phone": 1}).to_list(100000)
+    if phone:
+        for p in parties:
+            if p.get("phone") == phone:
+                return p
+    key = name.lower()
+    for p in parties:
+        if (p.get("name") or "").strip().lower() == key and (phone is None or not p.get("phone")):
+            return p
+    now = _now()
+    doc = {"id": _id(), "name": name[:200], "phone": phone, "address": (_clean(customer.get("address")) or "")[:300] or None,
+           "created_at": now, "updated_at": now}
+    if _types_ready:
+        try:
+            customer_type = await db.fin_party_types.find_one({"name": "Customer"}, {"_id": 0, "id": 1})
+        except Exception:  # noqa: BLE001 -- no types table yet: the party is left untyped
+            customer_type = None
+        doc["party_type_id"] = (customer_type or {}).get("id")
+    await db.fin_parties.insert_one(doc)
+    return doc
+
+
+async def _remove_linked_bill(db, source_type: str, source_id: str) -> None:
+    """Take a linked bill, and the debt it booked, out of the books."""
+    existing = await db.fin_transactions.find_one({"source_type": source_type, "source_id": source_id}, {"_id": 0, "id": 1})
+    if existing:
+        await db.fin_customer_ledger.delete_many({"source_type": "business_transaction", "source_id": existing["id"]})
+        await db.fin_transactions.delete_one({"id": existing["id"]})
+
+
+async def _upsert_linked_bill(db, source_type: str, source_id: str, party: dict, customer: dict, amount: float, note: str,
+                              bill_date: Optional[str], label: str) -> None:
+    """Make (or update) the Sale bill linked to source_type / source_id: a debt of `amount` on the party's ledger. A bill
+    number or anything else typed on the bill in Finance is kept; the fields set here are overwritten."""
+    now = _now()
+    fields = {
+        "type": "sale", "amount": amount, "note": note, "party_name": party.get("name"), "customer_id": party["id"],
+        "bill_date": (bill_date or "")[:10] or None, "party_address": (_clean(customer.get("address")) or "")[:300] or None,
+        "items": [{"description": label or "Vehicle", "qty": 1, "rate": amount, "amount": amount}],
+        "discount_amount": 0, "vat_amount": 0, "payment_mode": "credit", "bank_account_id": None, "expense_category_id": None,
+    }
+    if _services_ready:
+        fields.update({"service_charges": [], "installation_charge": 0})
+    existing = await db.fin_transactions.find_one({"source_type": source_type, "source_id": source_id}, {"_id": 0})
+    if existing:
+        fields["updated_at"] = now
+        await db.fin_transactions.update_one({"id": existing["id"]}, {"$set": fields})
+        bill = {**existing, **fields}
+    else:
+        bill = {"id": _id(), "source_type": source_type, "source_id": source_id, "bill_no": None,
+                "created_at": now, "updated_at": now, **fields}
+        await db.fin_transactions.insert_one(dict(bill))
+    await sync_bill_ledger(db, bill)
+
+
+async def remove_sale_bill(db, sale_id: str) -> None:
+    """Take a sale's bill, and the debt it booked, out of the books (the sale was deleted, or no longer has a customer)."""
+    await _remove_linked_bill(db, SALE_BILL_SOURCE, sale_id)
+
+
+def _why(e: Exception) -> str:
+    """A short, readable reason for a failed posting: it is shown to the user so a missing entry can be explained."""
+    return f"failed: {type(e).__name__}: {str(e)[:140]}"
+
+
+async def sync_sale_bill(db, sale: dict, customer: Optional[dict], vehicle_label: str = "") -> str:
+    """Make the sale's Sale bill match the sale: made when it is new, otherwise updated, and removed when the sale has no
+    customer or nothing is owed. The amount is what the customer pays (the sale price and any extra charges), or, for a
+    returned sale, what the shop kept. Safe to call again and again. Never raises: a problem in the Finance books must not
+    stop a sale from being saved. Returns "posted" (the bill is on the customer's ledger), "nothing" (there was nothing to
+    post) or "failed: <why>"."""
+    try:
+        returned = bool(sale.get("returned"))
+        owed = sale.get("retained_amount") if returned else (sale.get("total_amount") or sale.get("sale_price"))
+        amount = round(float(owed or 0), 2)
+        party = await _party_for_customer(db, customer) if customer and amount > 0 else None
+        if not party:
+            await remove_sale_bill(db, sale["id"])
+            return "nothing"
+        note = "Vehicle sale" + (f" · {vehicle_label}" if vehicle_label else "") + (" (returned)" if returned else "")
+        await _upsert_linked_bill(db, SALE_BILL_SOURCE, sale["id"], party, customer, amount, note, sale.get("sale_date"), vehicle_label)
+        return "posted"
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Could not post sale %s to the Finance books", sale.get("id"), exc_info=True)
+        return _why(e)
+
+
+# ── a booking made on the Sales page ──────────────────────────────────────
+# The deposit a customer leaves on a booked vehicle is money received: a Received entry on their Finance Ledger. If they cancel,
+# the refund is money paid back (a debit) and what the shop keeps is income, booked as a Sale bill, so the ledger balances out
+# and the kept amount counts in the books. Each is linked to the booking (source_type below, source_id = the booking's id), so
+# editing, cancelling or deleting the booking changes or removes it. A sale made from the booking keeps the deposit entry: the
+# customer has paid that much towards it. A booking with no customer, or no deposit, posts nothing.
+BOOKING_DEPOSIT_SOURCE = "booking_deposit"
+BOOKING_REFUND_SOURCE = "booking_refund"
+BOOKING_KEPT_SOURCE = "booking_kept"
+
+
+async def _put_ledger_entry(db, source_type: str, source_id: str, party: Optional[dict], entry_type: str, amount: float,
+                            note: str, entry_date: Optional[str], bank_account_id: Optional[str] = None,
+                            receipt_no: Optional[str] = None) -> None:
+    """Make, update or (when there is nothing to record) remove the one linked entry on the customer's ledger. It is a normal
+    entry (source "manual"), so it reads like any Received / Payment entry in Finance."""
+    existing = await db.fin_customer_ledger.find_one({"source_type": source_type, "source_id": source_id}, {"_id": 0})
+    if not party or not amount > 0:
+        if existing:
+            await db.fin_customer_ledger.delete_one({"id": existing["id"]})
+        return
+    fields = {"customer_id": party["id"], "entry_type": entry_type, "amount": amount, "note": note, "entry_date": entry_date,
+              "bank_account_id": bank_account_id, "receipt_no": receipt_no}
+    if existing:
+        await db.fin_customer_ledger.update_one({"id": existing["id"]}, {"$set": fields})
+    else:
+        await db.fin_customer_ledger.insert_one({"id": _id(), "source": "manual", "source_type": source_type,
+                                                 "source_id": source_id, "created_at": _now(), **fields})
+
+
+async def _bank_account_for(db, payment_method: Optional[str]) -> Optional[str]:
+    """The bank account a Bank Transfer went into, when there is only one to choose from; otherwise None (cash in hand)."""
+    if (payment_method or "").strip().lower() != "bank transfer":
+        return None
+    rows = await db.fin_bank_accounts.find({}, {"_id": 0, "id": 1}).to_list(10)
+    return rows[0]["id"] if len(rows) == 1 else None
+
+
+async def remove_booking_entries(db, booking_id: str) -> None:
+    """Take everything a booking put on the books out (the booking was deleted)."""
+    for source_type in (BOOKING_DEPOSIT_SOURCE, BOOKING_REFUND_SOURCE):
+        await db.fin_customer_ledger.delete_many({"source_type": source_type, "source_id": booking_id})
+    await _remove_linked_bill(db, BOOKING_KEPT_SOURCE, booking_id)
+
+
+async def sync_booking_entries(db, booking: dict, customer: Optional[dict], vehicle_label: str = "") -> str:
+    """Make the customer's Finance Ledger match the booking: its deposit as a Received entry and, once cancelled, the refund
+    paid back and the amount kept (a Sale bill). Safe to call again and again. Never raises: a problem in the Finance books
+    must not stop a booking from being saved. Returns "posted" (something is on the customer's ledger), "nothing" (there was
+    nothing to post: no deposit, or no customer) or "failed: <why>"."""
+    try:
+        bid = booking["id"]
+        cancelled = booking.get("status") == "cancelled"
+        deposit = round(float(booking.get("booking_amount") or 0), 2)
+        refund = round(float(booking.get("refund_amount") or 0), 2) if cancelled else 0
+        kept = round(float(booking.get("retained_amount") or 0), 2) if cancelled else 0
+        # The party is only looked up (or made) when there is something to record on its ledger.
+        party = await _party_for_customer(db, customer) if customer and (deposit > 0 or refund > 0 or kept > 0) else None
+        label = f" · {vehicle_label}" if vehicle_label else ""
+        method = booking.get("payment_method")
+        bank = await _bank_account_for(db, method)
+        receipt = str(booking["receipt_no"]) if booking.get("receipt_no") else None
+        await _put_ledger_entry(db, BOOKING_DEPOSIT_SOURCE, bid, party, "credit", deposit,
+                                f"Booking deposit{label}" + (f" · {method}" if method else ""),
+                                (booking.get("booking_date") or "")[:10] or None, bank, receipt)
+        ended = (booking.get("cancelled_at") or "")[:10] or None
+        await _put_ledger_entry(db, BOOKING_REFUND_SOURCE, bid, party, "debit", refund,
+                                f"Booking cancelled: deposit refunded{label}", ended, bank)
+        if party and kept > 0:
+            await _upsert_linked_bill(db, BOOKING_KEPT_SOURCE, bid, party, customer, kept,
+                                      f"Booking cancelled: amount kept{label}", ended, vehicle_label or "Booking")
+        else:
+            await _remove_linked_bill(db, BOOKING_KEPT_SOURCE, bid)
+        return "posted" if party else "nothing"
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Could not post booking %s to the Finance books", booking.get("id"), exc_info=True)
+        return _why(e)
+
+
 def register(api_router, db, admin_only):
     """Attach the /fin/* routes. `db` is the company-scoped database wrapper from server.py."""
 
@@ -550,20 +829,7 @@ def register(api_router, db, admin_only):
 
     async def _sync_bill_ledger(t: dict):
         """Keep the debt a bill books in step with the bill (what the original triggers did)."""
-        for coll, field, kind in ((db.fin_customer_ledger, "customer_id", "sale"),
-                                  (db.fin_vendor_ledger, "vendor_id", "purchase")):
-            existing = await coll.find_one({"source_type": "business_transaction", "source_id": t["id"]}, {"_id": 0})
-            if t["type"] == kind and t.get("customer_id") and (t.get("amount") or 0) > 0:
-                fields = {field: t["customer_id"], "amount": t["amount"], "note": t.get("note"),
-                          "entry_date": t.get("bill_date")}
-                if existing:
-                    await coll.update_one({"id": existing["id"]}, {"$set": fields})
-                else:
-                    await coll.insert_one({"id": _id(), "entry_type": "debit", "source": "booking",
-                                           "source_type": "business_transaction", "source_id": t["id"],
-                                           "bank_account_id": None, "receipt_no": None, "created_at": _now(), **fields})
-            elif existing:
-                await coll.delete_one({"id": existing["id"]})
+        await sync_bill_ledger(db, t)
 
     async def _sync_rental_rent():
         """Make the renters' ledgers match their rentals: one "Daily rent" debit per rental per day it has
@@ -706,6 +972,8 @@ def register(api_router, db, admin_only):
             "rent_ready": rentals is not None and cash_rows is not None,
             "services_ready": _services_ready,
             "groups_ready": _groups_ready,
+            # False while the accounts have no opening_balance column: the account form says so instead of offering the field.
+            "opening_ready": _opening_ready,
         }
 
     # ── parties ────────────────────────────────────────────────────────────
@@ -746,6 +1014,31 @@ def register(api_router, db, admin_only):
             fields["party_type_id"] = await _party_type_or_none(body.party_type_id)
         await db.fin_parties.update_one({"id": pid}, {"$set": fields})
         return await db.fin_parties.find_one({"id": pid}, {"_id": 0})
+
+    @api_router.put("/fin/parties/{pid}/opening")
+    @_safe
+    async def fin_set_party_opening(pid: str, body: PartyOpeningBody, cu: dict = Depends(admin_only)):
+        """Set (or clear, with 0) this party's opening balance: one entry, replacing any earlier one on either side."""
+        await _party_or_404(pid)
+        if body.direction not in ("receive", "pay"):
+            raise HTTPException(400, "Choose whether you receive or pay this amount")
+        try:
+            amount = round(abs(float(body.amount or 0)), 2)
+        except (TypeError, ValueError):
+            raise HTTPException(400, "Amount must be a number")
+        if amount != amount or amount > 1e12:
+            raise HTTPException(400, "Amount is not valid")
+        day = _clean(body.entry_date)
+        if day and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", day):
+            raise HTTPException(400, "Date must be a date")
+        await db.fin_customer_ledger.delete_many({"customer_id": pid, "source_type": PARTY_OPENING_SOURCE})
+        await db.fin_vendor_ledger.delete_many({"vendor_id": pid, "source_type": PARTY_OPENING_SOURCE})
+        if amount > 0:
+            coll, field = (db.fin_customer_ledger, "customer_id") if body.direction == "receive" else (db.fin_vendor_ledger, "vendor_id")
+            await coll.insert_one({"id": _id(), field: pid, "entry_type": "debit", "amount": amount, "note": "Opening balance",
+                                   "source": "booking", "source_type": PARTY_OPENING_SOURCE, "source_id": pid,
+                                   "bank_account_id": None, "entry_date": day, "receipt_no": None, "created_at": _now()})
+        return {"ok": True}
 
     # ── ledger types ───────────────────────────────────────────────────────
     async def _party_type_or_none(tid: Optional[str]):
@@ -879,7 +1172,7 @@ def register(api_router, db, admin_only):
         now = _now()
         doc = {"id": _id(), "name": name, "bank_name": _clean(body.bank_name), "account_number": _clean(body.account_number),
                "account_holder_name": _clean(body.account_holder_name), "address": _clean(body.address),
-               "created_at": now, "updated_at": now}
+               "created_at": now, "updated_at": now, **_opening_fields(body.opening_balance)}
         await db.fin_bank_accounts.insert_one(doc)
         doc.pop("_id", None)
         return doc
@@ -892,9 +1185,10 @@ def register(api_router, db, admin_only):
         if not name:
             raise HTTPException(400, "Account name is required")
         await _account_name_free(name, exclude=aid)
+        opening = _opening_fields(body.opening_balance)  # checked before anything is saved
         await db.fin_bank_accounts.update_one({"id": aid}, {"$set": {
             "name": name, "bank_name": _clean(body.bank_name), "account_number": _clean(body.account_number),
-            "account_holder_name": _clean(body.account_holder_name), "address": _clean(body.address), "updated_at": _now()}})
+            "account_holder_name": _clean(body.account_holder_name), "address": _clean(body.address), "updated_at": _now(), **opening}})
         return await db.fin_bank_accounts.find_one({"id": aid}, {"_id": 0})
 
     @api_router.delete("/fin/accounts/{aid}")
@@ -1363,7 +1657,7 @@ def register(api_router, db, admin_only):
         kept in one row of their own and shown on the Bank Accounts page like any other account."""
         doc = {"name": _clean(body.name), "bank_name": _clean(body.bank_name), "account_number": _clean(body.account_number),
                "account_holder_name": _clean(body.account_holder_name), "address": _clean(body.address),
-               "updated_at": _now()}
+               "updated_at": _now(), **_opening_fields(body.opening_balance)}
         existing = await db.fin_cash_account.find_one({}, {"_id": 0})
         if existing:
             await db.fin_cash_account.update_one({"id": existing["id"]}, {"$set": doc})

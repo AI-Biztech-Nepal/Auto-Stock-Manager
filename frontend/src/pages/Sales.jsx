@@ -1,22 +1,24 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
-import { useNavigate, useLocation } from "react-router-dom";
-import { Plus, Search, Trash2, Eye, TrendingUp, DollarSign, Calendar, ShoppingBag, AlertTriangle, UploadCloud, FileSpreadsheet, CheckCircle2, Undo2, BookmarkCheck, ArrowRight, Tags } from "lucide-react";
+import { createPortal } from "react-dom";
+import { useNavigate, useOutletContext } from "react-router-dom";
+import useMediaQuery from "../hooks/useMediaQuery";
+import { Plus, Search, Trash2, TrendingUp, DollarSign, Calendar, ShoppingBag, AlertTriangle, UploadCloud, FileSpreadsheet, CheckCircle2, Undo2 } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
 import { peek, remember, cacheTicket } from "../utils/listCache";
-import { formatNPR, splitSanakhatExpenses, deleteSaleConfirm, TRANSFER_STATUS_OPTIONS, getTransferStatusStyle } from "../utils/helpers";
+import { formatNPR, deleteSaleConfirm, TRANSFER_STATUS_OPTIONS, getTransferStatusStyle } from "../utils/helpers";
 import { getCurrentBSMonthRange } from "../utils/nepali-date";
 import { useAuth } from "../context/AuthContext";
-import { featureOn } from "../utils/permissions";
-import FeatureOff from "../components/FeatureOff";
 import HoverADDate from "../components/HoverADDate";
 import { BOOK_CARD, BookTableStyle } from "../components/BookTable";
 import WarrantyBadge from "../components/WarrantyBadge";
-import Bookings from "./Bookings";
+import { BookedTableRow, BookedCard, CancelledTableRow, CancelledCard, cancelledOn } from "../components/BookedRows";
+import BookingReceipt from "../components/BookingReceipt";
+import BookingDetailModal from "../components/BookingDetailModal";
+import { EditBookingModal, WithdrawBookingModal } from "../components/BookingModals";
 import SaleVehicleModal from "./SaleVehicleModal";
 import SaleDetailModal from "./SaleDetailModal";
 import DateRangeFilter, { resolveDateFilter } from "../components/DateRangeFilter";
-import { SOURCE_LABEL } from "../utils/crm";
 
 function getErrMsg(err, fallback) {
   if (!err.response) return "Network error - could not reach the server";
@@ -26,8 +28,19 @@ function getErrMsg(err, fallback) {
   return fallback || `Server error (${err.response.status})`;
 }
 
+// The Status column: a sale is "Sold" (or "Returned" once the customer has given the vehicle back); a booked vehicle is
+// "Booked" (see components/BookedRows.jsx).
+function SaleStatus({ sale }) {
+  const returned = !!sale.returned;
+  return (
+    <span className={`px-2 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wide whitespace-nowrap ${returned ? "bg-amber-100 text-amber-700" : "bg-green-100 text-green-700"}`} data-testid="sale-status-tag">
+      {returned ? "Returned" : "Sold"}
+    </span>
+  );
+}
+
 // Status tags from the sold vehicle's own record (what the old Sold Stock tab showed):
-// returned marker, name-transfer status and warranty. Sanakhat cost has its own column.
+// returned marker and warranty. The name-transfer status has its own column (and line on phones).
 function SaleTags({ sale, vehicle, booking }) {
   const fromBooking = booking && (
     <span className="px-1.5 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wide bg-yellow-100 text-yellow-800 whitespace-nowrap" title="This sale completed a booking" data-testid="sale-booking-tag">
@@ -42,21 +55,12 @@ function SaleTags({ sale, vehicle, booking }) {
     );
   }
   if (!vehicle) return fromBooking || null;
-  const transfer = getTransferStatusStyle(vehicle.ownership_transfer_status);
   return (
     <>
       {fromBooking}
-      <span className={`px-1.5 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wide whitespace-nowrap ${transfer.bg} ${transfer.text}`} title="Transfer status" data-testid="sale-transfer-tag">Transfer {transfer.label}</span>
       <WarrantyBadge warranty={vehicle.warranty} />
     </>
   );
-}
-
-// Sanakhat cost = sanakhat + re-sanakhat entered on the sale. Both are extra expenses, so
-// they're also inside the Extra Expenses column's total.
-function sanakhatOf(sale) {
-  const { sanakhat, resanakhat } = splitSanakhatExpenses(sale.extra_expenses);
-  return { total: sanakhat + resanakhat, resanakhat };
 }
 
 // Pending / In Progress / Done name transfer. Admins flip it right in the row; everyone else just sees the pill.
@@ -81,37 +85,35 @@ function TransferStatus({ vehicle, editable, onChange }) {
   );
 }
 
-// Profit on the sale: the vehicle's realized margin, or — once returned — what was kept.
-function marginOf(sale, vehicle) {
-  if (sale.returned) return sale.retained_amount ?? null;
-  return vehicle?.expected_profit ?? null;
-}
-
 export default function Sales() {
   const navigate = useNavigate();
-  const location = useLocation();
-  const { user, features } = useAuth();
-  const bookingsOn = featureOn(features, "stock.bookings");
+  const { user } = useAuth();
   const isAdmin = user?.role === "admin";
+  const wideScreen = useMediaQuery("(min-width: 1024px)");
+  const { topbarSlot } = useOutletContext() || {}; // the app's top bar: on wide screens the page's counts and buttons sit there
   // Coming back to this page shows the last lists at once (see utils/listCache.js); fetchAll below refreshes them as always.
   const [sales, setSales] = useState(() => peek("sales:list") ?? []);
   // Sold vehicles, keyed by id below — adds the old Sold Stock details (transfer, warranty,
   // margin, sanakhat) onto each sale row.
   const [soldVehicles, setSoldVehicles] = useState(() => peek("vehicles:sold") ?? []);
   const [summary, setSummary] = useState(() => peek("sales:summary") ?? null);
-  // Bookings are fetched here so open ones can be converted from this page and converted ones
-  // can be tagged on their sale row.
+  // Bookings are fetched here: the open ones are rows of the table below (status "Booked"), and the ones that became a
+  // sale are tagged on their sale row.
   const [bookings, setBookings] = useState([]);
+  const [reservedVehicles, setReservedVehicles] = useState([]); // the booked vehicles: their cost price shows on the booked rows
+  const [viewingBookingId, setViewingBookingId] = useState(null); // the cancelled booking that was clicked: its details are open
+  const [receipt, setReceipt] = useState(null);                   // the booking whose receipt is open for printing
+  const [editingBooking, setEditingBooking] = useState(null);     // the booking being edited
+  const [withdrawingBooking, setWithdrawingBooking] = useState(null); // the booking whose customer is backing out
   const [loading, setLoading] = useState(() => peek("sales:list") === undefined);
   const [search, setSearch] = useState("");
   // Set via the Today/This Week/This Month toggle in the header — "all" (default) shows
   // every sale; otherwise restricts the list below to sale_date falling in that range.
   const [dateRange, setDateRange] = useState({ key: "all", custom: null }); // key "all" = off
-  const [statusFilter, setStatusFilter] = useState("all"); // "all" | "sold" | "returned"
+  const [statusFilter, setStatusFilter] = useState("all"); // "all" | "sold" | "returned" | "booked" | "cancelled"
   const [showModal, setShowModal] = useState(false);
 
-  // "Sale Vehicle" on a booking (strip below or Bookings page) opens this same sale form
-  // pre-filled, with the booking kept in activeBooking.
+  // "Sale Vehicle" on a booked row opens this same sale form pre-filled, with the booking kept in activeBooking.
   const [activeBooking, setActiveBooking] = useState(null);
 
   // Spreadsheet import ("Sales Record 20XX" workbook)
@@ -119,12 +121,6 @@ export default function Sales() {
   const [importFile, setImportFile] = useState(null);
   const [importResult, setImportResult] = useState(null);
   const [importBusy, setImportBusy] = useState(false);
-
-  // Admin tool: read the lead type / referrer out of existing sales' notes, review, then save the ticked ones.
-  const [showNoteLeads, setShowNoteLeads] = useState(false);
-  const [noteLeads, setNoteLeads] = useState(null);       // null while loading, else the sales the notes say something about
-  const [noteLeadPicks, setNoteLeadPicks] = useState({}); // sale id -> ticked
-  const [noteLeadsBusy, setNoteLeadsBusy] = useState(false);
 
   // Admin-only diagnostic: sales whose linked vehicle no longer has status "sold", or a
   // vehicle marked sold with no sale behind it.
@@ -137,6 +133,7 @@ export default function Sales() {
       remember("sales:list", s.data, ticket); remember("sales:summary", sm.data, ticket); remember("vehicles:sold", v.data, ticket);
       setSales(s.data); setSummary(sm.data); setSoldVehicles(v.data);
       api.get("/bookings").then(r => setBookings(r.data)).catch(() => {});
+      api.get("/vehicles?status=reserved").then(r => setReservedVehicles(r.data)).catch(() => {});
     } catch { toast.error("Failed to load sales"); }
     finally { setLoading(false); }
   }, []);
@@ -149,8 +146,16 @@ export default function Sales() {
   }, [isAdmin, sales]);
 
   const openBookings = useMemo(() => bookings.filter(b => b.status === "active"), [bookings]);
+  // Bookings the customer cancelled: rows of the table too (the amount the shop kept is their profit).
+  const cancelledBookings = useMemo(() => bookings.filter(b => b.status === "cancelled"), [bookings]);
+  // Read from the live list, so the details close by themselves once the booking is sold or deleted.
+  const viewingBooking = [...openBookings, ...cancelledBookings].find(b => b.id === viewingBookingId) ?? null;
   const bookingBySaleId = useMemo(() => Object.fromEntries(bookings.filter(b => b.sale_id).map(b => [b.sale_id, b])), [bookings]);
   const vehicleById = useMemo(() => Object.fromEntries(soldVehicles.map(v => [v.id, v])), [soldVehicles]);
+  const reservedById = useMemo(() => Object.fromEntries(reservedVehicles.map(v => [v.id, v])), [reservedVehicles]);
+  // Cost price of a row's vehicle: its overall investment (purchase price + expenses + accessories). Blank when the vehicle
+  // isn't loaded (a returned sale's) or the role may not see costs.
+  const costOf = (vehicleId) => (vehicleById[vehicleId] ?? reservedById[vehicleId])?.total_investment ?? null;
 
   // Optimistic: flip the pill straight away, roll back if the save fails.
   const updateTransfer = async (vehicle, status) => {
@@ -170,24 +175,35 @@ export default function Sales() {
   // sold vehicle, and Edit, Return and Delete.
   const [detailId, setDetailId] = useState(null);
   const openSale = (s) => setDetailId(s.id);
+  // A booked row opens its vehicle's details page, the same page a sold vehicle opens (/sales/vehicle/:id, SoldStockDetail). A
+  // cancelled one (its vehicle is for sale again) opens the cancellation popup.
+  const openBooking = (b) => (b.status === "cancelled" ? setViewingBookingId(b.id) : navigate(`/sales/vehicle/${b.vehicle_id}`));
 
   const openModal = (booking = null) => { setActiveBooking(booking); setShowModal(true); };
   const closeModal = () => { setShowModal(false); setActiveBooking(null); };
 
-  // Arrived from the Bookings page (/sales?booking=ID): open the sale form for that booking
-  // once bookings have loaded, then drop the param so a refresh doesn't reopen it.
-  const tabParam = new URLSearchParams(location.search).get("tab");
-  const tab = tabParam === "bookings" ? "bookings" : "sales";
-  const setTab = (t) => navigate(t === "sales" ? "/sales" : `/sales?tab=${t}`, { replace: true });
-  const bookingParam = new URLSearchParams(location.search).get("booking");
-  useEffect(() => {
-    if (!bookingParam || loading) return;
-    navigate(location.pathname, { replace: true });
-    api.get("/bookings").then(r => {
-      const b = r.data.find(x => x.id === bookingParam && x.status === "active");
-      if (b) openModal(b); else toast.error("That booking is no longer open");
-    }).catch(() => toast.error("Failed to load booking"));
-  }, [bookingParam, loading]); // eslint-disable-line react-hooks/exhaustive-deps
+  const deleteBooking = async (b) => {
+    const warning = b.status === "cancelled"
+      ? "Delete this cancelled booking? The amount the shop kept from it will no longer be on record."
+      : "Delete this booking record? Use Cancel instead if the customer is cancelling.";
+    if (!window.confirm(warning)) return;
+    try {
+      await api.delete(`/bookings/${b.id}`);
+      toast.success("Booking deleted");
+      setViewingBookingId(null);
+      fetchAll();
+    } catch (err) { toast.error(getErrMsg(err, "Failed to delete booking")); }
+  };
+
+  // What the buttons in a booking's details do (components/BookingDetailModal.jsx): Sale Vehicle, Edit and Withdraw leave the
+  // details and open their own form; Receipt opens over them.
+  const bookingActions = {
+    onSell: (b) => { setViewingBookingId(null); openModal(b); },
+    onReceipt: setReceipt,
+    onEdit: (b) => { setViewingBookingId(null); setEditingBooking(b); },
+    onWithdraw: (b) => { setViewingBookingId(null); setWithdrawingBooking(b); },
+    onDelete: deleteBooking,
+  };
 
   const runImport = async (confirm) => {
     if (!importFile) { toast.error("Choose the spreadsheet first"); return; }
@@ -203,28 +219,6 @@ export default function Sales() {
   };
 
   const closeImport = () => { setShowImport(false); setImportFile(null); setImportResult(null); };
-
-  const openNoteLeads = async () => {
-    setShowNoteLeads(true); setNoteLeads(null);
-    try {
-      const rows = (await api.get("/crm/sale-notes-leads")).data.rows;
-      setNoteLeads(rows);
-      setNoteLeadPicks(Object.fromEntries(rows.map(r => [r.id, true])));
-    } catch (err) { toast.error(getErrMsg(err, "Couldn't read the sale notes")); setShowNoteLeads(false); }
-  };
-
-  const applyNoteLeads = async () => {
-    const ids = noteLeads.filter(r => noteLeadPicks[r.id]).map(r => r.id);
-    if (!ids.length) return;
-    setNoteLeadsBusy(true);
-    try {
-      const r = await api.post("/crm/sale-notes-leads", { ids });
-      toast.success(`Lead details saved on ${r.data.updated} sale${r.data.updated === 1 ? "" : "s"}`);
-      setShowNoteLeads(false);
-      fetchAll();
-    } catch (err) { toast.error(getErrMsg(err, "Couldn't save the lead details")); }
-    finally { setNoteLeadsBusy(false); }
-  };
 
   const handleDelete = async (id) => {
     if (!window.confirm(deleteSaleConfirm(sales.find(s => s.id === id)))) return;
@@ -251,7 +245,32 @@ export default function Sales() {
 
   const returnedCount = sales.filter(s => s.returned).length;
 
+  // The open bookings ("Booked") are rows above the sales, filtered the same way: the date, the search, and the status filter.
+  const filteredBookings = (statusFilter === "all" || statusFilter === "booked") ? openBookings.filter(b => {
+    const d = (b.booking_date || b.created_at || "").slice(0, 10);
+    if (periodRange && !(d >= periodRange.start && d <= periodRange.end)) return false;
+    if (!search) return true;
+    const q = search.toLowerCase();
+    return (b.vehicle_info || "").toLowerCase().includes(q) ||
+      (b.customer_name || "").toLowerCase().includes(q) ||
+      (b.customer_contact || "").toLowerCase().includes(q) ||
+      (b.payment_method || "").toLowerCase().includes(q);
+  }) : [];
+
+  // The cancelled bookings, dated by the day they were cancelled, filtered the same way.
+  const filteredCancelled = (statusFilter === "all" || statusFilter === "cancelled") ? cancelledBookings.filter(b => {
+    const d = cancelledOn(b);
+    if (periodRange && !(d >= periodRange.start && d <= periodRange.end)) return false;
+    if (!search) return true;
+    const q = search.toLowerCase();
+    return (b.vehicle_info || "").toLowerCase().includes(q) ||
+      (b.customer_name || "").toLowerCase().includes(q) ||
+      (b.customer_contact || "").toLowerCase().includes(q) ||
+      (b.cancel_notes || "").toLowerCase().includes(q);
+  }) : [];
+
   const filtered = sales.filter(s => {
+    if (statusFilter === "booked" || statusFilter === "cancelled") return false;
     if (statusFilter === "sold" && s.returned) return false;
     if (statusFilter === "returned" && !s.returned) return false;
     if (periodRange && !(s.sale_date >= periodRange.start && s.sale_date <= periodRange.end)) return false;
@@ -264,50 +283,45 @@ export default function Sales() {
   });
   const anyFilter = dateRange.key !== "all" || search || statusFilter !== "all";
 
+  // The rows under the booked ones: the sales and the cancelled bookings together, newest first (a sale by when it was recorded,
+  // a cancelled booking by when it was cancelled).
+  const stamp = (r) => (r.type === "sale" ? r.s.created_at || r.s.sale_date || "" : r.b.cancelled_at || "");
+  const tableRows = [...filtered.map(s => ({ type: "sale", s })), ...filteredCancelled.map(b => ({ type: "cancelled", b }))]
+    .sort((a, b) => stamp(b).localeCompare(stamp(a)));
+
+  // The line under the title: how many sales, returned, booked and cancelled.
+  const countsText = `${periodRange ? `${filtered.length} sales · ${periodRange.label}` : `${sales.length} sales recorded`}${returnedCount > 0 ? ` · ${returnedCount} returned` : ""}${openBookings.length > 0 ? ` · ${openBookings.length} booked` : ""}${cancelledBookings.length > 0 ? ` · ${cancelledBookings.length} cancelled` : ""}`;
+  const headerButtons = (
+    <>
+      <DateRangeFilter value={dateRange.key} custom={dateRange.custom} onChange={(key, custom) => setDateRange({ key, custom })} testid="sales-date-filter" />
+      {isAdmin && (
+        <button onClick={() => setShowImport(true)} data-testid="import-sales-btn" className="flex items-center gap-1.5 h-9 px-3 border border-slate-200 text-slate-700 text-sm font-medium rounded-lg hover:bg-slate-50 transition-all active:scale-95 whitespace-nowrap">
+          <UploadCloud size={15} /> Import Sheet
+        </button>
+      )}
+    </>
+  );
+
   if (loading) return <div className="flex items-center justify-center h-64"><div className="animate-spin w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full" /></div>;
 
-  if (tab === "bookings" && !bookingsOn) return <FeatureOff />;
   return (
     <div className="space-y-5 animate-fade-in">
-      <div className="flex items-center gap-1 border-b border-slate-200" data-testid="sales-tabs">
-        {[{ key: "sales", label: "Sales" }, bookingsOn && { key: "bookings", label: `Bookings${openBookings.length ? ` (${openBookings.length})` : ""}` }].filter(Boolean).map(t => (
-          <button key={t.key} onClick={() => setTab(t.key)} data-testid={`sales-tab-${t.key}`}
-            className={`px-4 h-10 text-sm font-semibold border-b-2 -mb-px transition-colors ${tab === t.key ? "border-blue-600 text-blue-600" : "border-transparent text-slate-500 hover:text-slate-700"}`}>
-            {t.label}
-          </button>
-        ))}
-      </div>
-
-      {tab === "bookings" ? (
-        <Bookings key={`${sales.length}-${openBookings.length}`} embedded onRecordSale={openModal} />
-      ) : (
-      <>
-      {/* Header */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-900">Sales</h1>
-          <p className="text-sm text-slate-500">
-            {periodRange ? `${filtered.length} sales · ${periodRange.label}` : `${sales.length} sales recorded`}
-            {returnedCount > 0 && ` · ${returnedCount} returned`}
-          </p>
-        </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          <DateRangeFilter value={dateRange.key} custom={dateRange.custom} onChange={(key, custom) => setDateRange({ key, custom })} testid="sales-date-filter" />
-          {isAdmin && (
-            <button onClick={openNoteLeads} data-testid="note-leads-btn" title="Read the lead type and referrer from what was typed in each sale's notes" className="flex items-center gap-2 border border-slate-200 text-slate-700 text-sm font-medium px-4 py-3 rounded-lg hover:bg-slate-50 transition-all active:scale-95">
-              <Tags size={16} /> Leads from Notes
-            </button>
-          )}
-          {isAdmin && (
-            <button onClick={() => setShowImport(true)} data-testid="import-sales-btn" className="flex items-center gap-2 border border-slate-200 text-slate-700 text-sm font-medium px-4 py-3 rounded-lg hover:bg-slate-50 transition-all active:scale-95">
-              <UploadCloud size={16} /> Import Sheet
-            </button>
-          )}
-          <button onClick={() => openModal()} data-testid="new-sale-btn" className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-3 rounded-lg transition-all active:scale-95 shadow-sm">
-            <Plus size={16} /> Sale Vehicle
-          </button>
-        </div>
-      </div>
+      {/* The title "Sales" is in the app's top bar. On wide screens the counts, date filter and buttons are up there too (the
+          counts only where there is room for them); on narrower ones they are here. */}
+      {wideScreen && topbarSlot
+        ? createPortal(
+          <>
+            <span className="hidden xl:block min-w-0 truncate text-xs text-slate-500 mr-1" data-testid="sales-counts">{countsText}</span>
+            {headerButtons}
+          </>,
+          topbarSlot,
+        )
+        : (
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="text-sm text-slate-500" data-testid="sales-counts">{countsText}</p>
+            <div className="flex items-center gap-2 flex-wrap">{headerButtons}</div>
+          </div>
+        )}
 
       {/* Summary Cards — the 3rd card follows the period toggle above (defaults to "This
           Month" when nothing's selected, same figure it always showed). */}
@@ -389,48 +403,22 @@ export default function Sales() {
           <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
           <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search vehicle, reg#, customer..." className="w-full h-9 pl-9 pr-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" data-testid="sales-search" />
         </div>
-        <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className="h-9 px-3 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500" data-testid="sales-status-filter" aria-label="Show sold or returned">
-          <option value="all">All sales</option>
+        <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className="h-9 px-3 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500" data-testid="sales-status-filter" aria-label="Filter by status">
+          <option value="all">All</option>
           <option value="sold">Sold only</option>
           <option value="returned">Returned only{returnedCount ? ` (${returnedCount})` : ""}</option>
+          <option value="booked">Booked only{openBookings.length ? ` (${openBookings.length})` : ""}</option>
+          <option value="cancelled">Cancelled only{cancelledBookings.length ? ` (${cancelledBookings.length})` : ""}</option>
         </select>
+        <button onClick={() => openModal()} data-testid="new-sale-btn" className="ml-auto flex items-center gap-2 h-9 px-4 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-all active:scale-95 shadow-sm whitespace-nowrap">
+          <Plus size={16} /> Sale Vehicle
+        </button>
       </div>
 
-      {/* Open bookings — deposits waiting on the balance; Sale Vehicle opens the normal sale form pre-filled */}
-      {openBookings.length > 0 && (
-        <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4" data-testid="open-bookings-strip">
-          <div className="flex items-center justify-between gap-2 mb-2">
-            <div className="flex items-center gap-2 text-sm font-semibold text-yellow-900">
-              <BookmarkCheck size={16} /> {openBookings.length} open booking{openBookings.length > 1 ? "s" : ""} awaiting sale
-            </div>
-            <button onClick={() => setTab("bookings")} className="text-xs font-medium text-yellow-800 hover:underline">Manage bookings</button>
-          </div>
-          <div className="divide-y divide-yellow-100">
-            {openBookings.map(b => {
-              const agreed = b.agreed_price ?? b.vehicle_selling_price;
-              const balance = agreed != null ? Math.max(agreed - (b.booking_amount || 0), 0) : null;
-              return (
-                <div key={b.id} className="flex items-center justify-between gap-3 py-2" data-testid="open-booking-row">
-                  <div className="min-w-0">
-                    <div className="text-sm font-medium text-slate-900 truncate">{b.vehicle_info || "—"}</div>
-                    <div className="text-xs text-slate-600 truncate">
-                      {b.customer_name} · Deposit {formatNPR(b.booking_amount)}{balance != null && ` · Balance ${formatNPR(balance)}`}
-                    </div>
-                  </div>
-                  <button onClick={() => openModal(b)} className="shrink-0 flex items-center gap-1.5 h-9 px-3 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-medium active:scale-95 transition-all">
-                    Sale Vehicle <ArrowRight size={14} />
-                  </button>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {/* Sales Table */}
+      {/* Sales Table: the open bookings come first, each with the status "Booked"; a sale has no status here */}
       <div className={BOOK_CARD}>
         <BookTableStyle />
-        {filtered.length === 0 ? (
+        {tableRows.length === 0 && filteredBookings.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-40 text-slate-500">
             <ShoppingBag size={32} className="mb-2 opacity-30" />
             <p className="font-medium">{anyFilter ? "No sales match this filter" : "No sales recorded yet"}</p>
@@ -440,9 +428,12 @@ export default function Sales() {
           <>
             {/* Card list — phones only, avoids squeezing a wide table into a narrow viewport */}
             <div className="sm:hidden divide-y divide-slate-100">
-              {filtered.map(s => {
+              {filteredBookings.map(b => <BookedCard key={b.id} b={b} cost={costOf(b.vehicle_id)} onOpen={openBooking} />)}
+              {tableRows.map(row => {
+                if (row.type === "cancelled") return <CancelledCard key={row.b.id} b={row.b} onOpen={openBooking} />;
+                const s = row.s;
                 const v = vehicleById[s.vehicle_id];
-                const margin = marginOf(s, v);
+                const cost = costOf(s.vehicle_id);
                 return (
                   <div
                     key={s.id}
@@ -456,7 +447,7 @@ export default function Sales() {
                           {s.needs_review && <span className="ml-1.5 inline-flex items-center gap-0.5 align-middle text-xs font-semibold text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded-full"><AlertTriangle size={9} /> Review</span>}
                         </div>
                         <div className="text-xs text-slate-500 mt-0.5 truncate">{s.customer_name}{s.customer_contact ? ` · ${s.customer_contact}` : ""}</div>
-                        <div className="flex items-center gap-1 flex-wrap mt-1.5"><SaleTags sale={s} vehicle={v} booking={bookingBySaleId[s.id]} /></div>
+                        <div className="flex items-center gap-1 flex-wrap mt-1.5"><SaleStatus sale={s} /><SaleTags sale={s} vehicle={v} booking={bookingBySaleId[s.id]} /></div>
                       </div>
                       {isAdmin && (
                         <button onClick={e => { e.stopPropagation(); handleDelete(s.id); }} className="w-11 h-11 -mr-2.5 -mt-2.5 shrink-0 flex items-center justify-center hover:bg-red-50 rounded-lg transition-colors" data-testid="delete-sale-btn-mobile">
@@ -465,28 +456,23 @@ export default function Sales() {
                       )}
                     </div>
                     <div className="flex items-center justify-between mt-2">
-                      <span className="text-sm font-bold text-green-700">{formatNPR(s.total_amount)}</span>
+                      {s.profit != null
+                        ? <span className={`text-sm font-bold ${s.profit < 0 ? "text-red-600" : "text-green-700"}`} data-testid="sale-profit-mobile"><span className="text-xs font-medium text-slate-400">Profit </span>{formatNPR(s.profit)}</span>
+                        : <span className="text-sm font-bold text-green-700"><span className="text-xs font-medium text-slate-400">Sale price </span>{formatNPR(s.sale_price)}</span>}
                       {s.returned
                         ? <span className="text-xs text-amber-700">Refunded {formatNPR(s.refund_amount || 0)}</span>
-                        : <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-700">{s.payment_method}</span>}
+                        : s.due_amount > 0
+                          ? <span className="text-xs font-semibold text-red-600" data-testid="sale-dues-mobile">Dues {formatNPR(s.due_amount)}</span>
+                          : <span className="text-xs font-medium text-green-600">No dues</span>}
                     </div>
-                    {((s.expenses_total || 0) + (s.job_card_cost || 0)) > 0 && (
-                      <div className="mt-1 text-xs text-orange-600 font-medium">+{formatNPR((s.expenses_total || 0) + (s.job_card_cost || 0))} extra expenses{s.extra_expenses?.length > 0 ? ` (${s.extra_expenses.length})` : ""}</div>
-                    )}
+                    {cost != null && <div className="mt-1 text-xs text-slate-500" data-testid="sale-cost-mobile">Cost price <span className="font-semibold text-slate-700">{formatNPR(cost)}</span></div>}
                     {!s.returned && v && (
                       <div className="mt-1.5 flex items-center gap-2 text-xs text-slate-500" data-testid="sale-transfer-mobile">
                         Transfer <TransferStatus vehicle={v} editable={isAdmin} onChange={updateTransfer} />
-                        {sanakhatOf(s).total > 0 && <span className="text-orange-600 font-medium">Sanakhat {formatNPR(sanakhatOf(s).total)}</span>}
                       </div>
                     )}
-                    {!s.returned && (s.due_amount > 0 ? (
-                      <div className="mt-1 text-xs font-semibold text-red-600" data-testid="due-badge">Due: {formatNPR(s.due_amount)}{s.due_date && <> (by <HoverADDate date={s.due_date} />)</>}</div>
-                    ) : (
-                      <div className="mt-1 text-xs text-green-600">Fully Paid</div>
-                    ))}
-                    <div className="mt-1.5 flex items-center justify-between text-xs text-slate-400">
+                    <div className="mt-1.5 text-xs text-slate-400">
                       <HoverADDate date={s.sale_date} />
-                      {margin != null && <span className={margin < 0 || v?.low_margin ? "text-red-600 font-semibold" : "text-green-700 font-semibold"}>{s.returned ? "Kept" : "Margin"} {formatNPR(margin)}</span>}
                     </div>
                   </div>
                 );
@@ -500,24 +486,24 @@ export default function Sales() {
                 <thead>
                   <tr>
                     <th className="w-10">SN</th>
+                    <th>Date</th>
                     <th>Vehicle</th>
                     <th>Customer</th>
-                    <th className="text-right">Sale Price</th>
-                    <th className="text-right">Extra Expenses</th>
-                    <th className="text-right">Sanakhat Cost</th>
                     <th>Transfer</th>
-                    <th className="text-right">Total</th>
-                    <th className="text-right">Due</th>
-                    <th>Payment</th>
-                    <th>Date</th>
-                    <th className="w-10" />
+                    <th className="text-right">Sale Price</th>
+                    <th className="text-right" title="The vehicle's overall cost: purchase price + expenses + accessories">Cost Price</th>
+                    <th className="text-right" title="What the sale earned: the sale price less the vehicle's overall cost (what was kept, for a returned sale)">Profit</th>
+                    <th className="text-right" title="What the customer still owes on the sale (for a booked vehicle: the agreed price less the deposit)">Dues</th>
+                    <th>Status</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {filtered.map((s, i) => {
+                  {filteredBookings.map((b, i) => <BookedTableRow key={b.id} b={b} index={i + 1} cost={costOf(b.vehicle_id)} onOpen={openBooking} />)}
+                  {tableRows.map((row, i) => {
+                    if (row.type === "cancelled") return <CancelledTableRow key={row.b.id} b={row.b} index={filteredBookings.length + i + 1} onOpen={openBooking} />;
+                    const s = row.s;
                     const v = vehicleById[s.vehicle_id];
-                    const margin = marginOf(s, v);
-                    const sanakhat = sanakhatOf(s);
+                    const cost = costOf(s.vehicle_id);
                     return (
                       <tr
                         key={s.id}
@@ -525,7 +511,8 @@ export default function Sales() {
                         onClick={() => openSale(s)}
                         className="cursor-pointer"
                       >
-                        <td className="text-gray-500">{i + 1}</td>
+                        <td className="text-gray-500">{filteredBookings.length + i + 1}</td>
+                        <td className="text-gray-500 whitespace-nowrap"><HoverADDate date={s.sale_date} /></td>
                         <td className="min-w-[12rem]">
                           <div className="font-semibold text-gray-900 flex items-center gap-1.5">
                             {s.vehicle_info || "—"}
@@ -537,59 +524,28 @@ export default function Sales() {
                           <div className="text-gray-700">{s.customer_name}</div>
                           {s.customer_contact && <div className="text-xs text-gray-400">{s.customer_contact}</div>}
                         </td>
-                        <td className="text-right font-medium text-gray-800 whitespace-nowrap">{formatNPR(s.sale_price)}</td>
-                        <td className="text-right whitespace-nowrap">
-                          {((s.expenses_total || 0) + (s.job_card_cost || 0)) > 0 ? (
-                            <span className="text-orange-600 font-medium">
-                              {formatNPR((s.expenses_total || 0) + (s.job_card_cost || 0))}
-                              {s.extra_expenses?.length > 0 ? ` (${s.extra_expenses.length} items)` : ""}
-                            </span>
-                          ) : <span className="text-gray-300">—</span>}
-                        </td>
-                        <td className="text-right whitespace-nowrap" title="Sanakhat + re-sanakhat entered on this sale — part of its extra expenses">
-                          {sanakhat.total > 0 ? (
-                            <>
-                              <div className="text-orange-600 font-medium">{formatNPR(sanakhat.total)}</div>
-                              {sanakhat.resanakhat > 0 && <div className="text-xs text-gray-400">incl. re-sanakhat {formatNPR(sanakhat.resanakhat)}</div>}
-                            </>
-                          ) : <span className="text-gray-300">—</span>}
-                        </td>
                         <td className="whitespace-nowrap">
                           {s.returned ? <span className="text-gray-300">—</span> : <TransferStatus vehicle={v} editable={isAdmin} onChange={updateTransfer} />}
                         </td>
-                        <td className="text-right font-bold text-green-700 whitespace-nowrap">{formatNPR(s.total_amount)}</td>
-                        <td className="text-right font-semibold whitespace-nowrap">
-                          {!s.returned && s.due_amount > 0
-                            ? <span className="text-red-600">{formatNPR(s.due_amount)}</span>
-                            : <span className="text-gray-300 font-normal">—</span>}
+                        <td className="text-right font-medium text-gray-800 whitespace-nowrap">{formatNPR(s.sale_price)}</td>
+                        <td className="text-right font-medium text-gray-800 whitespace-nowrap" data-testid="sale-cost-price">{cost != null ? formatNPR(cost) : <span className="text-gray-300">—</span>}</td>
+                        <td className="text-right font-bold whitespace-nowrap" data-testid="sale-profit">
+                          {s.profit != null ? <span className={s.profit < 0 ? "text-red-600" : "text-green-700"}>{formatNPR(s.profit)}</span> : <span className="text-gray-300 font-normal">—</span>}
                         </td>
-                        <td>
+                        <td className="text-right whitespace-nowrap" data-testid="sale-dues">
                           {s.returned ? (
-                            <div className="text-xs text-amber-700 whitespace-nowrap">Refunded {formatNPR(s.refund_amount || 0)}</div>
-                          ) : (
                             <>
-                              <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-700">{s.payment_method}</span>
-                              {s.due_amount > 0 ? (
-                                <div className="mt-1 text-xs font-semibold text-red-600 whitespace-nowrap" data-testid="due-badge">Due: {formatNPR(s.due_amount)}{s.due_date && <> (by <HoverADDate date={s.due_date} />)</>}</div>
-                              ) : (
-                                <div className="mt-1 text-xs text-green-600">Fully Paid</div>
-                              )}
+                              <span className="text-gray-300">—</span>
+                              <div className="text-xs text-amber-700">Refunded {formatNPR(s.refund_amount || 0)}</div>
                             </>
-                          )}
+                          ) : s.due_amount > 0 ? (
+                            <>
+                              <span className="font-semibold text-red-600">{formatNPR(s.due_amount)}</span>
+                              {s.due_date && <div className="text-xs text-gray-400">by <HoverADDate date={s.due_date} /></div>}
+                            </>
+                          ) : <span className="text-gray-300">—</span>}
                         </td>
-                        <td className="text-gray-500 whitespace-nowrap"><HoverADDate date={s.sale_date} /></td>
-                        <td>
-                          <div className="flex items-center gap-1">
-                            <button onClick={e => { e.stopPropagation(); openSale(s); }} className="max-md:min-w-11 max-md:min-h-11 max-md:inline-flex max-md:items-center max-md:justify-center p-1.5 hover:bg-slate-100 rounded-lg transition-colors" title="View / edit sale" data-testid="view-sale-btn">
-                              <Eye size={14} className="text-slate-500" />
-                            </button>
-                            {isAdmin && (
-                              <button onClick={e => { e.stopPropagation(); handleDelete(s.id); }} className="max-md:min-w-11 max-md:min-h-11 max-md:inline-flex max-md:items-center max-md:justify-center p-1.5 hover:bg-red-50 rounded-lg transition-colors" title="Delete sale" data-testid="delete-sale-btn">
-                                <Trash2 size={14} className="text-red-400" />
-                              </button>
-                            )}
-                          </div>
-                        </td>
+                        <td><SaleStatus sale={s} /></td>
                       </tr>
                     );
                   })}
@@ -600,70 +556,17 @@ export default function Sales() {
         )}
       </div>
 
-      </>
-      )}
-
       {/* Sale Vehicle form */}
       {showModal && <SaleVehicleModal booking={activeBooking} onClose={closeModal} onSaved={fetchAll} />}
 
+      {/* A booked row's details, and its receipt, edit and withdraw (these open over the details or in place of them) */}
+      {viewingBooking && <BookingDetailModal booking={viewingBooking} isAdmin={isAdmin} actions={bookingActions} onClose={() => setViewingBookingId(null)} />}
+      <BookingReceipt booking={receipt} onClose={() => setReceipt(null)} />
+      {editingBooking && <EditBookingModal booking={editingBooking} onClose={() => setEditingBooking(null)} onSaved={fetchAll} />}
+      {withdrawingBooking && <WithdrawBookingModal booking={withdrawingBooking} onClose={() => setWithdrawingBooking(null)} onSaved={fetchAll} />}
+
       {/* A sale's details */}
       {detailId && <SaleDetailModal saleId={detailId} onClose={() => setDetailId(null)} onChanged={fetchAll} />}
-
-      {/* Leads from Notes modal: what the notes say, for review before anything is saved */}
-      {showNoteLeads && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setShowNoteLeads(false)}>
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()} data-testid="note-leads-modal">
-            <div className="flex items-center justify-between p-4 sm:p-5 border-b border-slate-100 shrink-0">
-              <div>
-                <h2 className="text-lg font-bold text-slate-900">Leads from Notes</h2>
-                <p className="text-xs text-slate-500 mt-0.5">Sales whose notes mention a lead type or who referred the buyer, where the sale doesn't have it yet. Untick anything that's wrong.</p>
-              </div>
-              <button onClick={() => setShowNoteLeads(false)} aria-label="Close" className="w-11 h-11 -mr-2.5 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500 shrink-0">✕</button>
-            </div>
-
-            <div className="p-4 sm:p-5 space-y-2 overflow-y-auto">
-              {noteLeads === null && <div className="flex justify-center py-10"><div className="animate-spin w-7 h-7 border-4 border-blue-600 border-t-transparent rounded-full" /></div>}
-              {noteLeads && noteLeads.length === 0 && (
-                <p className="text-sm text-slate-500 text-center py-10" data-testid="note-leads-empty">No sale notes mention a lead type or a referrer that isn't already filled in.</p>
-              )}
-              {noteLeads && noteLeads.length > 0 && (
-                <>
-                  <div className="flex items-center justify-between text-xs text-slate-500 pb-1">
-                    <span>{noteLeads.filter(r => noteLeadPicks[r.id]).length} of {noteLeads.length} selected</span>
-                    <button type="button" onClick={() => setNoteLeadPicks(Object.fromEntries(noteLeads.map(r => [r.id, !noteLeads.every(x => noteLeadPicks[x.id])])))} className="font-semibold text-blue-600 hover:underline">
-                      {noteLeads.every(r => noteLeadPicks[r.id]) ? "Untick all" : "Tick all"}
-                    </button>
-                  </div>
-                  {noteLeads.map(r => (
-                    <label key={r.id} className={`flex items-start gap-3 border rounded-xl p-3 cursor-pointer transition-colors ${noteLeadPicks[r.id] ? "border-blue-200 bg-blue-50/40" : "border-slate-200 hover:bg-slate-50"}`} data-testid="note-leads-row">
-                      <input type="checkbox" checked={!!noteLeadPicks[r.id]} onChange={e => setNoteLeadPicks(p => ({ ...p, [r.id]: e.target.checked }))} className="mt-1 w-4 h-4 accent-blue-600 shrink-0" />
-                      <div className="min-w-0 flex-1 space-y-1.5">
-                        <div className="text-sm font-semibold text-slate-900 truncate">
-                          {r.vehicle || "Vehicle"}{r.customer_name ? ` · ${r.customer_name}` : ""} <span className="font-normal text-slate-500">· <HoverADDate date={r.sale_date} /></span>
-                        </div>
-                        <p className="text-xs text-slate-600 bg-white border border-slate-100 rounded-lg px-2.5 py-1.5 whitespace-pre-line break-words line-clamp-3">&ldquo;{r.notes}&rdquo;</p>
-                        <div className="flex flex-wrap gap-1.5">
-                          {r.lead_source && <span className="inline-flex items-center h-6 px-2.5 rounded-full text-[11px] font-semibold bg-blue-100 text-blue-700">Lead: {SOURCE_LABEL[r.lead_source] || r.lead_source}</span>}
-                          {r.referred_by_name && <span className="inline-flex items-center h-6 px-2.5 rounded-full text-[11px] font-semibold bg-amber-100 text-amber-800">Referred by: {r.referred_by_name}{r.referred_by_id ? " (customer)" : ""}</span>}
-                        </div>
-                      </div>
-                    </label>
-                  ))}
-                </>
-              )}
-            </div>
-
-            <div className="flex gap-3 p-4 sm:p-5 border-t border-slate-100 shrink-0">
-              <button onClick={() => setShowNoteLeads(false)} className="flex-1 h-11 border border-slate-200 text-slate-700 rounded-lg text-sm font-semibold hover:bg-slate-50">Close</button>
-              {noteLeads && noteLeads.length > 0 && (
-                <button onClick={applyNoteLeads} disabled={noteLeadsBusy || !noteLeads.some(r => noteLeadPicks[r.id])} data-testid="note-leads-save" className="flex-1 h-11 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-semibold disabled:opacity-60">
-                  {noteLeadsBusy ? "Saving..." : `Save (${noteLeads.filter(r => noteLeadPicks[r.id]).length})`}
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Import Sheet modal */}
       {showImport && (

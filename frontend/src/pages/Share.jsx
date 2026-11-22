@@ -357,10 +357,7 @@ export default function Share({ embedded = false }) {
   const sel = "border border-slate-200 rounded-lg px-3 py-2 text-sm bg-white";
   return (
     <div className="space-y-5 animate-fade-in">
-      <div>
-        {!embedded && <h1 className="text-2xl font-bold text-slate-900">Share</h1>}
-        <p className="text-sm text-slate-500">Pick vehicles, get a ready-to-post caption for each, then share to Facebook, WhatsApp or anywhere else.</p>
-      </div>
+      {!embedded && <h1 className="text-2xl font-bold text-slate-900">Share</h1>}
 
       <FacebookBar status={fbStatus} isAdmin={role === "admin"} onChanged={loadFb} />
 

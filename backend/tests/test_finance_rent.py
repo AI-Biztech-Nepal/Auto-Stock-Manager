@@ -290,12 +290,18 @@ def _ddl_columns(sql, table):
     return {p.split()[0] for p in parts if p.split() and p.split()[0].upper() not in ("INDEX", "CONSTRAINT", "UNIQUE", "PRIMARY", "KEY")}
 
 
+def _all_flags_on():
+    """The start-up step switches each optional Finance feature off until it has confirmed its column exists; put them all back
+    so the tests that run after these see the features on, as the rest of the suite expects."""
+    finance_books._services_ready = finance_books._groups_ready = finance_books._types_ready = finance_books._opening_ready = True
+
+
 class FinanceSchemaTests(unittest.TestCase):
     def setUp(self):
-        finance_books._services_ready = True
+        _all_flags_on()
 
     def tearDown(self):
-        finance_books._services_ready = True
+        _all_flags_on()
 
     def _api(self):
         db = _DB()
@@ -312,9 +318,13 @@ class FinanceSchemaTests(unittest.TestCase):
     def test_startup_creates_the_tables_adds_the_columns_and_lists_them(self):
         raw, registry = _RawDB(columns=["id", "installation_charge", "service_charges"]), _registry_stub()
         asyncio.run(finance_books.ensure_schema(raw, registry))
-        self.assertEqual(len([q for q in raw.ran if q.startswith("CREATE TABLE IF NOT EXISTS")]), 2)
-        self.assertTrue(all("ADD COLUMN IF NOT EXISTS" in q for q in raw.ran if q.startswith("ALTER")))
-        self.assertEqual(len([q for q in raw.ran if q.startswith("ALTER")]), 2)
+        creates = [q for q in raw.ran if q.startswith("CREATE TABLE IF NOT EXISTS")]
+        for table in ("fin_rentals", "fin_cash_account"):
+            self.assertTrue(any(f"CREATE TABLE IF NOT EXISTS {table} " in q for q in creates), f"{table} is created")
+        alters = [q for q in raw.ran if q.startswith("ALTER")]
+        self.assertTrue(all("ADD COLUMN IF NOT EXISTS" in q for q in alters))
+        for col in ("installation_charge", "service_charges"):
+            self.assertTrue(any(f"fin_transactions ADD COLUMN IF NOT EXISTS {col} " in q for q in alters), f"{col} is added")
         meta = registry["fin_transactions"]
         self.assertTrue({"installation_charge", "service_charges"} <= meta["columns"])
         self.assertEqual(meta["json_cols"], {"items", "service_charges"})

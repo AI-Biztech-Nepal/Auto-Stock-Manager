@@ -895,7 +895,8 @@ create table if not exists "public"."leads" (
   "decided_at" varchar(40),
   "customer_id" varchar(36),
   "vehicle_id" varchar(36),
-  "seen_at" varchar(40)
+  "seen_at" varchar(40),
+  "seen_by" varchar(100)
 );
 alter table "public"."leads" enable row level security;  -- the public API key can read nothing; the backend connects directly
 alter table "public"."leads" add column if not exists "id" varchar(36);
@@ -918,6 +919,7 @@ alter table "public"."leads" add column if not exists "decided_at" varchar(40);
 alter table "public"."leads" add column if not exists "customer_id" varchar(36);
 alter table "public"."leads" add column if not exists "vehicle_id" varchar(36);
 alter table "public"."leads" add column if not exists "seen_at" varchar(40);
+alter table "public"."leads" add column if not exists "seen_by" varchar(100);
 create index if not exists "idx_leads_company_id" on "public"."leads" ("company_id");
 create index if not exists "idx_leads_created_at" on "public"."leads" ("created_at");
 
@@ -1150,6 +1152,7 @@ create table if not exists "public"."fin_bank_accounts" (
   "address" varchar(300),
   "created_at" varchar(40),
   "updated_at" varchar(40),
+  "opening_balance" double precision not null default 0,
   constraint "uq_fin_accounts_name" unique ("company_id", "name")
 );
 alter table "public"."fin_bank_accounts" enable row level security;  -- the public API key can read nothing; the backend connects directly
@@ -1162,6 +1165,7 @@ alter table "public"."fin_bank_accounts" add column if not exists "account_holde
 alter table "public"."fin_bank_accounts" add column if not exists "address" varchar(300);
 alter table "public"."fin_bank_accounts" add column if not exists "created_at" varchar(40);
 alter table "public"."fin_bank_accounts" add column if not exists "updated_at" varchar(40);
+alter table "public"."fin_bank_accounts" add column if not exists "opening_balance" double precision default 0;
 
 create table if not exists "public"."fin_account_transfers" (
   "id" varchar(36) not null primary key,
@@ -1389,6 +1393,7 @@ create table if not exists "public"."fin_cash_account" (
   "account_holder_name" varchar(150),
   "address" varchar(300),
   "updated_at" varchar(40),
+  "opening_balance" double precision not null default 0,
   constraint "uq_fin_cash_company" unique ("company_id")
 );
 alter table "public"."fin_cash_account" enable row level security;  -- the public API key can read nothing; the backend connects directly
@@ -1400,6 +1405,7 @@ alter table "public"."fin_cash_account" add column if not exists "account_number
 alter table "public"."fin_cash_account" add column if not exists "account_holder_name" varchar(150);
 alter table "public"."fin_cash_account" add column if not exists "address" varchar(300);
 alter table "public"."fin_cash_account" add column if not exists "updated_at" varchar(40);
+alter table "public"."fin_cash_account" add column if not exists "opening_balance" double precision default 0;
 
 create table if not exists "public"."fin_quotations" (
   "id" varchar(36) not null primary key,

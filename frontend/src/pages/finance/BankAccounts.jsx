@@ -3,41 +3,31 @@ import { Plus, Landmark, Banknote, ArrowRightLeft } from "lucide-react";
 import { toast } from "sonner";
 import { useBooks } from "./BooksContext";
 import EntryEditor from "./EntryEditor";
+import AccountDetail from "./AccountDetail";
 import { Card, Field, Modal, DateField, Empty, Stat, TwoTapDelete, inputCls, btnPrimary, btnGhost } from "./ui";
 import { balances, transferDate, todayStr, npr, CASH, COLORS } from "./money";
 
-// The lines behind one account's balance, so a wrong total can be traced.
-export function AccountLines({ title, bucket, onClose }) {
-  const lines = [...(bucket?.lines || [])].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
-  return (
-    <Modal title={title} onClose={onClose} wide>
-      <div className="flex justify-between text-sm mb-3"><span className="text-slate-500">{lines.length} entries</span><span className="font-bold" style={{ color: (bucket?.total || 0) < 0 ? COLORS.out : COLORS.balance }}>{npr(bucket?.total || 0)}</span></div>
-      {lines.length === 0 ? <Empty>Nothing has moved through here yet.</Empty> : (
-        <div className="divide-y divide-slate-100">
-          {lines.map((l, i) => (
-            <div key={i} className="py-2 flex items-center gap-3 text-sm">
-              <span className="text-xs text-slate-400 w-24 shrink-0">{l.date}</span>
-              <span className="flex-1 min-w-0 truncate text-slate-700">{l.label}</span>
-              <span className="font-semibold shrink-0" style={{ color: l.amount >= 0 ? COLORS.in : COLORS.out }}>{l.amount >= 0 ? "+" : "−"}{npr(Math.abs(l.amount)).replace("NPR ", "")}</span>
-            </div>
-          ))}
-        </div>
-      )}
-    </Modal>
-  );
-}
-
 function AccountForm({ account, onClose, isCash = false }) {
-  const { post, put } = useBooks();
-  const [f, setF] = useState({ name: account?.name || "", bank_name: account?.bank_name || "", account_number: account?.account_number || "", account_holder_name: account?.account_holder_name || "", address: account?.address || "" });
+  const { books, post, put } = useBooks();
+  const [f, setF] = useState({
+    name: account?.name || "", bank_name: account?.bank_name || "", account_number: account?.account_number || "",
+    account_holder_name: account?.account_holder_name || "", address: account?.address || "",
+    opening_balance: account?.opening_balance ? String(account.opening_balance) : "",
+  });
   const [busy, setBusy] = useState(false);
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
+  // The opening balance can be saved once the server has the column for it (/fin/books says so); until then the box is off.
+  const canOpen = !!books.opening_ready;
   const save = async () => {
     if (!f.name.trim()) return toast.error("Account name is required");
+    const opening = f.opening_balance.trim() === "" ? 0 : Number(f.opening_balance);
+    if (canOpen && !Number.isFinite(opening)) return toast.error("Opening balance must be a number");
+    const { opening_balance: _typed, ...details } = f;
+    const body = canOpen ? { ...details, opening_balance: opening } : details;
     setBusy(true);
     // Cash is never a bank account row (cash is bank_account_id = null): its label and details are one row of their own.
-    const ok = isCash ? await put("/fin/cash-account", f, "Saved")
-      : account ? await put(`/fin/accounts/${account.id}`, f, "Saved") : await post("/fin/accounts", f, "Account added");
+    const ok = isCash ? await put("/fin/cash-account", body, "Saved")
+      : account ? await put(`/fin/accounts/${account.id}`, body, "Saved") : await post("/fin/accounts", body, "Account added");
     setBusy(false);
     if (ok) onClose();
   };
@@ -45,6 +35,10 @@ function AccountForm({ account, onClose, isCash = false }) {
     <Modal title={isCash ? "Edit cash account" : account ? "Edit account" : "Add bank account"} onClose={onClose}>
       <div className="space-y-4">
         <Field label="Name *" hint={isCash ? "How cash in hand is labelled here, for example “Cash”" : "Shown in dropdowns, for example “Nabil”"}><input value={f.name} onChange={set("name")} className={inputCls} autoFocus /></Field>
+        <Field label="Opening balance (NPR)"
+          hint={canOpen ? "What was already in this account before your first entry here. Every day's opening balance builds on it. Use a minus sign if it is overdrawn." : "Needs one more database update on the server, which is applied when it restarts."}>
+          <input type="number" step="any" value={f.opening_balance} onChange={set("opening_balance")} disabled={!canOpen} placeholder="0" className={inputCls} data-testid="account-opening-balance" />
+        </Field>
         <Field label="Bank name"><input value={f.bank_name} onChange={set("bank_name")} className={inputCls} /></Field>
         <Field label="Account number"><input value={f.account_number} onChange={set("account_number")} className={inputCls} /></Field>
         <Field label="Account holder"><input value={f.account_holder_name} onChange={set("account_holder_name")} className={inputCls} /></Field>
@@ -89,15 +83,35 @@ export function TransferForm({ onDone }) {
   );
 }
 
-export default function BankAccounts() {
+// accountId: the account whose own page is open (CASH or a bank account's id; from ?account=), or null for the list of accounts.
+// setAccountId: opens / closes an account's page. openParty: opens a person's ledger (from an entry on an account's page).
+export default function BankAccounts({ accountId, setAccountId, openParty }) {
   const { books, del } = useBooks();
   const [form, setForm] = useState(null);       // null | "new" | "cash" | account
-  const [lines, setLines] = useState(null);     // { title, bucket }
   const [editing, setEditing] = useState(null); // a transfer row
   const bal = useMemo(() => balances(books), [books]);
   const cash = books.cash_account || {};
   const cashName = cash.name || "Cash in hand";
   const transfers = useMemo(() => [...books.transfers].sort((a, b) => (transferDate(a) < transferDate(b) ? 1 : -1)), [books.transfers]);
+
+  const forms = (
+    <>
+      {form === "cash" && <AccountForm account={{ ...cash, name: cashName }} isCash onClose={() => setForm(null)} />}
+      {form && form !== "cash" && <AccountForm account={form === "new" ? null : form} onClose={() => setForm(null)} />}
+    </>
+  );
+
+  // An account's own page: every entry that moved money through it
+  const openAccount = accountId === CASH ? CASH : books.accounts.find((a) => a.id === accountId)?.id;
+  if (openAccount) {
+    return (
+      <>
+        <AccountDetail bucket={openAccount} onBack={() => setAccountId(null)} openParty={openParty}
+          onEdit={() => setForm(openAccount === CASH ? "cash" : books.accounts.find((a) => a.id === openAccount))} />
+        {forms}
+      </>
+    );
+  }
 
   return (
     <div className="space-y-5">
@@ -109,7 +123,7 @@ export default function BankAccounts() {
       </div>
       <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
         <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
-          <button onClick={() => setLines({ title: cashName, bucket: bal.buckets[CASH] })} className="text-left w-full">
+          <button onClick={() => setAccountId(CASH)} className="text-left w-full" data-testid="account-card-cash">
             <div className="flex items-center gap-2 text-xs font-semibold uppercase text-slate-500"><Banknote size={14} /> {cashName}</div>
             <div className="text-xl font-bold mt-1" style={{ color: bal.cash < 0 ? COLORS.out : COLORS.balance, fontFamily: "Manrope" }}>{npr(bal.cash)}</div>
             <div className="text-xs text-slate-400 mt-0.5 truncate">{[cash.bank_name, cash.account_number, cash.account_holder_name, cash.address].filter(Boolean).join(" · ") || "No details yet"}</div>
@@ -120,7 +134,7 @@ export default function BankAccounts() {
           const total = bal.buckets[a.id]?.total || 0;
           return (
             <div key={a.id} className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
-              <button onClick={() => setLines({ title: a.name, bucket: bal.buckets[a.id] })} className="text-left w-full">
+              <button onClick={() => setAccountId(a.id)} className="text-left w-full" data-testid="account-card">
                 <div className="flex items-center gap-2 text-xs font-semibold uppercase text-slate-500"><Landmark size={14} /> {a.name}</div>
                 <div className="text-xl font-bold mt-1" style={{ color: total < 0 ? COLORS.out : COLORS.balance, fontFamily: "Manrope" }}>{npr(total)}</div>
                 <div className="text-xs text-slate-400 mt-0.5 truncate">{[a.bank_name, a.account_number].filter(Boolean).join(" · ") || "No details yet"}</div>
@@ -149,9 +163,7 @@ export default function BankAccounts() {
         ))}
       </Card>
 
-      {form === "cash" && <AccountForm account={{ ...cash, name: cashName }} isCash onClose={() => setForm(null)} />}
-      {form && form !== "cash" && <AccountForm account={form === "new" ? null : form} onClose={() => setForm(null)} />}
-      {lines && <AccountLines title={lines.title} bucket={lines.bucket} onClose={() => setLines(null)} />}
+      {forms}
       {editing && <EntryEditor row={editing} onClose={() => setEditing(null)} />}
     </div>
   );

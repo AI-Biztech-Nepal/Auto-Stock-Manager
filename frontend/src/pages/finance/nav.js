@@ -13,7 +13,7 @@ export const FINANCE_NAV = [
     hideChildren: true, // for now the panel shows Day Book alone, without its dropdown; the pages still open from the Day Book's buttons and ?tab= links
     children: [
       { key: "received", label: "Received", icon: ArrowDownCircle },
-      { key: "paid", label: "Paid", icon: ArrowUpCircle },
+      { key: "paid", label: "Payment", icon: ArrowUpCircle },
       { key: "sales", label: "Sales", icon: ShoppingBag },
       { key: "purchases", label: "Purchase", icon: ShoppingCart },
       { key: "voucher", label: "Voucher", icon: NotebookPen },

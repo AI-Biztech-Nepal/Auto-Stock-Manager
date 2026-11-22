@@ -196,3 +196,12 @@ def test_run_lookup_only_runs_the_named_read_only_lookups():
     assert "error" in a.run_lookup("drop_table", {}, data, TODAY, _revenue)
     assert "error" in a.run_lookup("customer", "not a dict", data, TODAY, _revenue)
     assert len(a.lookup_dues(99, CUSTOMERS, SALES, TODAY)["top"]) <= a.MAX_ROWS          # results stay small
+
+
+def test_customer_lookup_forgives_a_different_spelling_but_not_a_different_name():
+    people = [{"id": "m", "name": "Rahul Manandar", "contact_number": "9841000009"},
+              {"id": "n", "name": "Sita Rai", "contact_number": "9841000010"}]
+    close = a.lookup_customer("Rahul Manandhar", people, [], TODAY)
+    assert close["matches"] == 1 and close["customers"][0]["name"] == "Rahul Manandar"
+    assert a.lookup_customer("Zzzz Qqqq", people, [], TODAY)["matches"] == 0
+    assert a.lookup_customer("rahul", people, [], TODAY)["matches"] == 1            # plain matching still wins first

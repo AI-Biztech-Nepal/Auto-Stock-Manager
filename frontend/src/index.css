@@ -74,6 +74,13 @@ h1, h2, h3, h4, h5, h6 {
 /* App-shell height: 100vh on mobile browsers is taller than the visible area (the URL bar
    overlaps it), so prefer dynamic viewport units where supported. */
 .h-app { height: 100vh; height: 100dvh; }
+/* Pop-ups are centred over the page, not over the page plus the side panel: from lg up the panel (w-64 = 16rem, see
+   Layout.jsx) takes the left of the screen, so the centring area of a pop-up's backdrop starts after it. The backdrop itself
+   still covers and dims the whole window. */
+@media (min-width: 1024px) {
+  .app-shell .fixed.inset-0.flex.items-center.justify-center { padding-left: 16rem; }
+}
+
 /* Notch / status-bar / gesture-bar padding; env() is 0 where there is no inset. */
 .pt-safe { padding-top: env(safe-area-inset-top); }
 .pb-safe { padding-bottom: env(safe-area-inset-bottom); }

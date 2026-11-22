@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { createPortal } from "react-dom";
+import { useSearchParams, useOutletContext } from "react-router-dom";
 import { BooksProvider, useBooks } from "./finance/BooksContext";
 import DayBook from "./finance/DayBook";
 import Payment from "./finance/Payment";
@@ -16,7 +17,7 @@ import Quotation from "./finance/Quotation";
 import BalanceSheet from "./finance/BalanceSheet";
 import { financeTab, FINANCE_NAV } from "./finance/nav";
 import { Card, Notice } from "./finance/ui";
-import { todayStr } from "./finance/money";
+import { todayStr, CASH } from "./finance/money";
 
 // Finance books, laid out like Jageer Nepal's Finance: Day Book (and its entry forms), Statement, Ledger, Bank
 // Accounts, Quotation and Report. The sections are listed in the main side panel under Finance (see
@@ -67,36 +68,53 @@ function SetupNotice({ message }) {
 }
 
 function FinanceInner() {
-  const { loading, setupMessage, loadError } = useBooks();
+  const { loading, setupMessage, loadError, books } = useBooks();
+  const { titleSlot } = useOutletContext() || {}; // the app's top bar, where the page's name goes
   const [params, setParams] = useSearchParams();
   const [bookDate, setBookDate] = useState(todayStr());
   const tab = financeTab(params.get("tab"));
   const partyId = params.get("party");
+  const accountId = params.get("account");
+  const editId = params.get("edit"); // a saved sale / purchase bill opened in its form to be changed (?tab=sales&edit=<id>)
 
   const goTab = (t) => setParams({ tab: t }, { replace: false });
+  const editBill = (type, id) => setParams({ tab: type === "sale" ? "sales" : "purchases", edit: id });
   const openParty = (id) => setParams({ tab: "ledger", party: id });
   const setPartyId = (id) => setParams(id ? { tab: "ledger", party: id } : { tab: "ledger" });
+  const setAccountId = (id) => setParams(id ? { tab: "banks", account: id } : { tab: "banks" });
   // A sales / purchase / expenses report of one person, from their ledger (?party= narrows the report).
   const openReport = (kind, id) => setParams({ tab: `${kind}-report`, party: id });
+  // The Payment form with this person already picked (the Payment button on their ledger page).
+  const payParty = (id) => setParams({ tab: "paid", party: id });
+  const onPartyPage = tab === "ledger" && !!partyId && !!books?.parties?.some((p) => p.id === partyId);
+  // An account's own page (?tab=banks&account=cash or a bank account's id), opened from its card on Bank Accounts.
+  const onAccountPage = tab === "banks" && !!accountId && (accountId === CASH || !!books?.accounts?.some((a) => a.id === accountId));
   const showEveryone = () => setParams({ tab: tab });
 
-  if (loading) return <div className="flex items-center justify-center h-48"><div className="animate-spin w-7 h-7 border-4 border-blue-600 border-t-transparent rounded-full" /></div>;
-  if (setupMessage) return <SetupNotice message={setupMessage} />;
-  if (loadError) return <Notice tone="red">{loadError}</Notice>;
+  // The page's name sits in the app's top bar, like every other page's. A person's ledger page and an account's page put their own
+  // there instead (a back arrow and a name: see PartyDetail in finance/Ledger.jsx and finance/AccountDetail.jsx).
+  const heading = titleSlot && !onPartyPage && !onAccountPage
+    ? createPortal(<h1 className="min-w-0 truncate text-2xl font-bold text-slate-900" data-testid="header-title">{titleOf(tab)}</h1>, titleSlot)
+    : null;
+  const wrap = (node) => <>{heading}{node}</>;
+
+  if (loading) return wrap(<div className="flex items-center justify-center h-48"><div className="animate-spin w-7 h-7 border-4 border-blue-600 border-t-transparent rounded-full" /></div>);
+  if (setupMessage) return wrap(<SetupNotice message={setupMessage} />);
+  if (loadError) return wrap(<Notice tone="red">{loadError}</Notice>);
 
   const screens = {
     "balance-sheet": <BalanceSheet goTab={goTab} openParty={openParty} />,
-    daybook: <DayBook date={bookDate} setDate={setBookDate} goTab={goTab} />,
+    daybook: <DayBook date={bookDate} setDate={setBookDate} goTab={goTab} openParty={openParty} editBill={editBill} />,
     statement: <Statement goTab={goTab} openParty={openParty} />,
     voucher: <Journal onDone={() => goTab("daybook")} />,
     contra: <Contra />,
     received: <Payment direction="received" />,
-    paid: <Payment direction="paid" />,
-    sales: <Bills type="sale" />,
-    purchases: <Bills type="purchase" />,
+    paid: <Payment direction="paid" partyId={partyId} />,
+    sales: <Bills type="sale" editId={editId} onDone={() => goTab("daybook")} />,
+    purchases: <Bills type="purchase" editId={editId} onDone={() => goTab("daybook")} />,
     expenses: <Bills type="expense" />,
-    ledger: <Ledger partyId={partyId} setPartyId={setPartyId} openReport={openReport} goTab={goTab} />,
-    banks: <BankAccounts />,
+    ledger: <Ledger partyId={partyId} setPartyId={setPartyId} openReport={openReport} payParty={payParty} goTab={goTab} />,
+    banks: <BankAccounts accountId={accountId} setAccountId={setAccountId} openParty={openParty} />,
     import: <ImportStatement />,
     report: <Report goTab={goTab} />,
     totals: <Totals />,
@@ -113,7 +131,7 @@ function FinanceInner() {
 
   return (
     <div className="min-w-0 w-full space-y-3.5">
-      <h1 className="text-xl font-bold text-gray-900">{titleOf(tab)}</h1>
+      {heading}
       {screens[tab]}
     </div>
   );

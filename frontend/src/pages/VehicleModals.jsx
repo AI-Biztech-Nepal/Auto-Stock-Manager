@@ -103,7 +103,7 @@ export function ReturnModal({ onClose, onSubmit, form, setForm, saving, activeSa
             <select value={form.new_status} onChange={e => setForm({ ...form, new_status: e.target.value })} className={sel} data-testid="return-new-status-select">
               <option value="available">Available</option>
               <option value="unlisted">Unlisted</option>
-              <option value="reserved">Reserved</option>
+              <option value="reserved">Booked</option>
               {featureOn(features, "stock.job_cards") && <option value="in_repair">In Repair</option>}
               {featureOn(features, "stock.job_cards") && <option value="scrap">Scrap</option>}
             </select>

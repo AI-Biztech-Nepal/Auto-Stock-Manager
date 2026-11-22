@@ -4,6 +4,7 @@ import api from "../utils/api";
 import { amountInWords } from "../utils/helpers";
 import { formatBSDateNumeric } from "../utils/nepali-date";
 import { useAuth } from "../context/AuthContext";
+import useBackdropClose from "../hooks/useBackdropClose";
 
 // A4 only while this modal is open, so other prints (bills, reports) keep their page size.
 const RECEIPT_CSS = `
@@ -53,6 +54,7 @@ export default function BookingReceipt({ booking, onClose }) {
   const { user } = useAuth();
   const [profile, setProfile] = useState({});
   useEffect(() => { api.get("/share/profile").then(r => setProfile(r.data || {})).catch(() => {}); }, []);
+  const backdrop = useBackdropClose(onClose); // clicking outside the receipt closes it
   if (!booking) return null;
 
   const date = formatBSDateNumeric(booking.booking_date);
@@ -60,7 +62,7 @@ export default function BookingReceipt({ booking, onClose }) {
   const contact = [profile.address, profile.contact_phone && `Phone: ${profile.contact_phone}`].filter(Boolean).join(" · ");
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-3 sm:p-4" data-testid="booking-receipt-modal">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-3 sm:p-4" data-testid="booking-receipt-modal" {...backdrop}>
       <style>{RECEIPT_CSS}</style>
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[95vh] flex flex-col">
         <div className="no-print flex items-center justify-between gap-3 p-4 border-b border-slate-100">

@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { X, Plus, Check, Printer, FileSpreadsheet, CalendarDays } from "lucide-react";
+import { createPortal } from "react-dom";
+import { useOutletContext } from "react-router-dom";
+import { X, Plus, Check, Printer, FileSpreadsheet, Search } from "lucide-react";
+import useMediaQuery from "../../hooks/useMediaQuery";
 import * as XLSX from "xlsx";
 import { formatBSDate } from "../../utils/nepali-date";
 import { npr } from "./money";
@@ -242,6 +245,25 @@ export function exportXlsx(filename, columns, rows) {
   XLSX.writeFile(wb, filename.endsWith(".xlsx") ? filename : `${filename}.xlsx`);
 }
 
+// A page's row of controls (a period switch, a search, Print / Excel ...). On screens at least `minWidth` px wide it is drawn in the
+// app's top bar beside the page's title; on narrower ones it stays at the top of the page, where `className` lays it out.
+export function TopbarControls({ children, minWidth = 1024, className = "" }) {
+  const { topbarSlot } = useOutletContext() || {};
+  const wide = useMediaQuery(`(min-width: ${minWidth}px)`);
+  if (wide && topbarSlot) return createPortal(<div className="fin-no-print flex items-center gap-2">{children}</div>, topbarSlot);
+  return <div className={`fin-no-print flex flex-wrap items-center gap-2 ${className}`}>{children}</div>;
+}
+
+// The search box of a report page: a fixed width, so it is the same in the top bar as in the page.
+export function SearchBox({ value, onChange, placeholder }) {
+  return (
+    <div className="relative">
+      <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+      <input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} className={`${inputCls} !w-64 max-w-full pl-9`} data-testid="report-search" />
+    </div>
+  );
+}
+
 export const ExportBar = ({ onXlsx }) => (
   <div className="fin-no-print flex gap-2">
     <button onClick={() => window.print()} className={btnGhost}><Printer size={15} className="text-gray-500" /> Print</button>
@@ -249,37 +271,3 @@ export const ExportBar = ({ onXlsx }) => (
   </div>
 );
 
-// Jageer's date filter button: shows "All time" (or the range picked) and opens a small From / To picker with
-// shortcuts. Empty from / to means no limit on that side.
-export function DateRangeButton({ from, to, onApply, shortcuts = [] }) {
-  const [open, setOpen] = useState(false);
-  const [f, setF] = useState(from || "");
-  const [t, setT] = useState(to || "");
-  const box = useRef(null);
-  useEffect(() => { setF(from || ""); setT(to || ""); }, [from, to]);
-  useEffect(() => {
-    const h = (e) => { if (box.current && !box.current.contains(e.target)) setOpen(false); };
-    document.addEventListener("mousedown", h);
-    return () => document.removeEventListener("mousedown", h);
-  }, []);
-  const active = shortcuts.find((s) => s.on);
-  const label = active ? active.label : from && to ? (from === to ? formatBSDate(from) : `${formatBSDate(from)} – ${formatBSDate(to)}`) : from ? `From ${formatBSDate(from)}` : to ? `Until ${formatBSDate(to)}` : "All time";
-  return (
-    <div className="fin-no-print relative" ref={box}>
-      <button type="button" onClick={() => setOpen(!open)} className={`${btnGhost} min-w-[8.5rem]`}><CalendarDays size={15} className="text-gray-500" /> {label}</button>
-      {open && (
-        <div className="absolute right-0 top-11 z-30 w-72 rounded-xl border border-gray-200 bg-white p-4 shadow-lg space-y-3">
-          {shortcuts.map((s) => (
-            <button key={s.label} type="button" onClick={() => { s.onSelect(); setOpen(false); }} className={`w-full rounded-lg px-3 py-2 text-left text-sm font-semibold ${s.on ? "bg-blue-50 text-blue-700" : "hover:bg-gray-50 text-gray-700"}`}>{s.label}</button>
-          ))}
-          <div className="grid grid-cols-2 gap-2">
-            <label className="text-xs font-semibold text-gray-600">From<input type="date" value={f} max={t || undefined} onChange={(e) => setF(e.target.value)} className={`${inputCls} mt-1 !px-2`} /></label>
-            <label className="text-xs font-semibold text-gray-600">To<input type="date" value={t} min={f || undefined} onChange={(e) => setT(e.target.value)} className={`${inputCls} mt-1 !px-2`} /></label>
-          </div>
-          {(f || t) && <div className="text-[11px] text-gray-400">{f ? formatBSDate(f) : "Start"} to {t ? formatBSDate(t) : "today"} BS</div>}
-          <button type="button" onClick={() => { onApply(f, t); setOpen(false); }} className={`${btnPrimary} w-full`}>Apply</button>
-        </div>
-      )}
-    </div>
-  );
-}

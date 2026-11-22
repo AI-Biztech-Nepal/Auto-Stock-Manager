@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from "react";
+import TopbarRow from "../components/TopbarRow";
 import { Plus, Search, Wrench, X, Package, Pencil, ShoppingBag } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
@@ -357,33 +358,27 @@ export default function JobCards() {
 
   return (
     <div className="space-y-5 animate-fade-in">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-900">Job Cards</h1>
-          <p className="text-sm text-slate-500">
-            {hasActiveFilters ? (
-              <>
-                {filtered.length} of {jobs.length} records
-                <span className="text-slate-400"> · filters active</span>
-                <button onClick={clearFilters} data-testid="job-clear-filters" className="ml-2 text-blue-600 hover:underline font-medium">Clear filters</button>
-              </>
-            ) : `${filtered.length} records`}
-          </p>
-        </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          <DateRangeFilter value={dateRange.key} custom={dateRange.custom} onChange={(key, custom) => setDateRange({ key, custom })} testid="job-cards-date-filter" />
-          <ViewToggle view={view} onChange={setView} testid="job-cards-view-toggle" />
-          {canEdit && (
-            <button onClick={openModal} data-testid="create-job-button" className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-3 rounded-lg transition-all active:scale-95 shadow-sm">
-              <Plus size={16} /> New Job Card
-            </button>
-          )}
-        </div>
-      </div>
+      {/* The plain record count is the Total card below; this line only shows while filters narrow the list, with the way to clear them. */}
+      <TopbarRow note={hasActiveFilters ? (
+        <>
+          {filtered.length} of {jobs.length} records
+          <span className="text-slate-400"> · filters active</span>
+          <button onClick={clearFilters} data-testid="job-clear-filters" className="ml-2 text-blue-600 hover:underline font-medium">Clear filters</button>
+        </>
+      ) : null}>
+        <DateRangeFilter value={dateRange.key} custom={dateRange.custom} onChange={(key, custom) => setDateRange({ key, custom })} testid="job-cards-date-filter" />
+        <ViewToggle view={view} onChange={setView} testid="job-cards-view-toggle" />
+        {canEdit && (
+          <button onClick={openModal} data-testid="create-job-button" className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-3 rounded-lg transition-all active:scale-95 shadow-sm">
+            <Plus size={16} /> New Job Card
+          </button>
+        )}
+      </TopbarRow>
 
       {/* Stats */}
-      <div className="grid grid-cols-3 gap-2 sm:gap-4">
+      <div className="grid grid-cols-4 gap-2 sm:gap-4">
         {[
+          { label: "Total", count: jobs.length, bg: "bg-violet-50 border-violet-100", text: "text-violet-800" },
           { label: "Pending", count: stats.pending, bg: "bg-yellow-50 border-yellow-100", text: "text-yellow-800" },
           { label: "In Progress", count: stats.in_progress, bg: "bg-blue-50 border-blue-100", text: "text-blue-800" },
           { label: "Completed", count: stats.completed, bg: "bg-green-50 border-green-100", text: "text-green-800" },

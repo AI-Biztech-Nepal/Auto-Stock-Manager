@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import TopbarRow from "../components/TopbarRow";
 import { Download, Search, ChevronDown, X, UserCheck, RefreshCw, AlertCircle } from "lucide-react";
 import { notify } from "../utils/notify";
 import api from "../utils/api";
@@ -216,7 +217,7 @@ export default function CRM() {
 
   return (
     <div className="space-y-4" data-testid="crm-page">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <TopbarRow>
         <div role="tablist" aria-label="CRM list" className="inline-flex rounded-xl bg-slate-100 p-1" data-testid="crm-view-toggle">
           {[["customers", "Sales customers", data?.customers?.length], ["leads", "Website leads", data?.leads?.length]].map(([k, label, n]) => (
             <button key={k} role="tab" aria-selected={view === k} onClick={() => { setView(k); clearFilters(); }} data-testid={`crm-view-${k}`}
@@ -225,7 +226,7 @@ export default function CRM() {
             </button>
           ))}
         </div>
-      </div>
+      </TopbarRow>
 
       {loadFailed && !data ? (
         <div className="bg-white border border-red-200 rounded-2xl"><EmptyState icon={AlertCircle} title="Couldn't load the CRM" action={<button onClick={() => { setLoadFailed(false); load(false); }} className={btnPrimary}><RefreshCw size={15} /> Try again</button>}>Check your connection and try again.</EmptyState></div>

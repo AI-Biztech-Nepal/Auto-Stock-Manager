@@ -1,5 +1,7 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
+import { createPortal } from "react-dom";
+import { useNavigate, useOutletContext } from "react-router-dom";
+import useMediaQuery from "../hooks/useMediaQuery";
 import DashboardTrends from "../components/DashboardTrends";
 import FinanceOverview from "../components/FinanceOverview";
 import { AlertTriangle, TrendingUp, Package, Users, Wrench, DollarSign, ShoppingCart, CalendarDays, TrendingDown, Banknote, Sparkles } from "lucide-react";
@@ -8,6 +10,7 @@ import { peek, remember, cacheTicket } from "../utils/listCache";
 import { formatNPR } from "../utils/helpers";
 import HoverADDate from "../components/HoverADDate";
 import SaleDetailModal from "./SaleDetailModal";
+import BookingDetailsHost from "../components/BookingDetailsHost";
 import DateRangeFilter, { resolveDateFilter } from "../components/DateRangeFilter";
 import { useAuth } from "../context/AuthContext";
 import { featureOn, itemsMode } from "../utils/permissions";
@@ -122,20 +125,22 @@ function AccountingSummary({ range }) {
   const rl = range.key === "daily" ? "today" : range.key === "all" ? "" : range.label.toLowerCase();
   const rangePhrase = range.key === "daily" ? "for today" : range.key === "all" ? "yet" : `for ${range.label.toLowerCase()}`;
   const navigate = useNavigate();
-  const { features, terms } = useAuth();
+  const { user, features, terms } = useAuth();
   const bookingsOn = featureOn(features, "stock.bookings");
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [recentSales, setRecentSales] = useState([]);
   const [purchases, setPurchases] = useState([]);
   const [bookings, setBookings] = useState([]);
+  const bookedNow = bookings.filter(b => b.status === "active"); // vehicles booked in the period and still booked
+  const [viewingBooking, setViewingBooking] = useState(null);   // the cancelled booking whose details are open
+  const [reloadTick, setReloadTick] = useState(0);              // bumped after a change made from those details, to reload the lists
   // null | "sales" | "profit" — which tile opened the sales-list popup, and so which
   // summary (Total Sale only, or Total Sale + Total Profit) it shows top-right.
   const [salesModalView, setSalesModalView] = useState(null);
   const [showPurchasesModal, setShowPurchasesModal] = useState(false);
-  // The sale open in the bill pop-up, and a counter that re-reads the lists after it is edited, returned or deleted.
+  // The sale open in the bill pop-up (refresh, below, re-reads the lists after it is edited, returned or deleted).
   const [openSaleId, setOpenSaleId] = useState(null);
-  const [reloadTick, setReloadTick] = useState(0);
   const openIdx = recentSales.findIndex(s => s.id === openSaleId);
   const saleNav = openIdx < 0 ? undefined : {
     index: openIdx, total: recentSales.length,
@@ -182,6 +187,8 @@ function AccountingSummary({ range }) {
   }, [range]);
 
   useEffect(() => { fetchSummary(); }, [fetchSummary]);
+  // A booking was sold, cancelled or deleted from its details: reload the lists and the figures.
+  const refresh = () => { setReloadTick(t => t + 1); fetchSummary(); };
 
   const isProfitPositive = data && data.net_profit >= 0;
   // "Vehicle Purchase Cost" = bare purchase price, no accessories/repairs. Backend
@@ -258,9 +265,32 @@ function AccountingSummary({ range }) {
           <span className="text-xs font-medium text-green-700 bg-green-100 px-2 py-0.5 rounded-full">
             {recentSales.length} {rl}
           </span>
+          {bookedNow.length > 0 && (
+            <span className="text-xs font-medium text-yellow-800 bg-yellow-100 px-2 py-0.5 rounded-full" data-testid="recent-booked-count">
+              {bookedNow.length} booked
+            </span>
+          )}
         </div>
-        {recentSales.length > 0 ? (
+        {recentSales.length > 0 || bookedNow.length > 0 ? (
           <div className="flex gap-3 overflow-x-auto pb-1">
+            {/* Vehicles booked in the period come first, tagged "Booked": a booking is a deposit, not yet a sale, so it is
+                shown here but never counted in the sales figures. */}
+            {bookedNow.map(b => (
+              <div
+                key={b.id}
+                onClick={() => navigate(`/sales/vehicle/${b.vehicle_id}`)}
+                data-testid="recent-booking-card"
+                className="shrink-0 w-56 bg-white rounded-lg border border-yellow-200 shadow-sm p-3 cursor-pointer hover:shadow-md hover:border-yellow-300 transition-all"
+              >
+                <div className="flex items-start justify-between gap-2 mb-1">
+                  <div className="font-bold text-slate-900 text-sm truncate" style={{ fontFamily: "Manrope" }}>{b.vehicle_info || "Vehicle"}</div>
+                  <span className="shrink-0 px-1.5 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide bg-yellow-100 text-yellow-800" data-testid="recent-booking-tag">Booked</span>
+                </div>
+                <div className="text-xs text-slate-500 mb-1 truncate">{b.customer_name}</div>
+                <div className="text-sm font-semibold text-amber-700 mb-1">{formatNPR(b.booking_amount)} <span className="text-xs font-medium text-slate-400">deposit</span></div>
+                <div className="text-xs text-slate-500">Booked: <HoverADDate date={b.booking_date} /></div>
+              </div>
+            ))}
             {recentSales.map(s => {
               const extraCosts = (s.expenses_total || 0) + (s.job_card_cost || 0);
               return (
@@ -291,8 +321,10 @@ function AccountingSummary({ range }) {
       </div>
 
       {openSaleId && (
-        <SaleDetailModal key={openSaleId} saleId={openSaleId} nav={saleNav} onClose={() => setOpenSaleId(null)} onChanged={() => { setReloadTick(t => t + 1); fetchSummary(); }} />
+        <SaleDetailModal key={openSaleId} saleId={openSaleId} nav={saleNav} onClose={() => setOpenSaleId(null)} onChanged={refresh} />
       )}
+      {/* A cancelled booking's details (opened from the Bookings list of the Today's Sale popup): the same popup the Sales page opens */}
+      {viewingBooking && <BookingDetailsHost booking={viewingBooking} isAdmin={user?.role === "admin"} onClose={() => setViewingBooking(null)} onChanged={refresh} />}
 
       {/* Sales-list popup — opened by either the Total Vehicle Sale or Net Profit tile
           (salesModalView says which). Net Profit adds a per-vehicle bill to each row
@@ -434,7 +466,13 @@ function AccountingSummary({ range }) {
                       {bookings.map(b => (
                         <div
                           key={b.id}
-                          onClick={() => { setSalesModalView(null); navigate("/bookings"); }}
+                          onClick={() => {
+                            setSalesModalView(null);
+                            // A booking still booked, or one that became a sale, opens its vehicle's details page, as a sold
+                            // vehicle does; a cancelled one (the vehicle is for sale again) opens the cancellation details.
+                            if (b.status === "cancelled") setViewingBooking(b);
+                            else navigate(`/sales/vehicle/${b.vehicle_id}`);
+                          }}
                           data-testid="period-bookings-modal-row"
                           className="flex items-center justify-between gap-3 px-4 sm:px-5 py-3 cursor-pointer hover:bg-slate-50 transition-colors"
                         >
@@ -448,7 +486,7 @@ function AccountingSummary({ range }) {
                           </div>
                           <div className="text-right shrink-0">
                             <div className="text-sm font-bold text-amber-700">{formatNPR(b.booking_amount)}</div>
-                            <div className="text-xs capitalize text-slate-500">{b.status === "cancelled" ? "withdrawn" : b.status}</div>
+                            <div className="text-xs text-slate-500" data-testid="period-booking-status">{{ active: "Booked", converted: "Sold", cancelled: "Cancelled" }[b.status] || b.status}</div>
                           </div>
                         </div>
                       ))}
@@ -544,6 +582,8 @@ export default function Dashboard() {
   const { user, features, terms } = useAuth();
   const itemsOnly = itemsMode(features);
   const jobsOn = featureOn(features, "stock.job_cards");
+  const wideScreen = useMediaQuery("(min-width: 1024px)");
+  const { topbarSlot } = useOutletContext() || {}; // the app's top bar: on wide screens the page's status pills and date filter sit there
   // Coming back to the Dashboard shows the last figures at once (see utils/listCache.js); they are refreshed below as always.
   const [stats, setStats] = useState(() => peek("dashboard:stats") ?? null);
   const [loading, setLoading] = useState(() => peek("dashboard:stats") === undefined);
@@ -588,31 +628,42 @@ export default function Dashboard() {
 
   const bs = getCurrentBSDate();
   const bsDateStr = bs ? `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year} BS` : "";
+  const statusPills = (
+    <>
+      <OnlineUsers />
+      {bsDateStr && (
+        <div className="flex items-center gap-2 bg-blue-50 border border-blue-100 px-3 py-1.5 rounded-lg" data-testid="bs-today-display">
+          <CalendarDays size={14} className="text-blue-600" />
+          <span className="text-xs font-semibold text-blue-700">{bsDateStr}</span>
+        </div>
+      )}
+    </>
+  );
+  const dateFilter = <DateRangeFilter value={filter.key} custom={filter.custom} onChange={changeFilter} testid="dashboard-date-filter" />;
 
   return (
     <div className="space-y-6 animate-fade-in">
-      {/* Header */}
-      <div className="flex items-start justify-between gap-3 flex-wrap">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-900">Dashboard</h1>
-          <p className="text-sm text-slate-500 mt-0.5">Overview of {user?.company_name || "your"} operations</p>
-        </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          {/* Status pills — one tidy row (was date+clock stacked over online-count, which
-              read as misaligned once the toggle grew a third tab). Hidden below sm: purely
-              informational, and the toggle above already stays reachable on phones. */}
-          <div className="hidden sm:flex items-center gap-2 flex-wrap">
-            <OnlineUsers />
-            {bsDateStr && (
-              <div className="flex items-center gap-2 bg-blue-50 border border-blue-100 px-3 py-1.5 rounded-lg" data-testid="bs-today-display">
-                <CalendarDays size={14} className="text-blue-600" />
-                <span className="text-xs font-semibold text-blue-700">{bsDateStr}</span>
-              </div>
-            )}
+      {/* The title "Dashboard" is in the app's top bar. On wide screens the status pills and the date filter are up there too;
+          on narrower ones they are here. */}
+      {wideScreen && topbarSlot
+        ? createPortal(
+          <>
+            {statusPills}
+            {dateFilter}
+          </>,
+          topbarSlot,
+        )
+        : (
+          <div className="flex items-start justify-end gap-3 flex-wrap">
+            <div className="flex items-center gap-2 flex-wrap">
+              {/* Status pills — one tidy row (was date+clock stacked over online-count, which
+                  read as misaligned once the toggle grew a third tab). Hidden below sm: purely
+                  informational, and the toggle above already stays reachable on phones. */}
+              <div className="hidden sm:flex items-center gap-2 flex-wrap">{statusPills}</div>
+              {dateFilter}
+            </div>
           </div>
-          <DateRangeFilter value={filter.key} custom={filter.custom} onChange={changeFilter} testid="dashboard-date-filter" />
-        </div>
-      </div>
+        )}
 
       {/* Period-scoped: follows the toggle above. Lifetime totals now live on the Finance tab. */}
       <AccountingSummary range={range} />

@@ -633,6 +633,7 @@ CREATE TABLE IF NOT EXISTS leads (
   customer_id VARCHAR(36),
   vehicle_id VARCHAR(36),
   seen_at VARCHAR(40),
+  seen_by VARCHAR(100),
   INDEX idx_leads_created_at (created_at),
   CONSTRAINT fk_leads_company FOREIGN KEY (company_id) REFERENCES companies(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from "react";
+import TopbarRow from "../components/TopbarRow";
 import { Sparkles, TrendingUp, CalendarDays, MessageCircle, Send, Loader2, Copy, Check, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
@@ -339,16 +340,7 @@ export default function AIAssistant() {
 
   return (
     <div className="space-y-5 animate-fade-in max-w-4xl">
-      {/* Header */}
-      <div className="flex items-center gap-3">
-        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-600 to-indigo-600 flex items-center justify-center shadow-md">
-          <Sparkles size={20} className="text-white" />
-        </div>
-        <div>
-          <h1 className="text-2xl font-bold text-slate-900">AI Assistant</h1>
-          <p className="text-sm text-slate-500">Pricing Engine · Festival Intel · Sales Chatbot · Business Advisor</p>
-        </div>
-      </div>
+      <TopbarRow note="Pricing Engine · Festival Intel · Sales Chatbot · Business Advisor" />
 
       {/* Tabs */}
       <div className="flex gap-1 bg-slate-100 rounded-xl p-1 flex-wrap">

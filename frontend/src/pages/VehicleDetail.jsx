@@ -429,9 +429,9 @@ export function VehicleDetailModal({ id, onClose }) {
               <span>
                 {vehicle.booking
                   ? <>Booked by <span className="font-semibold">{vehicle.booking.customer_name || "customer"}</span>{vehicle.booking.booking_amount != null && <> · {formatNPR(vehicle.booking.booking_amount)} deposit</>}{vehicle.booking.booking_date && <> · <HoverADDate date={vehicle.booking.booking_date} /></>}</>
-                  : "Reserved"}
+                  : "Booked"}
               </span>
-              {vehicle.booking && <button type="button" onClick={() => navigate("/bookings")} className="font-semibold underline">Open in Bookings</button>}
+              {vehicle.booking && <button type="button" onClick={() => navigate("/sales")} className="font-semibold underline">Open in Sales</button>}
             </div>
           )}
 

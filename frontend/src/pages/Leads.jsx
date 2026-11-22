@@ -96,7 +96,14 @@ export default function Leads() {
       // takes them out of All on the next visit (the list above keeps them there for this one).
       // Done before the ping below so the badge's refetch already sees them as seen.
       const unseen = data.filter(l => state(l) === "new" && !l.seen_at).map(l => l.id);
-      if (unseen.length) await api.post("/leads/seen", { ids: unseen }, { suppressErrorToast: true }).catch(() => {});
+      if (unseen.length) {
+        const seen = await api.post("/leads/seen", { ids: unseen }, { suppressErrorToast: true }).catch(() => null);
+        // Show who read them right away (the list above was fetched before they were marked).
+        if (seen?.data?.seen_by) {
+          const now = new Date().toISOString();
+          setLeads(ls => ls.map(l => (unseen.includes(l.id) ? { ...l, seen_at: now, seen_by: seen.data.seen_by } : l)));
+        }
+      }
       window.dispatchEvent(new Event("leads-changed"));
     } catch {
       toast.error("Failed to load leads");
@@ -209,9 +216,19 @@ export default function Leads() {
                       </p>
                     )}
                   </div>
-                  {state(l) !== "rejected" && (isNew
-                    ? <span data-testid="lead-new" className="inline-flex items-center gap-1 rounded-full bg-blue-600 px-2.5 py-1 text-xs font-bold text-white"><Sparkles size={12} /> New</span>
-                    : <span data-testid="lead-read" className="inline-flex items-center gap-1 rounded-full bg-emerald-600 px-2.5 py-1 text-xs font-bold text-white"><CheckCheck size={13} /> Read</span>)}
+                  {state(l) !== "rejected" && (
+                    <div className="flex flex-col items-end gap-1 text-right">
+                      {isNew
+                        ? <span data-testid="lead-new" className="inline-flex items-center gap-1 rounded-full bg-blue-600 px-2.5 py-1 text-xs font-bold text-white"><Sparkles size={12} /> New</span>
+                        : <span data-testid="lead-read" className="inline-flex items-center gap-1 rounded-full bg-emerald-600 px-2.5 py-1 text-xs font-bold text-white"><CheckCheck size={13} /> Read</span>}
+                      {/* The first person to open the lead (older leads were read before this was recorded: no name, just the time). */}
+                      {l.seen_at && (
+                        <span data-testid="lead-read-by" className="text-[11px] leading-tight text-slate-500">
+                          Read{l.seen_by ? <> by <b className="font-semibold text-slate-700">{l.seen_by}</b></> : ""}<br />{clock(l.seen_at)} · {dateOnly(l.seen_at)}
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 {(l.requested_service || l.vehicle_type || l.preferred_date) && (

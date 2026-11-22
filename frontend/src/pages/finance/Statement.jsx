@@ -1,8 +1,12 @@
 import { Fragment, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
+import { useOutletContext } from "react-router-dom";
+import useMediaQuery from "../../hooks/useMediaQuery";
 import { CloudUpload, Trash2, Banknote } from "lucide-react";
 import { useBooks } from "./BooksContext";
 import EntryEditor from "./EntryEditor";
-import { Card, Stat, Pill, FilterTabs, DateRangeButton, ExportBar, exportXlsx, btnPrimary } from "./ui";
+import PeriodStepper, { periodAt, periodSlug } from "./PeriodStepper";
+import { Card, Stat, Pill, FilterTabs, ExportBar, exportXlsx, btnPrimary } from "./ui";
 import { statementRows, dayGroupLabel, num } from "./money";
 import { formatBSDate } from "../../utils/nepali-date";
 
@@ -16,9 +20,11 @@ const FILTERS = [["all", "All"], ["sale", "Sales"], ["purchase", "Purchase"], ["
 
 export default function Statement({ goTab, openParty }) {
   const { books, del } = useBooks();
+  const { topbarSlot } = useOutletContext() || {}; // the app's top bar
+  const inTopbar = useMediaQuery("(min-width: 1536px)") && !!topbarSlot; // wide enough for all five controls beside the title
   const [filter, setFilter] = useState("all");
-  const [from, setFrom] = useState("");
-  const [to, setTo] = useState("");
+  const [period, setPeriod] = useState(() => periodAt("all")); // all time to begin with
+  const { from, to } = period;
   const [editing, setEditing] = useState(null);
 
   const all = useMemo(() => statementRows(books), [books]);
@@ -55,16 +61,22 @@ export default function Statement({ goTab, openParty }) {
     { header: "Cash in", value: (r) => r.cashIn ?? "" },
     { header: "Cash out", value: (r) => r.cashOut ?? "" },
   ];
-  const period = from || to ? `${from || "start"}-to-${to || "today"}` : "all";
+
+  const controls = (
+    <>
+      <FilterTabs options={FILTERS} value={filter} onChange={setFilter} />
+      <PeriodStepper value={period} onChange={setPeriod} />
+      <ExportBar onXlsx={() => exportXlsx(`statement-${periodSlug(period)}`, cols, rows)} />
+      <button onClick={() => goTab("import")} className={btnPrimary} data-testid="statement-import"><CloudUpload size={16} /> Import</button>
+    </>
+  );
 
   return (
     <div className="space-y-3.5">
-      <div className="fin-no-print flex flex-wrap items-center justify-end gap-2">
-        <FilterTabs options={FILTERS} value={filter} onChange={setFilter} />
-        <DateRangeButton from={from} to={to} onApply={(f, t) => { setFrom(f); setTo(t); }} shortcuts={[{ label: "All time", on: !from && !to, onSelect: () => { setFrom(""); setTo(""); } }]} />
-        <ExportBar onXlsx={() => exportXlsx(`statement-${period}`, cols, rows)} />
-        <button onClick={() => goTab("import")} className={btnPrimary} data-testid="statement-import"><CloudUpload size={16} /> Import</button>
-      </div>
+      {/* The type tabs, the date filter, Print, Excel and Import are in the app's top bar on wide screens; on narrower ones they are here. */}
+      {inTopbar
+        ? createPortal(<div className="fin-no-print flex items-center gap-2">{controls}</div>, topbarSlot)
+        : <div className="fin-no-print flex flex-wrap items-center justify-end gap-2">{controls}</div>}
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5">
         <Stat label="Sales" value={stats.sale} color="#111827" />

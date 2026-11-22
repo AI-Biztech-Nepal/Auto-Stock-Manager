@@ -115,7 +115,7 @@ function AppRoutes() {
           <Route path="spare-parts" element={<Navigate to="/inventory?tab=spare-parts" replace />} />
           <Route path="sales" element={<RoleRoute path="/sales"><Sales /></RoleRoute>} />
           <Route path="sanakhat" element={<RoleRoute path="/sanakhat"><SanakhatPortal /></RoleRoute>} />
-          <Route path="bookings" element={<Navigate to="/sales?tab=bookings" replace />} />
+          <Route path="bookings" element={<Navigate to="/sales" replace />} />
           <Route path="sales/:id" element={<RoleRoute path="/sales/detail"><SaleDetail /></RoleRoute>} />
           <Route path="sales/vehicle/:id" element={<RoleRoute path="/sales/vehicle"><SoldStockDetail /></RoleRoute>} />
           {/* Sold Stock was merged into Sales. */}

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import TopbarRow from "../components/TopbarRow";
 import { useNavigate } from "react-router-dom";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, PieChart, Pie, Legend } from "recharts";
 import api from "../utils/api";
@@ -46,10 +47,7 @@ export default function Reports() {
 
   return (
     <div className="space-y-5 animate-fade-in">
-      <div>
-        <h1 className="text-2xl font-bold text-slate-900">Reports & Analytics</h1>
-        <p className="text-sm text-slate-500">Business performance overview</p>
-      </div>
+      <TopbarRow note="Business performance overview" />
 
       {/* Tabs */}
       <div className="flex border-b border-slate-200 gap-1">

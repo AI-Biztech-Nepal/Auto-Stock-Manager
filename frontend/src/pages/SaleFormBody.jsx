@@ -35,8 +35,9 @@ const Static = ({ label, value }) => (
 // f: what useSaleForm returns. booking: the booking being turned into this sale. sale: the recorded sale this is the form
 // of (then everything can be edited: the buyer's details change the customer's record, the witness and the exchange change
 // the sale and, for the exchange, the old vehicle's Inventory entry). readOnly: nothing can be changed. attempted: Save was
-// pressed, so the fields still missing are marked.
-export default function SaleFormBody({ f, booking = null, sale = null, readOnly = false, attempted = false }) {
+// pressed, so the fields still missing are marked. compact: leave out the Payment, Exchange and Extra expenses sections and
+// the Vehicle pass date (the new Sale Vehicle form; a recorded sale still shows them).
+export default function SaleFormBody({ f, booking = null, sale = null, readOnly = false, attempted = false, compact = false }) {
   const { form, set } = f;
   const existing = !!sale;
   const bad = (id) => attempted && f.missing.some(m => m[0] === id);
@@ -61,14 +62,14 @@ export default function SaleFormBody({ f, booking = null, sale = null, readOnly 
         </div>
       )}
 
-      {/* 1 Sale: who is buying comes first (at the top, as Name does in Purchase Vehicle), then what and for how much */}
+      {/* 1 Sale: customer, dates, vehicle, price, salesman, lead, referrer. The buyer / witness panel opens right under the customer. */}
       <section id="sv-section-sale" className={SECTION}>
         <h3 className={H2} style={{ fontFamily: "Manrope, sans-serif" }}>Sale</h3>
         <div className={GRID}>
           <div className="sm:col-span-2">
             <label htmlFor="sv-customer" className={LBL}>Customer name</label>
             <div className="flex gap-2">
-              <select id="sv-customer" value={form.customer_id} onChange={e => set({ customer_id: e.target.value })} className={`${BOX} ${OK}`} data-testid="sale-customer-select">
+              <select id="sv-customer" value={form.customer_id} onChange={e => set({ customer_id: e.target.value })} className={`${BOX} ${bad("sv-customer") ? BAD : OK}`} data-testid="sale-customer-select">
                 <option value="">Walk-in / No customer record</option>
                 {form.customer_id && !f.selectedCustomer && <option value={form.customer_id}>{sale?.customer_name || "Customer"}</option>}
                 {f.customers.map(c => (
@@ -85,25 +86,18 @@ export default function SaleFormBody({ f, booking = null, sale = null, readOnly 
               )}
             </div>
             {!readOnly && <p className="mt-1 text-xs text-slate-500">{existing ? "Pick a customer, or press the person button to enter a new buyer" : "Pick a customer, or press the person button to enter a new buyer and the sale-deed witness"}</p>}
+            {bad("sv-customer") && <p className="mt-1 text-xs font-semibold text-red-700">A booking needs a customer: pick one, or enter a new one</p>}
           </div>
-          <div className="sm:col-span-2">
-            <label htmlFor="sv-vehicle" className={LBL}>Vehicle <span className="text-red-600">*</span></label>
-            {booking ? (
-              <div className="h-11 px-3 flex items-center text-sm bg-slate-50 border border-slate-300 rounded-[10px] text-slate-700">{booking.vehicle_info}</div>
-            ) : (
-              <VehicleComboBox
-                vehicles={vehicleList}
-                value={form.vehicle_id}
-                onChange={id => set({ vehicle_id: id })}
-                placeholder={ph("Search or select available vehicle...")}
-                testId="sale-vehicle"
-                showPrice
-                inputId="sv-vehicle"
-                inputClassName={`${COMBO} ${bad("sv-vehicle") ? BAD : OK}`}
-              />
-            )}
-            {bad("sv-vehicle") && <p className="mt-1.5 text-xs font-semibold text-red-700">Pick the vehicle being sold</p>}
+          <div className={compact ? "sm:col-span-2" : ""}>
+            <span className={LBL}>Date (BS)</span>
+            <BSDatePicker value={form.sale_date} onChange={val => set({ sale_date: val })} data-testid="sale-date-input" triggerClassName={`${DATE_BOX} ${OK}`} placeholder={readOnly ? "—" : "Today"} />
           </div>
+          {!compact && (
+            <div>
+              <span className={LBL}>Vehicle pass date (BS)</span>
+              <BSDatePicker value={form.ownership_transfer_date} onChange={val => set({ ownership_transfer_date: val })} data-testid="vehicle-pass-date-input" triggerClassName={`${DATE_BOX} ${OK}`} placeholder={readOnly ? "—" : undefined} />
+            </div>
+          )}
 
           {showPanel && (
             <div className="sm:col-span-2 lg:col-span-4 rounded-xl border border-blue-100 bg-blue-50/60 p-4 space-y-4" data-testid="add-customer-form">
@@ -133,7 +127,7 @@ export default function SaleFormBody({ f, booking = null, sale = null, readOnly 
                     <p className="text-xs font-semibold text-blue-700 uppercase tracking-wide" data-testid="witness-details-panel">Witness details <span className="normal-case font-medium text-blue-600/80">· for the sale deed</span></p>
                     {DEED_ROWS.map(({ label, ph: hint, wkey, wid }) => (
                       <div key={wkey} className="min-w-0">
-                        <label htmlFor={wid} className={LBL}>{label}{!existing && wkey !== "witness_id_number" && <span className="text-red-600"> *</span>}</label>
+                        <label htmlFor={wid} className={LBL}>{label}</label>
                         <input id={wid} aria-label={`Witness ${label}`} value={form[wkey]} onChange={e => set({ [wkey]: e.target.value })} placeholder={ph(hint)} className={`${BOX} ${bad(wid) ? BAD : OK}`} data-testid={wkey.replace(/_/g, "-")} />
                       </div>
                     ))}
@@ -153,26 +147,36 @@ export default function SaleFormBody({ f, booking = null, sale = null, readOnly 
             </div>
           )}
 
+          <div className="sm:col-span-2">
+            <label htmlFor="sv-vehicle" className={LBL}>Vehicle <span className="text-red-600">*</span></label>
+            {booking ? (
+              <div className="h-11 px-3 flex items-center text-sm bg-slate-50 border border-slate-300 rounded-[10px] text-slate-700">{booking.vehicle_info}</div>
+            ) : (
+              <VehicleComboBox
+                vehicles={vehicleList}
+                value={form.vehicle_id}
+                onChange={id => set({ vehicle_id: id })}
+                placeholder={ph("Search or select available vehicle...")}
+                testId="sale-vehicle"
+                showPrice
+                inputId="sv-vehicle"
+                inputClassName={`${COMBO} ${bad("sv-vehicle") ? BAD : OK}`}
+              />
+            )}
+            {bad("sv-vehicle") && <p className="mt-1.5 text-xs font-semibold text-red-700">Pick the vehicle being sold</p>}
+          </div>
           <div>
             <label htmlFor="sv-sale_price" className={LBL}>Sale price <span className="text-red-600">*</span></label>
             <Money id="sv-sale_price" testid="sale-price-input" value={form.sale_price} onChange={v => set({ sale_price: v })} error={bad("sv-sale_price")} />
             {bad("sv-sale_price") && <p className="mt-1 text-xs font-semibold text-red-700">Enter the price it is sold for</p>}
           </div>
           <div>
-            <span className={LBL}>Sale date (BS)</span>
-            <BSDatePicker value={form.sale_date} onChange={val => set({ sale_date: val })} data-testid="sale-date-input" triggerClassName={`${DATE_BOX} ${OK}`} placeholder={readOnly ? "—" : "Today"} />
-          </div>
-          <div>
-            <span className={LBL}>Vehicle pass date (BS)</span>
-            <BSDatePicker value={form.ownership_transfer_date} onChange={val => set({ ownership_transfer_date: val })} data-testid="vehicle-pass-date-input" triggerClassName={`${DATE_BOX} ${OK}`} placeholder={readOnly ? "—" : undefined} />
-          </div>
-          <div className="sm:col-span-2 lg:col-span-1">
             <span className={LBL}>Sold by</span>
             <SoldBySelect value={form.sold_by_id} onChange={v => set({ sold_by_id: v })} fallbackName={sale?.sold_by_name} className={`${BOX} ${OK}`} testid="sale-sold-by-select" />
           </div>
 
           <div id="sv-lead" tabIndex={-1} className="sm:col-span-2 outline-none" data-testid="sale-lead">
-            <SourceField value={f.leadSource} onChange={f.setLeadSource} customers={f.customers} label="Lead" hideReferral size="lg" />
+            <SourceField value={f.leadSource} onChange={f.setLeadSource} customers={f.customers} label="Lead" hideReferral asSelect size="lg" />
             {bad("sv-lead") && <p className="mt-1.5 text-xs font-semibold text-red-700">Pick a lead, or say who referred the buyer</p>}
           </div>
           <div className="sm:col-span-2">
@@ -181,8 +185,35 @@ export default function SaleFormBody({ f, booking = null, sale = null, readOnly 
         </div>
       </section>
 
+      {/* Booking: the tick, to say the vehicle is booked; ticked, it opens one box for the booking amount (the deposit) and
+          changes nothing else in the form. Save then books the vehicle (reserved, shown as Booked on the Sales page) instead of
+          recording a sale. The amount may be left empty and entered later from the booking's details (Edit). Not offered on a
+          recorded sale or when the sale completes a booking. */}
+      {!existing && !booking && (
+        <section id="sv-section-booking" className={SECTION} data-testid="booking-section">
+          {/* The title is a heading like "Sale" and "Notes" (same size and weight as H2), with the tick in front of it. */}
+          <div className="flex items-center gap-3">
+            <input
+              id="sv-booking" type="checkbox" checked={form.booking} onChange={e => set({ booking: e.target.checked })} data-testid="booking-checkbox"
+              className="h-5 w-5 shrink-0 cursor-pointer rounded border-slate-400 text-blue-600 focus:ring-2 focus:ring-blue-500"
+            />
+            <h3 className="text-base font-bold text-slate-900" style={{ fontFamily: "Manrope, sans-serif" }}>
+              <label htmlFor="sv-booking" className="cursor-pointer select-none">Booking</label>
+            </h3>
+          </div>
+          {form.booking && (
+            <div className={`${GRID} mt-4`} data-testid="booking-fields">
+              <div>
+                <label htmlFor="sv-booking-amount" className={LBL}>Booking Amount (NPR)</label>
+                <Money id="sv-booking-amount" testid="booking-amount-input" placeholder="e.g. 20000" value={form.booking_amount} onChange={v => set({ booking_amount: v })} />
+              </div>
+            </div>
+          )}
+        </section>
+      )}
+
       {/* 2 Payment */}
-      <section id="sv-section-payment" className={SECTION}>
+      {!compact && <section id="sv-section-payment" className={SECTION}>
         <h3 className={H2} style={{ fontFamily: "Manrope, sans-serif" }}>Payment</h3>
         <div className={GRID}>
           <div>
@@ -209,11 +240,11 @@ export default function SaleFormBody({ f, booking = null, sale = null, readOnly 
             </div>
           )}
         </div>
-      </section>
+      </section>}
 
       {/* 3 Exchange: the customer's old vehicle; its valuation is deducted from what they owe. On a recorded sale it can be
           edited too: its Inventory entry follows while that is still unlisted and untouched. */}
-      {(!existing || hasExchange || !readOnly) && (
+      {!compact && (!existing || hasExchange || !readOnly) && (
         <section id="sv-section-exchange" className={SECTION} data-testid="exchange-section">
           <h3 className={H2} style={{ fontFamily: "Manrope, sans-serif" }}>
             Exchange{" "}
@@ -249,7 +280,7 @@ export default function SaleFormBody({ f, booking = null, sale = null, readOnly 
       )}
 
       {/* 4 Extra expenses */}
-      <section id="sv-section-extras" className={SECTION}>
+      {!compact && <section id="sv-section-extras" className={SECTION}>
         <h3 className={H2} style={{ fontFamily: "Manrope, sans-serif" }}>
           Extra expenses
           {f.extraExpenses.length > 0 && <span className="ml-2 align-middle text-xs bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full font-semibold" style={{ fontFamily: "Inter, sans-serif" }}>{f.extraExpenses.length} added · {formatNPR(f.expensesTotal)}</span>}
@@ -315,7 +346,7 @@ export default function SaleFormBody({ f, booking = null, sale = null, readOnly 
             </div>
           )}
         </div>
-      </section>
+      </section>}
 
       {/* 5 Notes */}
       <section id="sv-section-notes" className={SECTION}>

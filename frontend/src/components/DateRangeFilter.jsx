@@ -6,7 +6,7 @@ import {
   getTodayAD, getCurrentWeekRange, BS_MONTHS,
 } from "../utils/nepali-date";
 
-// Date-range filter: a button showing the active range that opens a "Select Date"
+// Date-range filter: a small button showing just the name of the active range ("This Year"), that opens a "Select Date"
 // sheet (Today / Yesterday / This Week / This Month / Last Month /
 // This Year / All Time / Custom Date). All ranges are resolved to AD YYYY-MM-DD
 // start/end strings, since that's what the API filters on.
@@ -18,6 +18,16 @@ const fmtBS = (adStr) => {
   return b ? `${b.year} ${shortMonth(b.month)} ${pad2(b.day)}` : adStr;
 };
 const fmtRange = (s, e) => (s === e ? fmtBS(s) : `${fmtBS(s)} - ${fmtBS(e)}`);
+
+// The short form shown on the button for a custom range only ("Bai 01 - Jes 15"): the year is left out while the range is
+// inside the current BS year. The other ranges are just named.
+const shortRange = (s, e) => {
+  const bs = adToBsDate(s), be = adToBsDate(e), now = getCurrentBSDate();
+  if (!bs || !be) return `${s} - ${e}`;
+  const inThisYear = !!now && bs.year === now.year && be.year === now.year;
+  const part = (b) => `${inThisYear ? "" : `${b.year} `}${shortMonth(b.month)} ${pad2(b.day)}`;
+  return s === e ? part(bs) : `${part(bs)} - ${part(be)}`;
+};
 
 const addDays = (adStr, n) => {
   const d = new Date(`${adStr}T00:00:00Z`);
@@ -103,12 +113,13 @@ export default function DateRangeFilter({ value, custom, onChange, testid = "dat
         type="button"
         onClick={() => setOpen(true)}
         data-testid={testid}
-        className="flex items-center gap-2 bg-white border border-slate-200 hover:border-blue-300 px-3 py-1.5 rounded-lg transition-colors max-w-full"
+        title={`${active.label}${active.key === "all" ? "" : `: ${active.sub}`}`}
+        aria-label={`Date filter: ${active.label}. Click to change`}
+        className="flex items-center gap-2 bg-white border border-slate-200 hover:border-blue-300 px-3 py-1.5 rounded-lg transition-colors max-w-full cursor-pointer"
       >
         <CalendarDays size={14} className="text-blue-600 shrink-0" />
         <span className="text-xs font-bold text-slate-800 whitespace-nowrap">{active.label}</span>
-        <span className="text-xs text-slate-500 truncate hidden sm:inline">{active.sub}</span>
-        <span className="text-xs font-bold text-emerald-600 uppercase tracking-wide">Change</span>
+        {active.key === "custom" && <span className="text-xs text-slate-500 whitespace-nowrap" data-testid={`${testid}-short`}>{shortRange(active.start, active.end)}</span>}
       </button>
 
       {open && (

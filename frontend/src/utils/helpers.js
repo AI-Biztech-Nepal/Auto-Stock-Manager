@@ -21,7 +21,7 @@ export const getStatusStyle = (status) => {
     in_repair: { bg: "bg-purple-100", text: "text-purple-800", label: "In Repair", cardBg: "bg-purple-50", cardBorder: "border-purple-200" },
     available: { bg: "bg-blue-100",   text: "text-blue-800",   label: "Available", cardBg: "bg-blue-50",   cardBorder: "border-blue-200" },
     sold:      { bg: "bg-green-100",  text: "text-green-800",  label: "Sold",      cardBg: "bg-green-50",  cardBorder: "border-green-200" },
-    reserved:  { bg: "bg-yellow-100", text: "text-yellow-800", label: "Reserved",  cardBg: "bg-yellow-50", cardBorder: "border-yellow-200" },
+    reserved:  { bg: "bg-yellow-100", text: "text-yellow-800", label: "Booked",    cardBg: "bg-yellow-50", cardBorder: "border-yellow-200" }, // a vehicle with an active booking (stored as "reserved")
   };
   if (status === "hidden") return map.unlisted; // legacy alias, pre-rename data
   return map[status] || map.available;
@@ -33,7 +33,7 @@ export const VEHICLE_STATUS_OPTIONS = [
   { value: "unlisted", label: "Unlisted" },
   { value: "in_repair", label: "In Repair" },
   { value: "available", label: "Available" },
-  { value: "reserved", label: "Reserved" },
+  { value: "reserved", label: "Booked" }, // stored as "reserved"; a booking on the Sales page puts a vehicle here
   { value: "sold", label: "Sold" },
   { value: "scrap", label: "Scrap" },
 ];

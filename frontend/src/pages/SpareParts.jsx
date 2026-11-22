@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from "react";
+import TopbarRow from "../components/TopbarRow";
 import { Plus, Search, AlertTriangle, Package, Trash2, Edit, Minus, ShoppingCart, History, ChevronUp, ChevronDown, Check, Store, Layers, Boxes, PackageOpen } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
@@ -436,13 +437,11 @@ export default function SpareParts() {
 
   return (
     <div className="space-y-5 animate-fade-in">
-      {/* Header */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-sm text-slate-500">{parts.length} parts in inventory</p>
+      <TopbarRow>
         <button onClick={openBulkAdd} data-testid="bulk-add-part-btn" className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-3 rounded-lg transition-all active:scale-95 shadow-sm">
           <Layers size={16} /> Bulk Add (Bill)
         </button>
-      </div>
+      </TopbarRow>
 
       {/* Summary Cards */}
       {summary && (

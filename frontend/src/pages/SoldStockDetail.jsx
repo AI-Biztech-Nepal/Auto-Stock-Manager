@@ -1,11 +1,14 @@
 import { useEffect, useState, useCallback } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
-import { ArrowLeft, Undo2, ExternalLink, Lock, Store, User, Pencil, Trash2 } from "lucide-react";
+import { ArrowLeft, Undo2, ExternalLink, Lock, Store, User, Pencil, Trash2, Printer } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
 import { formatNPR, formatOwnership, TRANSFER_STATUS_OPTIONS, getTransferStatusStyle, splitSanakhatExpenses, deleteSaleConfirm } from "../utils/helpers";
 import { ReturnModal } from "./VehicleModals";
 import SaleDetail from "./SaleDetail";
+import SaleVehicleModal from "./SaleVehicleModal";
+import BookingReceipt from "../components/BookingReceipt";
+import { WithdrawBookingModal } from "../components/BookingModals";
 import HoverADDate from "../components/HoverADDate";
 import WarrantyHistory from "../components/WarrantyHistory";
 import { useAuth } from "../context/AuthContext";
@@ -25,6 +28,9 @@ const Row = ({ label, children }) => (
   </div>
 );
 
+// A sold vehicle's page (/sales/vehicle/:id). A vehicle that is booked (status "reserved") opens the same page: same header and
+// figures and the same Vehicle card, with a Booking card (and the customer) where a sold one has its Sale card, and the
+// booking's own buttons (Edit, Receipt, Cancel, Delete) in the header.
 export default function SoldStockDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -59,6 +65,31 @@ export default function SoldStockDetail() {
     if (!isAdmin) return;
     api.get(`/vehicles/${id}/active-sale`).then(r => setActiveSale(r.data)).catch(() => {});
   }, [id, isAdmin]);
+
+  // A booked vehicle: its active booking (deposit, how it was paid, receipt, customer ...) and the form its buttons open.
+  const isBooked = vehicle?.status === "reserved";
+  const [booking, setBooking] = useState(null);
+  const [bookingView, setBookingView] = useState(null); // null | "sale" (the Sale Vehicle form) | "cancel" (the cancel dialog)
+  const [receipt, setReceipt] = useState(null);
+  const fetchBooking = useCallback(async () => {
+    try { setBooking((await api.get("/bookings?status=active")).data.find(b => b.vehicle_id === id) || null); }
+    catch { setBooking(null); }
+  }, [id]);
+  useEffect(() => { if (isBooked) fetchBooking(); else setBooking(null); }, [isBooked, fetchBooking]);
+
+  // The booking was made a sale from here: the page is now the sold vehicle's, with its sale.
+  const afterBookingSold = () => {
+    fetchVehicle();
+    if (isAdmin) api.get(`/vehicles/${id}/active-sale`).then(r => setActiveSale(r.data)).catch(() => {});
+  };
+  const deleteBooking = async () => {
+    if (!booking || !window.confirm("Delete this booking record? Use Cancel instead if the customer is cancelling.")) return;
+    try {
+      await api.delete(`/bookings/${booking.id}`);
+      toast.success("Booking deleted");
+      navigate("/sales");
+    } catch (err) { toast.error(err.response?.data?.detail || "Failed to delete booking"); }
+  };
 
   // After the sale is edited in place: the vehicle's figures may have moved, or the sale may now be on another vehicle.
   const afterSaleSaved = ({ vehicle_id }) => {
@@ -152,7 +183,17 @@ export default function SoldStockDetail() {
           </div>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          <span className="px-2.5 py-1 rounded-full text-xs font-semibold uppercase tracking-wide bg-green-100 text-green-800" data-testid="sold-status-badge">Sold</span>
+          {isBooked
+            ? <span className="px-2.5 py-1 rounded-full text-xs font-semibold uppercase tracking-wide bg-yellow-100 text-yellow-800" data-testid="booked-status-badge">Booked</span>
+            : <span className="px-2.5 py-1 rounded-full text-xs font-semibold uppercase tracking-wide bg-green-100 text-green-800" data-testid="sold-status-badge">Sold</span>}
+          {isBooked && booking && (
+            <>
+              <button onClick={() => setBookingView("sale")} className="flex items-center gap-1.5 px-3 py-2 border border-slate-200 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50 transition-colors" data-testid="booking-record-sale-btn"><Pencil size={14} /> Edit</button>
+              <button onClick={() => setReceipt(booking)} className="flex items-center gap-1.5 px-3 py-2 border border-slate-200 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50 transition-colors" data-testid="booking-receipt-btn"><Printer size={14} /> Receipt</button>
+              {isAdmin && <button onClick={() => setBookingView("cancel")} className="flex items-center gap-1.5 px-3 py-2 border border-amber-200 text-amber-700 rounded-lg text-sm font-medium hover:bg-amber-50 transition-colors" data-testid="booking-withdraw-btn"><Undo2 size={14} /> Cancel</button>}
+              {isAdmin && <button onClick={deleteBooking} className="flex items-center gap-1.5 px-3 py-2 border border-red-200 text-red-600 rounded-lg text-sm font-medium hover:bg-red-50 transition-colors" data-testid="booking-delete-btn"><Trash2 size={14} /> Delete</button>}
+            </>
+          )}
           {isAdmin && activeSale && (
             <button onClick={() => setEditTick(t => t + 1)} className="flex items-center gap-1.5 px-3 py-2 border border-slate-200 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50 transition-colors" data-testid="edit-sale-btn"><Pencil size={14} /> Edit</button>
           )}
@@ -193,10 +234,11 @@ export default function SoldStockDetail() {
       {/* Amount Summary */}
       <div className="grid grid-cols-2 lg:grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-4">
         {[
+          isBooked && booking && { label: "Booking Amount", value: formatNPR(booking.booking_amount), bold: true },
           !hideFinancials && { label: "Purchase Price", value: formatNPR(vehicle.purchase_price) },
           { label: "Total Expenses", value: formatNPR(vehicle.total_expenses), clickable: true },
           !isPartsOnly && { label: "Selling Price", value: formatNPR(vehicle.selling_price), bold: true },
-          !hideFinancials && { label: "Realized Profit", value: vehicle.expected_profit !== null ? formatNPR(vehicle.expected_profit) : "N/A", highlight: vehicle.profit_margin !== null },
+          !hideFinancials && { label: isBooked ? "Expected Profit" : "Realized Profit", value: vehicle.expected_profit !== null ? formatNPR(vehicle.expected_profit) : "N/A", highlight: vehicle.profit_margin !== null, profit: true },
         ].filter(Boolean).map(c => (
           <div
             key={c.label}
@@ -206,7 +248,7 @@ export default function SoldStockDetail() {
           >
             <div className="text-xs text-slate-500 mb-1 truncate">{c.label}</div>
             <div className={`text-lg font-bold truncate ${c.highlight ? (vehicle.low_margin ? "text-red-600" : "text-green-600") : "text-slate-900"}`} style={{ fontFamily: "Manrope" }}>{c.value}</div>
-            {c.label === "Realized Profit" && vehicle.profit_margin !== null && (
+            {c.profit && vehicle.profit_margin !== null && (
               <div className={`text-xs mt-0.5 ${vehicle.low_margin ? "text-red-500" : "text-green-600"}`}>
                 {vehicle.profit_margin}% margin {vehicle.low_margin ? "⚠ Low!" : ""}
               </div>
@@ -247,6 +289,27 @@ export default function SoldStockDetail() {
             ) : <span className="text-sm font-medium text-slate-900 sm:text-right">—</span>}
           </Row>
         </div>
+        {isBooked && booking && (
+          <>
+            <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5" data-testid="booking-details">
+              <h3 className="text-sm font-bold text-slate-900 mb-1">Booking</h3>
+              <Row label="Booking Amount (deposit)"><span className="text-sm font-bold text-green-700 sm:text-right">{formatNPR(booking.booking_amount)}</span></Row>
+              <Row label="Paid By"><span className="text-sm font-medium text-slate-900 sm:text-right">{booking.payment_method || "—"}</span></Row>
+              <Row label="Booking Date"><span className="text-sm font-medium text-slate-900 sm:text-right">{booking.booking_date ? <HoverADDate date={booking.booking_date} /> : "—"}</span></Row>
+              {booking.receipt_no != null && <Row label="Receipt No."><span className="text-sm font-medium text-slate-900 sm:text-right">{booking.receipt_no}</span></Row>}
+              <Row label="Agreed Sale Price"><span className="text-sm font-medium text-slate-900 sm:text-right">{(booking.agreed_price ?? booking.vehicle_selling_price) != null ? formatNPR(booking.agreed_price ?? booking.vehicle_selling_price) : "—"}</span></Row>
+              {booking.expected_sale_date && <Row label="Expected Sale Date"><span className="text-sm font-medium text-slate-900 sm:text-right"><HoverADDate date={booking.expected_sale_date} /></span></Row>}
+              {booking.created_by && <Row label="Booked By"><span className="text-sm font-medium text-slate-900 sm:text-right">{booking.created_by}</span></Row>}
+              {booking.notes && <Row label="Notes"><span className="text-sm font-medium text-slate-900 sm:text-right">{booking.notes}</span></Row>}
+            </div>
+            <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5" data-testid="booking-customer-details">
+              <h3 className="text-sm font-bold text-slate-900 mb-1">Customer</h3>
+              <Row label="Name"><span className="text-sm font-medium text-slate-900 sm:text-right">{booking.customer_name || "—"}</span></Row>
+              <Row label="Phone"><span className="text-sm font-medium text-slate-900 sm:text-right">{booking.customer_contact || "—"}</span></Row>
+            </div>
+          </>
+        )}
+        {!isBooked && (
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
           <h3 className="text-sm font-bold text-slate-900 mb-1">Sale</h3>
           <Row label="Purchase Date"><span className="text-sm font-medium text-slate-900 sm:text-right"><HoverADDate date={vehicle.purchase_date} /></span></Row>
@@ -268,6 +331,7 @@ export default function SoldStockDetail() {
             )}
           </Row>
         </div>
+        )}
       </div>
 
       {vehicle.notes && (
@@ -283,6 +347,11 @@ export default function SoldStockDetail() {
       <Link to={`/inventory/${id}`} className="inline-flex items-center gap-1.5 text-sm text-blue-600 hover:underline">
         Open full vehicle record (photos, documents, expenses) <ExternalLink size={13} />
       </Link>
+
+      {/* A booked vehicle's buttons: Edit opens the Sale Vehicle form filled in from the booking, Cancel the cancel dialog */}
+      {bookingView === "sale" && booking && <SaleVehicleModal booking={booking} onClose={() => setBookingView(null)} onSaved={afterBookingSold} />}
+      {bookingView === "cancel" && booking && <WithdrawBookingModal booking={booking} onClose={() => setBookingView(null)} onSaved={() => navigate("/sales")} />}
+      <BookingReceipt booking={receipt} onClose={() => setReceipt(null)} />
 
       {showReturnModal && (
         <ReturnModal

@@ -91,8 +91,9 @@ export function ReferredByField({ value, onChange, customers = [], excludeId, si
   );
 }
 
-// `hideReferral` drops the Referral button, for a form that asks "Referred by" separately.
-export default function SourceField({ value, onChange, customers, excludeId, required = false, label = "How did they find us?", hideReferral = false, size }) {
+// `hideReferral` drops the Referral button, for a form that asks "Referred by" separately. `asSelect` shows the sources as a
+// dropdown instead of a row of buttons (the empty choice clears it).
+export default function SourceField({ value, onChange, customers, excludeId, required = false, label = "How did they find us?", hideReferral = false, asSelect = false, size }) {
   const big = size === "lg";
   const [loaded, setLoaded] = useState(null);
   const list = customers || loaded || [];
@@ -111,6 +112,17 @@ export default function SourceField({ value, onChange, customers, excludeId, req
   return (
     <div data-testid="source-field">
       <label className={labelCls(big)}>{label}{required && <span className="text-red-500 ml-0.5">*</span>}</label>
+      {asSelect ? (
+        <select
+          value={value.source || ""} onChange={e => pick(e.target.value)} aria-label={label} data-testid="source-select"
+          className={`${big ? inpLg : inp} cursor-pointer`}
+        >
+          <option value="">Select a lead...</option>
+          {SOURCES.filter(s => !(hideReferral && s.key === "referral")).map(({ key, label: l }) => (
+            <option key={key} value={key}>{l}</option>
+          ))}
+        </select>
+      ) : (
       <div className="flex flex-wrap gap-1.5" role="group" aria-label={label}>
         {SOURCES.filter(s => !(hideReferral && s.key === "referral")).map(({ key, label: l, Icon }) => {
           const on = value.source === key;
@@ -128,6 +140,7 @@ export default function SourceField({ value, onChange, customers, excludeId, req
           );
         })}
       </div>
+      )}
       {value.source === "referral" && (
         <div className="mt-2 space-y-1.5">
           <p className="text-xs font-medium text-slate-600">Referred by</p>

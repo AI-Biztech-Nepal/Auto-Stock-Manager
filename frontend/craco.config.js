@@ -9,7 +9,11 @@ const isDevServer = process.env.NODE_ENV !== "production";
 // Environment variable overrides
 const config = {
   enableHealthCheck: process.env.ENABLE_HEALTH_CHECK === "true",
-  enableVisualEdits: isDevServer && process.env.DISABLE_VISUAL_EDITS !== "true", // Only enable during dev server
+  // Only during the dev server. The plugin wraps every {expression} inside an HTML element in an extra <span style="display:contents">,
+  // which breaks CSS written as <style>{css}</style> (the table styles), <select>/<option> lists and space-y / divide-y spacing, so
+  // the app looks different from the built site. Set DISABLE_VISUAL_EDITS=true (e.g. in frontend/.env, which git ignores) to run
+  // without it.
+  enableVisualEdits: isDevServer && process.env.DISABLE_VISUAL_EDITS !== "true",
 };
 
 // Conditionally load visual edits modules only in dev mode

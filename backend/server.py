@@ -1713,7 +1713,7 @@ class PartStockOut(BaseModel):
 class BookingCreate(BaseModel):
     vehicle_id: str
     customer_id: str
-    booking_amount: float  # deposit taken now; counted as the sale's advance payment on conversion
+    booking_amount: float = 0  # deposit taken now (0 until it is entered); counted as the sale's advance payment on conversion
     payment_method: str = "Cash"
     booking_date: Optional[str] = None
     expected_sale_date: Optional[str] = None
@@ -1803,7 +1803,7 @@ class SaleCreate(BaseModel):
     sale_date: Optional[str] = None
     ownership_transfer_date: Optional[str] = None  # BS date the vehicle "passes" to the buyer's name
     notes: Optional[str] = None
-    # Sale-deed witness block — all four required (validated in create_sale).
+    # Sale-deed witness block — all four optional.
     witness_name: Optional[str] = None
     witness_address: Optional[str] = None
     witness_phone: Optional[str] = None
@@ -3441,6 +3441,7 @@ async def return_vehicle(vid: str, body: VehicleReturnRequest, cu: dict = Depend
         "user": cu["username"], "timestamp": datetime.now(timezone.utc).isoformat(),
         "details": f"Sale {sale['id']} returned with {refund_amount} refunded, vehicle set to {body.new_status}"})
 
+    await _sale_to_finance(sale["id"])  # the customer now owes only what the shop kept
     v = await db.vehicles.find_one({"id": vid}, {"_id": 0})
     return {"vehicle": v, "refund_amount": refund_amount, "retained_amount": retained_amount}
 
@@ -3475,6 +3476,7 @@ async def undo_sale_return(sid: str, cu: dict = Depends(admin_only)):
     await db.audit_logs.insert_one({"action": "vehicle_return_undone", "vehicle_id": s["vehicle_id"],
         "user": cu["username"], "timestamp": datetime.now(timezone.utc).isoformat(),
         "details": f"Return on sale {sid} reversed — vehicle back to Sold"})
+    await _sale_to_finance(sid)  # the bill goes back to the full amount
     return {"message": "Return reversed — vehicle back to Sold"}
 
 @api_router.delete("/vehicles/{vid}")
@@ -4112,6 +4114,49 @@ async def _plan_exchange_change(existing: dict, sale: SaleUpdate, sold: dict, sa
     plan["link"] = plan["insert"]["id"]
     return plan
 
+async def _finance_context(customer_id, vehicle_id):
+    """The customer and the vehicle's label ("Honda Shine 2020 (78/4613)") a Finance entry is written with."""
+    c = await db.customers.find_one({"id": customer_id}, {"_id": 0}) if customer_id else None
+    v = await db.vehicles.find_one({"id": vehicle_id}, {"_id": 0, "brand": 1, "model": 1, "year": 1, "registration_number": 1}) if vehicle_id else None
+    label = ""
+    if v:
+        label = f"{v.get('brand') or ''} {v.get('model') or ''} {v.get('year') or ''}".strip()
+        if v.get("registration_number"):
+            label += f" ({v['registration_number']})"
+    return c, label
+
+async def _sale_to_finance(sale_id: str) -> str:
+    """Keep the sale's Sale bill in the Finance books (and so on its customer's Finance Ledger) in step with the sale: made
+    when the sale is recorded, changed when it is edited or returned, removed when it is deleted. See
+    finance_books.sync_sale_bill. Never raises: the sale itself has already been saved. Returns "posted", "nothing" or
+    "failed: <why>", which the save's response carries as "finance" so the page can tell the user."""
+    try:
+        s = await db.sales.find_one({"id": sale_id}, {"_id": 0})
+        if not s:
+            await finance_books.remove_sale_bill(db, sale_id)
+            return "nothing"
+        c, label = await _finance_context(s.get("customer_id"), s.get("vehicle_id"))
+        return await finance_books.sync_sale_bill(db, s, c, label)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Could not update the Finance books for sale %s", sale_id, exc_info=True)
+        return finance_books._why(e)
+
+async def _booking_to_finance(booking_id: str) -> str:
+    """Keep a booking's deposit (and, once cancelled, its refund and the amount kept) on the customer's Finance Ledger in step
+    with the booking: made when it is booked, changed when it is edited or cancelled, removed when it is deleted. See
+    finance_books.sync_booking_entries. Never raises: the booking itself has already been saved. Returns "posted", "nothing"
+    or "failed: <why>", which the save's response carries as "finance" so the page can tell the user."""
+    try:
+        b = await db.bookings.find_one({"id": booking_id}, {"_id": 0})
+        if not b:
+            await finance_books.remove_booking_entries(db, booking_id)
+            return "nothing"
+        c, label = await _finance_context(b.get("customer_id"), b.get("vehicle_id"))
+        return await finance_books.sync_booking_entries(db, b, c, label)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Could not update the Finance books for booking %s", booking_id, exc_info=True)
+        return finance_books._why(e)
+
 @api_router.post("/sales")
 async def create_sale(sale: SaleCreate, cu: dict = Depends(require("sales", "create"))):
     v = await db.vehicles.find_one({"id": sale.vehicle_id}, {"_id": 0})
@@ -4126,8 +4171,8 @@ async def create_sale(sale: SaleCreate, cu: dict = Depends(require("sales", "cre
         raise HTTPException(400, "Vehicle is booked — record the sale from its booking")
     if v.get("status") != ("reserved" if booking else "available"): raise HTTPException(400, f"Vehicle is already {v.get('status')}")
     # Sale-deed witness block — captured with the buyer when a new customer is entered
-    # on the form; the required-ness of it is enforced there, not here (a sale against an
-    # already-recorded customer skips the panel and sends nothing).
+    # on the form. It is optional everywhere (the form does not require it either, for a
+    # sale or a booking); a sale against an already-recorded customer sends nothing.
     _witness = {
         "witness_name": (sale.witness_name or "").strip() or None,
         "witness_address": (sale.witness_address or "").strip() or None,
@@ -4208,7 +4253,7 @@ async def create_sale(sale: SaleCreate, cu: dict = Depends(require("sales", "cre
     # Update customer purchase history
     if sale.customer_id:
         await db.customers.update_one({"id": sale.customer_id}, {"$set": {"last_purchase_date": sale_date}})
-    return doc
+    return {**doc, "finance": await _sale_to_finance(doc["id"])}  # the Sale bill on the customer's Finance Ledger
 
 @api_router.get("/sales/summary")
 async def get_sales_summary(cu: dict = Depends(require("sales", "view"))):
@@ -4452,7 +4497,9 @@ async def update_sale(sid: str, sale: SaleUpdate, cu: dict = Depends(get_current
     await db.vehicles.update_one({"id": sale.vehicle_id}, {"$set": veh_set})
     if sale.customer_id:
         await db.customers.update_one({"id": sale.customer_id}, {"$set": {"last_purchase_date": sale_date}})
+    finance = await _sale_to_finance(sid)  # price, date or customer may have changed
     updated = await db.sales.find_one({"id": sid}, {"_id": 0})
+    updated["finance"] = finance  # not saved: just tells the page whether the Finance ledger was updated
     if exchange_plan and exchange_plan["note"]:
         updated["exchange_note"] = exchange_plan["note"]  # not saved: just tells the form what happened to the Inventory entry
     return updated
@@ -4481,6 +4528,7 @@ async def delete_sale(sid: str, cu: dict = Depends(get_current_user)):
     s = await db.sales.find_one({"id": sid}, {"_id": 0})
     if not s: raise HTTPException(404, "Not found")
     await db.sales.delete_one({"id": sid})
+    await _sale_to_finance(sid)  # takes its Sale bill out of the Finance books
     if s.get("item_id") and not s.get("vehicle_id"):
         # An item sale: the units go back on the shelf.
         await db.items.update_one({"id": s["item_id"]}, {"$inc": {"quantity": s.get("quantity") or 1},
@@ -4588,7 +4636,7 @@ async def create_booking(body: BookingCreate, cu: dict = Depends(require("sales"
     if not v: raise HTTPException(404, "Vehicle not found")
     if v.get("status") != "available": raise HTTPException(400, f"Vehicle is {v.get('status')} — only available vehicles can be booked")
     if not await db.customers.find_one({"id": body.customer_id}, {"_id": 0, "id": 1}): raise HTTPException(404, "Customer not found")
-    if body.booking_amount <= 0: raise HTTPException(400, "Booking amount must be greater than 0")
+    if body.booking_amount < 0: raise HTTPException(400, "Booking amount can't be negative")
     now = datetime.now(timezone.utc).isoformat()
     # The receipt number is the next one in this company's own series (1, 2, 3 ...). Reading the last number and saving
     # the booking happen under one lock so two bookings made at the same moment can never get the same number.
@@ -4608,7 +4656,8 @@ async def create_booking(body: BookingCreate, cu: dict = Depends(require("sales"
     await db.audit_logs.insert_one({"action": "booking_created", "vehicle_id": body.vehicle_id, "user": cu["username"],
         "timestamp": now, "details": f"Booking {doc['id']} — deposit {doc['booking_amount']}"})
     asyncio.create_task(_notify_storefront())
-    return (await _enrich_bookings([doc]))[0]
+    finance = await _booking_to_finance(doc["id"])  # the deposit, as a Received entry on the customer's Finance Ledger
+    return {**(await _enrich_bookings([doc]))[0], "finance": finance}
 
 @api_router.put("/bookings/{bid}")
 async def update_booking(bid: str, body: BookingUpdate, cu: dict = Depends(require("sales", "create"))):
@@ -4617,7 +4666,7 @@ async def update_booking(bid: str, body: BookingUpdate, cu: dict = Depends(requi
     if b.get("status") != "active": raise HTTPException(400, f"Booking is already {b.get('status')}")
     upd = {k: val for k, val in body.model_dump().items() if val is not None}
     if "booking_amount" in upd:
-        if upd["booking_amount"] <= 0: raise HTTPException(400, "Booking amount must be greater than 0")
+        if upd["booking_amount"] < 0: raise HTTPException(400, "Booking amount can't be negative")
         upd["booking_amount"] = round(upd["booking_amount"], 2)
     if "customer_id" in upd and not await db.customers.find_one({"id": upd["customer_id"]}, {"_id": 0, "id": 1}):
         raise HTTPException(404, "Customer not found")
@@ -4631,7 +4680,8 @@ async def update_booking(bid: str, body: BookingUpdate, cu: dict = Depends(requi
         await db.vehicles.update_one({"id": upd["vehicle_id"]}, {"$set": {"status": "reserved", "updated_at": upd["updated_at"]}})
     await db.bookings.update_one({"id": bid}, {"$set": upd})
     if swap: asyncio.create_task(_notify_storefront())
-    return (await _enrich_bookings([await db.bookings.find_one({"id": bid}, {"_id": 0})]))[0]
+    finance = await _booking_to_finance(bid)  # amount, date, customer or vehicle may have changed
+    return {**(await _enrich_bookings([await db.bookings.find_one({"id": bid}, {"_id": 0})]))[0], "finance": finance}
 
 @api_router.post("/bookings/{bid}/cancel")
 async def cancel_booking(bid: str, body: BookingCancel, cu: dict = Depends(admin_only)):
@@ -4653,7 +4703,8 @@ async def cancel_booking(bid: str, body: BookingCancel, cu: dict = Depends(admin
     await db.audit_logs.insert_one({"action": "booking_cancelled", "vehicle_id": b["vehicle_id"], "user": cu["username"],
         "timestamp": now, "details": f"Booking {bid} withdrawn — {refund} refunded, {round(deposit - refund, 2)} retained"})
     asyncio.create_task(_notify_storefront())
-    return (await _enrich_bookings([await db.bookings.find_one({"id": bid}, {"_id": 0})]))[0]
+    finance = await _booking_to_finance(bid)  # the refund paid back, and the amount kept as income
+    return {**(await _enrich_bookings([await db.bookings.find_one({"id": bid}, {"_id": 0})]))[0], "finance": finance}
 
 @api_router.delete("/bookings/{bid}")
 async def delete_booking(bid: str, cu: dict = Depends(admin_only)):
@@ -4662,6 +4713,7 @@ async def delete_booking(bid: str, cu: dict = Depends(admin_only)):
     if not b: raise HTTPException(404, "Booking not found")
     if b.get("status") == "converted": raise HTTPException(400, "This booking became a sale — delete the sale instead")
     await db.bookings.delete_one({"id": bid})
+    await _booking_to_finance(bid)  # takes its entries out of the Finance books
     if b.get("status") == "active":
         await db.vehicles.update_one({"id": b["vehicle_id"], "status": "reserved"}, {"$set": {"status": "available", "updated_at": datetime.now(timezone.utc).isoformat()}})
         asyncio.create_task(_notify_storefront())
@@ -5972,9 +6024,10 @@ async def mark_leads_seen(body: LeadsSeen, cu: dict = Depends(admin_only)):
     """The Leads screen was opened with these leads on it: they stop counting as new in the nav badge and the bell.
     Only the ids the screen actually showed are marked, so a lead that arrived a moment later still notifies."""
     if body.ids:
+        # seen_by is the first person to open the lead (same username format as decided_by); it is never overwritten.
         await db.leads.update_many({"id": {"$in": body.ids}, "seen_at": {"$exists": False}},
-                                   {"$set": {"seen_at": datetime.now(timezone.utc).isoformat()}})
-    return {"ok": True}
+                                   {"$set": {"seen_at": datetime.now(timezone.utc).isoformat(), "seen_by": cu.get("username")}})
+    return {"ok": True, "seen_by": cu.get("username")}
 
 @api_router.post("/leads/{lid}/accept")
 async def accept_lead(lid: str, cu: dict = Depends(admin_only)):
@@ -6580,6 +6633,7 @@ async def _run_startup_tasks():
             ("leads", "customer_id", "VARCHAR(36)"),
             ("leads", "vehicle_id", "VARCHAR(36)"),  # the vehicle the visitor was looking at when they tapped WhatsApp / Call
             ("leads", "seen_at", "VARCHAR(40)"),  # when staff first opened the lead; unseen pending leads drive the nav badge
+            ("leads", "seen_by", "VARCHAR(100)"),  # who opened it first
             # Who sold the vehicle (a Team member); the name is kept on the sale so it survives the member being removed.
             ("sales", "sold_by_id", "VARCHAR(36)"),
             ("sales", "sold_by_name", "VARCHAR(255)"),
@@ -6625,6 +6679,15 @@ async def _run_startup_tasks():
         except Exception:
             logger.warning("Could not ensure the Finance rent tables", exc_info=True)
     if DB_BACKEND == "postgres":
+        # leads.seen_by (who first read a lead) was added after the Supabase schema was loaded: add it here so the Leads screen
+        # keeps working without a manual SQL step. If the database user may not alter tables, stop asking for the column
+        # instead of failing every Leads query ("column seen_by does not exist").
+        try:
+            await db.execute_raw('ALTER TABLE leads ADD COLUMN IF NOT EXISTS seen_by varchar(100)')
+        except Exception:
+            logger.warning("Could not add leads.seen_by; Leads will not show who read a lead", exc_info=True)
+            import sqldb
+            sqldb.TABLES["leads"]["columns"].discard("seen_by")
         # Supabase: the tables and columns come from backend/supabase/schema.sql; this only registers Finance's late-added ones.
         try:
             await finance_books.ensure_schema_postgres(db)
