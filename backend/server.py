@@ -5191,6 +5191,15 @@ async def financial_report(cu: dict = Depends(admin_only)):
         monthly[month]["investment"] += inv
         monthly[month]["profit"] += sp - inv
         monthly[month]["count"] += 1
+    # item sales (no vehicle): cost was kept on the sale
+    item_sales = await db.sales.find({"item_id": {"$exists": True}, "returned": {"$ne": True}},
+                                     {"_id": 0, "vehicle_id": 1, "sale_date": 1, "created_at": 1, "sale_price": 1, "cost_at_sale": 1}).to_list(20000)
+    for s in item_sales:
+        if s.get("vehicle_id"): continue
+        month = (s.get("sale_date") or s.get("created_at") or "")[:7] or "unknown"
+        m = monthly.setdefault(month, {"revenue": 0, "investment": 0, "profit": 0, "count": 0})
+        sp, cost = s.get("sale_price") or 0, s.get("cost_at_sale") or 0
+        m["revenue"] += sp; m["investment"] += cost; m["profit"] += sp - cost; m["count"] += 1
     total_profit = sum(m["profit"] for m in monthly.values())
     partner_shares = [{"name": p["name"], "stake": p["stake_percentage"],
                        "capital": p["capital_contribution"],

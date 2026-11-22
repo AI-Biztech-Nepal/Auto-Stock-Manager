@@ -86,7 +86,7 @@ def client(monkeypatch):
         return {}
     monkeypatch.setattr(server.crm, "seller_for_sale", none)
     monkeypatch.setattr(server.crm, "lead_for_sale", none)
-    for name in ("items", "sales", "customers", "vehicles", "vehicle_photos"):
+    for name in ("items", "sales", "customers", "vehicles", "vehicle_photos", "partners"):
         monkeypatch.setattr(server.db, name, Coll(), raising=False)
     return TestClient(server.app, raise_server_exceptions=False)
 
@@ -158,6 +158,14 @@ def test_sale_list_names_the_item_and_shows_profit(client):
     assert s["vehicle_info"].startswith("Cabin suitcase") and s["profit"] == 3000 and s["total_investment"] == 4000
     one = client.get(f"/api/sales/{s['id']}", headers=H()).json()
     assert one["item_info"] == "Cabin suitcase" and one["profit"] == 3000
+
+
+def test_monthly_report_counts_item_sales(client):
+    it = make(client)
+    before = client.get("/api/reports/financial", headers=H()).json()["total_profit"]
+    client.post(f"/api/items/{it['id']}/sell", json={"unit_price": 3500, "quantity": 2}, headers=H())
+    after = client.get("/api/reports/financial", headers=H()).json()["total_profit"]
+    assert after - before == 3000
 
 
 def test_reconcile_does_not_flag_item_sales(client):
