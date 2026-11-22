@@ -1,3 +1,4 @@
+import { featureOn, STATUS_FEATURE } from "./permissions";
 export const formatNPR = (amount) => {
   if (amount === null || amount === undefined) return "N/A";
   return `Rs. ${new Intl.NumberFormat("en-IN").format(Math.round(amount))}`;
@@ -36,6 +37,11 @@ export const VEHICLE_STATUS_OPTIONS = [
   { value: "sold", label: "Sold" },
   { value: "scrap", label: "Scrap" },
 ];
+
+// The statuses an organization can use: In Repair and Scrap go with Job Cards and are hidden when that is off (a vehicle
+// already in one keeps showing it). `features` is the /features map (null = show everything).
+export const statusOptionsFor = (features, current) =>
+  VEHICLE_STATUS_OPTIONS.filter((o) => o.value === current || featureOn(features, STATUS_FEATURE[o.value]));
 
 const ordinal = (n) => `${n}${["st", "nd", "rd"][n - 1] || "th"}`;
 
