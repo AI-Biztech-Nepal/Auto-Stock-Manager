@@ -6,6 +6,7 @@ import api from "../utils/api";
 import { peek, remember, cacheTicket } from "../utils/listCache";
 import { formatNPR } from "../utils/helpers";
 import HoverADDate from "../components/HoverADDate";
+import SaleDetailModal from "./SaleDetailModal";
 import DateRangeFilter, { resolveDateFilter } from "../components/DateRangeFilter";
 import { useAuth } from "../context/AuthContext";
 import { featureOn, itemsMode } from "../utils/permissions";
@@ -132,6 +133,15 @@ function AccountingSummary({ range }) {
   // summary (Total Sale only, or Total Sale + Total Profit) it shows top-right.
   const [salesModalView, setSalesModalView] = useState(null);
   const [showPurchasesModal, setShowPurchasesModal] = useState(false);
+  // The sale open in the bill pop-up, and a counter that re-reads the lists after it is edited, returned or deleted.
+  const [openSaleId, setOpenSaleId] = useState(null);
+  const [reloadTick, setReloadTick] = useState(0);
+  const openIdx = recentSales.findIndex(s => s.id === openSaleId);
+  const saleNav = openIdx < 0 ? undefined : {
+    index: openIdx, total: recentSales.length,
+    prev: openIdx > 0 ? () => setOpenSaleId(recentSales[openIdx - 1].id) : undefined,
+    next: openIdx < recentSales.length - 1 ? () => setOpenSaleId(recentSales[openIdx + 1].id) : undefined,
+  };
 
   useEffect(() => {
     const { start, end } = range;
@@ -157,7 +167,7 @@ function AccountingSummary({ range }) {
         return d >= start && d <= end;
       })))
       .catch(() => {});
-  }, [range, bookingsOn]);
+  }, [range, bookingsOn, reloadTick]);
 
   const fetchSummary = useCallback(async () => {
     setLoading(true); setData(null);
@@ -256,7 +266,7 @@ function AccountingSummary({ range }) {
               return (
                 <div
                   key={s.id}
-                  onClick={() => navigate(`/sales/vehicle/${s.vehicle_id}`)}
+                  onClick={() => setOpenSaleId(s.id)}
                   data-testid="recent-sale-card"
                   className="shrink-0 w-56 bg-white rounded-lg border border-green-100 shadow-sm p-3 cursor-pointer hover:shadow-md hover:border-green-300 transition-all"
                 >
@@ -279,6 +289,10 @@ function AccountingSummary({ range }) {
           </p>
         )}
       </div>
+
+      {openSaleId && (
+        <SaleDetailModal key={openSaleId} saleId={openSaleId} nav={saleNav} onClose={() => setOpenSaleId(null)} onChanged={() => { setReloadTick(t => t + 1); fetchSummary(); }} />
+      )}
 
       {/* Sales-list popup — opened by either the Total Vehicle Sale or Net Profit tile
           (salesModalView says which). Net Profit adds a per-vehicle bill to each row
@@ -343,7 +357,7 @@ function AccountingSummary({ range }) {
                   return (
                     <div
                       key={s.id}
-                      onClick={() => { setSalesModalView(null); navigate(`/sales/vehicle/${s.vehicle_id}`); }}
+                      onClick={() => { setSalesModalView(null); setOpenSaleId(s.id); }}
                       data-testid="period-sales-modal-row"
                       className="px-4 sm:px-5 py-3 cursor-pointer hover:bg-slate-50 transition-colors"
                     >
