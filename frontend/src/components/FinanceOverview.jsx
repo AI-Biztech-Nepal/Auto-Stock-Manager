@@ -8,13 +8,14 @@
  */
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { AreaChart, Area, PieChart, Pie, Cell, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
+import { AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
 import { TrendingUp, ShoppingCart, Receipt, ArrowDownCircle, ArrowUpCircle, Download, Upload, Clock, ChevronRight, ClipboardCheck } from "lucide-react";
 import api from "../utils/api";
 import { BooksProvider, useBooks } from "../pages/finance/BooksContext";
 import { balances, accountName, billDate, cashMovements, isJournal, npr, owedTotals, partyName, profitLoss, receivableAgeing, receivedPaid, AGEING_BUCKETS, entryDate } from "../pages/finance/money";
 import { bsToAdDate, formatBSDate, getBSMonthMaxDays, getBSMonthRange, getCurrentBSDate, BS_MONTHS } from "../utils/nepali-date";
 import { compactNpr } from "./DashboardTrends";
+import { SOURCE_LABEL } from "../utils/crm";
 
 const BLUE = "#2563EB", RED = "#DC2626", AMBER = "#F59E0B", GREEN = "#047857";
 const PALETTE = ["#2563EB", "#0F766E", "#F59E0B", "#7C3AED", "#E11D48", "#94A3B8"];
@@ -105,9 +106,23 @@ function TwoLine({ data, a, b }) {
 }
 
 // ── the finance blocks ──
-function SalesAndPurchases({ books, cal }) {
-  const fy = useMemo(() => profitLoss(books, cal.fyRange.start, cal.fyRange.end), [books, cal]);
-  const series = useMemo(() => cal.months.map((m) => { const p = profitLoss(books, m.start, m.end); return { label: m.label, sales: p.sale, purchases: p.purchase }; }), [books, cal]);
+// `bought`: the vehicles bought (GET /reports/purchases). A vehicle's purchase price is never posted to the Finance books as a
+// purchase bill, so it is added to the purchase bills here; otherwise Purchases would read 0 for a dealership.
+const boughtIn = (bought, r) => bought.reduce((sum, v) => (v.purchase_date && inRange(v.purchase_date.slice(0, 10), r) ? sum + (v.purchase_price || 0) : sum), 0);
+
+// `dues`: GET /reports/vendor-dues, the Vendors module's purchases and payments as dated events. They are not in the Finance
+// books either, so To Pay and Paid add them. Owed to a vendor on a day = what was bought from them up to then, less what was
+// paid them up to then (never below 0 for one vendor, like Vendors' remaining due).
+const dueAt = (dues, upTo) => {
+  const by = new Map();
+  for (const e of dues) { if (upTo && e.date > upTo) continue; by.set(e.vendor_id, (by.get(e.vendor_id) || 0) + (e.kind === "paid" ? -e.amount : e.amount)); }
+  return [...by.values()].reduce((t, v) => t + Math.max(0, v), 0);
+};
+const paidToVendors = (dues, r) => dues.reduce((t, e) => (e.kind === "paid" && e.date && inRange(e.date.slice(0, 10), r) ? t + e.amount : t), 0);
+
+function SalesAndPurchases({ books, cal, bought }) {
+  const fy = useMemo(() => { const p = profitLoss(books, cal.fyRange.start, cal.fyRange.end); return { ...p, purchase: p.purchase + boughtIn(bought, cal.fyRange) }; }, [books, cal, bought]);
+  const series = useMemo(() => cal.months.map((m) => { const p = profitLoss(books, m.start, m.end); return { label: m.label, sales: p.sale, purchases: p.purchase + boughtIn(bought, m) }; }), [books, cal, bought]);
   const best = (k) => series.reduce((b, s) => (s[k] > (b?.[k] ?? 0) ? s : b), null);
   const bs = best("sales"), bp = best("purchases");
   return (
@@ -197,18 +212,18 @@ function ReceivableAgeing({ books, go }) {
   );
 }
 
-function ReceivablePayable({ books, cal }) {
-  const now = useMemo(() => owedTotals(books), [books]);
+function ReceivablePayable({ books, cal, dues }) {
+  const now = useMemo(() => { const o = owedTotals(books); return { ...o, totalPayable: o.totalPayable + dueAt(dues) }; }, [books, dues]);
   const series = useMemo(() => cal.months.map((m) => {
     const t = owedTotals({ ...books, customer_ledger: books.customer_ledger.filter((e) => entryDate(e) <= m.end), vendor_ledger: books.vendor_ledger.filter((e) => entryDate(e) <= m.end) });
-    return { label: m.label, receive: t.totalReceivable, pay: t.totalPayable };
-  }), [books, cal]);
+    return { label: m.label, receive: t.totalReceivable, pay: t.totalPayable + dueAt(dues, m.end) };
+  }), [books, cal, dues]);
   return (
     <Card title="Receivable & Payable" subtitle="What is owed to you and by you">
       <p className="text-xs font-semibold text-slate-500 mb-2">Owed right now</p>
       <div className="grid grid-cols-2 gap-3">
         <Tile icon={ArrowDownCircle} label="To Receive" value={npr(now.totalReceivable)} note={`From ${now.owingMe.length} part${now.owingMe.length === 1 ? "y" : "ies"}`} tone={TONES.blue} />
-        <Tile icon={ArrowUpCircle} label="To Pay" value={npr(now.totalPayable)} note="Owed to vendors" tone={TONES.red} />
+        <Tile icon={ArrowUpCircle} label="To Pay" value={npr(now.totalPayable)} note="Owed to vendors and suppliers" tone={TONES.red} />
       </div>
       <Net label="Net Owed (To Receive − To Pay)" value={now.totalReceivable - now.totalPayable} />
       <div className="flex items-center justify-between mt-4 mb-1"><p className="text-xs font-semibold text-slate-500">Receivable and payable · last 12 months</p><Legend items={[[BLUE, "To Receive"], [RED, "To Pay"]]} /></div>
@@ -217,22 +232,22 @@ function ReceivablePayable({ books, cal }) {
   );
 }
 
-function ReceivedPaid({ books, cal }) {
-  const fy = useMemo(() => receivedPaid(books, cal.fyRange.start, cal.fyRange.end), [books, cal]);
+function ReceivedPaid({ books, cal, dues }) {
+  const fy = useMemo(() => { const r = receivedPaid(books, cal.fyRange.start, cal.fyRange.end); return { ...r, paid: r.paid + paidToVendors(dues, cal.fyRange) }; }, [books, cal, dues]);
   const billed = useMemo(() => profitLoss(books, cal.fyRange.start, cal.fyRange.end).sale, [books, cal]);
   const series = useMemo(() => {
     const moves = cashMovements(books);
     return cal.months.map((m) => {
       let received = 0, paid = 0;
       for (const x of moves) if (inRange(x.date, m)) { if (x.dir === "in") received += x.amount; else paid += x.amount; }
-      return { label: m.label, received, paid };
+      return { label: m.label, received, paid: paid + paidToVendors(dues, m) };
     });
-  }, [books, cal]);
+  }, [books, cal, dues]);
   return (
     <Card title="Received & Paid" subtitle="What came in and what went out · this fiscal year">
       <div className="grid grid-cols-2 gap-3">
         <Tile icon={Download} label="Received" value={npr(fy.received)} note={billed > 0 ? `${Math.round((fy.received / billed) * 100)}% of ${npr(billed)} billed` : "Nothing billed yet"} tone={TONES.green} />
-        <Tile icon={Upload} label="Paid" value={npr(fy.paid)} note="Expenses and payments out" tone={TONES.amber} />
+        <Tile icon={Upload} label="Paid" value={npr(fy.paid)} note="Expenses and payments to vendors" tone={TONES.amber} />
       </div>
       <Net label="Net Movement (Received − Paid)" value={fy.received - fy.paid} />
       <div className="flex items-center justify-between mt-4 mb-1"><p className="text-xs font-semibold text-slate-500">Received and paid · last 12 months</p><Legend items={[[BLUE, "Received"], [AMBER, "Paid"]]} /></div>
@@ -304,6 +319,75 @@ function TopCustomers({ books, cal }) {
           </ul>
           <div className="grid grid-cols-[24px_1fr_auto_52px] gap-x-3 pt-2.5 border-t border-slate-200 text-[13px] font-bold text-slate-800"><span /><span>All Customers</span><span className="text-right">{npr(total)}</span><span className="text-right">100%</span></div>
         </>
+      )}
+    </Card>
+  );
+}
+
+// ── who sells, and where the buyers come from (the fiscal year's vehicle sales, from GET /sales) ──
+const bikesSold = (sales) => sales.filter((x) => !x.returned && x.vehicle_id);
+
+function TopSellers({ sales }) {
+  const rows = useMemo(() => {
+    const by = new Map();
+    for (const x of bikesSold(sales)) {
+      const n = x.sold_by_name || "Not recorded";
+      const r = by.get(n) || { name: n, bikes: 0, revenue: 0 };
+      r.bikes += 1; r.revenue += x.sale_price || 0; by.set(n, r);
+    }
+    return [...by.values()].sort((a, b) => b.bikes - a.bikes || b.revenue - a.revenue).slice(0, 8);
+  }, [sales]);
+  const tip = ({ active, payload }) => (active && payload?.length ? (
+    <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-lg text-xs">
+      <div className="font-semibold text-slate-900 mb-1">{payload[0].payload.name}</div>
+      <div className="text-slate-500">{payload[0].payload.bikes} bike{payload[0].payload.bikes === 1 ? "" : "s"} · {npr(payload[0].payload.revenue)}</div>
+    </div>
+  ) : null);
+  return (
+    <Card title="Top Sellers" subtitle="Bikes sold by each person · this fiscal year">
+      {rows.length === 0 ? <p className="text-sm text-slate-400 text-center py-10">No bikes sold this fiscal year</p> : (
+        <div style={{ height: Math.max(150, rows.length * 38 + 20) }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={rows} layout="vertical" margin={{ top: 0, right: 28, left: 0, bottom: 0 }}>
+              <CartesianGrid horizontal={false} stroke="#EEF0F3" strokeDasharray="3 4" />
+              <XAxis type="number" allowDecimals={false} tick={{ fontSize: 10.5, fill: "#9CA3AF" }} tickLine={false} axisLine={false} />
+              <YAxis type="category" dataKey="name" width={96} tick={{ fontSize: 11.5, fill: "#334155" }} tickLine={false} axisLine={false} />
+              <Tooltip content={tip} cursor={{ fill: "#F1F5F9" }} />
+              <Bar dataKey="bikes" fill={BLUE} radius={[0, 6, 6, 0]} barSize={18} label={{ position: "right", fontSize: 11, fill: "#334155" }} />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function LeadSources({ sales }) {
+  const { rows, total } = useMemo(() => {
+    const by = new Map();
+    for (const x of bikesSold(sales)) {
+      const n = SOURCE_LABEL[x.lead_source] || "Not tagged";
+      by.set(n, (by.get(n) || 0) + 1);
+    }
+    const all = [...by.entries()].sort((a, b) => b[1] - a[1]);
+    return { rows: all.map(([name, value]) => ({ name, value })), total: all.reduce((t, [, v]) => t + v, 0) };
+  }, [sales]);
+  return (
+    <Card title="Sales by Lead Source" subtitle="Where the buyers came from · this fiscal year">
+      {total <= 0 ? <p className="text-sm text-slate-400 text-center py-10">No bikes sold this fiscal year</p> : (
+        <div className="flex flex-col sm:flex-row items-center gap-6">
+          <div className="relative w-[170px] h-[170px] shrink-0">
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart><Pie data={rows} dataKey="value" innerRadius={58} outerRadius={82} startAngle={90} endAngle={-270} stroke="none">{rows.map((_, i) => <Cell key={i} fill={PALETTE[i % PALETTE.length]} />)}</Pie><Tooltip formatter={(v, n) => [`${v} bike${v === 1 ? "" : "s"}`, n]} /></PieChart>
+            </ResponsiveContainer>
+            <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none"><span className="text-[11px] text-slate-400">Bikes sold</span><span className="text-lg font-extrabold text-slate-900">{total}</span></div>
+          </div>
+          <ul className="flex-1 w-full space-y-2">
+            {rows.map((r, i) => (
+              <li key={r.name} className="flex items-center justify-between gap-3 text-sm"><span className="inline-flex items-center gap-2 min-w-0"><span className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ background: PALETTE[i % PALETTE.length] }} /><span className="truncate text-slate-700">{r.name}</span></span><span className="text-slate-900"><b>{r.value}</b> <span className="text-xs text-slate-400">· {Math.round((r.value / total) * 100)}%</span></span></li>
+            ))}
+          </ul>
+        </div>
       )}
     </Card>
   );
@@ -405,6 +489,17 @@ function Inner({ jobsOn }) {
   const { books, loading, setupMessage, loadError } = useBooks();
   const navigate = useNavigate();
   const cal = useCalendar();
+  // What the Finance books do not hold: vehicle purchases, and the sales with who sold them and how the buyer came. Each
+  // read fails quietly (e.g. not allowed) into an empty list, so a block never takes the others down with it.
+  const [stock, setStock] = useState({ bought: [], sales: [], dues: [] });
+  useEffect(() => {
+    if (!cal) return;
+    const start = [cal.months[0]?.start, cal.fyRange.start].filter(Boolean).sort()[0];
+    const end = [cal.months[cal.months.length - 1]?.end, cal.fyRange.end].filter(Boolean).sort().pop();
+    const get = (url, pick = (d) => d) => api.get(url, { suppressErrorToast: true }).then((r) => { const d = pick(r.data); return Array.isArray(d) ? d : []; }).catch(() => []);
+    Promise.all([get(`/reports/purchases?start_date=${start}&end_date=${end}`), get(`/sales?start_date=${cal.fyRange.start}&end_date=${cal.fyRange.end}`), get("/reports/vendor-dues", (d) => d?.events)])
+      .then(([bought, sales, dues]) => setStock({ bought, sales, dues }));
+  }, [cal]);
   if (loading) return <div className="h-48 rounded-2xl bg-white border border-slate-200 animate-pulse" />;
   const finance = !setupMessage && !loadError && cal;
   return (
@@ -412,10 +507,11 @@ function Inner({ jobsOn }) {
       {finance && (
         <>
           <div className="flex items-center gap-3"><h2 className="text-sm font-bold text-slate-700">Finance</h2><div className="flex-1 h-px bg-slate-200" /><span className="text-xs text-slate-400">This Fiscal Year · {cal.fyRange.label}</span></div>
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6"><SalesAndPurchases books={books} cal={cal} /><RecentActivity books={books} go={navigate} /></div>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6"><SalesAndPurchases books={books} cal={cal} bought={stock.bought} /><RecentActivity books={books} go={navigate} /></div>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6"><CashAndBanks books={books} go={navigate} /><ReceivableAgeing books={books} go={navigate} /></div>
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6"><ReceivablePayable books={books} cal={cal} /><ReceivedPaid books={books} cal={cal} /></div>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6"><ReceivablePayable books={books} cal={cal} dues={stock.dues} /><ReceivedPaid books={books} cal={cal} dues={stock.dues} /></div>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6"><ExpenseDiagram books={books} cal={cal} /><TopCustomers books={books} cal={cal} /></div>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6"><TopSellers sales={stock.sales} /><LeadSources sales={stock.sales} /></div>
         </>
       )}
       {jobsOn && <Work go={navigate} />}

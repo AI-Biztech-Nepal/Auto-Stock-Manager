@@ -4837,6 +4837,35 @@ async def get_vendor_payments(vid: str, cu: dict = Depends(require("vendors", "v
             "total_owed": total_owed, "remaining_due": max(0, total_owed - total_paid),
             "vehicles": vehicles, "parts_bills": parts_bills}
 
+@api_router.get("/reports/vendor-dues")
+async def vendor_dues(cu: dict = Depends(require("vendors", "view"))):
+    """What is owed to vendors and what was paid to them, as dated events (kind "owed": a vehicle or spare part bought from the
+    vendor; kind "paid": a payment made to them), so the Dashboard can show To Pay and Paid for any period. Same sums as
+    GET /vendors (vehicle purchase price + parts cost, less payments), one row per purchase / payment."""
+    vendors, vehicles, parts, payments = await asyncio.gather(
+        db.vendors.find({}, {"_id": 0, "id": 1}).to_list(200),
+        db.vehicles.find({"$or": [{"vendor_id": {"$exists": True}}, {"linked_contact_type": "vendor"}]},
+                         {"_id": 0, "vendor_id": 1, "linked_contact_type": 1, "linked_contact_id": 1, "purchase_price": 1, "purchase_date": 1}).to_list(20000),
+        db.spare_parts.find({"vendor_id": {"$exists": True}}, {"_id": 0, "id": 1, "vendor_id": 1, "quantity": 1, "unit_cost": 1, "entry_date": 1, "created_at": 1}).to_list(20000),
+        db.vendor_payments.find({}, {"_id": 0, "vendor_id": 1, "amount": 1, "payment_date": 1}).to_list(20000),
+    )
+    listed = {v["id"] for v in vendors}
+    parts = [p for p in parts if p.get("vendor_id") in listed]
+    await _attach_bought_qty(parts)
+    events = []
+    for vh in vehicles:
+        vid = vh.get("vendor_id") or (vh.get("linked_contact_id") if vh.get("linked_contact_type") == "vendor" else None)
+        if vid in listed and vh.get("purchase_price"):
+            events.append({"vendor_id": vid, "date": vh.get("purchase_date") or "", "amount": vh["purchase_price"], "kind": "owed"})
+    for p in parts:
+        amount = _parts_owed([p])
+        if amount:
+            events.append({"vendor_id": p["vendor_id"], "date": p.get("entry_date") or (p.get("created_at") or "")[:10], "amount": amount, "kind": "owed"})
+    for p in payments:
+        if p.get("vendor_id") in listed:
+            events.append({"vendor_id": p["vendor_id"], "date": p.get("payment_date") or "", "amount": p.get("amount", 0), "kind": "paid"})
+    return {"events": events}
+
 @api_router.post("/vendor-payments")
 async def create_vendor_payment(payment: VendorPaymentCreate, cu: dict = Depends(require("vendors", "manage_payments"))):
     if not await db.vendors.find_one({"id": payment.vendor_id}, {"_id": 0, "id": 1}):
