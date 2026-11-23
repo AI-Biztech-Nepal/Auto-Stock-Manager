@@ -52,7 +52,11 @@ pg_restore -l "$OUT" | grep -qi "auth\." && { echo "The dump still refers to Sup
 
 echo "== 4/5 Loading into local '$DB' =="
 LOCAL="postgresql://$ROLE:$PASS@127.0.0.1:5432/$DB"
-pg_restore --no-owner --no-privileges --exit-on-error -d "$LOCAL" "$OUT"
+# A new database already has its own `public` schema, so leave the dump's CREATE SCHEMA / COMMENT ON SCHEMA out of the restore.
+LIST="$(mktemp)"
+pg_restore -l "$OUT" | grep -v -E ' SCHEMA - public | COMMENT - SCHEMA public ' > "$LIST"
+pg_restore -L "$LIST" --no-owner --no-privileges --exit-on-error -d "$LOCAL" "$OUT"
+rm -f "$LIST"
 
 echo "== 5/5 Comparing row counts, table by table =="
 BAD=0
