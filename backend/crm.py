@@ -742,6 +742,7 @@ def register(api_router, database, admin_only, sale_revenue):
         # one who then buys moves across by itself.
         # Every lead ever accepted stays here (the lead remembers its customer), even if their Lead Source tag is changed later.
         from_website = {l["customer_id"] for l in accepted}
+        for r in rows: r["from_website"] = r["id"] in from_website  # so the CRM can highlight who was added from Marketing > Leads
         leads = [r for r in rows if r["id"] not in bought and (r["id"] in from_website or r["source"] == "website")]
         rows = [r for r in rows if r["id"] in bought]
         listed = bought | {r["id"] for r in leads}

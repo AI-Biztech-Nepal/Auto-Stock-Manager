@@ -198,6 +198,7 @@ function CustomerName({ c, onShowReferred }) {
       <div className="min-w-0 flex-1">
         <button type="button" title={`Open ${c.name}'s profile`} data-testid="crm-customer"
           className="block max-w-[118px] truncate text-left font-semibold text-slate-900 group-hover/name:text-blue-700 group-hover/name:underline focus-visible:outline-none focus-visible:underline">{c.name}</button>
+        {c.from_website && <span title="Added from the website Leads tab" data-testid="crm-website-badge" className="mr-1 text-[10px] font-bold px-1.5 py-px rounded-full bg-indigo-100 text-indigo-700">Website lead</span>}
         {c.referral_count > 0 && (
           <button type="button" onClick={e => { e.stopPropagation(); onShowReferred(c); }} title="Show everyone they referred" data-testid="crm-referred-badge"
             className="text-[10px] font-bold px-1.5 py-px rounded-full bg-amber-50 text-amber-700 hover:bg-amber-100">Referred {c.referral_count}</button>
@@ -245,7 +246,7 @@ export default function CustomerTable({
         {rows.map((c, i) => {
           const busy = savingId === c.id;
           return (
-            <div key={c.id} className={`bg-white border rounded-2xl p-4 shadow-[0_1px_3px_rgba(15,23,42,0.06)] ${c.source ? "border-slate-200/80" : "border-amber-300"}`} data-testid="crm-card">
+            <div key={c.id} className={`border rounded-2xl p-4 shadow-[0_1px_3px_rgba(15,23,42,0.06)] ${c.from_website ? "bg-indigo-50/60 border-indigo-300" : c.source ? "bg-white border-slate-200/80" : "bg-white border-amber-300"}`} data-testid="crm-card">
               <div className="flex items-start justify-between gap-3">
                 <div className="group/name min-w-0 flex-1 cursor-pointer rounded-lg -m-1 p-1 hover:bg-blue-50" onClick={() => onView(c)} data-testid="crm-customer-cell"><CustomerName c={c} onShowReferred={onShowReferred} /></div>
                 <div className="text-sm text-right"><Amount c={c} /></div>
@@ -301,8 +302,8 @@ export default function CustomerTable({
           {rows.map((c, i) => {
             const busy = savingId === c.id;
             return (
-              <tr key={c.id} className={`group h-[58px] ${c.source ? "bg-white" : "bg-amber-50"}`} data-testid="crm-row">
-                <td className={`sticky left-0 z-10 bg-inherit px-2.5 text-slate-400 tabular-nums ${c.source ? "" : "shadow-[inset_3px_0_0_0_#f59e0b]"}`}>{i + 1}</td>
+              <tr key={c.id} className={`group h-[58px] ${c.from_website ? "bg-indigo-50" : c.source ? "bg-white" : "bg-amber-50"}`} data-testid="crm-row">
+                <td className={`sticky left-0 z-10 bg-inherit px-2.5 text-slate-400 tabular-nums ${c.from_website ? "shadow-[inset_3px_0_0_0_#6366f1]" : c.source ? "" : "shadow-[inset_3px_0_0_0_#f59e0b]"}`}>{i + 1}</td>
                 <td onClick={() => onView(c)} data-testid="crm-customer-cell" className="group/name sticky left-10 z-10 bg-inherit cursor-pointer shadow-[2px_0_4px_-2px_rgba(15,23,42,0.15)]"><CustomerName c={c} onShowReferred={onShowReferred} /></td>
                 <td className="px-2.5 whitespace-nowrap font-medium text-slate-700 tabular-nums">{c.contact_number || <span className="text-slate-300">—</span>}</td>
                 <td className="px-2.5 max-w-[110px] truncate text-slate-600" title={c.address}>{c.address || <span className="text-slate-300">—</span>}</td>
