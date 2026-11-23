@@ -34,8 +34,15 @@ async def rows(db, table, fields, filt=None):
     return await getattr(db, table).find(filt or {}, {"_id": 0, **{f: 1 for f in fields}}).to_list(1000000)
 
 
-def needs_file(r):  # a row whose file lives in Storage and whose database copy is empty
-    return bool(r.get("storage_path")) and not r.get("data")
+async def in_storage(db, table):
+    """The rows whose file lives in Storage. Only id / path / size are read here: a file's data is looked at one row at a time
+    (has_data), so a re-run after a partial copy never pulls all the files into memory at once."""
+    return [r for r in await rows(db, table, ("id", "storage_path", "size")) if r.get("storage_path")]
+
+
+async def has_data(db, table, row_id):
+    row = await getattr(db, table).find_one({"id": row_id}, {"_id": 0, "data": 1})
+    return bool(row and row.get("data"))
 
 
 def lead_urls(lead):
@@ -44,7 +51,7 @@ def lead_urls(lead):
 
 async def plan(db):
     for table, _ in KINDS:
-        todo = [r for r in await rows(db, table, ("id", "storage_path", "data", "size")) if needs_file(r)]
+        todo = [r for r in await in_storage(db, table) if not await has_data(db, table, r["id"])]
         print(f"{table}: {len(todo)} file(s) to bring back, about {sum(r.get('size') or 0 for r in todo) / 1e6:.1f} MB")
     leads = await rows(db, "leads", ("id", "images"))
     n = sum(len(lead_urls(l)) for l in leads)
@@ -53,11 +60,13 @@ async def plan(db):
 
 async def copy(db):
     for table, bucket in KINDS:
-        todo = [r for r in await rows(db, table, ("id", "storage_path", "data")) if needs_file(r)]
-        print(f"{table}: {len(todo)} to copy")
+        todo = await in_storage(db, table)
+        print(f"{table}: {len(todo)} in Storage; copying the ones not in the database yet")
         done = failed = 0
         for r in todo:
             try:
+                if await has_data(db, table, r["id"]):
+                    continue
                 content = await media_storage.download(bucket, r["storage_path"])
                 await getattr(db, table).update_one({"id": r["id"]}, {"$set": {"data": base64.b64encode(content).decode("ascii")}})
                 done += 1
@@ -91,11 +100,13 @@ async def copy(db):
 async def verify(db):
     bad = 0
     for table, _ in KINDS:
-        for r in await rows(db, table, ("id", "storage_path", "data", "size")):
-            if r.get("storage_path") and not r.get("data"):
+        for r in await in_storage(db, table):
+            row = await getattr(db, table).find_one({"id": r["id"]}, {"_id": 0, "data": 1})
+            data = (row or {}).get("data")
+            if not data:
                 bad += 1
                 print(f"  MISSING {table} {r['id']}: no data in the database")
-            elif r.get("data") and r.get("size") and len(base64.b64decode(r["data"])) != r["size"]:
+            elif r.get("size") and len(base64.b64decode(data)) != r["size"]:
                 bad += 1
                 print(f"  WRONG SIZE {table} {r['id']}")
     left = sum(len(lead_urls(l)) for l in await rows(db, "leads", ("id", "images")))
