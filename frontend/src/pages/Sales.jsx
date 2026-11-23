@@ -29,24 +29,28 @@ function getErrMsg(err, fallback) {
 }
 
 // The Status column: a sale is "Sold" (or "Returned" once the customer has given the vehicle back); a booked vehicle is
-// "Booked" (see components/BookedRows.jsx).
-function SaleStatus({ sale }) {
+// "Booked" and a cancelled booking "Cancelled" (see components/BookedRows.jsx). A booking does not always become a sale, so
+// "Booked" is only ever the status of a booking that is still open. A sale that did begin as a booking (`booking`, found by
+// its sale_id) says so under its own status, with the deposit that counted as the advance.
+function SaleStatus({ sale, booking }) {
   const returned = !!sale.returned;
   return (
-    <span className={`px-2 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wide whitespace-nowrap ${returned ? "bg-amber-100 text-amber-700" : "bg-green-100 text-green-700"}`} data-testid="sale-status-tag">
-      {returned ? "Returned" : "Sold"}
-    </span>
+    <div className="inline-flex flex-col items-start gap-1">
+      <span className={`px-2 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wide whitespace-nowrap ${returned ? "bg-amber-100 text-amber-700" : "bg-green-100 text-green-700"}`} data-testid="sale-status-tag">
+        {returned ? "Returned" : "Sold"}
+      </span>
+      {booking && (
+        <span className="text-[11px] font-semibold text-yellow-800 whitespace-nowrap" title="This sale completed a booking: its deposit counted as the advance payment" data-testid="sale-booking-tag">
+          from booking · {formatNPR(booking.booking_amount)}
+        </span>
+      )}
+    </div>
   );
 }
 
-// Status tags from the sold vehicle's own record (what the old Sold Stock tab showed):
+// Tags under the vehicle name, from the sold vehicle's own record (what the old Sold Stock tab showed):
 // returned marker and warranty. The name-transfer status has its own column (and line on phones).
-function SaleTags({ sale, vehicle, booking }) {
-  const fromBooking = booking && (
-    <span className="px-1.5 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wide bg-yellow-100 text-yellow-800 whitespace-nowrap" title="This sale completed a booking" data-testid="sale-booking-tag">
-      Booked · {formatNPR(booking.booking_amount)}
-    </span>
-  );
+function SaleTags({ sale, vehicle }) {
   if (sale.returned) {
     return (
       <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wide bg-amber-100 text-amber-700" data-testid="sale-returned-tag">
@@ -54,13 +58,8 @@ function SaleTags({ sale, vehicle, booking }) {
       </span>
     );
   }
-  if (!vehicle) return fromBooking || null;
-  return (
-    <>
-      {fromBooking}
-      <WarrantyBadge warranty={vehicle.warranty} />
-    </>
-  );
+  if (!vehicle) return null;
+  return <WarrantyBadge warranty={vehicle.warranty} />;
 }
 
 // Pending / In Progress / Done name transfer. Admins flip it right in the row; everyone else just sees the pill.
@@ -447,7 +446,7 @@ export default function Sales() {
                           {s.needs_review && <span className="ml-1.5 inline-flex items-center gap-0.5 align-middle text-xs font-semibold text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded-full"><AlertTriangle size={9} /> Review</span>}
                         </div>
                         <div className="text-xs text-slate-500 mt-0.5 truncate">{s.customer_name}{s.customer_contact ? ` · ${s.customer_contact}` : ""}</div>
-                        <div className="flex items-center gap-1 flex-wrap mt-1.5"><SaleStatus sale={s} /><SaleTags sale={s} vehicle={v} booking={bookingBySaleId[s.id]} /></div>
+                        <div className="flex items-center gap-1 flex-wrap mt-1.5"><SaleStatus sale={s} booking={bookingBySaleId[s.id]} /><SaleTags sale={s} vehicle={v} /></div>
                       </div>
                       {isAdmin && (
                         <button onClick={e => { e.stopPropagation(); handleDelete(s.id); }} className="w-11 h-11 -mr-2.5 -mt-2.5 shrink-0 flex items-center justify-center hover:bg-red-50 rounded-lg transition-colors" data-testid="delete-sale-btn-mobile">
@@ -518,7 +517,7 @@ export default function Sales() {
                             {s.vehicle_info || "—"}
                             {s.needs_review && <span className="inline-flex items-center gap-0.5 text-xs font-semibold text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded-full" title={s.review_note || "Imported — might need attention"}><AlertTriangle size={9} /> Review</span>}
                           </div>
-                          <div className="flex items-center gap-1 flex-wrap mt-1"><SaleTags sale={s} vehicle={v} booking={bookingBySaleId[s.id]} /></div>
+                          <div className="flex items-center gap-1 flex-wrap mt-1"><SaleTags sale={s} vehicle={v} /></div>
                         </td>
                         <td>
                           <div className="text-gray-700">{s.customer_name}</div>
@@ -545,7 +544,7 @@ export default function Sales() {
                             </>
                           ) : <span className="text-gray-300">—</span>}
                         </td>
-                        <td><SaleStatus sale={s} /></td>
+                        <td><SaleStatus sale={s} booking={bookingBySaleId[s.id]} /></td>
                       </tr>
                     );
                   })}
