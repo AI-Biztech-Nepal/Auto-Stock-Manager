@@ -4,7 +4,7 @@ import { Eye, Pencil, Phone, MessageCircle, Search, Check, X, ChevronDown, Chevr
 import { formatNPR } from "../../utils/helpers";
 import {
   SOURCES, SOURCE_STYLE, STATUS_BY_KEY, PICKABLE_STATUSES, referredByLabel,
-  shortBS, timeOf, dateTimeTitle, waNumber,
+  waNumber,
 } from "../../utils/crm";
 import { FONT, Avatar, StatusBadge } from "./ui";
 import { BOOK_CARD, BookTableStyle } from "../BookTable";
@@ -41,21 +41,6 @@ function StatusSelect({ c, disabled, onChange }) {
         {PICKABLE_STATUSES.map(o => <option key={o.key} value={o.key}>{o.label}</option>)}
       </select>
       <Chevron />
-    </div>
-  );
-}
-
-function AssignSelect({ c, sellers, disabled, onChange }) {
-  const known = sellers.some(s => s.id === c.assigned_to_id);
-  return (
-    <div className="relative w-[134px] max-w-full">
-      <select value={c.assigned_to_id || ""} disabled={disabled} onChange={e => onChange(c, e.target.value)} aria-label={`Assigned to, ${c.name}`} data-testid="crm-assigned"
-        className={`${selectBase} h-7 w-full pl-2 pr-6 rounded-lg border text-xs font-medium truncate ${c.assigned_to_id ? "bg-white border-slate-200 text-slate-800 hover:border-slate-300" : "bg-slate-50 border-dashed border-slate-300 text-slate-400 hover:border-slate-400"}`}>
-        <option value="">Unassigned</option>
-        {c.assigned_to_id && !known && <option value={c.assigned_to_id}>{c.assigned_to_name || "Previous salesperson"}</option>}
-        {sellers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-      </select>
-      <Chevron className="right-1.5 text-slate-400" />
     </div>
   );
 }
@@ -176,23 +161,6 @@ function VehicleCell({ c }) {
   return <span className="block max-w-[150px] truncate text-slate-800 font-medium" title={c.purchased_vehicle}>{c.purchased_vehicle}{c.purchases > 1 && <span className="text-xs text-slate-400"> +{c.purchases - 1}</span>}</span>;
 }
 
-function NextFollowUp({ c }) {
-  const f = c.next_followup;
-  if (!f) return <span className="text-slate-300">—</span>;
-  const late = new Date(f.due_at).getTime() < Date.now();
-  return (
-    <div className={late ? "text-red-600" : "text-slate-700"} title={`${f.purpose} · ${dateTimeTitle(f.due_at)}`}>
-      <div className="font-semibold leading-4">{shortBS(f.due_at)}</div>
-      <div className="text-[11px] leading-4 opacity-75">{timeOf(f.due_at)}</div>
-    </div>
-  );
-}
-
-function LastContact({ c }) {
-  if (!c.last_contact_at) return <span className="text-slate-300">—</span>;
-  return <span className="text-slate-600 whitespace-nowrap" title={dateTimeTitle(c.last_contact_at)}>{shortBS(c.last_contact_at)}</span>;
-}
-
 function Amount({ c }) {
   const tip = [c.purchases ? `${c.purchases} vehicle${c.purchases > 1 ? "s" : ""}` : "No purchase yet", c.booked ? `${formatNPR(c.booked)} booking deposit` : ""].filter(Boolean).join(" · ");
   return (
@@ -295,12 +263,6 @@ export default function CustomerTable({
                 <dd><LeadSourceCell c={c} disabled={busy} {...cell} /></dd>
                 <dt className="pt-0.5 font-semibold text-slate-400 uppercase tracking-wider whitespace-nowrap">Status</dt>
                 <dd><StatusSelect c={c} disabled={busy} onChange={onStatus} /></dd>
-                <dt className="pt-1 font-semibold text-slate-400 uppercase tracking-wider whitespace-nowrap">Assigned to</dt>
-                <dd><AssignSelect c={c} sellers={sellers} disabled={busy} onChange={onAssign} /></dd>
-                <dt className="font-semibold text-slate-400 uppercase tracking-wider whitespace-nowrap">Last contact</dt>
-                <dd className="text-slate-600"><LastContact c={c} /></dd>
-                <dt className="font-semibold text-slate-400 uppercase tracking-wider whitespace-nowrap">Next follow-up</dt>
-                <dd><NextFollowUp c={c} /></dd>
               </dl>
               <div className="mt-3 pt-3 border-t border-slate-100"><Actions c={c} onView={onView} onEdit={onEdit} onContact={onContact} /></div>
             </div>
@@ -318,7 +280,7 @@ export default function CustomerTable({
     <div className={BOOK_CARD} data-testid="crm-table-wrap">
       <BookTableStyle />
       <div className="overflow-x-auto">
-      <table className={`w-full ${leads ? "min-w-[1320px]" : "min-w-[1560px]"}`} data-testid="crm-table">
+      <table className={`w-full ${leads ? "min-w-[1000px]" : "min-w-[1240px]"}`} data-testid="crm-table">
         <thead>
           <tr>
             <th scope="col" className="sticky left-0 z-20 bg-slate-50 w-10 min-w-[40px] text-left">SN</th>
@@ -330,9 +292,6 @@ export default function CustomerTable({
             {th("lead", "Lead Source")}
             {!leads && th("soldby", "Sold By")}
             {th("status", "Lead Status")}
-            {th("lastcontact", "Last Contact")}
-            {th("nextfollowup", "Next Follow-up")}
-            {th("assigned", "Assigned To")}
             {th("amount", "Transaction Amount", "", true)}
             {th(null, "Actions", "sticky right-0 z-20 bg-slate-50 shadow-[-2px_0_4px_-2px_rgba(15,23,42,0.15)]")}
           </tr>
@@ -351,9 +310,6 @@ export default function CustomerTable({
                 <td className="px-2.5"><LeadSourceCell c={c} disabled={busy} {...cell} /></td>
                 {!leads && <td className="px-2.5 whitespace-nowrap text-slate-700">{c.sold_by_name || <span className="text-slate-300">—</span>}</td>}
                 <td className="px-2.5"><StatusSelect c={c} disabled={busy} onChange={onStatus} /></td>
-                <td className="px-2.5"><LastContact c={c} /></td>
-                <td className="px-2.5"><NextFollowUp c={c} /></td>
-                <td className="px-2.5"><AssignSelect c={c} sellers={sellers} disabled={busy} onChange={onAssign} /></td>
                 <td className="px-2.5 text-right"><Amount c={c} /></td>
                 <td className="sticky right-0 z-10 bg-inherit px-2.5 shadow-[-2px_0_4px_-2px_rgba(15,23,42,0.15)]"><Actions c={c} onView={onView} onEdit={onEdit} onContact={onContact} /></td>
               </tr>
@@ -362,7 +318,7 @@ export default function CustomerTable({
         </tbody>
         <tfoot>
           <tr>
-            <td colSpan={leads ? 10 : 12} className="text-gray-600">Total · {count.toLocaleString()} customer{count === 1 ? "" : "s"}</td>
+            <td colSpan={leads ? 7 : 9} className="text-gray-600">Total · {count.toLocaleString()} customer{count === 1 ? "" : "s"}</td>
             <td className="text-right text-slate-900 whitespace-nowrap" style={FONT}>{formatNPR(total)}</td>
             <td />
           </tr>

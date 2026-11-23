@@ -3,6 +3,7 @@ import { Plus, Trash2, Percent, Tags, Wrench } from "lucide-react";
 import { toast } from "sonner";
 import { useBooks } from "./BooksContext";
 import Feed from "./Feed";
+import SaleVehicleModal from "../SaleVehicleModal";
 import { Card, Field, Modal, DateField, AccountSelect, PartyPicker, TwoTapDelete, useConfirmSave, useAskNewParty, inputCls, btnPrimary, btnGhost, btnSave } from "./ui";
 import { todayStr, billDate, partyName, billTotals, serviceLines, nextBillNo, balances, accountName, npr, COLORS } from "./money";
 
@@ -341,11 +342,14 @@ function ExpenseForm() {
 // editId: a saved sale / purchase bill to change (the Day Book's Edit): the form opens filled in with it, and Save changes /
 // Cancel go back through onDone. Without one (or when that bill is gone) it is the usual New bill form.
 export default function Bills({ type, editId, onDone }) {
-  const { books } = useBooks();
+  const { books, reload } = useBooks();
   const edit = editId && type !== "expense" ? books.transactions.find((t) => t.id === editId && t.type === type) || null : null;
+  // A new sale is entered on the same Sale Vehicle form as the Sales page (it records the sale and posts its bill here).
+  const newSale = type === "sale" && !edit;
   return (
     <div className="space-y-5">
-      {type === "expense" ? <ExpenseForm /> : <ItemisedBill key={edit?.id || "new"} type={type} edit={edit} onDone={onDone} />}
+      {newSale && <SaleVehicleModal onClose={onDone} onSaved={reload} />}
+      {type === "expense" ? <ExpenseForm /> : newSale ? null : <ItemisedBill key={edit?.id || "new"} type={type} edit={edit} onDone={onDone} />}
       {!edit && <Feed defaultFilter={type} title={type === "sale" ? "Sales and related entries" : type === "purchase" ? "Purchases and related entries" : "Expenses and related entries"} />}
     </div>
   );

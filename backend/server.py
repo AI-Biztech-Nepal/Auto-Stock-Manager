@@ -372,10 +372,16 @@ ROLE_PERMISSIONS = {
         # No "create" or "edit" on vehicles (view only, no status changes either -- see
         # require_any("vehicles", {"edit", "edit_status"}) on update_vehicle_status), and no
         # jobs/customers/sales at all -- those pages were pulled from their nav to match.
-        "vehicles": {"view"},
-        "vehicle_media": {"view"},  # read-only, so opening a vehicle's detail page doesn't 403 loading photos/documents
-        "vehicle_photos": {"view"},
-        "expenses": {"view"},
+        "vehicles": {"view", "create", "edit", "edit_status"},
+        "vehicle_media": {"view", "create", "edit"},
+        "vehicle_photos": {"view", "create", "edit"},
+        "expenses": {"view", "create", "edit"},
+        "vendors": {"view", "create", "edit"},
+        "sales": {"view"},
+        "customers": {"view", "create", "edit"},  # Marketing > CRM tab
+        "marketing": {"manage"},  # Marketing > Leads / Offers / Visits tabs
+        "sanakhat": {"view", "edit"},  # Sanakhat desk page
+        "finance": {"manage"},  # Finance page (/fin/* books, quotations, summary)
         "team": {"view", "create", "edit", "delete"},
         "vendor_lookup": {"view", "create"},  # vendor picker + inline "add new vendor" when picking a vehicle's purchase source
         # Warranty tracker: follow up on sold vehicles and void a warranty when the customer
@@ -4908,7 +4914,7 @@ async def add_emi_payment(payment: EMIPaymentCreate, cu: dict = Depends(admin_on
 
 # ── FINANCE ───────────────────────────────────────────────────────────
 @api_router.get("/finance/summary")
-async def finance_summary(cu: dict = Depends(admin_only)):
+async def finance_summary(cu: dict = Depends(require("finance", "manage"))):
     # Five pieces of work that do not depend on each other, run at the same time (the database is in another city, so
     # one after another this waited for every step in turn).
     async def stock_value():  # inventory value (available vehicles)
@@ -5872,7 +5878,7 @@ async def _backfill_lead_vehicles():
     if done: logger.info(f"Linked {done} earlier website tap(s) to the bike they were about")
 
 @api_router.get("/leads")
-async def get_leads(request: Request, cu: dict = Depends(admin_only)):
+async def get_leads(request: Request, cu: dict = Depends(require("marketing", "manage"))):
     """Every lead, newest first. A lead from a vehicle's WhatsApp / Call button also carries that vehicle (name, plate,
     price, cover photo and its page on the website), so staff can see which bike the person was looking at."""
     leads = await db.leads.find({}, {"_id": 0}).sort("created_at", -1).to_list(1000)
@@ -5891,7 +5897,7 @@ async def get_leads(request: Request, cu: dict = Depends(admin_only)):
     return leads
 
 @api_router.get("/leads/new-count")
-async def get_new_leads_count(cu: dict = Depends(admin_only)):
+async def get_new_leads_count(cu: dict = Depends(require("marketing", "manage"))):
     """How many website leads are still new and unopened (the sidebar badge), and, apart from them, how many newly registered
     accounts (a signup is not a lead: it is told about in the bell and listed under Leads > Accounts). The sidebar asks every
     minute, so this reads three small columns instead of every lead together with the photos some of them carry (megabytes)."""
@@ -5912,7 +5918,7 @@ def _lead_email(v) -> Optional[str]:
     return e if re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", e) else None
 
 @api_router.post("/leads/seen")
-async def mark_leads_seen(body: LeadsSeen, cu: dict = Depends(admin_only)):
+async def mark_leads_seen(body: LeadsSeen, cu: dict = Depends(require("marketing", "manage"))):
     """The Leads screen was opened with these leads on it: they stop counting as new in the nav badge and the bell.
     Only the ids the screen actually showed are marked, so a lead that arrived a moment later still notifies."""
     if body.ids:
@@ -5922,7 +5928,7 @@ async def mark_leads_seen(body: LeadsSeen, cu: dict = Depends(admin_only)):
     return {"ok": True, "seen_by": cu.get("username")}
 
 @api_router.post("/leads/{lid}/accept")
-async def accept_lead(lid: str, cu: dict = Depends(admin_only)):
+async def accept_lead(lid: str, cu: dict = Depends(require("marketing", "manage"))):
     async with _lead_decision_lock:
         lead = await db.leads.find_one({"id": lid}, {"_id": 0})
         if not lead: raise HTTPException(404, "Lead not found")
@@ -5933,7 +5939,7 @@ async def accept_lead(lid: str, cu: dict = Depends(admin_only)):
     return {"lead": await db.leads.find_one({"id": lid}, {"_id": 0}), "customer_id": customer["id"] if customer else None, "customer_created": created}
 
 @api_router.post("/leads/{lid}/reject")
-async def reject_lead(lid: str, body: LeadReject, cu: dict = Depends(admin_only)):
+async def reject_lead(lid: str, body: LeadReject, cu: dict = Depends(require("marketing", "manage"))):
     remark = (body.remark or "").strip()[:1000]
     if len(remark) < 3: raise HTTPException(422, "Please write why you are rejecting this lead")
     async with _lead_decision_lock:
@@ -6006,14 +6012,14 @@ def _offer_bike_no(raw: str) -> str:
     return s if 4 <= len(s) <= 20 and re.search(r"\d", s) else ""
 
 @api_router.get("/offers/dashain")
-async def get_dashain_offer(cu: dict = Depends(admin_only)):
+async def get_dashain_offer(cu: dict = Depends(require("marketing", "manage"))):
     prizes = await _offer_prizes()
     spins = await db.offer_codes.find({"status": "USED"}, {"_id": 0}).sort("used_at", -1).to_list(5000)
     return {"prizes": prizes, "spins": spins, "review_url": OFFER_REVIEW_URL,
             "storefront_url": f"{STOREFRONT_URL}/offers"}
 
 @api_router.put("/offers/dashain/prizes")
-async def update_dashain_prizes(req: OfferPrizesUpdate, cu: dict = Depends(admin_only)):
+async def update_dashain_prizes(req: OfferPrizesUpdate, cu: dict = Depends(require("marketing", "manage"))):
     """Saves the wheel exactly as sent: listed prizes are updated/added in this order, and
     any prize left out is removed. Spins already won keep their prize name."""
     current = {p["id"] for p in await _offer_prizes()}
@@ -6144,7 +6150,7 @@ def _gsc_token() -> str:
     return creds.token
 
 @api_router.get("/visits/search")
-async def visits_search(days: int = 30, skip: int = 0, cu: dict = Depends(admin_only)):
+async def visits_search(days: int = 30, skip: int = 0, cu: dict = Depends(require("marketing", "manage"))):
     days = max(1, min(days, 365)); skip = max(0, min(skip, 30))
     if not GSC_CREDENTIALS_JSON:
         return {"configured": False}
@@ -6189,7 +6195,7 @@ async def visits_search(days: int = 30, skip: int = 0, cu: dict = Depends(admin_
             "total_clicks": sum(d["clicks"] for d in daily), "total_impressions": sum(d["impressions"] for d in daily)}
 
 @api_router.get("/visits/summary")
-async def visits_summary(days: int = 30, skip: int = 0, cu: dict = Depends(admin_only)):
+async def visits_summary(days: int = 30, skip: int = 0, cu: dict = Depends(require("marketing", "manage"))):
     days = max(1, min(days, 365)); skip = max(0, min(skip, 30))  # skip = days back from today the range ends (1 = yesterday)
     if GA4_PROPERTY_ID and GA4_CREDENTIALS_JSON:
         return await _name_vehicle_pages(await _ga4_summary(days, skip))
@@ -8077,7 +8083,7 @@ async def shutdown():
     _compress_pool.shutdown(wait=False, cancel_futures=True)
 
 import finance_books
-finance_books.register(api_router, db, admin_only)
+finance_books.register(api_router, db, require("finance", "manage"))  # Finance page: admin + roles granted "finance"
 crm.register(api_router, db, admin_only, _sale_revenue)
 
 # TEMPORARY - the owner-only tool that moves the data to Supabase without a login on the server. To remove it once the
