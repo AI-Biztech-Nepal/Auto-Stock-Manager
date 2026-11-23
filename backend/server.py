@@ -8084,7 +8084,7 @@ async def shutdown():
 
 import finance_books
 finance_books.register(api_router, db, require("finance", "manage"))  # Finance page: admin + roles granted "finance"
-crm.register(api_router, db, admin_only, _sale_revenue)
+crm.register(api_router, db, require("marketing", "manage"), _sale_revenue)  # CRM tab: admin + roles granted "marketing"
 
 # TEMPORARY - the owner-only tool that moves the data to Supabase without a login on the server. To remove it once the
 # move is finished: delete backend/migration_tool.py and tools/run_migration.py, and delete this comment and the two lines below.
