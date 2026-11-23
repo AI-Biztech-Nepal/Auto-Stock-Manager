@@ -40,8 +40,8 @@ const navItems = [
   { path: "/marketing",   label: "Marketing",    icon: Megaphone },
   { path: "/ledger",       label: "Ledger",       icon: BookOpen },
   { path: "/jobs",         label: "Job Cards",    icon: Wrench },
-  { path: "/warranty",     label: "Warranty",     icon: ShieldCheck },
   { path: "/finance",      label: "Finance",      icon: Wallet },
+  { path: "/warranty",     label: "Warranty",     icon: ShieldCheck },
   { path: "/sanakhat",     label: "Sanakhat",     icon: FileCheck2 },  // the Sanakhat Desk account's only page; admin opens the same page
   { path: "/ai",           label: "AI Assistant", icon: Sparkles },
   { path: "/settings",     label: "Settings",     icon: Settings },
@@ -70,7 +70,7 @@ export default function Layout() {
   const handleLogout = () => { logout(); navigate("/login"); };
   // Admin's people live in Finance's Ledger now, so the main Ledger item goes for admin; stock and parts supervisors
   // (who can't open Finance) keep it as their way to Staff / Vendors. The /ledger page itself still works.
-  const visibleNavItems = navItems.filter(({ path }) => canAccessPath(user?.role, path) && (path !== "/sanakhat" || user?.role === "sanakhat_officer" || canAccessPath(user?.role, "/sales")) && (path !== "/ledger" || (user?.role && user.role !== "admin")));
+  const visibleNavItems = navItems.filter(({ path }) => canAccessPath(user?.role, path) && (path !== "/sanakhat" || user?.role === "sanakhat_officer" || canAccessPath(user?.role, "/sales")) && (path !== "/ledger" || (user?.role && user.role !== "admin" && !canAccessPath(user.role, "/finance"))));
 
   // Missing-data notifications: flags active-stock vehicles missing a photo or a
   // registration number so gaps get caught without staff having to go hunting for
