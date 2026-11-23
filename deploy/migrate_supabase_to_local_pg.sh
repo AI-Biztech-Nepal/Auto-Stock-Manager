@@ -55,8 +55,15 @@ LOCAL="postgresql://$ROLE:$PASS@127.0.0.1:5432/$DB"
 # A new database already has its own `public` schema, so leave the dump's CREATE SCHEMA / COMMENT ON SCHEMA out of the restore.
 LIST="$(mktemp)"
 pg_restore -l "$OUT" | grep -v -E ' SCHEMA - public | COMMENT - SCHEMA public ' > "$LIST"
-pg_restore -L "$LIST" --no-owner --no-privileges --exit-on-error -d "$LOCAL" "$OUT"
-rm -f "$LIST"
+pg_restore -L "$LIST" --section=pre-data --section=data --no-owner --no-privileges --exit-on-error -d "$LOCAL" "$OUT"
+# Indexes and constraints go in last. The data was copied into Supabase from MariaDB with foreign-key checks off, so it can hold
+# a row that points at something deleted long ago (e.g. a job card whose mechanic is gone). Adding such a rule as NOT VALID keeps it
+# enforced for every new or changed row and leaves the old row alone, which is exactly the state Supabase is in.
+POST="$(mktemp)"
+pg_restore -L "$LIST" --section=post-data --no-owner --no-privileges -f "$POST" "$OUT"
+sed -i -E '/ADD CONSTRAINT .* FOREIGN KEY .*;$/ s/;$/ NOT VALID;/' "$POST"
+psql "$LOCAL" -v ON_ERROR_STOP=1 -q -f "$POST"
+rm -f "$LIST" "$POST"
 
 echo "== 5/5 Comparing row counts, table by table =="
 BAD=0
