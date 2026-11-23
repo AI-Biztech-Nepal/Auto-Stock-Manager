@@ -280,7 +280,7 @@ export default function CustomerTable({
     <div className={BOOK_CARD} data-testid="crm-table-wrap">
       <BookTableStyle />
       <div className="overflow-x-auto">
-      <table className={`w-full ${leads ? "min-w-[1000px]" : "min-w-[1240px]"}`} data-testid="crm-table">
+      <table className={`w-full ${leads ? "min-w-[1140px]" : "min-w-[1380px]"}`} data-testid="crm-table">
         <thead>
           <tr>
             <th scope="col" className="sticky left-0 z-20 bg-slate-50 w-10 min-w-[40px] text-left">SN</th>
@@ -290,6 +290,7 @@ export default function CustomerTable({
             {th("vehicle", "Vehicle")}
             {!leads && th("price", "Price", "", true)}
             {th("lead", "Lead Source")}
+            {th(null, "Referred By")}
             {!leads && th("soldby", "Sold By")}
             {th("status", "Lead Status")}
             {th("amount", "Transaction Amount", "", true)}
@@ -308,6 +309,7 @@ export default function CustomerTable({
                 <td className="px-2.5"><VehicleCell c={c} /></td>
                 {!leads && <td className="px-2.5 text-right whitespace-nowrap font-medium text-slate-800">{c.sale_price > 0 ? formatNPR(c.sale_price) : <span className="text-slate-300">—</span>}</td>}
                 <td className="px-2.5"><LeadSourceCell c={c} disabled={busy} {...cell} /></td>
+                <td className="px-2.5 max-w-[140px] truncate text-slate-700" title={referredByLabel(c)}>{referredByLabel(c) || <span className="text-slate-300">—</span>}</td>
                 {!leads && <td className="px-2.5 whitespace-nowrap text-slate-700">{c.sold_by_name || <span className="text-slate-300">—</span>}</td>}
                 <td className="px-2.5"><StatusSelect c={c} disabled={busy} onChange={onStatus} /></td>
                 <td className="px-2.5 text-right"><Amount c={c} /></td>
@@ -318,7 +320,7 @@ export default function CustomerTable({
         </tbody>
         <tfoot>
           <tr>
-            <td colSpan={leads ? 7 : 9} className="text-gray-600">Total · {count.toLocaleString()} customer{count === 1 ? "" : "s"}</td>
+            <td colSpan={leads ? 8 : 10} className="text-gray-600">Total · {count.toLocaleString()} customer{count === 1 ? "" : "s"}</td>
             <td className="text-right text-slate-900 whitespace-nowrap" style={FONT}>{formatNPR(total)}</td>
             <td />
           </tr>

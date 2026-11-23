@@ -103,7 +103,7 @@ export default function JobCards() {
   useEffect(() => {
     fetchJobs();
     Promise.all([
-      api.get("/vehicles?status=in_repair,available"),
+      api.get("/vehicles?status=in_repair,available,reserved"),
       api.get("/vehicles?status=sold"),
     ]).then(([active, sold]) => {
       // Every sold vehicle can get a job card: it's tracked as its next service after the sale

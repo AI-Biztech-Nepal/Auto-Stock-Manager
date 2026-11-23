@@ -3631,8 +3631,9 @@ async def create_job(job: JobCardCreate, cu: dict = Depends(require("jobs", "cre
             if w["status"] in ("awaiting", "active"):
                 jc["is_warranty"] = True
                 jc["labour_charge"] = 0
-        elif v.get("status") not in ("available", "in_repair"):
-            raise HTTPException(400, "Job cards can only be created for Available, In Repair or Sold vehicles")
+        # A Reserved (booked) vehicle still gets prepared for delivery; it stays Reserved so the booking is untouched.
+        elif v.get("status") not in ("available", "in_repair", "reserved"):
+            raise HTTPException(400, "Job cards can only be created for Available, Reserved, In Repair or Sold vehicles")
         jc["vehicle_brand"] = v.get("brand"); jc["vehicle_model"] = v.get("model")
         jc["vehicle_year"] = v.get("year"); jc["registration_number"] = v.get("registration_number")
     await db.job_cards.insert_one(jc)

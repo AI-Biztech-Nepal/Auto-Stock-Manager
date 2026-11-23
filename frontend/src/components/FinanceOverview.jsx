@@ -363,24 +363,29 @@ function TopSellers({ sales }) {
 }
 
 function LeadSources({ sales }) {
-  const { rows, total } = useMemo(() => {
+  const { rows, total, walkIn, sold } = useMemo(() => {
     const by = new Map();
+    let walkIn = 0;
     for (const x of bikesSold(sales)) {
-      const n = SOURCE_LABEL[x.lead_source] || "Not tagged";
-      by.set(n, (by.get(n) || 0) + 1);
+      const n = SOURCE_LABEL[x.lead_source];
+      // Untagged sales are mostly walk-ins, so they are counted with the Walk-in tag and kept out of the chart.
+      if (!n || n === "Walk-in") walkIn++;
+      else by.set(n, (by.get(n) || 0) + 1);
     }
     const all = [...by.entries()].sort((a, b) => b[1] - a[1]);
-    return { rows: all.map(([name, value]) => ({ name, value })), total: all.reduce((t, [, v]) => t + v, 0) };
+    const tagged = all.reduce((t, [, v]) => t + v, 0);
+    return { rows: all.map(([name, value]) => ({ name, value })), total: tagged, walkIn, sold: tagged + walkIn };
   }, [sales]);
   return (
     <Card title="Sales by Lead Source" subtitle="Where the buyers came from · this fiscal year">
-      {total <= 0 ? <p className="text-sm text-slate-400 text-center py-10">No bikes sold this fiscal year</p> : (
+      {sold > 0 && <p className="text-xs text-slate-500 mb-3">Walk-in &amp; untagged: <b className="text-slate-800">{walkIn}</b> of {sold} bikes ({Math.round((walkIn / sold) * 100)}%), left out of the chart so it shows only the sources that brought buyers in.</p>}
+      {total <= 0 ? <p className="text-sm text-slate-400 text-center py-10">{sold > 0 ? "No tagged lead sources yet" : "No bikes sold this fiscal year"}</p> : (
         <div className="flex flex-col sm:flex-row items-center gap-6">
           <div className="relative w-[170px] h-[170px] shrink-0">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart><Pie data={rows} dataKey="value" innerRadius={58} outerRadius={82} startAngle={90} endAngle={-270} stroke="none">{rows.map((_, i) => <Cell key={i} fill={PALETTE[i % PALETTE.length]} />)}</Pie><Tooltip formatter={(v, n) => [`${v} bike${v === 1 ? "" : "s"}`, n]} /></PieChart>
             </ResponsiveContainer>
-            <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none"><span className="text-[11px] text-slate-400">Bikes sold</span><span className="text-lg font-extrabold text-slate-900">{total}</span></div>
+            <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none"><span className="text-[11px] text-slate-400">Excl. walk-in</span><span className="text-lg font-extrabold text-slate-900">{total}</span></div>
           </div>
           <ul className="flex-1 w-full space-y-2">
             {rows.map((r, i) => (
