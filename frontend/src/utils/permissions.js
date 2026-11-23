@@ -8,7 +8,7 @@ export const ROLE_NAV_PATHS = {
   // Ledger: Staff tab only (see LEDGER_TABS below).
   // /sales/vehicle: the sold-vehicle page, so they can keep Transfer / Sanakhat status current
   // (the Sales list itself stays admin-only -- it carries prices and margins).
-  stock_supervisor: ["/inventory", "/items", "/warranty", "/ledger", "/sales/vehicle", "/settings"],
+  stock_supervisor: ["/inventory", "/items", "/warranty", "/ledger", "/sales", "/marketing", "/sanakhat", "/finance", "/settings"],
   // Sanakhat desk: one page, /sanakhat, and nothing else (no sales, stock, settings or team).
   sanakhat_officer: ["/sanakhat"],
   // Parts department gets read-only inventory browsing plus the ability to flip a vehicle's
@@ -33,13 +33,14 @@ export const ROLE_DEFAULT_PATH = {
 // Which Ledger tabs each role sees -- mirrors the backend's "customers" / "vendors" / "team"
 // resources in ROLE_PERMISSIONS. Admin gets all three.
 const LEDGER_TABS = {
-  stock_supervisor: ["staff"],
+  stock_supervisor: ["vendors", "staff"],
   parts_supervisor: ["vendors", "staff"],
 };
 
 // Which Marketing tabs each role sees -- Social Media only gets Share (the backend limits
 // Offers and Visits to admin).
 const MARKETING_TABS = {
+  stock_supervisor: ["leads", "crm", "share", "offers", "visits"],
   social_media: ["share"],
 };
 
@@ -128,7 +129,7 @@ export const PARTS_ALLOWED_VEHICLE_STATUSES = ["available", "in_repair", "scrap"
 // Front Desk (stock_supervisor) is showroom-floor staff -- view only, no vehicle edits of any
 // kind (not even status changes), so only admin gets full vehicle access.
 export function hasFullVehicleAccess(role) {
-  return !role || role === "admin";
+  return !role || role === "admin" || role === "stock_supervisor";
 }
 
 // Mirrors ROLE_PERMISSIONS["social_media"] in server.py: can add a vehicle with basic

@@ -624,7 +624,13 @@ export default function Dashboard() {
     </div>
   );
 
-  if (!stats) return null;
+  if (!stats) return (
+    <div className="bg-white rounded-xl border border-red-200 p-8 text-center" data-testid="dashboard-error">
+      <p className="font-semibold text-slate-900">The dashboard could not load</p>
+      <p className="text-sm text-slate-500 mt-1">The server did not answer the request for the dashboard figures. Check your connection, or ask whoever runs the server to look at its log.</p>
+      <button onClick={() => window.location.reload()} className="mt-4 px-4 h-10 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold">Try again</button>
+    </div>
+  );
 
   const bs = getCurrentBSDate();
   const bsDateStr = bs ? `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year} BS` : "";
