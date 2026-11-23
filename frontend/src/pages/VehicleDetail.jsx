@@ -3,11 +3,12 @@ import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { Plus, Trash2, Edit, CheckCircle, AlertCircle, Clock, QrCode, Undo2, Download, FileText, Package, ChevronLeft, ChevronRight, GripVertical } from "lucide-react";
 import { toast } from "sonner";
 import api, { postWithRetry } from "../utils/api";
-import { formatNPR, getAgingStyle, getStatusStyle, getTerminationStyle, sanakhatDaysLeft, sanakhatPendingDays, sanakhatDueDate, sanakhatLeftText, SANAKHAT_CYCLE_DAYS, SANAKHAT_WARN_DAYS, getDocStyle, EXPENSE_CATEGORIES, VEHICLE_STATUS_OPTIONS } from "../utils/helpers";
+import { formatNPR, getAgingStyle, getStatusStyle, getTerminationStyle, sanakhatDaysLeft, sanakhatPendingDays, sanakhatDueDate, sanakhatLeftText, SANAKHAT_CYCLE_DAYS, SANAKHAT_WARN_DAYS, getDocStyle, EXPENSE_CATEGORIES, statusOptionsFor } from "../utils/helpers";
 import { ExpenseModal, QRLabelModal, ReturnModal } from "./VehicleModals";
 import { VehicleFormBody, vehicleMissing } from "./AddVehicleModal";
 import HoverADDate from "../components/HoverADDate";
 import { useAuth } from "../context/AuthContext";
+import { featureOn } from "../utils/permissions";
 import { hasFullVehicleAccess, canManageVehiclePhotos, hidesVehiclePricing, isBasicStockRole, PARTS_ALLOWED_VEHICLE_STATUSES } from "../utils/permissions";
 import { PhotoCropperModal } from "../components/PhotoCropperModal";
 import { usePhotoCropQueue } from "../hooks/usePhotoCropQueue";
@@ -45,7 +46,9 @@ const describeUploadError = (e) => {
 // wrapper below) or embedded directly by Inventory.jsx with local state — the latter keeps
 // the Inventory page mounted underneath instead of unmounting/refetching it on open/close.
 export function VehicleDetailModal({ id, onClose }) {
-  const { user } = useAuth();
+  const { user, features } = useAuth();
+  const vehiclePack = featureOn(features, "stock.vehicles");
+  const sanakhatPack = vehiclePack && featureOn(features, "stock.sanakhat");
   const isAdmin = user?.role === "admin";
   const isFrontDesk = user?.role === "stock_supervisor";
   const isPartsOnly = user?.role === "parts_supervisor";
@@ -445,7 +448,7 @@ export function VehicleDetailModal({ id, onClose }) {
           {/* Status + Actions */}
           <div className="flex items-center gap-2 flex-wrap px-4 sm:px-5 pb-4 sm:pb-5">
             <span className={`px-2.5 py-1 rounded-full text-xs font-semibold uppercase tracking-wide ${ag.bg} ${ag.text}`}>{vehicle.aging?.days}d · {ag.label}</span>
-            <span className={`px-2.5 py-1 rounded-full text-xs font-semibold uppercase tracking-wide ${skTone}`} title={`Sanaakhat has to be done again every ${SANAKHAT_CYCLE_DAYS} days`} data-testid="vehicle-sanakhat-pill">{skPill}</span>
+            {sanakhatPack && (<span className={`px-2.5 py-1 rounded-full text-xs font-semibold uppercase tracking-wide ${skTone}`} title={`Sanaakhat has to be done again every ${SANAKHAT_CYCLE_DAYS} days`} data-testid="vehicle-sanakhat-pill">{skPill}</span>)}
             {!isEditing && (
               <select
                 value={vehicle.status}
@@ -460,7 +463,7 @@ export function VehicleDetailModal({ id, onClose }) {
                    outside what this role can pick — otherwise a filtered <select> with no matching
                    <option> silently mis-renders (browsers show a blank/wrong label). The select is
                    disabled in that case anyway, so this can't be used to bypass the restriction. */}
-                {(canManageStock ? VEHICLE_STATUS_OPTIONS : VEHICLE_STATUS_OPTIONS.filter(o => (isPartsOnly && PARTS_ALLOWED_VEHICLE_STATUSES.includes(o.value)) || o.value === vehicle.status)).map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                {(canManageStock ? statusOptionsFor(features, vehicle.status) : statusOptionsFor(features, vehicle.status).filter(o => (isPartsOnly && PARTS_ALLOWED_VEHICLE_STATUSES.includes(o.value)) || o.value === vehicle.status)).map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
               </select>
             )}
             <div className="flex-1" />
@@ -477,7 +480,7 @@ export function VehicleDetailModal({ id, onClose }) {
             {isAdmin && vehicle.status === "sold" && !isEditing && (
               <button onClick={openReturnModal} className="flex items-center gap-1.5 px-3 py-3 border border-amber-200 text-amber-700 rounded-lg text-sm font-medium hover:bg-amber-50 transition-colors" data-testid="record-return-btn"><Undo2 size={14} /> Record Return</button>
             )}
-            {!isEditing && !hideExpenses && (
+            {!isEditing && !hideExpenses && vehiclePack && (
               <button onClick={loadQR} className="flex items-center gap-1.5 px-3 py-3 border border-slate-200 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors" data-testid="qr-btn"><QrCode size={14} /> QR Label</button>
             )}
           </div>
@@ -709,6 +712,7 @@ export function VehicleDetailModal({ id, onClose }) {
           </div>
 
           {/* Document Status + Upload */}
+          {vehiclePack && (
           <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
             <h2 className="text-sm font-bold text-slate-900 mb-3" style={{ fontFamily: "Manrope" }}>Legal Documents</h2>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-4">
@@ -787,6 +791,7 @@ export function VehicleDetailModal({ id, onClose }) {
               </div>
             )}
           </div>
+          )}
         </div>
       </div>
 

@@ -13,6 +13,7 @@ import SaleDetailModal from "./SaleDetailModal";
 import BookingDetailsHost from "../components/BookingDetailsHost";
 import DateRangeFilter, { resolveDateFilter } from "../components/DateRangeFilter";
 import { useAuth } from "../context/AuthContext";
+import { featureOn, itemsMode } from "../utils/permissions";
 import { getCurrentBSDate, BS_MONTHS } from "../utils/nepali-date";
 
 // ── Sub-components defined OUTSIDE to prevent remount ──────────────────
@@ -124,7 +125,8 @@ function AccountingSummary({ range }) {
   const rl = range.key === "daily" ? "today" : range.key === "all" ? "" : range.label.toLowerCase();
   const rangePhrase = range.key === "daily" ? "for today" : range.key === "all" ? "yet" : `for ${range.label.toLowerCase()}`;
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, features, terms } = useAuth();
+  const bookingsOn = featureOn(features, "stock.bookings");
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [recentSales, setRecentSales] = useState([]);
@@ -164,13 +166,13 @@ function AccountingSummary({ range }) {
     // Bookings are deposits, not sales — kept out of the sales figures and listed in
     // their own section of the popup. The endpoint has no date filter, so narrow to
     // the period here by booking_date.
-    api.get("/bookings")
+    if (bookingsOn) api.get("/bookings")
       .then(r => setBookings(r.data.filter(b => {
         const d = (b.booking_date || b.created_at || "").slice(0, 10);
         return d >= start && d <= end;
       })))
       .catch(() => {});
-  }, [range, reloadTick]);
+  }, [range, bookingsOn, reloadTick]);
 
   const fetchSummary = useCallback(async () => {
     setLoading(true); setData(null);
@@ -217,18 +219,18 @@ function AccountingSummary({ range }) {
       ) : data ? (
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-3">
           <AccountingKPI
-            label="Vehicle Purchase Cost"
+            label={`${terms.item} Purchase Cost`}
             value={formatNPR(vehiclePurchaseCost)}
-            sub={`${data.purchase_count} vehicle${data.purchase_count !== 1 ? "s" : ""} purchased`}
+            sub={`${data.purchase_count} ${data.purchase_count !== 1 ? terms.items.toLowerCase() : terms.item.toLowerCase()} purchased`}
             color="bg-blue-500"
             icon={ShoppingCart}
             testid="kpi-total-cost"
             onClick={() => setShowPurchasesModal(true)}
           />
           <AccountingKPI
-            label="Total Vehicle Sale"
+            label={`Total ${terms.item} Sale`}
             value={formatNPR(data.total_sales)}
-            sub={`${data.sold_count} vehicle${data.sold_count !== 1 ? "s" : ""} sold`}
+            sub={`${data.sold_count} ${data.sold_count !== 1 ? terms.items.toLowerCase() : terms.item.toLowerCase()} sold`}
             color="bg-green-500"
             icon={Banknote}
             testid="kpi-total-sales"
@@ -299,7 +301,7 @@ function AccountingSummary({ range }) {
                   className="shrink-0 w-56 bg-white rounded-lg border border-green-100 shadow-sm p-3 cursor-pointer hover:shadow-md hover:border-green-300 transition-all"
                 >
                   <div className="font-bold text-slate-900 text-sm truncate mb-1" style={{ fontFamily: "Manrope" }}>
-                    {s.vehicle_info || "Vehicle"}
+                    {s.vehicle_info || terms.item}
                   </div>
                   <div className="text-xs text-slate-500 mb-1 truncate">{s.customer_name}</div>
                   <div className="text-sm font-semibold text-green-700 mb-1">{formatNPR(s.sale_price)}</div>
@@ -355,7 +357,7 @@ function AccountingSummary({ range }) {
                     </div>
                   )}
                   <div className="text-xs text-slate-500 font-medium" data-testid="sales-modal-total-sale">
-                    Total Vehicle Sale: {formatNPR(data?.total_sales)}
+                    Total {terms.item} Sale: {formatNPR(data?.total_sales)}
                   </div>
                 </div>
                 <button
@@ -394,7 +396,7 @@ function AccountingSummary({ range }) {
                       <div className={showBill ? "" : "flex items-center justify-between gap-3"}>
                         <div className="min-w-0">
                           <div className="font-semibold text-slate-900 text-sm truncate" style={{ fontFamily: "Manrope" }}>
-                            {s.vehicle_info || "Vehicle"}
+                            {s.vehicle_info || terms.item}
                           </div>
                           <div className="text-xs text-slate-500 truncate">
                             {s.customer_name} · Sold: <HoverADDate date={s.sale_date} />
@@ -447,7 +449,7 @@ function AccountingSummary({ range }) {
 
               {/* Bookings made in the period — separate from sales; a booking is only a
                   deposit until it's converted into a sale. */}
-              {salesModalView === "sales" && (
+              {salesModalView === "sales" && bookingsOn && (
                 <div data-testid="period-bookings-section">
                   <div className="flex items-center justify-between gap-3 px-4 sm:px-5 py-2.5 bg-amber-50 border-y border-amber-100">
                     <h3 className="text-sm font-bold text-amber-900">
@@ -476,7 +478,7 @@ function AccountingSummary({ range }) {
                         >
                           <div className="min-w-0">
                             <div className="font-semibold text-slate-900 text-sm truncate" style={{ fontFamily: "Manrope" }}>
-                              {b.vehicle_info || "Vehicle"}
+                              {b.vehicle_info || terms.item}
                             </div>
                             <div className="text-xs text-slate-500 truncate">
                               {b.customer_name} · Booked: <HoverADDate date={b.booking_date} />
@@ -524,7 +526,7 @@ function AccountingSummary({ range }) {
               <div className="flex items-center gap-4 shrink-0">
                 <div className="text-right">
                   <div className="text-sm font-bold text-blue-700" data-testid="purchases-modal-total-cost">
-                    Vehicle Purchase Cost: {formatNPR(vehiclePurchaseCost)}
+                    {terms.item} Purchase Cost: {formatNPR(vehiclePurchaseCost)}
                   </div>
                 </div>
                 <button
@@ -552,7 +554,7 @@ function AccountingSummary({ range }) {
                   >
                     <div className="min-w-0">
                       <div className="font-semibold text-slate-900 text-sm truncate" style={{ fontFamily: "Manrope" }}>
-                        {v.vehicle_info || "Vehicle"}
+                        {v.vehicle_info || terms.item}
                       </div>
                       <div className="text-xs text-slate-500 truncate">
                         {v.registration_number || v.purchase_source || "—"} · Purchased: <HoverADDate date={v.purchase_date} />
@@ -577,7 +579,9 @@ function AccountingSummary({ range }) {
 const PERIOD_STORAGE_KEY = "dashboard_date_filter";
 
 export default function Dashboard() {
-  const { user } = useAuth();
+  const { user, features, terms } = useAuth();
+  const itemsOnly = itemsMode(features);
+  const jobsOn = featureOn(features, "stock.job_cards");
   const wideScreen = useMediaQuery("(min-width: 1024px)");
   const { topbarSlot } = useOutletContext() || {}; // the app's top bar: on wide screens the page's status pills and date filter sit there
   // Coming back to the Dashboard shows the last figures at once (see utils/listCache.js); they are refreshed below as always.
@@ -672,12 +676,14 @@ export default function Dashboard() {
 
       {/* Current stock & workload — a live "right now" snapshot, not affected by the period toggle */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-4">
-        <KPICard title="Available Vehicles" value={stats.available} icon={Package} color="bg-blue-500" testid="kpi-available" onClick={() => navigate("/inventory")} />
-        <KPICard title="Locked Capital" value={formatNPR(stats.locked_capital)} icon={DollarSign} color="bg-indigo-500" testid="kpi-capital" subtitle="In available stock" onClick={() => navigate("/inventory")} />
-        <KPICard title="Pending Jobs" value={stats.pending_jobs} icon={Wrench} color="bg-orange-500" testid="kpi-pending-jobs" onClick={() => navigate("/jobs")} />
+        <KPICard title={`Available ${terms.items}`} value={itemsOnly ? stats.item_lines_in_stock ?? 0 : stats.available} icon={Package} color="bg-blue-500" testid="kpi-available" onClick={() => navigate(itemsOnly ? "/items" : "/inventory")} />
+        <KPICard title="Locked Capital" value={formatNPR(stats.locked_capital)} icon={DollarSign} color="bg-indigo-500" testid="kpi-capital" subtitle="In available stock" onClick={() => navigate(itemsOnly ? "/items" : "/inventory")} />
+        {jobsOn && (
+          <KPICard title="Pending Jobs" value={stats.pending_jobs} icon={Wrench} color="bg-orange-500" testid="kpi-pending-jobs" onClick={() => navigate("/jobs")} />
+        )}
       </div>
 
-      {/* Charts (sales trend) + Alerts */}
+      {/* Charts (sales trend, net trend) + Alerts */}
       <DashboardTrends>
         {/* Alerts */}
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5" data-testid="alerts-panel">
@@ -685,16 +691,20 @@ export default function Dashboard() {
           <div className="space-y-3">
             <AlertCard title="Dead Stock" count={stats.dead_stock_count} description="60+ days. Immediate action needed." color="bg-red-100 text-red-800" onClick={() => navigate("/inventory?aging=dead")} />
             <AlertCard title="Slow Moving" count={stats.slow_moving_count} description="46–60 days. Consider price reduction." color="bg-orange-100 text-orange-800" onClick={() => navigate("/inventory?aging=slow")} />
+            {jobsOn && (
+              <>
             <AlertCard title="Pending Jobs" count={stats.pending_jobs} description="Job cards awaiting attention." color="bg-yellow-100 text-yellow-800" onClick={() => navigate("/jobs?status=pending")} />
             {stats.in_progress_jobs > 0 && (
               <AlertCard title="In Progress" count={stats.in_progress_jobs} description="Active repair/prep work." color="bg-blue-100 text-blue-800" onClick={() => navigate("/jobs?status=in_progress")} />
+            )}
+              </>
             )}
           </div>
         </div>
       </DashboardTrends>
 
       {/* Finance books + job totals: the owner's view, as in the Finance dashboard */}
-      {user?.role === "admin" && <FinanceOverview jobsOn />}
+      {user?.role === "admin" && <FinanceOverview jobsOn={jobsOn} />}
 
       {/* Quick Action */}
       <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 flex items-center justify-between">

@@ -6,6 +6,7 @@ import WarrantyLengthInput from "../components/WarrantyLengthInput";
 import SpeedReport from "../components/SpeedReport";
 import BackupCard from "../components/BackupCard";
 import { useAuth } from "../context/AuthContext";
+import { featureOn, ROLE_FEATURE } from "../utils/permissions";
 import api from "../utils/api";
 import { isNative, isBiometricAvailable, hasSavedCredentials, saveCredentials, deleteCredentials, verifyIdentity } from "../utils/biometric";
 
@@ -28,7 +29,7 @@ const formatBytes = (bytes) => {
 };
 
 export default function Settings() {
-  const { user, logout } = useAuth();
+  const { user, logout, features } = useAuth();
   const isAdmin = user?.role === "admin";
   const [pwForm, setPwForm] = useState({ current_password: "", new_password: "", confirm: "" });
   const [saving, setSaving] = useState(false);
@@ -184,6 +185,8 @@ export default function Settings() {
   };
 
   const ROLE_LABELS = { admin: "Admin", stock_supervisor: "Front Desk", parts_supervisor: "Parts Department", social_media: "Social Media", sanakhat_officer: "Sanakhat Desk" };
+  // A role whose feature is off is not offered for new accounts, but stays in the list for someone who already has it.
+  const ROLE_IN_USE = (r) => editUserForm.role === r || newUserForm.role === r;
 
   const inp = "w-full h-10 px-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500";
 
@@ -460,9 +463,9 @@ export default function Settings() {
                 <label className="block text-xs font-medium text-slate-600 mb-1.5">Role</label>
                 <select value={newUserForm.role} onChange={e => setNewUserForm({ ...newUserForm, role: e.target.value })} className={inp} data-testid="new-user-role">
                   <option value="stock_supervisor">Front Desk</option>
-                  <option value="parts_supervisor">Parts Department</option>
+                  {(featureOn(features, ROLE_FEATURE.parts_supervisor) || ROLE_IN_USE("parts_supervisor")) && <option value="parts_supervisor">Parts Department</option>}
                   <option value="social_media">Social Media</option>
-                  <option value="sanakhat_officer">Sanakhat Desk</option>
+                  {(featureOn(features, ROLE_FEATURE.sanakhat_officer) || ROLE_IN_USE("sanakhat_officer")) && <option value="sanakhat_officer">Sanakhat Desk</option>}
                   <option value="admin">Admin</option>
                 </select>
               </div>
@@ -499,9 +502,9 @@ export default function Settings() {
                 <label className="block text-xs font-medium text-slate-600 mb-1.5">Role</label>
                 <select value={editUserForm.role} onChange={e => setEditUserForm({ ...editUserForm, role: e.target.value })} className={inp} data-testid="edit-user-role">
                   <option value="stock_supervisor">Front Desk</option>
-                  <option value="parts_supervisor">Parts Department</option>
+                  {(featureOn(features, ROLE_FEATURE.parts_supervisor) || ROLE_IN_USE("parts_supervisor")) && <option value="parts_supervisor">Parts Department</option>}
                   <option value="social_media">Social Media</option>
-                  <option value="sanakhat_officer">Sanakhat Desk</option>
+                  {(featureOn(features, ROLE_FEATURE.sanakhat_officer) || ROLE_IN_USE("sanakhat_officer")) && <option value="sanakhat_officer">Sanakhat Desk</option>}
                   <option value="admin">Admin</option>
                 </select>
               </div>
