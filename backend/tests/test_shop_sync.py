@@ -35,5 +35,16 @@ class ShopSyncTests(unittest.TestCase):
         self.assertIsNone(shop_sync.build_payload({**ITEM, "category": "toys"}, [("p1", b"a")]))
 
 
+class ItemsOnlyTests(unittest.TestCase):
+    def test_shop_company_sees_items_not_vehicles_and_others_are_untouched(self):
+        import asyncio
+        import os
+        import portal_bridge
+        os.environ["SHOP_SYNC_COMPANY_ID"] = "C1"
+        shop = asyncio.run(portal_bridge.features_for({"company_id": "C1"}))
+        self.assertFalse(shop["stock.vehicles"])
+        self.assertIsNone(asyncio.run(portal_bridge.features_for({"company_id": "C2"})))
+
+
 if __name__ == "__main__":
     unittest.main()
