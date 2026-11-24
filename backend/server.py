@@ -7491,7 +7491,13 @@ async def upload_item_photo(iid: str, file: UploadFile = File(...), cu: dict = D
     content = await file.read()
     if len(content) > RAW_UPLOAD_MAX:
         raise HTTPException(400, "File too large. Max 25MB.")
-    content_type = _resolved_content_type(file)
+    photo = await _save_item_photo(it, content, _resolved_content_type(file), file.filename)
+    _spawn(_shop_sync_item(iid))
+    return _photo_out(photo)
+
+async def _save_item_photo(it: dict, content: bytes, content_type: str, filename: Optional[str]) -> dict:
+    """Compresses and stores one photo of an item (database or Supabase Storage) and starts its thumbnails."""
+    iid = it["id"]
     try:
         content, content_type = await _run_isolated(_compress_photo, content)
     except Exception:
@@ -7499,7 +7505,7 @@ async def upload_item_photo(iid: str, file: UploadFile = File(...), cu: dict = D
     if len(content) > PHOTO_MAX_BYTES:
         raise HTTPException(400, "File too large and could not be compressed. Try a smaller photo.")
     photo_id = str(uuid.uuid4())
-    photo = {"id": photo_id, "vehicle_id": None, "item_id": iid, "filename": file.filename or f"{photo_id}.jpg",
+    photo = {"id": photo_id, "vehicle_id": None, "item_id": iid, "filename": filename or f"{photo_id}.jpg",
              "content_type": content_type, "data": base64.b64encode(content).decode("ascii"),
              "uploaded_at": datetime.now(timezone.utc).isoformat(), "size": len(content),
              "sort_order": await db.vehicle_photos.count_documents({"item_id": iid})}
@@ -7512,8 +7518,7 @@ async def upload_item_photo(iid: str, file: UploadFile = File(...), cu: dict = D
             logger.warning(f"Supabase upload failed for a photo of item {iid}, keeping it in the database", exc_info=True)
     await db.vehicle_photos.insert_one(photo)
     _spawn(_make_and_store_thumbs(photo_id, content))
-    _spawn(_shop_sync_item(iid))
-    return _photo_out(photo)
+    return photo
 
 @api_router.delete("/items/{iid}/photos/{photo_id}")
 async def delete_item_photo(iid: str, photo_id: str, cu: dict = Depends(require("items", "edit"))):
@@ -7525,6 +7530,62 @@ async def delete_item_photo(iid: str, photo_id: str, cu: dict = Depends(require(
     _evict_photo_cache(photo_id)
     _spawn(_shop_sync_item(iid))
     return {"message": "Photo deleted"}
+
+async def _sync_items_in_turn(ids: list):
+    for iid in ids:  # one at a time: each sends its photos
+        await _shop_sync_item(iid)
+
+@api_router.post("/items/import-from-site")
+async def import_items_from_site(cu: dict = Depends(require("items", "create"))):
+    """One-off: reads the products already on the company's website (its public <site>/api.php?action=products) and creates an
+    Item, with its photos, for each name that is not an Item yet. Stock count and price come across; the cost does not (the site
+    never had it), so fill that in. The new Items are then sent back to the site, which links each to its existing product."""
+    cfg = await _company_site()
+    if not cfg["site_url"]:
+        raise HTTPException(400, "Add the website address under Settings > Website connection first")
+    try:
+        async with httpx.AsyncClient(timeout=30, follow_redirects=True) as http:
+            r = await http.get(cfg["site_url"] + "/api.php", params={"action": "products"})
+            products = r.json().get("products")
+            if not isinstance(products, list):
+                raise ValueError("no product list")
+            have = {(i.get("name") or "").strip().lower() for i in await db.items.find({}, {"_id": 0, "name": 1}).to_list(20000)}
+            created, skipped, photos_failed, new_ids = 0, 0, 0, []
+            for pr in products:
+                name = str(pr.get("name") or "").strip()[:255]
+                if not name or name.lower() in have:
+                    skipped += 1
+                    continue
+                qty = max(int(pr.get("stock") or 0), 0)
+                now = datetime.now(timezone.utc).isoformat()
+                doc = {"id": str(uuid.uuid4()), "name": name, "sku": None, "category": (str(pr.get("cat") or "").strip() or None),
+                       "serial_number": None, "cost": 0, "price": float(pr.get("price") or 0), "quantity": qty,
+                       "status": _item_status(qty, False), "notes": (str(pr.get("sub") or "").strip()[:5000] or None),
+                       "vendor_id": None, "created_by": cu.get("username"), "created_at": now, "updated_at": now}
+                await db.items.insert_one(doc)
+                have.add(name.lower())
+                new_ids.append(doc["id"])
+                created += 1
+                paths = [pr.get("img")] + str(pr.get("images") or "").split("|")
+                for path in [x.strip() for x in paths if x and x.strip()][:8]:
+                    try:
+                        url = path if re.match(r"https?://", path) else f"{cfg['site_url']}/{path.lstrip('/')}"
+                        pic = await http.get(url)
+                        ctype = pic.headers.get("content-type", "").split(";")[0].strip().lower()
+                        if pic.status_code != 200 or ctype not in ALLOWED_IMAGE_TYPES or len(pic.content) > RAW_UPLOAD_MAX:
+                            raise ValueError(f"{pic.status_code} {ctype}")
+                        await _save_item_photo(doc, pic.content, ctype, path.rsplit("/", 1)[-1])
+                    except Exception:
+                        photos_failed += 1
+                        logger.warning("Import: could not copy photo %s of %s", path, name, exc_info=True)
+    except HTTPException:
+        raise
+    except Exception as ex:
+        logger.warning("Import from %s failed", cfg["site_url"], exc_info=True)
+        raise HTTPException(502, f"Could not read the product list from {cfg['site_url']} ({type(ex).__name__})")
+    if new_ids:
+        _spawn(_sync_items_in_turn(new_ids))
+    return {"created": created, "skipped_existing": skipped, "photos_failed": photos_failed}
 
 # ══════════════════════════════════════════════════════════════════════
 # ── LEGAL DOCUMENT UPLOAD ─────────────────────────────────────────────

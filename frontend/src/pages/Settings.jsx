@@ -39,6 +39,7 @@ export default function Settings() {
   const [savingSite, setSavingSite] = useState(false);
   const [webForm, setWebForm] = useState({ business_type: "dealership", site_url: "", site_sync_key: "" });
   const [savingWeb, setSavingWeb] = useState(false);
+  const [importing, setImporting] = useState(false);
   const [storage, setStorage] = useState(null);
   const [bioSupported, setBioSupported] = useState(false);
   const [bioEnabled, setBioEnabled] = useState(false);
@@ -118,6 +119,16 @@ export default function Settings() {
       setWebForm({ business_type: r.data.business_type || "dealership", site_url: r.data.site_url || "", site_sync_key: "" });
       toast.success("Website connection saved. Reload the page to see the menu change.");
     } catch (err) { toast.error(err?.response?.data?.detail || "Failed to save"); } finally { setSavingWeb(false); }
+  };
+
+  const importFromSite = async () => {
+    if (!window.confirm(`Copy the products already on ${siteForm.site_url} into Items, with their photos? Products whose name is already an Item are skipped.`)) return;
+    setImporting(true);
+    try {
+      const r = await api.post("/items/import-from-site", {}, { timeout: 300000 });
+      const { created, skipped_existing, photos_failed } = r.data;
+      toast.success(`Imported ${created} product${created === 1 ? "" : "s"}${skipped_existing ? `, skipped ${skipped_existing} already in Items` : ""}${photos_failed ? `, ${photos_failed} photo(s) could not be copied` : ""}.`);
+    } catch (err) { toast.error(err?.response?.data?.detail || "Import failed"); } finally { setImporting(false); }
   };
 
   const saveWarrantyDefault = async (e) => {
@@ -329,6 +340,14 @@ export default function Settings() {
             <button type="submit" disabled={savingWeb} data-testid="save-website-btn" className="h-10 px-6 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-semibold disabled:opacity-60 transition-colors">
               {savingWeb ? "Saving..." : "Save website connection"}
             </button>
+            {siteForm.site_url && (
+              <div className="pt-4 mt-2 border-t border-slate-100">
+                <p className="text-xs text-slate-500 mb-2">Already have products on this website? Copy them into Items (name, price, stock, description and photos). Run it once.</p>
+                <button type="button" onClick={importFromSite} disabled={importing} data-testid="import-from-site-btn" className="h-10 px-6 border border-slate-300 hover:bg-slate-50 text-slate-700 rounded-lg text-sm font-semibold disabled:opacity-60 transition-colors">
+                  {importing ? "Importing... this can take a minute" : "Import products from my website"}
+                </button>
+              </div>
+            )}
           </form>
         </div>
       )}
