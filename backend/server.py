@@ -7397,6 +7397,15 @@ async def create_item(body: ItemIn, cu: dict = Depends(require("items", "create"
     _spawn(_shop_sync_item(doc["id"]))
     return _item_out(doc, cu.get("role", "admin"))
 
+@api_router.get("/items/categories")
+async def item_categories(cu: dict = Depends(require("items", "view"))):
+    """The category choices for the Add Item form: those already used by this company's items, plus the ones its website
+    takes when it is connected. Declared before /items/{iid}, which would otherwise read "categories" as an item id."""
+    used = {(i.get("category") or "").strip() for i in await db.items.find({}, {"_id": 0, "category": 1}).to_list(20000)}
+    if shop_sync.enabled(await _company_site()):
+        used |= shop_sync.CATEGORIES
+    return sorted(c for c in used if c)
+
 @api_router.get("/items/{iid}")
 async def get_item(iid: str, cu: dict = Depends(require("items", "view"))):
     it = await db.items.find_one({"id": iid}, {"_id": 0})

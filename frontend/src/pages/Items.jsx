@@ -45,6 +45,10 @@ function ItemForm({ item, isAdmin, terms, onSaved, onClose }) {
   const [photos, setPhotos] = useState([]);
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(item || null);
+  const [cats, setCats] = useState([]);
+  const [newCat, setNewCat] = useState(false);
+  useEffect(() => { api.get("/items/categories").then((r) => setCats(r.data)).catch(() => {}); }, []);
+  const catOptions = f.category && !cats.includes(f.category) ? [...cats, f.category] : cats;
   const set = (k) => (e) => setF((p) => ({ ...p, [k]: e.target.type === "checkbox" ? e.target.checked : e.target.value }));
 
   const loadPhotos = useCallback((id) => api.get(`/items/${id}/photos`).then((r) => setPhotos(r.data)).catch(() => {}), []);
@@ -85,7 +89,18 @@ function ItemForm({ item, isAdmin, terms, onSaved, onClose }) {
         <Field label="Name *"><input required className={BOX} value={f.name} onChange={set("name")} data-testid="item-name" /></Field>
         <div className="grid grid-cols-2 gap-3">
           <Field label="SKU"><input className={BOX} value={f.sku} onChange={set("sku")} /></Field>
-          <Field label="Category"><input className={BOX} value={f.category} onChange={set("category")} /></Field>
+          <Field label="Category">
+            {newCat ? (
+              <input autoFocus placeholder="New category" className={BOX} value={f.category} onChange={set("category")} data-testid="item-category" />
+            ) : (
+              <select className={BOX} value={f.category} data-testid="item-category"
+                onChange={(e) => e.target.value === "__new__" ? (setNewCat(true), setF((p) => ({ ...p, category: "" }))) : setF((p) => ({ ...p, category: e.target.value }))}>
+                <option value="">Select…</option>
+                {catOptions.map((c) => <option key={c} value={c}>{c}</option>)}
+                <option value="__new__">+ New category…</option>
+              </select>
+            )}
+          </Field>
         </div>
         <div className="grid grid-cols-2 gap-3">
           {isAdmin && <Field label="Cost (what you paid)"><input type="number" min="0" step="any" className={BOX} value={f.cost} onChange={set("cost")} /></Field>}
