@@ -3420,7 +3420,7 @@ async def return_vehicle(vid: str, body: VehicleReturnRequest, cu: dict = Depend
         fresh["purchase_price"] = refund_amount  # what the shop paid to take it back
     # Net cost this sale absorbs = its full cost minus what the vehicle is worth on re-entry, so
     # (retained revenue - cost_at_return) is the sale's true profit.
-    cost_at_return = await _vehicle_investment(vid, existing, sale) - fresh.get("purchase_price", existing.get("purchase_price") or 0)
+    cost_at_return = 0.0  # a return's profit is what we kept (retained_amount)
 
     await db.sales.update_one({"id": sale["id"]}, {"$set": {
         "cost_at_return": cost_at_return,
