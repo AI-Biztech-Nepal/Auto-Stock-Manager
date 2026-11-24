@@ -15,14 +15,16 @@ ITEM = {"id": "11111111-1111-1111-1111-111111111111", "company_id": "C1", "name"
 
 class ShopSyncTests(unittest.TestCase):
     def setUp(self):
-        shop_sync.URL, shop_sync.KEY, shop_sync.COMPANY_ID = "https://shop.test/sync_product.php", "k" * 32, "C1"
+        import os
+        os.environ.update(SHOP_SYNC_URL="https://shop.test/sync_product.php", SHOP_SYNC_KEY="k" * 32, SHOP_SYNC_COMPANY_ID="C1")
 
     def test_only_the_shops_company_is_wanted(self):
         self.assertTrue(shop_sync.wanted(ITEM))
         self.assertFalse(shop_sync.wanted({**ITEM, "company_id": "OTHER"}))
 
     def test_off_when_not_configured(self):
-        shop_sync.KEY = ""
+        import os
+        os.environ["SHOP_SYNC_KEY"] = ""
         self.assertFalse(shop_sync.wanted(ITEM))
 
     def test_payload(self):

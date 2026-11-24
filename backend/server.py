@@ -8252,9 +8252,9 @@ async def public_get_settings():
 async def _scope_to_shop_company():
     """For /public/shop/*: the online shop's own company (SHOP_SYNC_COMPANY_ID), where /public/* otherwise means the first
     company. Off (404) until that setting exists."""
-    if not shop_sync.COMPANY_ID:
+    if not shop_sync.company_id():
         raise HTTPException(404, "Not found")
-    current_company_id.set(shop_sync.COMPANY_ID)
+    current_company_id.set(shop_sync.company_id())
 
 @api_router.post("/public/visit", dependencies=[Depends(_scope_to_default_company)])
 @limiter.limit("120/minute")

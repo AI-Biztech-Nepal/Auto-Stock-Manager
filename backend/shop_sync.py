@@ -17,16 +17,24 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-URL = os.environ.get("SHOP_SYNC_URL", "").strip()
-KEY = os.environ.get("SHOP_SYNC_KEY", "").strip()
-COMPANY_ID = os.environ.get("SHOP_SYNC_COMPANY_ID", "").strip()
+
+
+def _env(name: str) -> str:
+    # Read when used, not at import: server.py imports this module before it loads backend/.env.
+    return os.environ.get(name, "").strip()
+
+
+def company_id() -> str:
+    return _env("SHOP_SYNC_COMPANY_ID")
+
+
 CATEGORIES = {"luggage", "kitchen", "appliances"}  # what the shop's pages filter on
 MAX_PHOTOS = 8
 
 
 def wanted(item: Optional[dict]) -> bool:
     """True when sync is configured and this item belongs to the shop's company."""
-    return bool(URL and KEY and COMPANY_ID and item and item.get("company_id") == COMPANY_ID)
+    return bool(_env("SHOP_SYNC_URL") and _env("SHOP_SYNC_KEY") and company_id() and item and item.get("company_id") == company_id())
 
 
 def build_payload(item: dict, photos: list) -> Optional[dict]:
@@ -49,7 +57,7 @@ def build_payload(item: dict, photos: list) -> Optional[dict]:
 
 async def _post(body: dict) -> None:
     async with httpx.AsyncClient(timeout=60) as client:
-        r = await client.post(URL, json=body, headers={"Authorization": f"Bearer {KEY}"})
+        r = await client.post(_env("SHOP_SYNC_URL"), json=body, headers={"Authorization": f"Bearer {_env('SHOP_SYNC_KEY')}"})
     if r.status_code != 200:
         logger.warning("Shop sync of %s was refused (%s): %s", body.get("app_id"), r.status_code, r.text[:300])
 
