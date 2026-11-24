@@ -380,6 +380,8 @@ async def my_features(cu: dict = Depends(get_current_user)):
     """Which stock.* features are on for the caller's organization, so screens can hide the rest. features is null when
     the portal cannot say (not connected, company not linked): show everything, the server still refuses what is off."""
     features = await portal_bridge.features_for(cu)
+    if shop_sync.is_shop(await _company_site(cu.get("company_id"))):  # a company that sells goods, not vehicles (Settings > Website)
+        features = {**(features or {}), **portal_bridge.ITEMS_ONLY_FEATURES}
     return {"features": features, "terms": terms.terms_for(features)}
 
 # require_feature('stock.x') for Prompt 2: portal logins are checked against core.feature_on, old tokens pass.
@@ -2042,6 +2044,11 @@ class SettingsUpdate(BaseModel):
     hero_image_url: Optional[str] = None
     service_image_url: Optional[str] = None
     warranty_days_default: Optional[int] = Field(None, ge=1, le=3650)
+    # Website connection (see shop_sync.py): what the company sells, where its site is, and the key its site's receiver checks.
+    business_type: Optional[str] = Field(None, pattern="^(dealership|shop)$")
+    site_url: Optional[str] = Field(None, max_length=300)
+    site_sync_url: Optional[str] = Field(None, max_length=300)
+    site_sync_key: Optional[str] = Field(None, max_length=120)
 
 class WarrantyVoid(BaseModel):
     reason: str = Field(..., min_length=1, max_length=500)
@@ -6391,14 +6398,16 @@ async def visits_summary(days: int = 30, skip: int = 0, cu: dict = Depends(requi
             e["views"] += 1; e["people"].add(r["visitor_id"])
     top_bikes = [{"id": k, "path": f"/inventory/{k}", "name": k, "views": e["views"], "customers": len(e["people"])}
                  for k, e in sorted(bike_views.items(), key=lambda kv: (-kv[1]["views"], -len(kv[1]["people"])))[:20]]
-    shop = shop_sync.is_shop_company(cu.get("company_id"))
+    site = await _company_site()
+    shop = shop_sync.is_shop(site)
     if shop:  # the shop's product pages (/product/<id>, see its tracker) take the bikes' place
-        prod_views = {}
+        prod_views, base = {}, "/product.php"
         for r in rows:
             if m := _SHOP_PRODUCT_PATH.fullmatch(r["path"]):
-                e = prod_views.setdefault(m.group(1), {"views": 0, "people": set()})
+                base = m.group(1)
+                e = prod_views.setdefault(m.group(2), {"views": 0, "people": set()})
                 e["views"] += 1; e["people"].add(r["visitor_id"])
-        top_bikes = [{"id": k, "path": f"/product.php?id={k}", "name": k, "views": e["views"], "customers": len(e["people"])}
+        top_bikes = [{"id": k, "path": f"{base}?id={k}", "name": k, "views": e["views"], "customers": len(e["people"])}
                      for k, e in sorted(prod_views.items(), key=lambda kv: (-kv[1]["views"], -len(kv[1]["people"])))[:20]]
     visits, spans, visit_list = 0, [], []
     def close_visit(vid, pv):
@@ -6428,17 +6437,17 @@ async def visits_summary(days: int = 30, skip: int = 0, cu: dict = Depends(requi
     out = await _name_vehicle_pages({"days": days, "total_views": len(rows), "unique_visitors": len(visitors),
             "today_views": today_views, "today_visitors": len(today_visitors), "daily": daily,
             "top_pages": top(pages), "top_bikes": top_bikes, "sources": top(refs), "devices": devices,
-            "storefront_url": (shop_sync.site_url() or STOREFRONT_URL) if shop else STOREFRONT_URL,
+            "storefront_url": (site["site_url"] or STOREFRONT_URL) if shop else STOREFRONT_URL,
             "source": "beacon", "engagement": engagement, "visit_list": visit_list[:200]})
-    return _name_shop_products(out, await shop_sync.product_names()) if shop else out
+    return _name_shop_products(out, await shop_sync.product_names(site)) if shop else out
 
-_SHOP_PRODUCT_PATH = re.compile(r"/product/(\d+)/?")
+_SHOP_PRODUCT_PATH = re.compile(r"(/[^/]*product[^/]*)/(\d+)/?")  # what the tracker sends for a product page: /product.php/29
 
 def _name_shop_products(summary: dict, names: dict) -> dict:
     """The shop's counterpart of _name_vehicle_pages: /product/<id> becomes the product's name, and links to its page."""
-    label = lambda p: names.get(m.group(1), f"Product {m.group(1)}") if (m := _SHOP_PRODUCT_PATH.fullmatch(p)) else p
+    label = lambda p: names.get(m.group(2), f"Product {m.group(2)}") if (m := _SHOP_PRODUCT_PATH.fullmatch(p)) else p
     for r in summary["top_pages"]:
-        if m := _SHOP_PRODUCT_PATH.fullmatch(r["path"]): r["path"] = f"/product.php?id={m.group(1)}"
+        if m := _SHOP_PRODUCT_PATH.fullmatch(r["path"]): r["path"] = f"{m.group(1)}?id={m.group(2)}"
         r["name"] = label(r["name"])
     for b in summary["top_bikes"]: b["name"] = names.get(b["id"], f"Product {b['id']}")
     for v in summary["visit_list"]:
@@ -6447,19 +6456,49 @@ def _name_shop_products(summary: dict, names: dict) -> dict:
     return summary
 
 # ── SETTINGS (storefront branding/contact info) ────────────────────────
+def _settings_out(row: Optional[dict], request: Request) -> dict:
+    """The settings row for the admin screen: the sync key is never sent back (only whether one is set), and the tracker
+    address is worked out from this request."""
+    out = dict(row or {})
+    out["site_sync_key_set"] = bool(out.pop("site_sync_key", None))
+    if out.get("site_key"):
+        scheme = request.headers.get("x-forwarded-proto", request.url.scheme).split(",")[0].strip()
+        host = (request.headers.get("x-forwarded-host") or request.headers.get("host") or request.url.netloc).split(",")[0].strip()
+        out["tracker_url"] = f"{scheme}://{host}/api/public/tracker/{out['site_key']}.js"
+    return out
+
+def _clean_url(v: str, what: str) -> str:
+    v = v.strip().rstrip("/")
+    if v and not re.fullmatch(r"https?://[^\s/]+(/\S*)?", v):
+        raise HTTPException(400, f"{what} must start with https:// (or http://) and be a full address")
+    return v
+
 @api_router.get("/settings")
-async def get_settings(cu: dict = Depends(admin_only)):
+async def get_settings(request: Request, cu: dict = Depends(admin_only)):
     # No "id" filter: settings is looked up purely by the company_id the wrapper scopes
     # this query to -- one row per company, "id" is just an arbitrary row identifier.
-    s = await db.settings.find_one({}, {"_id": 0})
-    return s or {}
+    return _settings_out(await db.settings.find_one({}, {"_id": 0}), request)
 
 @api_router.put("/settings")
-async def update_settings(settings: SettingsUpdate, cu: dict = Depends(admin_only)):
+async def update_settings(request: Request, settings: SettingsUpdate, cu: dict = Depends(admin_only)):
     updates = {k: v for k, v in settings.model_dump().items() if v is not None}
-    await db.settings.update_one({}, {"$set": updates}, upsert=True)
+    for field, what in (("site_url", "Website address"), ("site_sync_url", "Receiver address")):
+        if field in updates:
+            updates[field] = _clean_url(updates[field], what)
+    if "site_sync_key" in updates:
+        updates["site_sync_key"] = updates["site_sync_key"].strip()
+        if updates["site_sync_key"] and len(updates["site_sync_key"]) < 32:
+            raise HTTPException(400, "The sync key must be at least 32 characters (use a long random one)")
+    row = await db.settings.find_one({}, {"_id": 0})
+    if not row:  # a company that never saved settings has no row yet; "id" is the table's primary key
+        await db.settings.insert_one({"id": str(uuid.uuid4())})
+        row = {}
+    if updates.get("site_url") and not row.get("site_key"):
+        updates["site_key"] = uuid.uuid4().hex[:24]  # public id for this company's visit tracker
+    if updates:
+        await db.settings.update_one({}, {"$set": updates})
     asyncio.create_task(_notify_storefront())
-    return await db.settings.find_one({}, {"_id": 0})
+    return _settings_out(await db.settings.find_one({}, {"_id": 0}), request)
 
 # ── REAL TIMINGS (see perf_stats.py) ─────────────────────────────────────
 class PerfSample(BaseModel):
@@ -6675,6 +6714,11 @@ async def _run_startup_tasks():
             ("vehicles", "sanakhat_cost", "DOUBLE"),
             ("vehicles", "purchase_due", "DOUBLE"),
             ("settings", "warranty_days_default", "INT"),
+            ("settings", "business_type", "VARCHAR(20)"),
+            ("settings", "site_url", "VARCHAR(300)"),
+            ("settings", "site_sync_url", "VARCHAR(300)"),
+            ("settings", "site_sync_key", "VARCHAR(120)"),
+            ("settings", "site_key", "VARCHAR(40)"),
             ("vehicle_photos", "sort_order", "INT"),
             ("vehicle_photos", "storage_path", "VARCHAR(500)"),
             ("legal_documents", "storage_path", "VARCHAR(500)"),
@@ -7304,19 +7348,25 @@ def _item_out(it: dict, role: str, photos: Optional[list] = None) -> dict:
     out["thumb_photos"] = [{"id": p["id"], "url": f"/api/vehicle-photos/{p['id']}/file", "thumb": f"/api/vehicle-photos/{p['id']}/file?w=240"} for p in photos[:3]]
     return out
 
+async def _company_site(cid=None) -> dict:
+    """The current company's website connection (see shop_sync.from_settings), from its settings row."""
+    cid = cid or current_company_id.get()
+    return shop_sync.from_settings(await db.settings.find_one({}, {"_id": 0}), cid)
+
 async def _shop_sync_item(iid: str):
     """Sends an item's current state to the company's online shop (see shop_sync.py). Runs in the background and never
     raises: a shop outage must not hold up stock work. Unlisted items are taken off the shop; sold-out ones stay, as Out of stock."""
     try:
-        it = await db.items.find_one({"id": iid}, {"_id": 0})
-        if not shop_sync.wanted(it):
+        cfg = await _company_site()
+        it = await db.items.find_one({"id": iid}, {"_id": 0}) if shop_sync.enabled(cfg) else None
+        if not it:
             return
         if it.get("status") == "unlisted":
-            await shop_sync.remove_item(iid)
+            await shop_sync.remove_item(cfg, iid)
             return
         photos = await db.vehicle_photos.find({"item_id": iid}, {"_id": 0, "id": 1}).sort(PHOTO_ORDER).to_list(shop_sync.MAX_PHOTOS)
         blobs = [(p["id"], (await _get_photo_bytes({"id": p["id"], "item_id": iid}))[0]) for p in photos]
-        await shop_sync.push_item(it, blobs)
+        await shop_sync.push_item(cfg, it, blobs)
     except Exception:
         logger.warning("Shop sync of item %s failed", iid, exc_info=True)
 
@@ -7370,11 +7420,11 @@ async def delete_item(iid: str, cu: dict = Depends(require("items", "delete"))):
         # The books keep referring to it; unlist it instead so history stays whole.
         raise HTTPException(400, "This item has sales on record and cannot be deleted. Mark it unlisted instead.")
     photos = await db.vehicle_photos.find({"item_id": iid}, {"_id": 0, "id": 1, "storage_path": 1}).to_list(500)
-    shop_item = await db.items.find_one({"id": iid}, {"_id": 0, "company_id": 1})
     r = await db.items.delete_one({"id": iid})
     if r.deleted_count == 0: raise HTTPException(404, "Item not found")
-    if shop_sync.wanted(shop_item):
-        _spawn(shop_sync.remove_item(iid))
+    cfg = await _company_site()
+    if shop_sync.enabled(cfg):
+        _spawn(shop_sync.remove_item(cfg, iid))
     for p in photos:
         await db.vehicle_photos.delete_one({"id": p["id"]})
         if p.get("storage_path") and media_storage.enabled():
@@ -8275,22 +8325,59 @@ async def public_get_settings():
     s = await db.settings.find_one({}, {"_id": 0, "id": 0})
     return s or {}
 
-async def _scope_to_shop_company():
-    """For /public/shop/*: the online shop's own company (SHOP_SYNC_COMPANY_ID), where /public/* otherwise means the first
-    company. Off (404) until that setting exists."""
-    if not shop_sync.company_id():
+async def _scope_to_site(site_key: str):
+    """For /public/visit/{site_key}: the company that owns this key (Settings > Website). The key only says whose visits these
+    are; it is public, like the page it sits on."""
+    row = await db.settings.find_one({"site_key": site_key}, {"_id": 0, "company_id": 1}) if re.fullmatch(r"[A-Za-z0-9]{16,40}", site_key) else None
+    if not row:
         raise HTTPException(404, "Not found")
-    current_company_id.set(shop_sync.company_id())
+    current_company_id.set(row["company_id"])
 
 @api_router.post("/public/visit", dependencies=[Depends(_scope_to_default_company)])
 @limiter.limit("120/minute")
 async def public_record_visit(request: Request):
     return await _record_visit(request, "hamroauto.com.np")
 
-@api_router.post("/public/shop/visit", dependencies=[Depends(_scope_to_shop_company)])
+async def _scope_to_env_shop():
+    if not shop_sync.company_id():
+        raise HTTPException(404, "Not found")
+    current_company_id.set(shop_sync.company_id())
+
+@api_router.post("/public/shop/visit", dependencies=[Depends(_scope_to_env_shop)])
 @limiter.limit("120/minute")
 async def public_record_shop_visit(request: Request):
-    return await _record_visit(request, "allinoneabroad.com")
+    """Kept for the first shop's already-installed tracker (it posts here). New sites use /public/visit/{site_key}."""
+    host = urlparse((await _company_site())["site_url"]).hostname or ""
+    return await _record_visit(request, host.removeprefix("www.") or "-")
+
+@api_router.post("/public/visit/{site_key}", dependencies=[Depends(_scope_to_site)])
+@limiter.limit("120/minute")
+async def public_record_site_visit(request: Request, site_key: str):
+    host = urlparse((await _company_site())["site_url"]).hostname or ""
+    return await _record_visit(request, host.removeprefix("www.") or "-")
+
+_TRACKER_JS = """(function () {
+  if (navigator.webdriver) return;
+  var id = null;
+  try { id = localStorage.getItem('vid'); if (!id) { id = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now()) + '-' + Math.random().toString(16).slice(2); localStorage.setItem('vid', id); } }
+  catch (e) { id = String(Date.now()) + '-' + Math.random().toString(16).slice(2); }
+  var path = location.pathname, pid = new URLSearchParams(location.search).get('id');
+  if (pid && /^[0-9]+$/.test(pid)) path += '/' + pid; // product.php?id=29 is reported as /product.php/29, so Visits can rank products
+  var url = '__URL__', body = JSON.stringify({ visitor_id: id, path: path, referrer: document.referrer });
+  try { if (!navigator.sendBeacon(url, body)) throw 0; } catch (e) { fetch(url, { method: 'POST', body: body, keepalive: true, headers: { 'Content-Type': 'text/plain' } }).catch(function () {}); }
+})();
+"""
+
+@api_router.get("/public/tracker/{site_key_js}")
+async def public_tracker_js(request: Request, site_key_js: str):
+    """The visit tracker for a company's website: <script src=".../api/public/tracker/<site key>.js" defer></script> on its pages."""
+    key = site_key_js.removesuffix(".js")
+    if not re.fullmatch(r"[A-Za-z0-9]{16,40}", key) or not await db.settings.find_one({"site_key": key}, {"_id": 0, "id": 1}):
+        raise HTTPException(404, "Not found")
+    scheme = request.headers.get("x-forwarded-proto", request.url.scheme).split(",")[0].strip()
+    host = (request.headers.get("x-forwarded-host") or request.headers.get("host") or request.url.netloc).split(",")[0].strip()
+    return Response(_TRACKER_JS.replace("__URL__", f"{scheme}://{host}/api/public/visit/{key}"), media_type="application/javascript",
+                    headers={"Cache-Control": "public, max-age=3600"})
 
 async def _record_visit(request: Request, own_host: str):
     try:  # navigator.sendBeacon posts text/plain, so don't insist on a JSON content type

@@ -933,7 +933,12 @@ create table if not exists "public"."settings" (
   "address" varchar(500),
   "hero_image_url" varchar(1000),
   "service_image_url" varchar(1000),
-  "warranty_days_default" integer
+  "warranty_days_default" integer,
+  "business_type" varchar(20),
+  "site_url" varchar(300),
+  "site_sync_url" varchar(300),
+  "site_sync_key" varchar(120),
+  "site_key" varchar(40)
 );
 alter table "public"."settings" enable row level security;  -- the public API key can read nothing; the backend connects directly
 alter table "public"."settings" add column if not exists "id" varchar(36);
@@ -946,6 +951,11 @@ alter table "public"."settings" add column if not exists "address" varchar(500);
 alter table "public"."settings" add column if not exists "hero_image_url" varchar(1000);
 alter table "public"."settings" add column if not exists "service_image_url" varchar(1000);
 alter table "public"."settings" add column if not exists "warranty_days_default" integer;
+alter table "public"."settings" add column if not exists "business_type" varchar(20);
+alter table "public"."settings" add column if not exists "site_url" varchar(300);
+alter table "public"."settings" add column if not exists "site_sync_url" varchar(300);
+alter table "public"."settings" add column if not exists "site_sync_key" varchar(120);
+alter table "public"."settings" add column if not exists "site_key" varchar(40);
 create index if not exists "idx_settings_company_id" on "public"."settings" ("company_id");
 
 create table if not exists "public"."sync_logs" (

@@ -278,15 +278,7 @@ ITEMS_ONLY_FEATURES = {"stock.vehicles": False, "stock.sanakhat": False, "stock.
                        "stock.visits": True}  # the shop wants the Marketing > Visits tab
 
 
-def items_only(company_id) -> bool:
-    """A company that sells goods, not vehicles (the shop in SHOP_SYNC_COMPANY_ID), is shown the Items screens without
-    waiting for the portal to say so. shortcut: tied to the shop-sync company, widen to its own setting for a second shop."""
-    return bool(company_id) and company_id == os.environ.get("SHOP_SYNC_COMPANY_ID", "").strip()
-
-
 async def features_for(cu: dict):
-    if not cu.get("org_id") and items_only(cu.get("company_id")):
-        return dict(ITEMS_ONLY_FEATURES)
     return await asyncio.to_thread(_features_sync, cu.get("company_id"), cu.get("org_id"))
 
 

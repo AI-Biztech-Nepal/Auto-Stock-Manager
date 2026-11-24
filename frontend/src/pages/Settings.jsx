@@ -37,6 +37,8 @@ export default function Settings() {
   const [warrantyDays, setWarrantyDays] = useState(182);
   const [savingWarranty, setSavingWarranty] = useState(false);
   const [savingSite, setSavingSite] = useState(false);
+  const [webForm, setWebForm] = useState({ business_type: "dealership", site_url: "", site_sync_key: "" });
+  const [savingWeb, setSavingWeb] = useState(false);
   const [storage, setStorage] = useState(null);
   const [bioSupported, setBioSupported] = useState(false);
   const [bioEnabled, setBioEnabled] = useState(false);
@@ -56,7 +58,7 @@ export default function Settings() {
 
   useEffect(() => {
     if (!isAdmin) return;
-    api.get("/settings").then(r => { setSiteForm(r.data || {}); setWarrantyDays(r.data?.warranty_days_default || 182); }).catch(() => toast.error("Failed to load storefront settings"));
+    api.get("/settings").then(r => { setSiteForm(r.data || {}); setWarrantyDays(r.data?.warranty_days_default || 182); setWebForm({ business_type: r.data?.business_type || "dealership", site_url: r.data?.site_url || "", site_sync_key: "" }); }).catch(() => toast.error("Failed to load storefront settings"));
     api.get("/admin/storage-usage").then(r => setStorage(r.data)).catch(() => {});
     fetchCompanyUsers();
   }, [isAdmin]);
@@ -103,6 +105,19 @@ export default function Settings() {
       setSiteForm(r.data);
       toast.success("Storefront settings updated!");
     } catch { toast.error("Failed to save"); } finally { setSavingSite(false); }
+  };
+
+  const saveWebsite = async (e) => {
+    e.preventDefault();
+    setSavingWeb(true);
+    try {
+      const body = { business_type: webForm.business_type, site_url: webForm.site_url };
+      if (webForm.site_sync_key.trim()) body.site_sync_key = webForm.site_sync_key.trim();  // empty = keep the saved key
+      const r = await api.put("/settings", body);
+      setSiteForm(r.data);
+      setWebForm({ business_type: r.data.business_type || "dealership", site_url: r.data.site_url || "", site_sync_key: "" });
+      toast.success("Website connection saved. Reload the page to see the menu change.");
+    } catch (err) { toast.error(err?.response?.data?.detail || "Failed to save"); } finally { setSavingWeb(false); }
   };
 
   const saveWarrantyDefault = async (e) => {
@@ -276,6 +291,45 @@ export default function Settings() {
               </button>
             </form>
           )}
+        </div>
+      )}
+
+      {/* Website connection (Admin only): what this business sells, and the site its items and visits belong to */}
+      {isAdmin && siteForm && (
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
+          <h2 className="text-base font-bold text-slate-900 mb-1" style={{ fontFamily: "Manrope" }}>Website connection</h2>
+          <p className="text-xs text-slate-500 mb-4">
+            For a business with its own website: pick "Shop" if it sells goods rather than vehicles (the menu then shows Items), add the
+            website address, and its items are sent to the site and its visitors are counted under Marketing &rarr; Visits.
+          </p>
+          <form onSubmit={saveWebsite} className="space-y-4">
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1.5">What does this business sell?</label>
+              <select value={webForm.business_type} onChange={e => setWebForm({ ...webForm, business_type: e.target.value })} className={inp} data-testid="web-business-type">
+                <option value="dealership">Vehicles (dealership)</option>
+                <option value="shop">Goods (shop: Items instead of Vehicles)</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1.5">Website address</label>
+              <input type="url" placeholder="https://yourshop.com" value={webForm.site_url} onChange={e => setWebForm({ ...webForm, site_url: e.target.value })} className={inp} data-testid="web-site-url" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1.5">Sync key {siteForm.site_sync_key_set && <span className="text-emerald-600 font-semibold">(saved)</span>}</label>
+              <input type="password" autoComplete="new-password" placeholder={siteForm.site_sync_key_set ? "Leave empty to keep the saved key" : "The same key as in your website's receiver (32+ characters)"}
+                value={webForm.site_sync_key} onChange={e => setWebForm({ ...webForm, site_sync_key: e.target.value })} className={inp} data-testid="web-sync-key" />
+              <p className="text-xs text-slate-400 mt-1">Items are sent to <b>{(webForm.site_url || "your website").replace(/\/$/, "")}/sync_product.php</b>. Never shown again once saved.</p>
+            </div>
+            {siteForm.tracker_url && (
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1.5">Visit tracker: paste this line before &lt;/body&gt; on each page of the website</label>
+                <input readOnly onFocus={e => e.target.select()} value={`<script src="${siteForm.tracker_url}" defer></script>`} className={`${inp} font-mono text-xs`} data-testid="web-tracker" />
+              </div>
+            )}
+            <button type="submit" disabled={savingWeb} data-testid="save-website-btn" className="h-10 px-6 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-semibold disabled:opacity-60 transition-colors">
+              {savingWeb ? "Saving..." : "Save website connection"}
+            </button>
+          </form>
         </div>
       )}
 
