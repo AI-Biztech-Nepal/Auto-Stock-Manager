@@ -274,7 +274,8 @@ def _features_sync(company_id, org_id):
         return None
 
 
-ITEMS_ONLY_FEATURES = {"stock.vehicles": False, "stock.sanakhat": False, "stock.job_cards": False, "stock.spare_parts": False}
+ITEMS_ONLY_FEATURES = {"stock.vehicles": False, "stock.sanakhat": False, "stock.job_cards": False, "stock.spare_parts": False,
+                       "stock.visits": True}  # the shop wants the Marketing > Visits tab
 
 
 def items_only(company_id) -> bool:
