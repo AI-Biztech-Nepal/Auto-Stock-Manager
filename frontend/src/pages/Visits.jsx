@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import TopbarRow from "../components/TopbarRow";
-import { Eye, Users, Smartphone, Monitor, Globe, FileText, ExternalLink, Search, Clock, TrendingUp, Layers, Bike, Mail } from "lucide-react";
+import { Eye, Users, Smartphone, Monitor, Globe, FileText, ExternalLink, Search, Clock, TrendingUp, Layers, Bike, Mail, Package } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
 import { useAuth } from "../context/AuthContext";
@@ -194,20 +194,21 @@ const SearchTable = ({ title, icon, rows: allRows, empty, linkBase }) => {
 };
 
 // The bikes people opened most, with how many different customers (browsers) looked at each one.
-const TopBikes = ({ rows, linkBase }) => {
+const TopBikes = ({ rows, linkBase, products = false }) => {
+  const thing = products ? "product" : "bike";
   const [all, setAll] = useState(false);
   const list = all ? rows : rows.slice(0, 8);
   const max = Math.max(1, ...rows.map(r => r.views));
   const hasCustomers = rows.some(r => r.customers != null);
   return (
     <Card>
-      <SectionTitle icon={Bike} title="Most viewed bikes" hint="Which bikes customers open most. Customers = different people who looked at that bike." />
-      {rows.length === 0 ? <p className="px-5 pb-6 text-sm text-slate-500 text-center">No bike pages were opened in this period.</p> : (
+      <SectionTitle icon={products ? Package : Bike} title={`Most viewed ${thing}s`} hint={`Which ${thing}s customers open most. Customers = different people who looked at that ${thing}.`} />
+      {rows.length === 0 ? <p className="px-5 pb-6 text-sm text-slate-500 text-center">No {thing} pages were opened in this period.</p> : (
         <div className="pb-2">
           <table className="w-full text-sm">
             <thead><tr className="text-xs text-slate-400 text-left">
               <th className="pl-5 py-2 font-medium w-8">#</th>
-              <th className="py-2 font-medium">Bike</th>
+              <th className="py-2 font-medium capitalize">{thing}</th>
               <th className="py-2 font-medium text-right">Views</th>
               {hasCustomers && <th className="px-5 py-2 font-medium text-right" title="Different people (browsers) who opened this bike's page">Customers</th>}
             </tr></thead>
@@ -215,7 +216,7 @@ const TopBikes = ({ rows, linkBase }) => {
               <tr key={r.id} className="border-t border-slate-100 hover:bg-slate-50" data-testid="top-bike-row">
                 <td className="pl-5 py-2.5 text-slate-400 font-semibold">{i + 1}</td>
                 <td className="py-2.5 pr-3 max-w-[180px] sm:max-w-[320px]">
-                  <a href={linkBase + r.path} target="_blank" rel="noopener noreferrer" title="Open this bike on the website" className="block truncate text-slate-700 hover:text-blue-700 hover:underline">{r.name}</a>
+                  <a href={linkBase + r.path} target="_blank" rel="noopener noreferrer" title={`Open this ${thing} on the website`} className="block truncate text-slate-700 hover:text-blue-700 hover:underline">{r.name}</a>
                   <div className="h-1 bg-slate-100 rounded-full mt-1.5"><div className="h-1 bg-gradient-to-r from-blue-500 to-indigo-500 rounded-full" style={{ width: `${(r.views / max) * 100}%` }} /></div>
                 </td>
                 <td className="py-2.5 text-right font-semibold text-slate-900">{r.views}</td>
@@ -408,7 +409,7 @@ export default function Visits({ embedded = false }) {
         </Card>
       </div>
 
-      {!itemsMode(features) && <TopBikes rows={data.top_bikes || []} linkBase={base} />}
+      <TopBikes rows={data.top_bikes || []} linkBase={base} products={itemsMode(features)} />
 
       {searchErr && <p className="text-sm text-red-600">{searchErr}</p>}
       {search?.configured && (

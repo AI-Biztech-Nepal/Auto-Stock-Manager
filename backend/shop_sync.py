@@ -11,7 +11,9 @@ Off unless all three are set in backend/.env:
 import base64
 import logging
 import os
+import time
 from typing import Optional
+from urllib.parse import urlparse
 
 import httpx
 
@@ -26,6 +28,33 @@ def _env(name: str) -> str:
 
 def company_id() -> str:
     return _env("SHOP_SYNC_COMPANY_ID")
+
+
+def site_url() -> str:
+    """The shop's address (scheme and host of SHOP_SYNC_URL), or "" when sync is not set up."""
+    u = urlparse(_env("SHOP_SYNC_URL"))
+    return f"{u.scheme}://{u.netloc}" if u.scheme and u.netloc else ""
+
+
+def is_shop_company(cid) -> bool:
+    return bool(cid) and cid == company_id()
+
+
+_names = {"at": 0.0, "by_id": {}}
+
+
+async def product_names() -> dict:
+    """{shop product id (text): name} from the shop's own public catalogue, kept 5 minutes. Empty when it cannot be
+    reached: the Visits page then shows "Product 29" instead of the name."""
+    if _names["by_id"] and time.monotonic() - _names["at"] < 300:
+        return _names["by_id"]
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.get(site_url() + "/api.php", params={"action": "products"})
+        _names.update(at=time.monotonic(), by_id={str(p["id"]): p["name"] for p in r.json().get("products", [])})
+    except Exception:
+        logger.warning("Could not read the shop's product names", exc_info=True)
+    return _names["by_id"]
 
 
 CATEGORIES = {"luggage", "kitchen", "appliances"}  # what the shop's pages filter on

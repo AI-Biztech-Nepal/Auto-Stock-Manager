@@ -6391,6 +6391,15 @@ async def visits_summary(days: int = 30, skip: int = 0, cu: dict = Depends(requi
             e["views"] += 1; e["people"].add(r["visitor_id"])
     top_bikes = [{"id": k, "path": f"/inventory/{k}", "name": k, "views": e["views"], "customers": len(e["people"])}
                  for k, e in sorted(bike_views.items(), key=lambda kv: (-kv[1]["views"], -len(kv[1]["people"])))[:20]]
+    shop = shop_sync.is_shop_company(cu.get("company_id"))
+    if shop:  # the shop's product pages (/product/<id>, see its tracker) take the bikes' place
+        prod_views = {}
+        for r in rows:
+            if m := _SHOP_PRODUCT_PATH.fullmatch(r["path"]):
+                e = prod_views.setdefault(m.group(1), {"views": 0, "people": set()})
+                e["views"] += 1; e["people"].add(r["visitor_id"])
+        top_bikes = [{"id": k, "path": f"/product.php?id={k}", "name": k, "views": e["views"], "customers": len(e["people"])}
+                     for k, e in sorted(prod_views.items(), key=lambda kv: (-kv[1]["views"], -len(kv[1]["people"])))[:20]]
     visits, spans, visit_list = 0, [], []
     def close_visit(vid, pv):
         nonlocal visits
@@ -6416,10 +6425,26 @@ async def visits_summary(days: int = 30, skip: int = 0, cu: dict = Depends(requi
                   "longest_minutes": round(max(spans) / 60, 1) if spans else 0,
                   "pages_per_visit": round(len(rows) / visits, 1) if visits else 0,
                   "quick_visit_pct": round(100 * (visits - len(spans)) / visits) if visits else 0}
-    return await _name_vehicle_pages({"days": days, "total_views": len(rows), "unique_visitors": len(visitors),
+    out = await _name_vehicle_pages({"days": days, "total_views": len(rows), "unique_visitors": len(visitors),
             "today_views": today_views, "today_visitors": len(today_visitors), "daily": daily,
             "top_pages": top(pages), "top_bikes": top_bikes, "sources": top(refs), "devices": devices,
-            "storefront_url": STOREFRONT_URL, "source": "beacon", "engagement": engagement, "visit_list": visit_list[:200]})
+            "storefront_url": (shop_sync.site_url() or STOREFRONT_URL) if shop else STOREFRONT_URL,
+            "source": "beacon", "engagement": engagement, "visit_list": visit_list[:200]})
+    return _name_shop_products(out, await shop_sync.product_names()) if shop else out
+
+_SHOP_PRODUCT_PATH = re.compile(r"/product/(\d+)/?")
+
+def _name_shop_products(summary: dict, names: dict) -> dict:
+    """The shop's counterpart of _name_vehicle_pages: /product/<id> becomes the product's name, and links to its page."""
+    label = lambda p: names.get(m.group(1), f"Product {m.group(1)}") if (m := _SHOP_PRODUCT_PATH.fullmatch(p)) else p
+    for r in summary["top_pages"]:
+        if m := _SHOP_PRODUCT_PATH.fullmatch(r["path"]): r["path"] = f"/product.php?id={m.group(1)}"
+        r["name"] = label(r["name"])
+    for b in summary["top_bikes"]: b["name"] = names.get(b["id"], f"Product {b['id']}")
+    for v in summary["visit_list"]:
+        v["paths"] = [label(p) for p in v["paths"]]
+        for st in v.get("steps", []): st["label"] = label(st["path"])
+    return summary
 
 # ── SETTINGS (storefront branding/contact info) ────────────────────────
 @api_router.get("/settings")
