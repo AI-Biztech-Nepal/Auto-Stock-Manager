@@ -29,6 +29,7 @@ import perf_stats
 import auto_backup
 import crm
 import portal_bridge
+import shop_sync
 import terms
 import assistant_api
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -7277,6 +7278,22 @@ def _item_out(it: dict, role: str, photos: Optional[list] = None) -> dict:
     out["thumb_photos"] = [{"id": p["id"], "url": f"/api/vehicle-photos/{p['id']}/file", "thumb": f"/api/vehicle-photos/{p['id']}/file?w=240"} for p in photos[:3]]
     return out
 
+async def _shop_sync_item(iid: str):
+    """Sends an item's current state to the company's online shop (see shop_sync.py). Runs in the background and never
+    raises: a shop outage must not hold up stock work. Unlisted items are taken off the shop; sold-out ones stay, as Out of stock."""
+    try:
+        it = await db.items.find_one({"id": iid}, {"_id": 0})
+        if not shop_sync.wanted(it):
+            return
+        if it.get("status") == "unlisted":
+            await shop_sync.remove_item(iid)
+            return
+        photos = await db.vehicle_photos.find({"item_id": iid}, {"_id": 0, "id": 1}).sort(PHOTO_ORDER).to_list(shop_sync.MAX_PHOTOS)
+        blobs = [(p["id"], (await _get_photo_bytes({"id": p["id"], "item_id": iid}))[0]) for p in photos]
+        await shop_sync.push_item(it, blobs)
+    except Exception:
+        logger.warning("Shop sync of item %s failed", iid, exc_info=True)
+
 @api_router.get("/items")
 async def list_items(status: Optional[str] = None, q: Optional[str] = None, cu: dict = Depends(require("items", "view"))):
     query = {}
@@ -7301,6 +7318,7 @@ async def create_item(body: ItemIn, cu: dict = Depends(require("items", "create"
     doc.update({"id": str(uuid.uuid4()), "created_by": cu.get("username"), "created_at": now, "updated_at": now})
     await db.items.insert_one(doc)
     doc.pop("_id", None)
+    _spawn(_shop_sync_item(doc["id"]))
     return _item_out(doc, cu.get("role", "admin"))
 
 @api_router.get("/items/{iid}")
@@ -7317,6 +7335,7 @@ async def update_item(iid: str, body: ItemIn, cu: dict = Depends(require("items"
     await _check_sku_free(doc["sku"], iid)
     doc["updated_at"] = datetime.now(timezone.utc).isoformat()
     await db.items.update_one({"id": iid}, {"$set": doc})
+    _spawn(_shop_sync_item(iid))
     return await get_item(iid, cu)
 
 @api_router.delete("/items/{iid}")
@@ -7325,8 +7344,11 @@ async def delete_item(iid: str, cu: dict = Depends(require("items", "delete"))):
         # The books keep referring to it; unlist it instead so history stays whole.
         raise HTTPException(400, "This item has sales on record and cannot be deleted. Mark it unlisted instead.")
     photos = await db.vehicle_photos.find({"item_id": iid}, {"_id": 0, "id": 1, "storage_path": 1}).to_list(500)
+    shop_item = await db.items.find_one({"id": iid}, {"_id": 0, "company_id": 1})
     r = await db.items.delete_one({"id": iid})
     if r.deleted_count == 0: raise HTTPException(404, "Item not found")
+    if shop_sync.wanted(shop_item):
+        _spawn(shop_sync.remove_item(iid))
     for p in photos:
         await db.vehicle_photos.delete_one({"id": p["id"]})
         if p.get("storage_path") and media_storage.enabled():
@@ -7375,6 +7397,7 @@ async def sell_item(iid: str, sale: ItemSale, cu: dict = Depends(require("sales"
     if sale.customer_id:
         await db.customers.update_one({"id": sale.customer_id}, {"$set": {"last_purchase_date": sale_date}})
     doc.pop("_id", None)
+    _spawn(_shop_sync_item(iid))  # the shop shows the new count, or Out of stock
     return doc
 
 @api_router.get("/items/{iid}/photos")
@@ -7413,6 +7436,7 @@ async def upload_item_photo(iid: str, file: UploadFile = File(...), cu: dict = D
             logger.warning(f"Supabase upload failed for a photo of item {iid}, keeping it in the database", exc_info=True)
     await db.vehicle_photos.insert_one(photo)
     _spawn(_make_and_store_thumbs(photo_id, content))
+    _spawn(_shop_sync_item(iid))
     return _photo_out(photo)
 
 @api_router.delete("/items/{iid}/photos/{photo_id}")
@@ -7423,6 +7447,7 @@ async def delete_item_photo(iid: str, photo_id: str, cu: dict = Depends(require(
     if p and p.get("storage_path") and media_storage.enabled():
         await media_storage.remove(media_storage.PHOTO_BUCKET, p["storage_path"])
     _evict_photo_cache(photo_id)
+    _spawn(_shop_sync_item(iid))
     return {"message": "Photo deleted"}
 
 # ══════════════════════════════════════════════════════════════════════
