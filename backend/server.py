@@ -8249,9 +8249,24 @@ async def public_get_settings():
     s = await db.settings.find_one({}, {"_id": 0, "id": 0})
     return s or {}
 
+async def _scope_to_shop_company():
+    """For /public/shop/*: the online shop's own company (SHOP_SYNC_COMPANY_ID), where /public/* otherwise means the first
+    company. Off (404) until that setting exists."""
+    if not shop_sync.COMPANY_ID:
+        raise HTTPException(404, "Not found")
+    current_company_id.set(shop_sync.COMPANY_ID)
+
 @api_router.post("/public/visit", dependencies=[Depends(_scope_to_default_company)])
 @limiter.limit("120/minute")
 async def public_record_visit(request: Request):
+    return await _record_visit(request, "hamroauto.com.np")
+
+@api_router.post("/public/shop/visit", dependencies=[Depends(_scope_to_shop_company)])
+@limiter.limit("120/minute")
+async def public_record_shop_visit(request: Request):
+    return await _record_visit(request, "allinoneabroad.com")
+
+async def _record_visit(request: Request, own_host: str):
     try:  # navigator.sendBeacon posts text/plain, so don't insist on a JSON content type
         body = json.loads((await request.body()) or b"{}")
     except Exception:
@@ -8261,7 +8276,7 @@ async def public_record_visit(request: Request):
     path = (str(body.get("path") or "/").split("?")[0].split("#")[0] or "/")[:300]
     if not visitor: return {"ok": False}
     ref_host = (urlparse(str(body.get("referrer") or "")).hostname or "").lower().removeprefix("www.")[:100]
-    if ref_host.endswith("hamroauto.com.np"): ref_host = ""  # internal navigation isn't a source
+    if ref_host.endswith(own_host): ref_host = ""  # internal navigation isn't a source
     # A signed-in visitor's email rides along, but only one that really is a registered account is kept (the beacon is public).
     email = _lead_email(body.get("email"))
     if email and not await db.leads.find_one({"type": "signup", "email": email}, {"_id": 0, "id": 1}): email = None
