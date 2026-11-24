@@ -3,6 +3,8 @@ import TopbarRow from "../components/TopbarRow";
 import { Eye, Users, Smartphone, Monitor, Globe, FileText, ExternalLink, Search, Clock, TrendingUp, Layers, Bike, Mail } from "lucide-react";
 import { toast } from "sonner";
 import api from "../utils/api";
+import { useAuth } from "../context/AuthContext";
+import { itemsMode } from "../utils/permissions";
 
 const RANGES = [
   { key: "today", days: 1, skip: 0, label: "Today", short: "today" },
@@ -317,6 +319,7 @@ const VisitModal = ({ v, onClose }) => {
 
 // Storefront traffic: page views and unique visitors reported by the site's visit beacon.
 export default function Visits({ embedded = false }) {
+  const { features } = useAuth();
   const [rangeKey, setRangeKey] = useState("month");
   const range = RANGES.find(r => r.key === rangeKey);
   const { days, skip } = range;
@@ -405,7 +408,7 @@ export default function Visits({ embedded = false }) {
         </Card>
       </div>
 
-      <TopBikes rows={data.top_bikes || []} linkBase={base} />
+      {!itemsMode(features) && <TopBikes rows={data.top_bikes || []} linkBase={base} />}
 
       {searchErr && <p className="text-sm text-red-600">{searchErr}</p>}
       {search?.configured && (

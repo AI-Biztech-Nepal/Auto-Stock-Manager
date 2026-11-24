@@ -6300,7 +6300,8 @@ def _gsc_token() -> str:
 @api_router.get("/visits/search")
 async def visits_search(days: int = 30, skip: int = 0, cu: dict = Depends(require("marketing", "manage"))):
     days = max(1, min(days, 365)); skip = max(0, min(skip, 30))
-    if not GSC_CREDENTIALS_JSON:
+    # The Search Console property is the first company's website (GSC_SITE_URL); another company must not see its numbers.
+    if not GSC_CREDENTIALS_JSON or cu.get("company_id") != await _default_company_id():
         return {"configured": False}
     try:
         token = await asyncio.to_thread(_gsc_token)
@@ -6345,7 +6346,7 @@ async def visits_search(days: int = 30, skip: int = 0, cu: dict = Depends(requir
 @api_router.get("/visits/summary")
 async def visits_summary(days: int = 30, skip: int = 0, cu: dict = Depends(require("marketing", "manage"))):
     days = max(1, min(days, 365)); skip = max(0, min(skip, 30))  # skip = days back from today the range ends (1 = yesterday)
-    if GA4_PROPERTY_ID and GA4_CREDENTIALS_JSON:
+    if GA4_PROPERTY_ID and GA4_CREDENTIALS_JSON and cu.get("company_id") == await _default_company_id():  # GA4 is the first company's site
         return await _name_vehicle_pages(await _ga4_summary(days, skip))
     npt = timezone(timedelta(hours=5, minutes=45))  # Nepal time, so "today" matches the shop's day
     today = datetime.now(npt).date() - timedelta(days=skip)
