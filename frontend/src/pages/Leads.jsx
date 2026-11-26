@@ -6,7 +6,7 @@ import api from "../utils/api";
 import { formatNPR } from "../utils/helpers";
 
 // Sell / Exchange / Book Service forms from the public website land here (POST /public/leads), and so do WhatsApp / Call
-// taps (the website asks who they are first). Every lead is decided once: Add to CRM (the lead is accepted and the person
+// taps (the website asks who they are first). Every lead is decided once: Converted (stored as "accepted": the person
 // goes into the CRM) or Reject (a remark saying why is required).
 // Tabs: "All" lists every lead, newest first, whatever its type or outcome. Each lead also lives in the tab for its type
 // (still waiting for a decision there); rejecting one also puts it in the Rejected tab. A registered account also shows in
@@ -136,10 +136,10 @@ export default function Leads() {
     try {
       const { data } = await api.post(`/leads/${lead.id}/accept`, null, { suppressErrorToast: true });
       replaceLead(data.lead);
-      toast.success(!data.customer_id ? "Accepted, but it has no phone number, so it was not added to the CRM"
-        : data.customer_created ? `${lead.name} was added to the CRM` : `${lead.name} is already a customer, linked in the CRM`,
+      toast.success(!data.customer_id ? "Marked converted, but it has no phone number, so it was not added to the customer list"
+        : data.customer_created ? `${lead.name} was added to the customer list` : `${lead.name} is already a customer, now linked to this lead`,
       tabOf(data.lead) === tab ? undefined : { description: `Moved to the ${tabLabel(tabOf(data.lead))} tab` });
-    } catch (ex) { toast.error(errText(ex, "Couldn't add that lead to the CRM")); load(); }
+    } catch (ex) { toast.error(errText(ex, "Couldn't convert that lead")); load(); }
     finally { setBusyId(null); }
   };
 
@@ -290,15 +290,15 @@ export default function Leads() {
                   ) : (
                     <div className="mt-3 grid grid-cols-2 gap-2 sm:flex sm:justify-end">
                       <button onClick={() => setRejecting({ id: l.id, remark: "" })} disabled={busyId === l.id} className="h-10 px-5 rounded-lg border border-red-200 bg-white text-red-700 hover:bg-red-50 text-sm font-semibold inline-flex items-center justify-center gap-1.5 disabled:opacity-60" data-testid="lead-reject"><Ban size={15} /> Reject</button>
-                      <button onClick={() => accept(l)} disabled={busyId === l.id} className="h-10 px-5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold inline-flex items-center justify-center gap-1.5 disabled:opacity-60" data-testid="lead-accept"><UserPlus size={16} /> {busyId === l.id ? "Adding..." : "Add to CRM"}</button>
+                      <button onClick={() => accept(l)} disabled={busyId === l.id} className="h-10 px-5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold inline-flex items-center justify-center gap-1.5 disabled:opacity-60" data-testid="lead-accept"><UserPlus size={16} /> {busyId === l.id ? "Converting..." : "Converted"}</button>
                     </div>
                   )
                 ) : l.status === "accepted" ? (
                   <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg bg-emerald-50 px-3 py-2 text-sm" data-testid="lead-outcome">
-                    <span className="inline-flex items-center gap-1 font-semibold text-emerald-800"><Check size={14} /> Accepted</span>
+                    <span className="inline-flex items-center gap-1 font-semibold text-emerald-800"><Check size={14} /> Converted</span>
                     {l.customer_id
-                      ? <button onClick={() => navigate("/marketing?tab=crm")} className="inline-flex items-center gap-1 font-semibold text-blue-700 hover:underline"><Users size={13} /> In the CRM</button>
-                      : <span className="text-xs text-slate-500">Not added to the CRM (no phone number)</span>}
+                      ? <button onClick={() => navigate("/marketing?tab=crm")} className="inline-flex items-center gap-1 font-semibold text-blue-700 hover:underline"><Users size={13} /> In customers</button>
+                      : <span className="text-xs text-slate-500">Not in the customer list (no phone number)</span>}
                     <span className="text-xs text-slate-400 sm:ml-auto">{l.decided_by ? `by ${l.decided_by} · ` : ""}{when(l.decided_at)}</span>
                   </div>
                 ) : (

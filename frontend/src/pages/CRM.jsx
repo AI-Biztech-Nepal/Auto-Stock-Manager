@@ -59,7 +59,7 @@ export default function CRM() {
   const [assigned, setAssigned] = useState("all"); // all | none | a team member id
   const [dateRange, setDateRange] = useState({ key: "all", custom: null });
   const [search, setSearch] = useState("");
-  const [view, setView] = useState("customers"); // customers: people on a sale · leads: website leads nobody has sold to yet
+  const [view, setView] = useState("customers"); // customers: people on a sale + converted website leads · leads: website leads nobody has sold to yet
   const [referrer, setReferrer] = useState(null); // { id, name }: only the people this customer referred
   const [sort, setSort] = useState({ key: "newest", dir: "desc" });
   const [shown, setShown] = useState(PAGE_SIZE);
@@ -202,8 +202,8 @@ export default function CRM() {
     <div className="bg-white border border-slate-200 rounded-2xl">
       {counts.all === 0
         ? (view === "leads"
-          ? <EmptyState icon={UserCheck} title="No website leads">People you accept from the website appear here until they buy, then they move to Customers.</EmptyState>
-          : <EmptyState icon={UserCheck} title="No customers yet">Customers appear here as soon as a sale is recorded for them in the Sales tab.</EmptyState>)
+          ? <EmptyState icon={UserCheck} title="No website leads">Website leads you convert appear here (and under Customers). They leave this list once they buy.</EmptyState>
+          : <EmptyState icon={UserCheck} title="No customers yet">Customers appear here when a sale is recorded for them, or when you convert a website lead.</EmptyState>)
         : <EmptyState icon={UserCheck} title="No customers match" action={anyFilter && <button onClick={clearFilters} className={btnGhost}>Clear filters</button>}>Try another filter or search.</EmptyState>}
     </div>
   ) : (
@@ -219,7 +219,7 @@ export default function CRM() {
     <div className="space-y-4" data-testid="crm-page">
       <TopbarRow>
         <div role="tablist" aria-label="CRM list" className="inline-flex rounded-xl bg-slate-100 p-1" data-testid="crm-view-toggle">
-          {[["customers", "Sales customers", data?.customers?.length], ["leads", "Website leads", data?.leads?.length]].map(([k, label, n]) => (
+          {[["customers", "Customers", data?.customers?.length], ["leads", "Website leads", data?.leads?.length]].map(([k, label, n]) => (
             <button key={k} role="tab" aria-selected={view === k} onClick={() => { setView(k); clearFilters(); }} data-testid={`crm-view-${k}`}
               className={`h-9 px-4 rounded-lg text-sm font-semibold inline-flex items-center gap-2 transition-colors ${view === k ? "bg-white text-blue-700 shadow-sm" : "text-slate-500 hover:text-slate-800"}`}>
               {label}<span className={`text-xs px-1.5 py-0.5 rounded-full ${view === k ? "bg-blue-50 text-blue-700" : "bg-slate-200 text-slate-500"}`}>{n ?? "–"}</span>

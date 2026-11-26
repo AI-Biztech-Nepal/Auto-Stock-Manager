@@ -735,17 +735,17 @@ def register(api_router, database, admin_only, sale_revenue):
             if not s.get("returned") and (cur is None or (s.get("sale_date") or "", s.get("created_at") or "") > (cur.get("sale_date") or "", cur.get("created_at") or "")): latest_ids[s.get("customer_id")] = s
         vehicles = await _vehicles_for(list(latest_ids.values()))
         rows = customer_rows(customers, sales, bookings, interactions, open_followups, vehicles)
-        # The CRM is the people who bought, i.e. who is on a sale. Everyone else stays on file (Ledger, bookings, website
-        # leads) but is not listed here; they were read above only so a referrer who never bought still gets a name.
+        # The CRM's customers are the people who bought (on a sale) plus the website leads staff marked Converted in
+        # Marketing > Leads. Everyone else stays on file (Ledger, bookings) but is not listed here; they were read above only
+        # so a referrer who never bought still gets a name.
         bought = {s.get("customer_id") for s in sales if s.get("customer_id")}
-        # Website leads you accepted (nobody has sold them anything yet) are their own list, so they never mix with buyers;
-        # one who then buys moves across by itself.
-        # Every lead ever accepted stays here (the lead remembers its customer), even if their Lead Source tag is changed later.
+        # Converted website leads also keep their own "Website leads" list until they buy.
+        # Every lead ever converted stays listed (the lead remembers its customer), even if their Lead Source tag is changed later.
         from_website = {l["customer_id"] for l in accepted}
         for r in rows: r["from_website"] = r["id"] in from_website  # so the CRM can highlight who was added from Marketing > Leads
         leads = [r for r in rows if r["id"] not in bought and (r["id"] in from_website or r["source"] == "website")]
-        rows = [r for r in rows if r["id"] in bought]
-        listed = bought | {r["id"] for r in leads}
+        rows = [r for r in rows if r["id"] in bought or r["id"] in from_website]
+        listed = {r["id"] for r in rows} | {r["id"] for r in leads}
         if not (month_start and month_end):  # default: this calendar month, and the one before
             first = today.replace(day=1)
             month_start, month_end = first.isoformat(), today.isoformat()
