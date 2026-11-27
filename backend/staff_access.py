@@ -26,6 +26,9 @@ SECTIONS = ("dashboard", "inventory", "spare_parts", "sales", "leads", "crm", "s
 LEVELS = {"none": 0, "view": 1, "edit": 2}
 
 COLUMNS = {"id", "company_id", "phone", "address", "pan", "job_title", "work_start", "work_end", "access", "status", "updated_at"}
+# Added later: the AI Biz Tech Nepal address this login also answers to (portal_sso.py). Checked on its own, so that a
+# database that cannot take it never switches the access restrictions off.
+PORTAL_COLUMN = "portal_email"
 
 _DDL = ("CREATE TABLE IF NOT EXISTS staff_access (id VARCHAR(36) NOT NULL PRIMARY KEY, company_id VARCHAR(36) NOT NULL, "
         "phone VARCHAR(50), address VARCHAR(500), pan VARCHAR(50), job_title VARCHAR(100), work_start VARCHAR(5), "
@@ -33,6 +36,7 @@ _DDL = ("CREATE TABLE IF NOT EXISTS staff_access (id VARCHAR(36) NOT NULL PRIMAR
 
 # False until start-up has confirmed the table exists: until then nothing is restricted and the screen says why.
 ready = False
+portal_email_ready = False
 _CACHE_SECONDS = 20
 _cache: dict = {}  # user_id -> (read at, record or None)
 
@@ -200,10 +204,10 @@ async def is_paused(db, user: dict) -> bool:
 async def ensure_schema(db, backend: str) -> None:
     """Start-up: create the table (MariaDB or Supabase Postgres) and switch the feature on only if it is really there.
     Never raises."""
-    global ready
-    ready = False
+    global ready, portal_email_ready
+    ready = portal_email_ready = False
     if backend not in ("mysql", "postgres"):
-        ready = True  # the document backend needs no schema
+        ready = portal_email_ready = True  # the document backend needs no schema
         return
     try:
         await db.execute_raw(_DDL + (" ENGINE=InnoDB DEFAULT CHARSET=utf8mb4" if backend == "mysql" else ""))
@@ -219,6 +223,19 @@ async def ensure_schema(db, backend: str) -> None:
         ready = True
     except Exception:  # noqa: BLE001
         logger.warning("Staff & Access is off: the staff_access table is not usable", exc_info=True)
+        return
+    try:
+        await db.execute_raw(f"ALTER TABLE staff_access ADD COLUMN IF NOT EXISTS {PORTAL_COLUMN} VARCHAR(255)")
+    except Exception:  # noqa: BLE001
+        logger.warning("Could not add staff_access.%s", PORTAL_COLUMN, exc_info=True)
+    import sqldb
+    try:
+        await db.fetch_raw(f"SELECT {PORTAL_COLUMN} FROM staff_access LIMIT 1")
+        sqldb.TABLES["staff_access"]["columns"].add(PORTAL_COLUMN)
+        portal_email_ready = True
+    except Exception:  # noqa: BLE001
+        sqldb.TABLES["staff_access"]["columns"].discard(PORTAL_COLUMN)  # never ask for a column that is not there
+        logger.warning("The AiBizTech email cannot be saved: staff_access has no %s column", PORTAL_COLUMN, exc_info=True)
 
 
 class StaffBody(BaseModel):
@@ -233,6 +250,7 @@ class StaffBody(BaseModel):
     work_end: Optional[str] = Field(default=None, max_length=5)
     access: dict = Field(default_factory=dict)
     status: str = "active"
+    portal_email: Optional[str] = Field(default=None, max_length=255)
 
 
 def register(api_router, db, admin_only, company_scope, hash_password, roles: set):
@@ -253,9 +271,9 @@ def register(api_router, db, admin_only, company_scope, hash_password, roles: se
         for u in users:
             r = rows.get(u["id"]) or {}
             out.append({"id": u["id"], "name": u.get("name") or u["username"], "email": u["username"], "role": u.get("role", "admin"),
-                        **{k: r.get(k) or "" for k in ("phone", "address", "pan", "job_title", "work_start", "work_end")},
+                        **{k: r.get(k) or "" for k in ("phone", "address", "pan", "job_title", "work_start", "work_end", "portal_email")},
                         "access": r.get("access") or {}, "status": r.get("status") or "active"})
-        return {"ready": ready, "staff": sorted(out, key=lambda s: s["name"].lower())}
+        return {"ready": ready, "portal_email_ready": portal_email_ready, "staff": sorted(out, key=lambda s: s["name"].lower())}
 
     @api_router.put("/staff/{uid}")
     async def staff_save(uid: str, body: StaffBody, cu: dict = Depends(admin_only)):
@@ -276,6 +294,14 @@ def register(api_router, db, admin_only, company_scope, hash_password, roles: se
         if target.get("role", "admin") == "admin" and body.role != "admin":
             if await db.users.count_documents({"role": "admin", "id": {"$ne": uid}, **company_scope(cu)}) == 0:
                 raise HTTPException(400, "Cannot change role: at least one Admin account must remain")
+        portal = (_text(body.portal_email) or "").lower() or None
+        if portal and portal_email_ready:  # one address opens one login
+            if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", portal):
+                raise HTTPException(422, "Write the AiBizTech email as name@example.com")
+            taken = await db.staff_access.find_one({"portal_email": portal, "id": {"$ne": uid}}, {"_id": 0, "id": 1})
+            owner = await db.users.find_one({"username": portal, **company_scope(cu)}, {"_id": 0, "id": 1})
+            if taken or (owner and owner["id"] != uid):
+                raise HTTPException(409, "Another account already uses that AiBizTech email")
         admin = body.role == "admin"
         update = {"name": body.name.strip(), "role": body.role}
         if body.password:
@@ -284,6 +310,8 @@ def register(api_router, db, admin_only, company_scope, hash_password, roles: se
                   "work_start": _text(body.work_start), "work_end": _text(body.work_end),
                   "access": json.dumps({} if admin else clean_access(body.access)),  # an Admin is never restricted
                   "status": "active" if admin else body.status, "updated_at": datetime.now(timezone.utc).isoformat()}
+        if portal_email_ready and "portal_email" in body.model_fields_set:  # a save that does not send it keeps it
+            record["portal_email"] = portal
         # the restriction is written first: if it fails, the role has not been changed under the old restriction
         if await db.staff_access.find_one({"id": uid}, {"_id": 0, "id": 1}):
             await db.staff_access.update_one({"id": uid}, {"$set": record})

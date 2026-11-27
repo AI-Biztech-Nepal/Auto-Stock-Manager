@@ -29,6 +29,7 @@ import perf_stats
 import auto_backup
 import crm
 import portal_bridge
+import portal_sso
 import staff_access
 import shop_sync
 import terms
@@ -2297,6 +2298,8 @@ async def delete_user(uid: str, cu: dict = Depends(admin_only)):
     if staff_access.ready:  # a token they already hold must stop working too
         try:
             gone = {"access": "{}", "status": "removed", "updated_at": datetime.now(timezone.utc).isoformat()}
+            if staff_access.portal_email_ready:
+                gone["portal_email"] = None  # free the address for a new account
             if await db.staff_access.find_one({"id": uid}, {"_id": 0, "id": 1}):
                 await db.staff_access.update_one({"id": uid}, {"$set": gone})
             else:
@@ -8697,6 +8700,7 @@ async def shutdown():
 import finance_books
 finance_books.register(api_router, db, require("finance", "manage"))  # Finance page: admin + roles granted "finance"
 staff_access.register(api_router, db, admin_only, company_scope, hash_pw_async, {"admin", *ROLE_PERMISSIONS})  # Settings > Staff & Access
+portal_sso.register(api_router, db, limiter, _default_company_id, create_token, current_company_id)  # POST /auth/sso, off until SSO_* is set
 crm.register(api_router, db, require("marketing", "manage"), _sale_revenue)  # CRM tab: admin + roles granted "marketing"
 
 # TEMPORARY - the owner-only tool that moves the data to Supabase without a login on the server. To remove it once the

@@ -28,7 +28,7 @@ const inp = "w-full h-10 px-3 text-sm border border-slate-200 rounded-lg bg-whit
 const ghost = "h-10 px-4 rounded-lg border border-slate-200 bg-white text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50";
 const primary = "h-10 px-5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold disabled:opacity-50";
 const initials = (name) => (name || "").trim().split(/\s+/).slice(0, 2).map((w) => w[0]?.toUpperCase() || "").join("") || "?";
-const draftOf = (s) => ({ name: s.name, role: s.role, password: "", phone: s.phone, address: s.address, pan: s.pan, job_title: s.job_title, work_start: s.work_start, work_end: s.work_end, access: s.access || {}, status: s.status });
+const draftOf = (s) => ({ name: s.name, role: s.role, password: "", phone: s.phone, address: s.address, pan: s.pan, job_title: s.job_title, work_start: s.work_start, work_end: s.work_end, portal_email: s.portal_email || "", access: s.access || {}, status: s.status });
 const errText = (e, fallback) => (typeof e.response?.data?.detail === "string" ? e.response.data.detail : fallback);
 
 const Field = ({ label, children, className = "" }) => (
@@ -246,6 +246,7 @@ export default function StaffAccess() {
                 </div>
               </div>
               <Field label="New password"><input type="password" {...text("password")} placeholder="Leave empty to keep the current one" autoComplete="new-password" data-testid="edit-user-password" /></Field>
+              <Field label="AiBizTech email (one-login from the portal)"><input type="email" {...text("portal_email")} placeholder="Only if different from the sign-in email" disabled={!data.portal_email_ready} data-testid="edit-user-portal-email" /></Field>
             </div>
 
             <div>

@@ -760,7 +760,8 @@ CREATE TABLE IF NOT EXISTS staff_access (
   work_end VARCHAR(5),
   access TEXT,
   status VARCHAR(10),
-  updated_at VARCHAR(40)
+  updated_at VARCHAR(40),
+  portal_email VARCHAR(255)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 SET FOREIGN_KEY_CHECKS = 1;

@@ -18,6 +18,7 @@ const SignUp = lazy(() => import("./pages/SignUp"));
 const ForgotPassword = lazy(() => import("./pages/ForgotPassword"));
 const ResetPassword = lazy(() => import("./pages/ResetPassword"));
 const VerifyEmail = lazy(() => import("./pages/VerifyEmail"));
+const SsoLanding = lazy(() => import("./pages/SsoLanding"));
 const Dashboard = lazy(() => import("./pages/Dashboard"));
 const InventoryHub = lazy(() => import("./pages/InventoryHub"));
 const VehicleDetail = lazy(() => import("./pages/VehicleDetail"));
@@ -97,6 +98,8 @@ function AppRoutes() {
         <Route path="/forgot-password" element={<PublicRoute><ForgotPassword /></PublicRoute>} />
         <Route path="/reset-password" element={<PublicRoute><ResetPassword /></PublicRoute>} />
         <Route path="/verify-email" element={<PublicRoute><VerifyEmail /></PublicRoute>} />
+        {/* One login from the AI Biz Tech Nepal portal (signed-in or not). */}
+        <Route path="/sso" element={<SsoLanding />} />
         <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
           <Route index element={<HomeRoute />} />
           <Route path="inventory" element={<RoleRoute path="/inventory"><InventoryHub /></RoleRoute>} />

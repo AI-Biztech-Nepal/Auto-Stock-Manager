@@ -1104,7 +1104,8 @@ create table if not exists "public"."staff_access" (
   "work_end" varchar(5),
   "access" text,
   "status" varchar(10),
-  "updated_at" varchar(40)
+  "updated_at" varchar(40),
+  "portal_email" varchar(255)
 );
 alter table "public"."staff_access" enable row level security;  -- the public API key can read nothing; the backend connects directly
 alter table "public"."staff_access" add column if not exists "id" varchar(36);
@@ -1118,6 +1119,7 @@ alter table "public"."staff_access" add column if not exists "work_end" varchar(
 alter table "public"."staff_access" add column if not exists "access" text;
 alter table "public"."staff_access" add column if not exists "status" varchar(10);
 alter table "public"."staff_access" add column if not exists "updated_at" varchar(40);
+alter table "public"."staff_access" add column if not exists "portal_email" varchar(255);
 
 create table if not exists "public"."items" (
   "id" varchar(36) not null primary key,
