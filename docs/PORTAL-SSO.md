@@ -13,8 +13,8 @@ Off until both sides are set; signing in here directly keeps working either way.
    ```
    Then `pm2 restart auto-stock-backend`. The id: in the portal's Supabase SQL editor, `select id, name from core.organizations;`
    (If it is wrong, the sign-in screen says which id it was given.)
-3. In this app: Settings > Staff & Access. For anyone whose portal email differs from their sign-in email (an account
-   called `admin`, say), type it in **AiBizTech email** and save. Everyone needs an account here; none is created.
+3. In this app: Settings > Staff & Access. For anyone in the main business whose portal email differs from their
+   sign-in email (an account called `admin`, say), type it in **AiBizTech email** and save.
 4. Merge the portal branch `stock-live-app` into the portal's `main`.
 5. The portal's Vercel project, environment variables, then redeploy:
    ```
@@ -27,8 +27,12 @@ Off until both sides are set; signing in here directly keeps working either way.
 To undo: remove `STOCK_LIVE_APP` in Vercel and redeploy (the portal shows its own /stock pages again).
 
 ## What it will and will not do
-- Only the business(es) in `SSO_ORG_ID` get in, and they open the first company in this database.
-- No company or account is created. Role, Staff & Access limits and pause come from this app, not the portal.
+- The business(es) in `SSO_ORG_ID` open the first company in this database. For them no account is created, and role,
+  Staff & Access limits and pause come from this app, not the portal.
+- Every other portal business gets its **own private company** here, made the first time one of its admins opens Stock
+  Manager. Its people get a login there on first sign-in, with their portal role; after that, role and limits are managed
+  in this app. Removing someone in the portal stops new sign-ins. `SSO_OWN_BUSINESSES=off` in `backend/.env` turns this
+  off.
 - A pass lasts a minute and works once.
 - The portal's dashboard figures still come from the portal's own `stock` tables, not from this app.
 

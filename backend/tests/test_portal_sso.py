@@ -41,8 +41,12 @@ class Coll:
 
     async def insert_one(self, doc):
         self.writes += 1
+        self.rows.append(dict(doc))
 
-    update_one = delete_one = insert_one
+    async def update_one(self, *a, **k):
+        self.writes += 1
+
+    delete_one = update_one
 
 
 class Db:
@@ -54,6 +58,7 @@ class Db:
         ])
         self.companies = Coll([{"id": COMPANY, "name": "Hamro G&G Auto"}])
         self.staff_access = Coll([{"id": "u1", "company_id": COMPANY, "portal_email": "owner@example.com", "status": "active"}])
+        self.settings = Coll([{"id": "s1", "company_id": COMPANY, "business_name": "Hamro G&G Auto"}])
 
 
 @pytest.fixture
@@ -61,7 +66,7 @@ def app(monkeypatch):
     db = Db()
     monkeypatch.setenv("SSO_SECRET", SECRET)
     monkeypatch.setenv("SSO_ORG_ID", ORG)
-    for name in ("users", "companies", "staff_access"):
+    for name in ("users", "companies", "staff_access", "settings"):
         monkeypatch.setattr(server.db._real_db, name, getattr(db, name), raising=False)
     monkeypatch.setattr(sa, "ready", True)
     monkeypatch.setattr(sa, "portal_email_ready", True)
@@ -106,10 +111,67 @@ def test_no_account_here_means_no_entry_and_nothing_is_created(app, email):
     assert app.db.users.writes == app.db.companies.writes == 0
 
 
-def test_another_portal_business_is_refused(app):
-    other = "99999999-2222-3333-4444-555555555555"
-    r = app(sign(org_id=other))
-    assert r.status_code == 403 and other in r.json()["detail"]
+OTHER = "99999999-2222-3333-4444-555555555555"
+
+
+def session(r):
+    assert r.status_code == 200, r.text
+    return jwt.decode(r.json()["token"], os.environ["JWT_SECRET"], algorithms=["HS256"])
+
+
+def other(**claims):
+    return sign(org_id=OTHER, org_name="Famous Traders", **claims)
+
+
+def test_another_business_gets_its_own_company_never_the_main_one(app):
+    # even with the email of a login in the main company
+    claims = session(app(other(email="desk@example.com", name="Sita")))
+    mine = portal_sso.business_company_id(OTHER)
+    assert claims["company_id"] == mine != COMPANY
+    assert claims["user_id"] != "u2" and claims["role"] == "admin" and claims["username"] == "desk@example.com#99999999"
+    assert [c["name"] for c in app.db.companies.rows if c["id"] == mine] == ["Famous Traders"]
+    assert [s["business_name"] for s in app.db.settings.rows if s["company_id"] == mine] == ["Famous Traders"]
+
+
+def test_the_second_sign_in_reuses_the_company_and_login(app):
+    first = session(app(other()))
+    writes = (app.db.companies.writes, app.db.users.writes, app.db.settings.writes)
+    again = session(app(other(role="stock_supervisor")))  # the role here wins once the login exists
+    assert (again["company_id"], again["user_id"], again["role"]) == (first["company_id"], first["user_id"], "admin")
+    assert writes == (app.db.companies.writes, app.db.users.writes, app.db.settings.writes) == (1, 1, 1)
+
+
+def test_staff_join_their_business_with_the_portal_role(app):
+    boss = session(app(other(email="boss@example.com")))
+    desk = session(app(other(email="help@example.com", role="parts_supervisor")))
+    assert desk["company_id"] == boss["company_id"] and desk["user_id"] != boss["user_id"]
+    assert desk["role"] == "parts_supervisor" and app.db.companies.writes == 1
+
+
+def test_only_an_admin_opens_a_new_business_and_unknown_roles_are_refused(app):
+    assert app(other(role="stock_supervisor")).status_code == 403
+    assert app(other(role="platform_owner")).status_code == 403
+    assert app(other(role="owner")).status_code == 403
+    assert app.db.companies.writes == app.db.users.writes == app.db.settings.writes == 0
+
+
+def test_a_removed_login_is_not_made_again(app):
+    session(app(other(email="boss@example.com")))
+    gone = session(app(other(email="help@example.com", role="parts_supervisor")))
+    app.db.users.rows[:] = [u for u in app.db.users.rows if u["id"] != gone["user_id"]]
+    app.db.staff_access.rows.append({"id": gone["user_id"], "company_id": gone["company_id"], "status": "removed"})
+    assert app(other(email="help@example.com", role="parts_supervisor")).status_code == 403
+
+
+def test_a_business_id_that_is_not_an_id_is_refused(app):
+    assert app(sign(org_id="hamro")).status_code == 403
+
+
+def test_own_businesses_can_be_switched_off(app, monkeypatch):
+    monkeypatch.setenv("SSO_OWN_BUSINESSES", "off")
+    r = app(other())
+    assert r.status_code == 403 and OTHER in r.json()["detail"] and app.db.companies.writes == 0
+    assert app(sign()).status_code == 200  # the main business is not affected
 
 
 @pytest.mark.parametrize("token", [

@@ -8700,7 +8700,8 @@ async def shutdown():
 import finance_books
 finance_books.register(api_router, db, require("finance", "manage"))  # Finance page: admin + roles granted "finance"
 staff_access.register(api_router, db, admin_only, company_scope, hash_pw_async, {"admin", *ROLE_PERMISSIONS})  # Settings > Staff & Access
-portal_sso.register(api_router, db, limiter, _default_company_id, create_token, current_company_id)  # POST /auth/sso, off until SSO_* is set
+portal_sso.register(api_router, db, limiter, _default_company_id, create_token, current_company_id,
+                    hash_pw_async)  # POST /auth/sso, off until SSO_* is set
 crm.register(api_router, db, require("marketing", "manage"), _sale_revenue)  # CRM tab: admin + roles granted "marketing"
 
 # TEMPORARY - the owner-only tool that moves the data to Supabase without a login on the server. To remove it once the
