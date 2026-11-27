@@ -40,6 +40,9 @@ class ReturnDocument:
 TABLES = {
     "companies": {"columns": {"id", "name", "created_at"}},
     "users": {"columns": {"id", "company_id", "username", "password_hash", "name", "role", "email_verified_at", "created_at"}},
+    # Settings > Staff & Access (staff_access.py): id is the user's id. Only that module reads it.
+    "staff_access": {"columns": {"id", "company_id", "phone", "address", "pan", "job_title", "work_start", "work_end", "access",
+                                  "status", "updated_at"}},
     "auth_tokens": {"columns": {"id", "user_id", "purpose", "token_hash", "expires_at", "used_at", "created_at"}},
     "vendors": {"columns": {"id", "company_id", "name", "phone", "address", "notes", "vendor_type", "commission_amount", "created_at"}},
     "customers": {"columns": {"id", "company_id", "name", "contact_number", "address", "id_number", "occupation", "budget_min",

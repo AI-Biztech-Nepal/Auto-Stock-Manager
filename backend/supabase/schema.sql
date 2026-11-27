@@ -1093,6 +1093,32 @@ alter table "public"."page_views" add column if not exists "created_at" varchar(
 create index if not exists "idx_page_views_company_id" on "public"."page_views" ("company_id");
 create index if not exists "idx_page_views_created_at" on "public"."page_views" ("created_at");
 
+create table if not exists "public"."staff_access" (
+  "id" varchar(36) not null primary key,
+  "company_id" varchar(36) not null,
+  "phone" varchar(50),
+  "address" varchar(500),
+  "pan" varchar(50),
+  "job_title" varchar(100),
+  "work_start" varchar(5),
+  "work_end" varchar(5),
+  "access" text,
+  "status" varchar(10),
+  "updated_at" varchar(40)
+);
+alter table "public"."staff_access" enable row level security;  -- the public API key can read nothing; the backend connects directly
+alter table "public"."staff_access" add column if not exists "id" varchar(36);
+alter table "public"."staff_access" add column if not exists "company_id" varchar(36);
+alter table "public"."staff_access" add column if not exists "phone" varchar(50);
+alter table "public"."staff_access" add column if not exists "address" varchar(500);
+alter table "public"."staff_access" add column if not exists "pan" varchar(50);
+alter table "public"."staff_access" add column if not exists "job_title" varchar(100);
+alter table "public"."staff_access" add column if not exists "work_start" varchar(5);
+alter table "public"."staff_access" add column if not exists "work_end" varchar(5);
+alter table "public"."staff_access" add column if not exists "access" text;
+alter table "public"."staff_access" add column if not exists "status" varchar(10);
+alter table "public"."staff_access" add column if not exists "updated_at" varchar(40);
+
 create table if not exists "public"."items" (
   "id" varchar(36) not null primary key,
   "company_id" varchar(36) not null,

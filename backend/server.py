@@ -29,6 +29,7 @@ import perf_stats
 import auto_backup
 import crm
 import portal_bridge
+import staff_access
 import shop_sync
 import terms
 import assistant_api
@@ -105,7 +106,7 @@ TENANT_COLLECTIONS = {
     "leads", "legal_documents", "part_transactions", "partners", "sales", "spare_parts",
     "sync_logs", "team_members", "vehicle_photos", "vehicles", "vendor_payments", "vendors",
     "audit_logs", "ai_chat_sessions", "settings", "facebook_pages", "bookings",
-    "offer_prizes", "offer_codes", "page_views", "crm_followups", "crm_interactions", "items",
+    "offer_prizes", "offer_codes", "page_views", "crm_followups", "crm_interactions", "items", "staff_access",
     # Finance books (see finance_books.py); tables are created by migration_add_finance_books.sql.
     "fin_parties", "fin_bank_accounts", "fin_account_transfers", "fin_expense_categories", "fin_items",
     "fin_transactions", "fin_customer_ledger", "fin_vendor_ledger", "fin_statement_imports",
@@ -373,6 +374,8 @@ async def get_current_user(request: Request, creds: HTTPAuthorizationCredentials
     # automatically filters/stamps by this company_id -- see _ScopedCollection above.
     await portal_bridge.enforce_feature(request.url.path, payload.get("company_id"))  # 403 {"feature"} if this route's feature is off
     current_company_id.set(payload.get("company_id"))
+    # Settings > Staff & Access: a paused login is refused, and per-person access is applied (see staff_access.py).
+    await staff_access.check(db, payload, request.method, request.url.path)
     return payload
 
 @api_router.get("/features")
@@ -382,7 +385,14 @@ async def my_features(cu: dict = Depends(get_current_user)):
     features = await portal_bridge.features_for(cu)
     if shop_sync.is_shop(await _company_site(cu.get("company_id"))):  # a company that sells goods, not vehicles (Settings > Website)
         features = {**(features or {}), **portal_bridge.ITEMS_ONLY_FEATURES}
-    return {"features": features, "terms": terms.terms_for(features)}
+    # This person's own Staff & Access changes (section -> none / view / edit), so the menu shows what they can open.
+    access = {}
+    if staff_access.ready and cu.get("role", "admin") not in ("admin", "platform_owner") and cu.get("user_id"):
+        try:
+            access = (await staff_access.record_for(db, cu["user_id"]) or {}).get("access") or {}
+        except Exception:
+            logger.warning("Could not read staff access for the menu", exc_info=True)  # the server still enforces it
+    return {"features": features, "terms": terms.terms_for(features), "access": access}
 
 # require_feature('stock.x') for Prompt 2: portal logins are checked against core.feature_on, old tokens pass.
 require_feature = portal_bridge.make_feature_guard(get_current_user)
@@ -456,7 +466,7 @@ PARTS_ALLOWED_STATUSES = {"available", "in_repair", "scrap"}
 def require(resource: str, action: str):
     async def _checker(cu: dict = Depends(get_current_user)):
         role = cu.get("role", "admin")
-        if role == "admin":
+        if role == "admin" or cu.get("access_grant"):  # access_grant: given to this person in Staff & Access
             return cu
         if action in ROLE_PERMISSIONS.get(role, {}).get(resource, set()):
             return cu
@@ -466,7 +476,7 @@ def require(resource: str, action: str):
 def require_any(resource: str, actions: set):
     async def _checker(cu: dict = Depends(get_current_user)):
         role = cu.get("role", "admin")
-        if role == "admin":
+        if role == "admin" or cu.get("access_grant"):
             return cu
         if ROLE_PERMISSIONS.get(role, {}).get(resource, set()) & actions:
             return cu
@@ -474,7 +484,8 @@ def require_any(resource: str, actions: set):
     return _checker
 
 async def admin_only(cu: dict = Depends(get_current_user)):
-    if cu.get("role", "admin") != "admin":
+    # access_grant is only ever set for the sections in staff_access.RULES; accounts, settings, deletes etc. are not in them
+    if cu.get("role", "admin") != "admin" and not cu.get("access_grant"):
         raise HTTPException(403, "This section is restricted to Admin accounts")
     return cu
 
@@ -2097,6 +2108,8 @@ async def login(request: Request, req: LoginRequest):
     user = await db.users.find_one({"username": req.username})
     if not user or not await verify_pw_async(req.password, user["password_hash"]):
         raise HTTPException(401, "Invalid credentials")
+    if await staff_access.is_paused(db, user):
+        raise HTTPException(403, "Your access is paused. Ask your admin.")
     token = create_token(user.get("id", ""), user["username"], user.get("role", "admin"), user.get("company_id"))
     company = await db.companies.find_one({"id": user.get("company_id")}, {"_id": 0, "name": 1}) if user.get("company_id") else None
     return {"token": token, "username": user["username"], "name": user.get("name", user["username"]),
@@ -2281,6 +2294,16 @@ async def delete_user(uid: str, cu: dict = Depends(admin_only)):
         if remaining_admins == 0:
             raise HTTPException(400, "Cannot delete the only remaining Admin account")
     await db.users.delete_one({"id": uid, **company_scope(cu)})
+    if staff_access.ready:  # a token they already hold must stop working too
+        try:
+            gone = {"access": "{}", "status": "removed", "updated_at": datetime.now(timezone.utc).isoformat()}
+            if await db.staff_access.find_one({"id": uid}, {"_id": 0, "id": 1}):
+                await db.staff_access.update_one({"id": uid}, {"$set": gone})
+            else:
+                await db.staff_access.insert_one({"id": uid, **gone})
+            staff_access.forget(uid)
+        except Exception:
+            logger.warning("Could not mark the removed login's access", exc_info=True)
     return {"message": "Account deleted"}
 
 # ── PLATFORM (platform_owner only) ──────────────────────────────────────
@@ -6809,6 +6832,7 @@ async def _run_startup_tasks():
             await finance_books.ensure_schema_postgres(db)
         except Exception:
             logger.warning("Could not check the Finance columns", exc_info=True)
+    await staff_access.ensure_schema(db, DB_BACKEND)  # never raises; leaves the feature off if the table cannot be made
     try:
         await _backfill_booking_receipt_numbers()
     except Exception:
@@ -8672,6 +8696,7 @@ async def shutdown():
 
 import finance_books
 finance_books.register(api_router, db, require("finance", "manage"))  # Finance page: admin + roles granted "finance"
+staff_access.register(api_router, db, admin_only, company_scope, hash_pw_async, {"admin", *ROLE_PERMISSIONS})  # Settings > Staff & Access
 crm.register(api_router, db, require("marketing", "manage"), _sale_revenue)  # CRM tab: admin + roles granted "marketing"
 
 # TEMPORARY - the owner-only tool that moves the data to Supabase without a login on the server. To remove it once the

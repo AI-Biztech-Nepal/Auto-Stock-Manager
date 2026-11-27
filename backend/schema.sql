@@ -748,4 +748,19 @@ CREATE TABLE IF NOT EXISTS page_views (
   CONSTRAINT fk_page_views_company FOREIGN KEY (company_id) REFERENCES companies(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- Settings > Staff & Access (staff_access.py): one row per login that has details, restrictions or a pause.
+CREATE TABLE IF NOT EXISTS staff_access (
+  id VARCHAR(36) NOT NULL PRIMARY KEY,
+  company_id VARCHAR(36) NOT NULL,
+  phone VARCHAR(50),
+  address VARCHAR(500),
+  pan VARCHAR(50),
+  job_title VARCHAR(100),
+  work_start VARCHAR(5),
+  work_end VARCHAR(5),
+  access TEXT,
+  status VARCHAR(10),
+  updated_at VARCHAR(40)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 SET FOREIGN_KEY_CHECKS = 1;

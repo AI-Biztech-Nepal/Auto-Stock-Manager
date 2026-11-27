@@ -22,6 +22,66 @@ export const ROLE_NAV_PATHS = {
   platform_owner: ["/platform"],
 };
 
+// ── Settings > Staff & Access ─────────────────────────────────────────
+// The app's sections, as the side menu runs, each a row of the access grid. `group` rows are drawn indented under it.
+// The keys are the backend's (staff_access.py SECTIONS).
+export const SECTIONS = [
+  { key: "dashboard", label: "Dashboard" },
+  { key: "sales", label: "Sales" },
+  { key: "inventory", label: "Inventory" },
+  { key: "spare_parts", label: "Spare Parts" },
+  { key: "leads", label: "Marketing · Leads", group: "Marketing" },
+  { key: "crm", label: "Marketing · CRM", group: "Marketing" },
+  { key: "share", label: "Marketing · Share", group: "Marketing" },
+  { key: "offers", label: "Marketing · Offers", group: "Marketing" },
+  { key: "visits", label: "Marketing · Visits", group: "Marketing" },
+  { key: "ledger", label: "Ledger (Customers, Vendors, Staff)" },
+  { key: "jobs", label: "Job Cards" },
+  { key: "finance", label: "Finance" },
+  { key: "reports", label: "Reports" },
+  { key: "warranty", label: "Warranty" },
+  { key: "sanakhat", label: "Sanakhat" },
+  { key: "ai", label: "AI Assistant" },
+];
+
+const allAt = (level) => Object.fromEntries(SECTIONS.map((s) => [s.key, level]));
+// What each work role can do before anything is changed for one person: what the grid starts with. Mirrors
+// ROLE_PERMISSIONS in server.py -- keep in step. A section left out is "none".
+export const ROLE_DEFAULT_ACCESS = {
+  admin: allAt("edit"),
+  stock_supervisor: {
+    sales: "view", inventory: "edit", leads: "edit", crm: "edit", share: "edit", offers: "edit", visits: "edit",
+    ledger: "edit", finance: "edit", warranty: "edit", sanakhat: "edit",
+  },
+  parts_supervisor: { inventory: "view", spare_parts: "edit", ledger: "edit", jobs: "edit" },
+  social_media: { inventory: "edit", share: "edit" },
+  sanakhat_officer: { sanakhat: "edit" },
+};
+
+// The signed-in person's own changes (section -> none / view / edit), from /features. Set by AuthContext before it
+// renders; empty for an admin and for anyone whose access was never changed, who then follow their role exactly.
+let overrides = {};
+export function setAccessOverrides(next) { overrides = next || {}; }
+const limited = (role) => !!role && role !== "admin" && role !== "platform_owner";
+const overrideOf = (role, section) => (limited(role) ? overrides[section] : undefined);
+export function accessLevel(role, section) {
+  if (!role || role === "admin") return "edit";
+  return overrideOf(role, section) || ROLE_DEFAULT_ACCESS[role]?.[section] || "none";
+}
+
+// Which sections open each page. A page not listed here is decided by the role alone.
+const PATH_SECTIONS = [
+  ["/inventory", ["inventory", "spare_parts"]], ["/items", ["inventory"]], ["/spare-parts", ["spare_parts"]],
+  ["/sales", ["sales"]], ["/marketing", ["leads", "crm", "share", "offers", "visits"]], ["/ledger", ["ledger"]],
+  ["/jobs", ["jobs"]], ["/finance", ["finance"]], ["/reports", ["reports"]], ["/warranty", ["warranty"]],
+  ["/sanakhat", ["sanakhat"]], ["/ai", ["ai"]],
+];
+function sectionsForPath(path) {
+  if (path === "/") return ["dashboard"];
+  const hit = PATH_SECTIONS.find(([p]) => path === p || path.startsWith(p + "/"));
+  return hit ? hit[1] : [];
+}
+
 export const ROLE_DEFAULT_PATH = {
   sanakhat_officer: "/sanakhat",
   stock_supervisor: "/inventory",
@@ -87,12 +147,16 @@ export function featureForPath(path) {
 const MARKETING_FEATURE = { leads: "stock.leads", crm: "stock.crm", share: "stock.share", offers: "stock.offers", visits: "stock.visits" };
 
 export function marketingTabsFor(role, features) {
-  const tabs = !role || role === "admin" ? ["leads", "crm", "share", "offers", "visits"] : MARKETING_TABS[role] || [];
+  const all = ["leads", "crm", "share", "offers", "visits"];
+  const byRole = !role || role === "admin" ? all : MARKETING_TABS[role] || [];
+  const tabs = all.filter((t) => (overrideOf(role, t) ? overrideOf(role, t) !== "none" : byRole.includes(t)));
   return tabs.filter((t) => featureOn(features, MARKETING_FEATURE[t]));
 }
 
 export function ledgerTabsFor(role) {
   if (!role || role === "admin") return ["customers", "vendors", "staff"];
+  const own = overrideOf(role, "ledger");
+  if (own) return own === "none" ? [] : ["customers", "vendors", "staff"];
   return LEDGER_TABS[role] || [];
 }
 
@@ -102,6 +166,10 @@ function roleAllowsPath(role, path) {
   // see it in nav and 403 on the backend when they clicked it.
   if (path === "/platform" || path.startsWith("/platform/")) return role === "platform_owner";
   if (!role || role === "admin") return true;
+  // Everyone keeps their own Settings (password), whatever else was changed for them.
+  if (path === "/settings" && Object.keys(overrides).length) return true;
+  const sections = sectionsForPath(path);
+  if (sections.some((s) => overrideOf(role, s))) return sections.some((s) => accessLevel(role, s) !== "none");
   const allowed = ROLE_NAV_PATHS[role] || [];
   return allowed.some((p) => path === p || path.startsWith(p + "/"));
 }
@@ -113,12 +181,20 @@ export function canAccessPath(role, path, features) {
   return featureOn(features, featureForPath(path));
 }
 
+// Where to send someone who asks for a page they cannot open (or signs in).
+export function defaultPathFor(role) {
+  const tries = [ROLE_DEFAULT_PATH[role] || "/", "/", "/inventory", "/sales", "/sanakhat", "/jobs", "/marketing", "/ledger", "/finance", "/warranty", "/reports", "/ai"];
+  return tries.find((p) => canAccessPath(role, p)) || "/settings";
+}
+
 // Job Cards tab is shared: Front desk stock can only view, Parts department has full create/edit/delete access.
 export function canEditJobs(role) {
+  if (overrideOf(role, "jobs")) return overrideOf(role, "jobs") === "edit";
   return !role || role === "admin" || role === "parts_supervisor";
 }
 
 export function canDeleteJobs(role) {
+  if (overrideOf(role, "jobs")) return overrideOf(role, "jobs") === "edit";
   return !role || role === "admin" || role === "parts_supervisor";
 }
 
@@ -129,13 +205,16 @@ export const PARTS_ALLOWED_VEHICLE_STATUSES = ["available", "in_repair", "scrap"
 // Front Desk (stock_supervisor) is showroom-floor staff -- view only, no vehicle edits of any
 // kind (not even status changes), so only admin gets full vehicle access.
 export function hasFullVehicleAccess(role) {
+  const own = overrideOf(role, "inventory");
+  if (own && own !== "edit") return false;
+  if (own === "edit" && role !== "social_media") return true; // social media stays on the basic form (the server enforces it)
   return !role || role === "admin" || role === "stock_supervisor";
 }
 
 // Mirrors ROLE_PERMISSIONS["social_media"] in server.py: can add a vehicle with basic
 // details only (no purchase/pricing/status fields) and add/remove its photos.
 export function isBasicStockRole(role) {
-  return role === "social_media";
+  return role === "social_media" && accessLevel(role, "inventory") === "edit";
 }
 
 export function canAddVehicle(role) {
@@ -154,11 +233,15 @@ export function hidesVehiclePricing(role) {
 // Mirrors ROLE_PERMISSIONS["stock_supervisor"]["warranty"] in server.py: front desk can void a
 // warranty (customer serviced elsewhere); restoring it or changing its length is admin-only.
 export function canVoidWarranty(role) {
+  if (overrideOf(role, "warranty")) return overrideOf(role, "warranty") === "edit";
   return !role || role === "admin" || role === "stock_supervisor";
 }
 
 // Name-transfer / sanakhat status on a sold vehicle -- mirrors ROLE_PERMISSIONS["stock_supervisor"]["sale_statuses"].
 export function canEditSaleStatuses(role) {
+  const own = [overrideOf(role, "sales"), overrideOf(role, "sanakhat")];
+  if (own.includes("edit")) return true;
+  if (own.every(Boolean)) return false;
   return !role || role === "admin" || role === "stock_supervisor";
 }
 

@@ -3,7 +3,7 @@ import { Suspense, lazy, useEffect } from "react";
 import { BrowserRouter, Routes, Route, Navigate, useParams, useLocation } from "react-router-dom";
 import { Toaster } from "sonner";
 import { AuthProvider, useAuth } from "./context/AuthContext";
-import { canAccessPath, ROLE_DEFAULT_PATH } from "./utils/permissions";
+import { canAccessPath, defaultPathFor } from "./utils/permissions";
 import { startUpdateChecker } from "./utils/updateChecker";
 import Layout from "./components/Layout";
 import FeatureOff from "./components/FeatureOff";
@@ -66,7 +66,7 @@ const PublicRoute = ({ children }) => {
 const RoleRoute = ({ path, children }) => {
   const { user, features } = useAuth();
   if (!canAccessPath(user?.role, path)) {
-    return <Navigate to={ROLE_DEFAULT_PATH[user?.role] || "/"} replace />;
+    return <Navigate to={defaultPathFor(user?.role)} replace />;
   }
   // Allowed for the role, but the organization has the feature switched off: say so instead of an empty or broken page.
   if (!canAccessPath(user?.role, path, features)) return <FeatureOff />;
@@ -81,8 +81,9 @@ const SoldStockRedirect = () => {
 
 const HomeRoute = () => {
   const { user } = useAuth();
-  if (user?.role && user.role !== "admin") {
-    return <Navigate to={ROLE_DEFAULT_PATH[user.role] || "/settings"} replace />;
+  // The Dashboard is Admin's, and anyone given it in Staff & Access.
+  if (user?.role && user.role !== "admin" && !canAccessPath(user.role, "/")) {
+    return <Navigate to={defaultPathFor(user.role)} replace />;
   }
   return <Dashboard />;
 };
